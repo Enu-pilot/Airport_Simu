@@ -9,7 +9,39 @@ PCブラウザで動作する空港デザイン・運営シミュレーション
 
 ## 現在の状態
 
-**Phase 0（要件定義・技術設計）** — 設計文書のみ。実装コードはまだない。
+**Phase 1（2D空港マップ・建設エディタ）** — 空港施設を配置・編集し、配置エラー・接続エラーを確認できるエディタ。航空機の運航シミュレーションは Phase 2 以降。
+
+## 使い方
+
+```bash
+npm install
+npm run dev        # 開発サーバー（http://localhost:5173）
+npm run build      # 型チェック + 本番ビルド（dist/）
+npm test           # 単体テスト（Vitest）
+npm run test:e2e   # ブラウザテスト（Playwright）
+npm run lint       # ESLint（レイヤー境界ルールを含む）
+```
+
+| 操作 | 内容 |
+|------|------|
+| 左クリック / ドラッグ | 選択 / 移動（選択ツール）、配置（各建設ツール） |
+| 右ドラッグ・中ドラッグ・Space+ドラッグ | パン |
+| ホイール | ズーム（カーソル位置を中心） |
+| 誘導路・道路 | クリックで頂点追加、ダブルクリック・Enter・右クリックで確定 |
+| R / Ctrl+D / Delete | 回転 / 複製 / 削除 |
+| Ctrl+Z / Ctrl+Shift+Z・Ctrl+Y | 元に戻す / やり直し |
+| 矢印キー | 選択中の施設を1タイル移動（Shift で10） |
+
+## ソース構成
+
+| ディレクトリ | 役割 |
+|-------------|------|
+| `src/core/` | DOM・描画に依存しないロジック（データモデル、編集操作、論理ネットワーク、検証、Undo履歴、サンプル空港） |
+| `src/editor/` | エディタの状態（Zustand ストア）、ツールのプレビュー、マウス・キー操作の解釈 |
+| `src/render/` | PixiJS によるマップ描画 |
+| `src/ui/` | React の画面部品（ツール、施設一覧、プロパティ、問題一覧） |
+| `src/i18n/` | 表示文言（日本語） |
+| `tests/unit/` | core の単体テスト / `tests/e2e/` ブラウザテスト |
 
 ## 設計文書
 
@@ -27,7 +59,7 @@ PCブラウザで動作する空港デザイン・運営シミュレーション
 | 09 | [docs/09_roadmap.md](docs/09_roadmap.md) | フェーズ別ロードマップ |
 | 10 | [docs/10_open_issues.md](docs/10_open_issues.md) | 未決事項一覧 |
 
-## 想定技術構成（承認待ち）
+## 技術構成
 
-TypeScript / Vite / PixiJS（マップ描画）/ React（UIパネル）/ Vitest / Playwright。
+TypeScript / Vite / PixiJS（マップ描画）/ React（UIパネル）/ Zustand / Vitest / Playwright / ESLint。
 詳細と選定理由は [docs/07_architecture.md](docs/07_architecture.md) を参照。

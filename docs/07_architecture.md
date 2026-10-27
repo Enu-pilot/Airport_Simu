@@ -56,6 +56,10 @@
 
 ## 3. ディレクトリ構成（Phase 1 で作成）
 
+> Phase 1 の実装では、上図の `view/` に相当する層を `src/editor/`（エディタ状態・ツールのプレビュー・入力の解釈）として作成し、
+> 表示文言を `src/i18n/` に分けた。`platform/`（IndexedDB 保存）は未作成で、保存は `editor/store.ts` の localStorage 自動保存と JSON 入出力のみ。
+> 依存方向 `ui / render → editor → core` は ESLint（`eslint.config.js`）で強制している。
+
 ```
 /
 ├─ docs/                 設計文書

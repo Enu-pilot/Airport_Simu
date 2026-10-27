@@ -1,0 +1,161 @@
+import { FACILITY_SPECS } from '../core/model/catalog';
+import type { BuildState, FacilityKind, SizeClass } from '../core/model/types';
+import { BUILD_STATES } from '../core/model/types';
+import { actions, useEditor, type ToolId } from '../editor/store';
+import { facilityKindOf } from '../editor/tools';
+import { BUILD_STATE_LABEL, FACILITY_LABEL, ROAD_CLASS_LABEL } from '../i18n/ja';
+
+interface ToolDef {
+  id: ToolId;
+  label: string;
+  hint: string;
+}
+
+const fac = (kind: FacilityKind, hint?: string): ToolDef => ({
+  id: `facility:${kind}`,
+  label: FACILITY_LABEL[kind],
+  hint: hint ?? (FACILITY_SPECS[kind].dragPlace ? 'ドラッグで範囲を指定' : 'クリックで配置（R で回転）'),
+});
+
+const GROUPS: { title: string; tools: ToolDef[] }[] = [
+  { title: '編集', tools: [{ id: 'select', label: '選択・移動', hint: 'クリックで選択、ドラッグで移動' }] },
+  {
+    title: '滑走路・誘導路',
+    tools: [
+      { id: 'runway', label: '滑走路', hint: '始点→終点をクリック（またはドラッグ）。8方向' },
+      { id: 'taxiway', label: '誘導路', hint: 'クリックで頂点を追加、ダブルクリック/Enter/右クリックで確定' },
+    ],
+  },
+  {
+    title: 'エプロン・スポット',
+    tools: [fac('apron'), { id: 'stand', label: '駐機スポット', hint: 'クリックで配置（R で機首の向きを回転）' }],
+  },
+  { title: 'ターミナル', tools: [fac('terminal'), fac('gate', 'ターミナルに接して配置。近くのスポットに自動で紐付け')] },
+  {
+    title: '支援施設',
+    tools: [fac('tower'), fac('hangar'), fac('maintenance'), fac('fuelFarm'), fac('fireStation'), fac('gseBase')],
+  },
+  {
+    title: '道路・エリア',
+    tools: [
+      { id: 'road', label: '道路', hint: 'クリックで頂点を追加、ダブルクリック/Enter/右クリックで確定' },
+      fac('serviceArea'),
+      fac('parking'),
+    ],
+  },
+];
+
+const ALL_TOOLS = GROUPS.flatMap((g) => g.tools);
+
+export function toolHint(tool: ToolId): string {
+  return ALL_TOOLS.find((t) => t.id === tool)?.hint ?? '';
+}
+
+export function Toolbox() {
+  const tool = useEditor((s) => s.tool);
+  const options = useEditor((s) => s.options);
+  const kind = facilityKindOf(tool);
+  const rotatable = tool === 'stand' || (kind !== null && !FACILITY_SPECS[kind].dragPlace);
+
+  return (
+    <div className="toolbox" data-testid="toolbox">
+      {GROUPS.map((g) => (
+        <div key={g.title} className="tool-group">
+          <div className="tool-group-title">{g.title}</div>
+          <div className="tool-buttons">
+            {g.tools.map((t) => (
+              <button
+                key={t.id}
+                className={tool === t.id ? 'tool active' : 'tool'}
+                title={t.hint}
+                data-testid={`tool-${t.id}`}
+                onClick={() => actions.setTool(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <div className="tool-options">
+        <div className="tool-group-title">配置オプション</div>
+        <label>
+          新規の状態
+          <select
+            value={options.buildState}
+            onChange={(e) => actions.setOption('buildState', e.target.value as BuildState)}
+            data-testid="opt-buildState"
+          >
+            {BUILD_STATES.map((b) => (
+              <option key={b} value={b}>
+                {BUILD_STATE_LABEL[b]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {tool === 'runway' && (
+          <label>
+            舗装幅
+            <select value={options.runwayWidth} onChange={(e) => actions.setOption('runwayWidth', Number(e.target.value) as 30 | 45 | 60)}>
+              <option value={30}>30m（S級まで）</option>
+              <option value={45}>45m（M級まで）</option>
+              <option value={60}>60m（L級まで）</option>
+            </select>
+          </label>
+        )}
+        {tool === 'taxiway' && (
+          <>
+            <label>
+              誘導路幅
+              <SizeSelect value={options.taxiWidth} onChange={(v) => actions.setOption('taxiWidth', v)} />
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={options.oneWay} onChange={(e) => actions.setOption('oneWay', e.target.checked)} />
+              一方通行（描いた向き）
+            </label>
+          </>
+        )}
+        {tool === 'road' && (
+          <>
+            <label>
+              種別
+              <select value={options.roadClass} onChange={(e) => actions.setOption('roadClass', e.target.value as 'public' | 'service')}>
+                <option value="public">{ROAD_CLASS_LABEL.public}</option>
+                <option value="service">{ROAD_CLASS_LABEL.service}</option>
+              </select>
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={options.oneWay} onChange={(e) => actions.setOption('oneWay', e.target.checked)} />
+              一方通行
+            </label>
+          </>
+        )}
+        {tool === 'stand' && (
+          <label>
+            サイズ
+            <SizeSelect value={options.standSize} onChange={(v) => actions.setOption('standSize', v)} />
+          </label>
+        )}
+        {rotatable && (
+          <label>
+            向き
+            <button className="small" onClick={() => actions.rotateTool()} title="R キー">
+              {options.rotation}° ↻
+            </button>
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SizeSelect({ value, onChange }: { value: SizeClass; onChange: (v: SizeClass) => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value as SizeClass)}>
+      <option value="S">S（小型）</option>
+      <option value="M">M（中型）</option>
+      <option value="L">L（大型）</option>
+    </select>
+  );
+}
