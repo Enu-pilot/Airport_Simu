@@ -56,7 +56,7 @@ export function OpsControls() {
 
   return (
     <div className="toolbox ops" data-testid="ops-controls">
-      <div className="sim-clock" data-testid="sim-clock">{formatSimTime(state.now, true)}</div>
+      <div className="sim-clock" data-testid="sim-clock">{formatSimTime(state.now + (state.economy?.dayOffset ?? 0) * 86400, true)}</div>
       <div className="speed-buttons">
         {SPEED_LEVELS.map((l, i) => (
           <button
@@ -130,16 +130,20 @@ export function OpsControls() {
         <button onClick={() => ops.addArrival(type)} disabled={!types.includes(type)} data-testid="add-arrival">
           到着便を追加（すぐ空域に進入）
         </button>
-        <label>
-          1日の往復便数（翌日以降）
-          <input
-            type="number"
-            min={0}
-            max={200}
-            value={state.settings.flightsPerDay}
-            onChange={(e) => ops.setFlightsPerDay(Math.max(0, Math.min(200, Number(e.target.value) || 0)))}
-          />
-        </label>
+        {o.sim.company ? (
+          <div className="muted small">定期便は契約から作られます（下の「運航計画」タブ）。手動で追加した便も料金・費用の対象です。</div>
+        ) : (
+          <label>
+            1日の往復便数（翌日以降）
+            <input
+              type="number"
+              min={0}
+              max={200}
+              value={state.settings.flightsPerDay}
+              onChange={(e) => ops.setFlightsPerDay(Math.max(0, Math.min(200, Number(e.target.value) || 0)))}
+            />
+          </label>
+        )}
       </div>
     </div>
   );

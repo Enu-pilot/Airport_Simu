@@ -169,3 +169,23 @@ table.board tr.closed td { color: var(--muted); text-decoration: line-through; }
 .bar > span { display: block; height: 100%; background: var(--accent); }
 .bar > span.indeterminate { background: repeating-linear-gradient(45deg, var(--accent) 0 4px, transparent 4px 8px); }
 .bag-history { background: var(--panel-2); padding: 4px 8px; margin-bottom: 6px; border-radius: 4px; font-size: 12px; }
+
+/* ---------------------------------------------------------------- 経営 */
+.company-badge { display: inline-flex; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); padding: 2px 10px; border: 1px solid var(--border); border-radius: 4px; }
+.company-badge b { color: var(--text); font-variant-numeric: tabular-nums; }
+.company-badge.negative b { color: var(--error); }
+.mgmt-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 4px 8px; }
+.mgmt h4 { margin: 10px 0 4px; font-size: 12px; }
+.mgmt .small { font-size: 11px; }
+.mgmt td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mgmt button { font-size: 11px; padding: 1px 6px; margin-right: 2px; }
+.fee-grid { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; }
+.fee-grid label { display: flex; align-items: center; gap: 6px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 4px; }
+.kpi { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 11px; color: var(--muted); cursor: help; }
+.kpi b { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.plan-issues { margin: 2px 0 6px; padding-left: 18px; font-size: 12px; }
+tr.warn-row td:first-child { box-shadow: inset 3px 0 var(--warning); }
+@media (max-width: 1100px) { .mgmt-grid { grid-template-columns: minmax(0, 1fr); } }
+.mgmt-grid > section { min-width: 0; overflow-x: auto; }
+.fee-grid input[type='range'] { width: 110px; }

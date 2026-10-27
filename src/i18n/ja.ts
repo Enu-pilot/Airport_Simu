@@ -4,6 +4,9 @@ import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/validation/validate';
 import type { OpFailure } from '../core/layout/operations';
 import type { AirsideNodeKind } from '../core/airside/network';
+import type { AirlineType } from '../core/economy/registry';
+import type { Contract, ContractActionResult, CostCategory, DailyKpi, RevenueCategory, TimeWindow } from '../core/economy/company';
+import type { PlanIssueCode } from '../core/economy/planning';
 
 export const FACILITY_LABEL: Record<FacilityKind, string> = {
   apron: 'エプロン',
@@ -306,6 +309,8 @@ export function eventText(e: SimEvent, callsign: (id: string) => string): string
       return `設備復旧: ${e.note}`;
     case 'bagsLeftBehind':
       return `⚠ 積み残し: ${e.note}`;
+    case 'finance':
+      return `💴 ${e.note}`;
   }
 }
 
@@ -324,6 +329,8 @@ export const AREA_KIND_LABEL: Record<TerminalAreaKind, string> = {
   hall: '通路・ホール',
   escalator: 'エスカレーター',
   elevator: 'エレベーター',
+  shop: '店舗',
+  restaurant: '飲食店',
 };
 
 export const ZONE_LABEL: Record<PaxZone, string> = {
@@ -340,6 +347,7 @@ export const AREA_PROP_LABEL: Record<string, string> = {
   fixtures: '個室・設備数',
   belts: 'ベルト数',
   travelSec: '上下移動の所要時間（秒）',
+  capacity: '同時に利用できるグループ数',
   levels: '階数',
 };
 
@@ -437,3 +445,103 @@ export const BAG_STATE_LABEL: Record<BagState, string> = {
   onBelt: 'ベルト上',
   collected: '受け取り済み',
 };
+
+// ---------------------------------------------------------------- 経営（docs/14_management_rules.md）
+
+export const REVENUE_LABEL: Record<RevenueCategory, string> = {
+  contract: '契約料',
+  landing: '着陸料',
+  parking: '駐機料',
+  terminal: 'ターミナル使用料',
+  groundHandling: '地上支援料',
+  retail: '店舗売上',
+  dining: '飲食売上',
+  carPark: '駐車場収入',
+};
+
+export const COST_LABEL: Record<CostCategory, string> = {
+  salary: '人件費（作業員・整備士）',
+  counterStaff: '窓口要員（カウンター・保安検査・ゲート）',
+  vehicles: '車両維持費',
+  maintenance: '施設維持費',
+  utilities: '光熱費',
+  groundOps: '地上作業費',
+  compensation: '補償・対応費',
+};
+
+export const WINDOW_LABEL: Record<TimeWindow, string> = {
+  morning: '朝（6〜11時）',
+  daytime: '昼（10〜17時）',
+  evening: '夕（16〜22時）',
+  any: '終日',
+};
+
+export const CONTRACT_STATUS_LABEL: Record<Contract['status'], string> = {
+  offered: '提案中',
+  active: '契約中',
+  ended: '満了',
+  rejected: '辞退',
+  withdrawn: '撤退',
+  expired: '期限切れ',
+};
+
+export const AIRLINE_TYPE_LABEL: Record<AirlineType, string> = {
+  fullService: 'フルサービス',
+  lcc: 'LCC',
+  regional: 'リージョナル',
+};
+
+export const CONTRACT_ACTION_LABEL: Record<Exclude<ContractActionResult, { ok: true }>['reason'], string> = {
+  NOT_FOUND: '契約が見つかりません',
+  NOT_OFFERED: '提案中の契約ではありません',
+  NOT_ACTIVE: '契約中ではありません',
+  UNSUPPORTED: 'この機種はこの空港では運航できません（滑走路・スポットの区分を確認してください）',
+  AIRLINE_REFUSED: '航空会社の満足度が低いため、増便に応じてもらえません',
+  MIN_FREQUENCY: 'これ以上減便できません（1日1便が最小）',
+};
+
+export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
+  SIZE_UNSUPPORTED: '運航できない機種（滑走路・スポットが未対応）',
+  STAND_CONFLICT: 'スポット不足（到着時に空きスポットがない見込み）',
+  NO_GATE: 'ゲートのないスポット（旅客が搭乗できない）',
+  NO_TERMINAL: '旅客ターミナル（入口）がない',
+  RUNWAY_OVERLOAD: '滑走路の処理能力の目安（30回/時・本）を超える',
+  SECURITY_OVERLOAD: '保安検査の処理能力を超える見込み',
+  CHECKIN_OVERLOAD: 'チェックインの処理能力を超える見込み',
+  GROUND_OVERLOAD: '地上支援の能力を超えて折り返しが重なる',
+  OUTSIDE_HOURS: '運用時間・契約の時間帯に収まらない（計画できない便）',
+};
+
+/** KPI の名前と計算式（画面のツールチップに表示） */
+export const KPI_LABEL: Record<Exclude<keyof DailyKpi, 'rating'> | 'rating', { label: string; formula: string }> = {
+  flights: { label: '運航便数', formula: '期間内に着陸した到着便 + ブロックアウトした出発便' },
+  movements: { label: '離着陸回数', formula: '着陸 + 離陸の回数' },
+  paxDeparted: { label: '出発旅客', formula: '搭乗した旅客数' },
+  paxArrived: { label: '到着旅客', formula: '降機した旅客数' },
+  otp: { label: '定時運航率', formula: '予定から15分以内の便 ÷ 全便（ダイバート・欠航は遅延扱い）。到着は着陸、出発はブロックアウトで判定' },
+  avgDelayMin: { label: '平均遅延', formula: '運航した便の (実績 − 予定) の平均（分）' },
+  runwayUtil: { label: '滑走路使用率', formula: '離着陸回数 ÷ (運用中の滑走路数 × 30回/時 × 経過時間)' },
+  gateUtil: { label: 'スポット使用率', formula: 'スポットが機体に割り当てられていた時間 ÷ (運用中のスポット数 × 経過時間)' },
+  facilityUtil: { label: '窓口稼働率', formula: 'チェックイン・保安検査で処理中の窓口・秒 ÷ 開いていた窓口・秒' },
+  avgWaitMin: { label: '平均待ち時間', formula: '搭乗・退出した旅客の待ち時間の平均（分）' },
+  avgWalkMin: { label: '平均歩行時間', formula: '搭乗・退出した旅客の歩行時間の平均（分）' },
+  avgGroundMin: { label: '平均地上作業時間', formula: '出発準備完了 − ブロックイン の平均（分）' },
+  unprocessedPax: { label: '未処理旅客', formula: '締めの時点でターミナル内に残り、手続きが終わっていない旅客' },
+  missedPax: { label: '乗り遅れ', formula: '搭乗締切までに搭乗できなかった旅客' },
+  leftBags: { label: '積み残し手荷物', formula: '搭乗した旅客の手荷物のうち、機体に積めなかった個数' },
+  diverted: { label: 'ダイバート', formula: '到着できずにダイバートした便' },
+  cancelled: { label: '欠航', formula: '出発できずに欠航した便' },
+  paxSatisfaction: {
+    label: '旅客満足度',
+    formula: '100 − 2×平均待ち(分) − max(0, 平均歩行(分) − 10) − 平均遅延(分) − 300×乗り遅れ率 − 100×積み残し率（0〜100）',
+  },
+  airlineSatisfaction: { label: '航空会社満足度', formula: '契約中の航空会社の満足度の平均（定時率・乗り遅れ・積み残し・欠航・料金で日々変化）' },
+  rating: { label: '空港評価', formula: '0.7 × 前日の評価 + 0.3 × (0.4×旅客満足度 + 0.4×航空会社満足度 + 0.2×定時運航率%)' },
+};
+
+export const MODE_LABEL = { career: 'キャリア', sandbox: 'サンドボックス' } as const;
+
+/** 日内の分 → 06:30 */
+export function formatMinute(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+}

@@ -5,6 +5,8 @@ import { findPaxRoute, linkBetween } from '../terminal/route';
 import { AIRCRAFT_TYPES } from './aircraftTypes';
 import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt } from './baggage';
 import { boardingAllowed } from './ground';
+import { BALANCE } from '../economy/balance';
+import { onPaxDeplaned, onPaxEnter, onPaxMissed, onShopDone } from '../economy/ops';
 import type { Simulation } from './simulation';
 import {
   EVENT_LOG_LIMIT,
@@ -103,13 +105,15 @@ export function serversOf(sim: Simulation, key: string): number {
   if (key.startsWith('gate:')) return 1;
   const a = sim.ctx.layout.terminalAreas[key];
   if (!a || isClosed(sim.state, key)) return 0;
-  return Math.max(0, Number(a.props.counters ?? a.props.lanes ?? a.props.fixtures ?? 0));
+  return Math.max(0, Number(a.props.counters ?? a.props.lanes ?? a.props.fixtures ?? a.props.capacity ?? 0));
 }
 
 function perPaxSec(sim: Simulation, key: string): number {
   const a = sim.ctx.layout.terminalAreas[key];
   if (!a) return 0;
   if (a.kind === 'restroom') return RESTROOM_SEC / 2;
+  if (a.kind === 'shop') return BALANCE.retail.shopSec / 3;
+  if (a.kind === 'restaurant') return BALANCE.retail.restaurantSec / 3;
   return Number(a.props.serviceSecPerPax ?? 30);
 }
 
@@ -232,6 +236,7 @@ function closeBoarding(sim: Simulation, f: Flight, forced: MissReason | null): v
       missed += g.count;
     }
   }
+  if (missed > 0) onPaxMissed(sim, f, missed);
   p.boarding = 'closed';
   log(state, { t: state.now, kind: 'boardingClosed', aircraftId: f.aircraftId, note: `${f.number} 搭乗 ${p.boarded} / 乗り遅れ ${p.missed}` });
   if (missed > 0) log(state, { t: state.now, kind: 'paxMissed', aircraftId: f.aircraftId, note: `${f.number} ${missed}人` });
@@ -245,7 +250,7 @@ function generateDeparturePax(sim: Simulation, f: Flight): void {
   if (!terminal) return; // ターミナル（入口）が無い空港では旅客なし
   const seats = AIRCRAFT_TYPES[state.aircraft[f.aircraftId]!.typeId].seats;
   withRng(state, (rng) => {
-    let remaining = Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min)));
+    let remaining = f.plannedPax ?? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min)));
     p.booked = remaining;
     while (remaining > 0) {
       const count = Math.min(remaining, rng.int(1, MAX_GROUP_SIZE));
@@ -274,6 +279,8 @@ function addGroup(sim: Simulation, rng: Rng, f: Flight, count: number, appearAt:
   const steps: PaxStep[] = [];
   if (bags > 0 || rng.next() < COUNTER_WITHOUT_BAGS_PROB) steps.push('checkIn');
   steps.push('security');
+  // 店舗・飲食店があるターミナルでは、一部の旅客が出発区域で立ち寄る（時間に余裕があるときだけ）
+  if (shopAreas(sim, terminalId).length > 0 && rng.next() < BALANCE.retail.shopVisitProb) steps.push('shop');
   if (rng.next() < RESTROOM_PROB) steps.push('restroom');
   steps.push('gate');
   const id = nextId(state, 'pg');
@@ -325,7 +332,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
     const seats = AIRCRAFT_TYPES[ac.typeId].seats;
     const access = gateId ? ctx.terminal.gates[gateId] : undefined;
     withRng(state, (rng) => {
-      p.booked = ctx.paxTerminal || access?.terminalId ? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min))) : 0;
+      p.booked = ctx.paxTerminal || access?.terminalId ? (f.plannedPax ?? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min)))) : 0;
       p.deplaneRemaining = p.booked;
       // 手荷物受取所: 降機口から近い受取所。ベルトが空くまで手荷物は出ない
       if (access?.deplane) {
@@ -349,6 +356,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
       p.deplaneRemaining -= size;
       p.deplaned += size;
       state.paxStats.deplaned += size;
+      onPaxDeplaned(sim, f, size);
       const access = gateId ? ctx.terminal.gates[gateId] : undefined;
       let bags = 0;
       for (let i = 0; i < size; i++) if (rng.next() < BAG_PROB) bags++;
@@ -411,6 +419,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
         }
         g.area = withRng(state, (rng) => entrances[rng.int(0, entrances.length - 1)]!);
         state.paxStats.spawned += g.count;
+        onPaxEnter(sim, g);
         planStep(sim, g);
       }
       return;
@@ -465,6 +474,10 @@ function planStep(sim: Simulation, g: PaxGroup): void {
 
   if (step === 'gate') {
     planGate(sim, g, closed);
+    return;
+  }
+  if (step === 'shop') {
+    planShop(sim, g, closed);
     return;
   }
   const kind = STEP_KIND[step]!;
@@ -530,6 +543,34 @@ function planGate(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
   dwell(state, g);
 }
 
+/** ターミナル内の店舗・飲食店 */
+function shopAreas(sim: Simulation, terminalId: string | null): string[] {
+  const model = sim.ctx.terminal;
+  return (model.byTerminal[terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === 'shop' || model.areas[id]!.kind === 'restaurant');
+}
+
+/** 店舗・飲食店に立ち寄る余裕（搭乗開始まで minSlackSec 以上）と、混雑（見込み待ち10分以内）を確かめて向かう。無理なら飛ばす */
+function planShop(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
+  const { state } = sim;
+  const f = state.flights[g.flightId]!;
+  const slack = f.estimated - boardingLeadSec(sim, f) - state.now;
+  const goals = new Map<string, number>();
+  if (slack >= BALANCE.retail.minSlackSec) {
+    for (const id of shopAreas(sim, g.terminalId)) {
+      if (closed.has(id) || serversOf(sim, id) <= 0) continue;
+      const w = expectedWait(sim, id);
+      if (w <= 10 * 60) goals.set(id, w);
+    }
+  }
+  const route = goals.size > 0 ? findPaxRoute(sim.ctx.terminal, { from: g.area!, goals, closed, uncleared: uncleared(g) }) : null;
+  if (route) {
+    startRoute(sim, g, route.areas);
+    return;
+  }
+  g.stepIndex++;
+  planStep(sim, g);
+}
+
 const uncleared = (g: PaxGroup): boolean => g.direction === 'departure' && !g.securityCleared;
 
 function dwell(state: SimState, g: PaxGroup): void {
@@ -592,6 +633,7 @@ function arrive(sim: Simulation, g: PaxGroup): void {
   switch (step) {
     case 'checkIn':
     case 'security':
+    case 'shop':
     case 'restroom':
       joinQueue(state, g, g.area!, 'queuing');
       return;
@@ -668,6 +710,7 @@ function stepFacility(sim: Simulation, key: string): void {
     const area = sim.ctx.terminal.areas[key];
     if (area?.kind === 'security') g.securityCleared = true;
     if (area?.kind === 'checkIn') checkInBags(sim, g, key);
+    if (area?.kind === 'shop' || area?.kind === 'restaurant') onShopDone(sim, g, area.kind);
     g.stepIndex++;
     planStep(sim, g);
   }
@@ -714,6 +757,8 @@ function serviceSec(sim: Simulation, key: string, g: PaxGroup): number {
   }
   const a = sim.ctx.terminal.areas[key]!;
   if (a.kind === 'restroom') return RESTROOM_SEC;
+  if (a.kind === 'shop') return BALANCE.retail.shopSec;
+  if (a.kind === 'restaurant') return BALANCE.retail.restaurantSec;
   return withRng(sim.state, (rng) => Math.max(1, Math.round(g.count * perPaxSec(sim, key) * (0.8 + rng.next() * 0.4))));
 }
 

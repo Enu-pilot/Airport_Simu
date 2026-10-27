@@ -154,7 +154,9 @@ export type TerminalAreaKind =
   | 'baggageClaim'
   | 'hall'
   | 'escalator'
-  | 'elevator';
+  | 'elevator'
+  | 'shop'
+  | 'restaurant';
 
 /**
  * 旅客の区域。landside = 保安検査前（一般区域）、departure = 保安検査後の出発区域、arrival = 到着区域。

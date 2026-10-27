@@ -6,7 +6,21 @@ import { setUnitBroken } from '../core/sim/ground';
 import { setEquipmentBroken } from '../core/sim/baggage';
 import type { AircraftTypeId } from '../core/sim/aircraftTypes';
 import type { RunwayConfig } from '../core/sim/types';
-import { editorStore, showToast, type OpsState } from './store';
+import { editorStore, forgetCharges, formatCr, showToast, type OpsState } from './store';
+import { settleDay } from '../core/economy/ops';
+import {
+  acceptOffer,
+  changeFrequency,
+  rejectOffer,
+  setFees,
+  setHours,
+  type CompanyState,
+  type ContractActionResult,
+  type FeeSettings,
+  type OperatingHours,
+} from '../core/economy/company';
+import { createContext, operableTypes } from '../core/sim/context';
+import { CONTRACT_ACTION_LABEL } from '../i18n/ja';
 
 /**
  * 運航モードのループ。requestAnimationFrame の実時間からティック数を求め（core/sim/clock.ts）、
@@ -30,7 +44,14 @@ function frame(ts: number): void {
   const dt = lastTs ? (ts - lastTs) / 1000 : 0;
   lastTs = ts;
   const r = advanceClock(ops.clock, dt);
-  for (let i = 0; i < r.ticks; i++) stepSimulation(ops.sim);
+  for (let i = 0; i < r.ticks; i++) {
+    stepSimulation(ops.sim);
+    if (ops.sim.company?.bankrupt) {
+      showToast('経営破綻: 資金のマイナスが続いたため、運航を続けられません', 'error');
+      endOps();
+      return;
+    }
+  }
   const ui = ts - lastUi > 100 || r.ticks === 0;
   if (ui) lastUi = ts;
   patchOps({ clock: r.clock, frame: ops.frame + 1, dropped: r.dropped, uiVersion: ui ? ops.uiVersion + 1 : ops.uiVersion });
@@ -40,12 +61,17 @@ function frame(ts: number): void {
 export const ops = {
   start(seed?: string): void {
     const s = get();
-    const sim = createSimulation(s.history.present, seed ? { seed } : {});
+    if (s.company.bankrupt) {
+      showToast('経営破綻しています。新しいゲームを始めてください', 'error');
+      return;
+    }
+    const sim = createSimulation(s.history.present, { ...(seed ? { seed } : {}), company: structuredClone(s.company) });
     if (Object.keys(sim.ctx.runways).length === 0) {
       showToast('滑走路がないため運航できません', 'error');
       return;
     }
     cancelAnimationFrame(raf);
+    forgetCharges();
     set({
       mode: 'operate',
       tool: 'select',
@@ -58,11 +84,12 @@ export const ops = {
     const n = Object.keys(sim.state.flights).length / 2;
     showToast(n > 0 ? `運航を開始しました（本日 ${n} 往復）` : '運航を開始しました。運航できる機種がないため便は生成されていません', n > 0 ? 'info' : 'error');
   },
+  /** 運航を終了する。その日を途中で締めて、経営の状態を建設モードへ引き継ぐ */
   stop(): void {
-    cancelAnimationFrame(raf);
-    set({ mode: 'build', ops: null });
+    endOps();
   },
   restart(): void {
+    endOps();
     ops.start();
   },
   setSpeed(speed: number): void {
@@ -130,3 +157,58 @@ export const ops = {
 };
 
 let pausedSpeed: number | null = null;
+
+function endOps(): void {
+  cancelAnimationFrame(raf);
+  const o = get().ops;
+  if (o?.sim.company) {
+    const report = o.sim.company.bankrupt ? null : settleDay(o.sim, true);
+    set({ mode: 'build', ops: null, company: o.sim.company });
+    if (report) showToast(`${report.day + 1}日目を締めました（営業利益 ${formatCr(report.operatingProfit)}）`);
+    return;
+  }
+  set({ mode: 'build', ops: null });
+}
+
+/**
+ * 会社の設定を変える。運航中はシミュレーションの会社（最新）を、建設中はストアの会社を更新する。
+ */
+function mutateCompany(fn: (c: CompanyState) => ContractActionResult | void): boolean {
+  const o = get().ops;
+  let r: ContractActionResult | void;
+  if (o?.sim.company) {
+    r = fn(o.sim.company);
+    patchOps({ uiVersion: o.uiVersion + 1 });
+  } else {
+    const c = structuredClone(get().company);
+    r = fn(c);
+    if (!r || r.ok) set({ company: c });
+  }
+  if (r && !r.ok) showToast(CONTRACT_ACTION_LABEL[r.reason], 'error');
+  return !r || r.ok;
+}
+
+export const companyActions = {
+  acceptOffer(id: string): void {
+    const s = get();
+    const c = s.ops?.sim.company ?? s.company;
+    const k = c.contracts[id];
+    if (!k) return;
+    const ctx = s.ops?.sim.ctx ?? createContext(s.history.present);
+    if (mutateCompany((x) => acceptOffer(x, id, operableTypes(ctx).includes(k.typeId)))) {
+      showToast(s.ops ? '契約しました（翌日の運航計画から運航します）' : '契約しました');
+    }
+  },
+  rejectOffer(id: string): void {
+    mutateCompany((c) => rejectOffer(c, id));
+  },
+  changeFrequency(id: string, delta: 1 | -1): void {
+    mutateCompany((c) => changeFrequency(c, id, delta));
+  },
+  setFees(fees: Partial<FeeSettings>): void {
+    mutateCompany((c) => setFees(c, fees));
+  },
+  setHours(hours: Partial<OperatingHours>): void {
+    mutateCompany((c) => setHours(c, hours));
+  },
+};

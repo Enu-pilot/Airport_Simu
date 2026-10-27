@@ -1,0 +1,498 @@
+import { AIRCRAFT_TYPES } from '../sim/aircraftTypes';
+import { operableTypes, type SimContext } from '../sim/context';
+import { DAY_SEC } from '../sim/rules';
+import type { Simulation } from '../sim/simulation';
+import {
+  EVENT_LOG_LIMIT,
+  PAX_FINAL_STATES,
+  type Aircraft,
+  type Flight,
+  type GroundStats,
+  type GroundTask,
+  type PaxGroup,
+  type PaxStats,
+  type SimState,
+  type SimStats,
+} from '../sim/types';
+import { BALANCE, ON_TIME_SEC } from './balance';
+import {
+  COST_CATEGORIES,
+  REPORT_LIMIT,
+  REVENUE_CATEGORIES,
+  activeContractsOn,
+  contractsOf,
+  generateOffers,
+  post,
+  updateContracts,
+  type AirlineDayResult,
+  type CompanyState,
+  type CostCategory,
+  type DailyKpi,
+  type DailyReport,
+} from './company';
+import { layoutValue } from './construction';
+import { isPeak, RUNWAY_HOURLY_CAPACITY } from './planning';
+import { airlineDef } from './registry';
+
+/**
+ * 運航中の経営処理（docs/14_management_rules.md §3・§5・§6）。
+ *
+ * - 収入・費用は発生した時点で会社の当日の収支に記録する（着陸料は着陸時、作業費は作業完了時など）。
+ * - 1日単位の固定費と契約料は、時間の経過に比例して1時間ごとに計上する（途中で運航を止めても公平になる）。
+ * - 0:00 と運航停止時に日次締めを行い、KPI・航空会社の満足度・契約・空港評価を更新する。
+ * 会社（CompanyState）がないシミュレーション（テスト・手動の運航）では何もしない。
+ */
+
+export interface SimEconomy {
+  /** 会社の日 − シミュレーションの日 */
+  dayOffset: number;
+  /** 集計期間の開始時刻と、固定費を計上済みの時刻 */
+  periodStart: number;
+  accruedAt: number;
+  /** 期間開始時点の累計値（差分で当日の値を出す） */
+  base: { pax: PaxStats; ground: GroundStats; stats: SimStats };
+  /** スポット割り当て時間の合計（スポット・秒） */
+  standBusySec: number;
+  /** チェックイン・保安検査の窓口の使用時間と、開いていた窓口の時間（窓口・秒） */
+  facilityBusy: number;
+  facilityCap: number;
+  /** 当日に駐車した台数と端数 */
+  cars: number;
+  carAcc: number;
+  /** 補償の対象になった積み残し手荷物 */
+  leftBags: number;
+  /** 1日あたりの固定費（費目ごと）と契約料 */
+  fixedDaily: Partial<Record<CostCategory, number>>;
+  contractDaily: number;
+  /** 駐車場の1日あたりの受け入れ台数 */
+  carCapacity: number;
+  /** 窓口の稼働率を測るエリア */
+  processingAreas: string[];
+}
+
+const enabled = (sim: Simulation): sim is Simulation & { company: CompanyState } => !!sim.company && !!sim.state.economy;
+
+function log(state: SimState, note: string): void {
+  state.events.push({ t: state.now, kind: 'finance', note });
+  if (state.events.length > EVENT_LOG_LIMIT) state.events.splice(0, state.events.length - EVENT_LOG_LIMIT);
+}
+
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
+// ---------------------------------------------------------------- 固定費
+
+/**
+ * 1日あたりの固定費:
+ *   人件費 = 作業員数 × 1,200 + 整備士数 × 2,000
+ *   窓口要員 = チェックインカウンター数 × 800 + 保安検査レーン数 × 2,500 + ゲート数 × 600
+ *   車両維持費 = 車両台数 × 300
+ *   施設維持費 = 資産額 × 0.0003
+ *   光熱費 = ターミナルの面積（タイル）× 階数 × 30
+ */
+export function dailyFixedCosts(ctx: SimContext): Partial<Record<CostCategory, number>> {
+  const D = BALANCE.daily;
+  let salary = 0;
+  let vehicles = 0;
+  for (const b of ctx.bases) {
+    for (const [kind, n] of Object.entries(b.units)) {
+      const s = D.salary[kind as keyof typeof D.salary];
+      if (s !== undefined) salary += s * (n ?? 0);
+      else vehicles += n ?? 0;
+    }
+  }
+  let counterStaff = 0;
+  for (const a of Object.values(ctx.layout.terminalAreas)) {
+    if (a.kind === 'checkIn') counterStaff += Number(a.props.counters ?? 0) * D.checkInCounter;
+    if (a.kind === 'security') counterStaff += Number(a.props.lanes ?? 0) * D.securityLane;
+  }
+  let utilities = 0;
+  for (const f of Object.values(ctx.layout.facilities)) {
+    if (f.buildState !== 'operational') continue;
+    if (f.kind === 'gate') counterStaff += D.gate;
+    if (f.kind === 'terminal') utilities += f.w * f.h * Math.max(1, Number(f.props.levels ?? 1)) * D.utilitiesPerTerminalTile;
+  }
+  return {
+    salary,
+    counterStaff,
+    vehicles: vehicles * D.vehicle,
+    maintenance: Math.round(layoutValue(ctx.layout) * D.maintenanceRate),
+    utilities,
+  };
+}
+
+/** 契約料（1日あたり）= 有効な契約の1日の便数の合計 × 3,000 */
+export function dailyContractRevenue(c: CompanyState, day: number): number {
+  return activeContractsOn(c, day).reduce((s, k) => s + k.perDay * BALANCE.fees.contractPerDailyFlight, 0);
+}
+
+// ---------------------------------------------------------------- 開始
+
+export function createEconomy(ctx: SimContext, state: SimState, c: CompanyState): SimEconomy {
+  const simDay = Math.floor(state.now / DAY_SEC);
+  const spaces = Object.values(ctx.layout.facilities)
+    .filter((f) => f.kind === 'parking' && f.buildState === 'operational')
+    .reduce((s, f) => s + Math.max(0, Number(f.props.spaces ?? 0)), 0);
+  return {
+    dayOffset: c.day - simDay,
+    periodStart: state.now,
+    accruedAt: state.now,
+    base: { pax: clone(state.paxStats), ground: clone(state.groundStats), stats: clone(state.stats) },
+    standBusySec: 0,
+    facilityBusy: 0,
+    facilityCap: 0,
+    cars: 0,
+    carAcc: 0,
+    leftBags: 0,
+    fixedDaily: dailyFixedCosts(ctx),
+    contractDaily: dailyContractRevenue(c, c.day),
+    carCapacity: Math.floor(spaces / BALANCE.carPark.stayDays),
+    processingAreas: Object.keys(ctx.terminal.areas)
+      .filter((id) => ['checkIn', 'security'].includes(ctx.terminal.areas[id]!.kind))
+      .sort(),
+  };
+}
+
+/** シミュレーションの日に対応する会社の日 */
+export function companyDayOf(sim: Simulation, simDay: number): number {
+  return simDay + (sim.state.economy?.dayOffset ?? 0);
+}
+
+// ---------------------------------------------------------------- 料金
+
+function contractOf(sim: Simulation & { company: CompanyState }, f: Flight) {
+  return f.contractId ? sim.company.contracts[f.contractId] : undefined;
+}
+
+/** 契約の割引を反映した倍率 */
+function discount(sim: Simulation & { company: CompanyState }, f: Flight): number {
+  return 1 - (contractOf(sim, f)?.feeDiscount ?? 0);
+}
+
+/** 着陸料 = 最大離陸重量(t) × 150 × 料金倍率 × (ピーク時 1.25) × (1 − 契約割引) */
+export function landingFee(c: CompanyState, ac: Pick<Aircraft, 'typeId'>, at: number, disc: number): number {
+  const F = BALANCE.fees;
+  const peak = isPeak(c.hours, Math.floor((at % DAY_SEC) / 60)) ? 1 + F.peakSurcharge : 1;
+  return AIRCRAFT_TYPES[ac.typeId].mtowT * F.landingPerTonne * c.fees.landing * peak * disc;
+}
+
+/** 駐機料 = 切り上げ(駐機時間 − 2時間) × 区分の時間料金 × 料金倍率 × (1 − 契約割引) */
+export function parkingFee(c: CompanyState, ac: Pick<Aircraft, 'typeId'>, parkedSec: number, disc: number): number {
+  const F = BALANCE.fees;
+  const hours = Math.max(0, Math.ceil(parkedSec / 3600 - F.parkingFreeHours));
+  return hours * F.parkingPerHour[AIRCRAFT_TYPES[ac.typeId].size] * c.fees.parking * disc;
+}
+
+// ---------------------------------------------------------------- イベントごとの計上
+
+export function onLanding(sim: Simulation, ac: Aircraft): void {
+  if (!enabled(sim)) return;
+  const arr = sim.state.flights[ac.arrivalFlightId]!;
+  post(sim.company, 'landing', landingFee(sim.company, ac, sim.state.now, discount(sim, arr)));
+}
+
+/** 到着旅客のターミナル使用料 = 人数 × 60 × 料金倍率 × (1 − 契約割引) */
+export function onPaxDeplaned(sim: Simulation, f: Flight, count: number): void {
+  if (!enabled(sim)) return;
+  post(sim.company, 'terminal', count * BALANCE.fees.paxArriving * sim.company.fees.terminal * discount(sim, f));
+}
+
+/**
+ * 離陸時: 出発旅客のターミナル使用料（搭乗者数 × 120 × 倍率 × 割引）、地上支援料、駐機料、
+ * 60分を超える遅延の補償。
+ */
+export function onTakeoff(sim: Simulation, ac: Aircraft): void {
+  if (!enabled(sim)) return;
+  const c = sim.company;
+  const dep = sim.state.flights[ac.departureFlightId]!;
+  const arr = sim.state.flights[ac.arrivalFlightId]!;
+  const disc = discount(sim, dep);
+  post(c, 'terminal', dep.pax.boarded * BALANCE.fees.paxDeparting * c.fees.terminal * disc);
+  post(c, 'groundHandling', BALANCE.fees.groundHandling[AIRCRAFT_TYPES[ac.typeId].size] * disc);
+  if (arr.block !== null && dep.block !== null) post(c, 'parking', parkingFee(c, ac, dep.block - arr.block, disc));
+  if (dep.block !== null && dep.block - dep.scheduled > 60 * 60) post(c, 'compensation', -BALANCE.compensation.delayedFlight60);
+}
+
+/** ダイバート・欠航した便: 遅延と同額の補償 */
+export function onFlightLost(sim: Simulation): void {
+  if (!enabled(sim)) return;
+  post(sim.company, 'compensation', -BALANCE.compensation.delayedFlight60);
+}
+
+/** 地上作業の運営費（作業の種類ごと。点検で不具合が見つかれば追加） */
+export function onTaskDone(sim: Simulation, t: GroundTask): void {
+  if (!enabled(sim)) return;
+  let cost = BALANCE.taskCost[t.kind] ?? 0;
+  if (t.kind === 'inspect' && t.note) cost += BALANCE.taskCost.defect ?? 0;
+  post(sim.company, 'groundOps', -cost);
+}
+
+/** 店舗・飲食店の売上（人数 × 1人あたりの売上） */
+export function onShopDone(sim: Simulation, g: PaxGroup, kind: 'shop' | 'restaurant'): void {
+  if (!enabled(sim)) return;
+  if (kind === 'shop') post(sim.company, 'retail', g.count * BALANCE.retail.shopPerPax);
+  else post(sim.company, 'dining', g.count * BALANCE.retail.restaurantPerPax);
+}
+
+/** 出発旅客の到着: 一部が車で来て駐車場を使う（1日の受け入れ台数まで） */
+export function onPaxEnter(sim: Simulation, g: PaxGroup): void {
+  if (!enabled(sim)) return;
+  const e = sim.state.economy!;
+  e.carAcc += g.count * BALANCE.carPark.carShare;
+  const cars = Math.floor(e.carAcc);
+  e.carAcc -= cars;
+  const parked = Math.max(0, Math.min(cars, e.carCapacity - e.cars));
+  e.cars += parked;
+  post(sim.company, 'carPark', parked * BALANCE.carPark.feePerCar);
+}
+
+export function onPaxMissed(sim: Simulation, _f: Flight, count: number): void {
+  if (!enabled(sim)) return;
+  post(sim.company, 'compensation', -count * BALANCE.compensation.missedPax);
+}
+
+export function onBagLeftBehind(sim: Simulation): void {
+  if (!enabled(sim)) return;
+  sim.state.economy!.leftBags++;
+  post(sim.company, 'compensation', -BALANCE.compensation.leftBag);
+}
+
+// ---------------------------------------------------------------- 毎ティック
+
+/** 固定費と契約料を、前回からの経過時間に比例して計上する */
+function accrue(sim: Simulation & { company: CompanyState }, until: number): void {
+  const e = sim.state.economy!;
+  const frac = (until - e.accruedAt) / DAY_SEC;
+  if (frac <= 0) return;
+  for (const k of COST_CATEGORIES) {
+    const v = e.fixedDaily[k];
+    if (v) post(sim.company, k, -v * frac);
+  }
+  post(sim.company, 'contract', e.contractDaily * frac);
+  e.accruedAt = until;
+}
+
+/**
+ * 経営の1ティック。日付が変わったら true を返す（呼び出し側が翌日の運航計画を作る）。
+ */
+export function stepEconomy(sim: Simulation, serversOf: (key: string) => number): boolean {
+  if (!enabled(sim)) return false;
+  const { state } = sim;
+  const e = state.economy!;
+  let newDay = false;
+  if (state.now % 3600 === 0 && state.now > e.accruedAt) accrue(sim, state.now);
+  if (state.now % DAY_SEC === 0 && state.now > e.periodStart) {
+    settleDay(sim, false);
+    newDay = true;
+  }
+  e.standBusySec += Object.keys(state.standAssignments).length;
+  for (const id of e.processingAreas) {
+    const servers = serversOf(id);
+    e.facilityCap += servers;
+    e.facilityBusy += Math.min(servers, state.facilities[id]?.inService.length ?? 0);
+  }
+  return newDay;
+}
+
+// ---------------------------------------------------------------- 日次締め・KPI
+
+interface Leg {
+  f: Flight;
+  at: number;
+  lost: boolean;
+  delaySec: number;
+}
+
+/** 期間内に終わった便の区間（到着 = 着陸、出発 = ブロックアウト、運航不能 = その時刻） */
+function legsInPeriod(sim: Simulation, from: number, to: number): Leg[] {
+  const { state } = sim;
+  const legs: Leg[] = [];
+  const inP = (t: number | null) => t !== null && t >= from && t < to;
+  for (const f of Object.values(state.flights)) {
+    if (f.status === 'diverted' || f.status === 'cancelled') {
+      const ac = state.aircraft[f.aircraftId]!;
+      if ((ac.state === 'diverted' || ac.state === 'cannotOperate') && inP(ac.stateSince)) legs.push({ f, at: ac.stateSince, lost: true, delaySec: 0 });
+      continue;
+    }
+    const ref = f.direction === 'arrival' ? f.actual : f.block;
+    if (inP(ref)) legs.push({ f, at: ref!, lost: false, delaySec: Math.max(0, ref! - f.scheduled) });
+  }
+  return legs;
+}
+
+const clamp = (v: number, lo = 0, hi = 100) => Math.min(hi, Math.max(lo, v));
+const round1 = (v: number) => Math.round(v * 10) / 10;
+
+/**
+ * 当日の KPI（式は docs/14 §6）。
+ */
+export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; byAirline: Record<string, AirlineDayResult> } {
+  const { state, ctx } = sim;
+  const e = state.economy!;
+  const from = e.periodStart;
+  const elapsed = Math.max(1, state.now - from);
+  const legs = legsInPeriod(sim, from, state.now);
+  const done = legs.filter((l) => !l.lost);
+  const onTime = done.filter((l) => l.delaySec <= ON_TIME_SEC).length;
+  const movements = done.filter((l) => l.f.direction === 'arrival' || l.f.actual !== null).length;
+  const pax = state.paxStats;
+  const b = e.base;
+  const dPax = {
+    boarded: pax.boarded - b.pax.boarded,
+    missed: pax.missed - b.pax.missed,
+    deplaned: pax.deplaned - b.pax.deplaned,
+    finished: pax.finished - b.pax.finished,
+    wait: pax.waitTotal - b.pax.waitTotal,
+    walk: pax.walkTotal - b.pax.walkTotal,
+  };
+  const bagsLoaded = state.groundStats.bagsLoaded - b.ground.bagsLoaded;
+  const avgWaitMin = dPax.finished > 0 ? dPax.wait / dPax.finished / 60 : 0;
+  const avgWalkMin = dPax.finished > 0 ? dPax.walk / dPax.finished / 60 : 0;
+  const avgDelayMin = done.length > 0 ? done.reduce((s, l) => s + l.delaySec, 0) / done.length / 60 : 0;
+  // 地上作業時間 = 準備完了 − ブロックイン（期間内に準備完了した出発便）
+  const ground: number[] = [];
+  for (const f of Object.values(state.flights)) {
+    if (f.direction !== 'departure' || f.readyAt === null || f.readyAt < from || f.readyAt >= state.now) continue;
+    const arr = state.flights[state.aircraft[f.aircraftId]!.arrivalFlightId]!;
+    if (arr.block !== null) ground.push(f.readyAt - arr.block);
+  }
+  const runways = Object.values(ctx.runways).filter((r) => r.operational).length;
+  const stands = Object.values(ctx.stands).filter((s) => s.operational).length;
+  const unprocessed = state.activePax.reduce((s, id) => {
+    const g = state.paxGroups[id]!;
+    return s + (g.state !== 'toAirport' && !PAX_FINAL_STATES.includes(g.state) ? g.count : 0);
+  }, 0);
+  const paxTotal = dPax.boarded + dPax.missed;
+  let paxSatisfaction: number | null = null;
+  if (dPax.finished + dPax.missed > 0) {
+    const missedRate = paxTotal > 0 ? dPax.missed / paxTotal : 0;
+    const leftRate = e.leftBags / Math.max(1, bagsLoaded + e.leftBags);
+    paxSatisfaction = round1(clamp(100 - 2 * avgWaitMin - Math.max(0, avgWalkMin - 10) - avgDelayMin - 300 * missedRate - 100 * leftRate));
+  }
+
+  const byAirline: Record<string, AirlineDayResult> = {};
+  for (const l of legs) {
+    const id = l.f.airlineId;
+    if (!id || !c.airlines[id]) continue;
+    const r = (byAirline[id] ??= { flights: 0, onTime: 0, paxBoarded: 0, missedPax: 0, leftBags: 0, cancelled: 0 });
+    if (l.lost) {
+      r.cancelled++;
+      continue;
+    }
+    r.flights++;
+    if (l.delaySec <= ON_TIME_SEC) r.onTime++;
+    if (l.f.direction === 'departure') {
+      r.paxBoarded += l.f.pax.boarded;
+      r.missedPax += l.f.pax.missed;
+      r.leftBags += (state.flightBags[l.f.id] ?? []).filter((bid) => {
+        const bag = state.bags[bid]!;
+        const g = state.paxGroups[bag.paxGroupId];
+        return bag.state === 'leftBehind' && g?.state !== 'missed' && g?.state !== 'cancelled';
+      }).length;
+    }
+  }
+
+  const kpi: DailyKpi = {
+    flights: done.length,
+    movements,
+    paxDeparted: dPax.boarded,
+    paxArrived: dPax.deplaned,
+    otp: legs.length > 0 ? onTime / legs.length : null,
+    avgDelayMin: round1(avgDelayMin),
+    runwayUtil: runways > 0 ? Math.min(1, movements / (runways * RUNWAY_HOURLY_CAPACITY * (elapsed / 3600))) : 0,
+    gateUtil: stands > 0 ? Math.min(1, e.standBusySec / (stands * elapsed)) : 0,
+    facilityUtil: e.facilityCap > 0 ? e.facilityBusy / e.facilityCap : 0,
+    avgWaitMin: round1(avgWaitMin),
+    avgWalkMin: round1(avgWalkMin),
+    avgGroundMin: ground.length > 0 ? round1(ground.reduce((s, v) => s + v, 0) / ground.length / 60) : 0,
+    unprocessedPax: unprocessed,
+    missedPax: dPax.missed,
+    leftBags: e.leftBags,
+    diverted: state.stats.diverted - b.stats.diverted,
+    cancelled: state.stats.cancelled - b.stats.cancelled,
+    paxSatisfaction,
+    airlineSatisfaction: null,
+    rating: c.rating,
+  };
+  return { kpi, byAirline };
+}
+
+/** 航空会社満足度 = 有効な契約がある航空会社の満足度の平均 */
+function airlineSatisfaction(c: CompanyState): number | null {
+  const ids = [...new Set(contractsOf(c, 'active').map((k) => k.airlineId))];
+  if (ids.length === 0) return null;
+  return round1(ids.reduce((s, id) => s + c.airlines[id]!.satisfaction, 0) / ids.length);
+}
+
+/**
+ * 空港評価の更新（便があった日のみ）:
+ *   当日の評価 = 0.4 × 旅客満足度 + 0.4 × 航空会社満足度 + 0.2 × 定時運航率(%)
+ *   新しい評価 = 0.7 × 前日の評価 + 0.3 × 当日の評価
+ * 値がない項目は前日の評価で代用する。
+ */
+export function nextRating(prev: number, kpi: Pick<DailyKpi, 'paxSatisfaction' | 'airlineSatisfaction' | 'otp' | 'flights'>): number {
+  if (kpi.flights === 0) return prev;
+  const today = 0.4 * (kpi.paxSatisfaction ?? prev) + 0.4 * (kpi.airlineSatisfaction ?? prev) + 0.2 * (kpi.otp !== null ? kpi.otp * 100 : prev);
+  return round1(clamp(0.7 * prev + 0.3 * today));
+}
+
+/**
+ * 日次締め。partial = true は運航の途中停止（その日を途中で締める）。
+ * 収支を日報に移し、航空会社の満足度・契約・評価・新しい提案を更新して、会社の日を進める。
+ */
+export function settleDay(sim: Simulation, partial: boolean): DailyReport | null {
+  if (!enabled(sim)) return null;
+  const { state, ctx } = sim;
+  const c = sim.company;
+  const e = state.economy!;
+  accrue(sim, state.now);
+  const { kpi, byAirline } = computeKpi(sim, c);
+  for (const ev of updateContracts(c, byAirline)) log(state, ev);
+  kpi.airlineSatisfaction = airlineSatisfaction(c);
+  c.rating = nextRating(c.rating, kpi);
+  kpi.rating = c.rating;
+  const offers = generateOffers(c, operableTypes(ctx));
+  for (const k of offers) log(state, `${airlineDef(k.airlineId).name} から新しい契約の提案があります`);
+
+  const revenue: DailyReport['revenue'] = {};
+  const cost: DailyReport['cost'] = {};
+  for (const k of REVENUE_CATEGORIES) if (c.today[k]) revenue[k] = c.today[k]!;
+  for (const k of COST_CATEGORIES) if (c.today[k]) cost[k] = -c.today[k]!;
+  const totalRevenue = Object.values(revenue).reduce((s, v) => s + v, 0);
+  const totalCost = Object.values(cost).reduce((s, v) => s + v, 0);
+  const report: DailyReport = {
+    day: c.day,
+    partial,
+    revenue,
+    cost,
+    construction: -(c.today.construction ?? 0),
+    totalRevenue,
+    totalCost,
+    operatingProfit: totalRevenue - totalCost,
+    cashEnd: c.cash,
+    kpi,
+  };
+  c.reports.push(report);
+  if (c.reports.length > REPORT_LIMIT) c.reports.splice(0, c.reports.length - REPORT_LIMIT);
+  c.today = {};
+  checkBankruptcy(c);
+  log(state, `${c.day + 1}日目を締めました: 営業利益 ${report.operatingProfit.toLocaleString('ja-JP')} cr`);
+  c.day++;
+
+  // 次の集計期間
+  e.periodStart = state.now;
+  e.base = { pax: clone(state.paxStats), ground: clone(state.groundStats), stats: clone(state.stats) };
+  e.standBusySec = 0;
+  e.facilityBusy = 0;
+  e.facilityCap = 0;
+  e.cars = 0;
+  e.leftBags = 0;
+  e.contractDaily = dailyContractRevenue(c, c.day);
+  e.dayOffset = c.day - Math.floor(state.now / DAY_SEC);
+  return report;
+}
+
+/** 資金がマイナスの日が続くと経営破綻（キャリアモードのみ） */
+export function checkBankruptcy(c: CompanyState): void {
+  c.negativeDays = c.cash < 0 ? c.negativeDays + 1 : 0;
+  if (c.mode === 'career' && c.negativeDays >= BALANCE.bankruptcyDays) c.bankrupt = true;
+}

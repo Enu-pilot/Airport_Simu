@@ -1,0 +1,387 @@
+import { Rng, type RngState } from '../rng';
+import { compareIds } from '../model/ids';
+import { AIRCRAFT_TYPES, type AircraftTypeId } from '../sim/aircraftTypes';
+import { BALANCE } from './balance';
+import { AIRLINES, DESTINATIONS, airlineDef } from './registry';
+
+/**
+ * 空港会社（経営）の状態。建設モードと運航モードをまたいで保持し、レイアウトと一緒に保存する。
+ * docs/14_management_rules.md
+ */
+
+export type RevenueCategory = 'contract' | 'landing' | 'parking' | 'terminal' | 'groundHandling' | 'retail' | 'dining' | 'carPark';
+export type CostCategory = 'salary' | 'counterStaff' | 'vehicles' | 'maintenance' | 'utilities' | 'groundOps' | 'compensation';
+export type LedgerCategory = RevenueCategory | CostCategory | 'construction';
+
+export const REVENUE_CATEGORIES: readonly RevenueCategory[] = ['contract', 'landing', 'parking', 'terminal', 'groundHandling', 'retail', 'dining', 'carPark'];
+export const COST_CATEGORIES: readonly CostCategory[] = ['salary', 'counterStaff', 'vehicles', 'maintenance', 'utilities', 'groundOps', 'compensation'];
+
+export type TimeWindow = 'morning' | 'daytime' | 'evening' | 'any';
+
+export interface Contract {
+  id: string;
+  airlineId: string;
+  destinationId: string;
+  typeId: AircraftTypeId;
+  /** 1日あたりの往復便数 */
+  perDay: number;
+  window: TimeWindow;
+  /** 空港使用料の割引率（0〜0.4） */
+  feeDiscount: number;
+  startDay: number;
+  endDay: number;
+  status: 'offered' | 'active' | 'ended' | 'rejected' | 'withdrawn' | 'expired';
+  /** 提案の有効期限（提案中のみ） */
+  offerExpiresDay: number;
+  /** 便名の基番号 */
+  numberBase: number;
+}
+
+export interface AirlineRelation {
+  /** 航空会社の満足度（0〜100） */
+  satisfaction: number;
+  /** 満足度が撤退水準を下回った連続日数 */
+  lowDays: number;
+}
+
+export interface FeeSettings {
+  /** 基準料金に対する倍率（0.5〜2.0） */
+  landing: number;
+  terminal: number;
+  parking: number;
+}
+
+export interface OperatingHours {
+  /** 運用時間（日内の分）。到着・出発はこの範囲内 */
+  openMin: number;
+  closeMin: number;
+  /** ピーク時間帯（着陸料の割増・計画分析に使う） */
+  peaks: { fromMin: number; toMin: number }[];
+}
+
+export interface DailyKpi {
+  flights: number;
+  movements: number;
+  paxDeparted: number;
+  paxArrived: number;
+  /** 定時運航率（0〜1、対象便なしは null） */
+  otp: number | null;
+  avgDelayMin: number;
+  runwayUtil: number;
+  gateUtil: number;
+  facilityUtil: number;
+  avgWaitMin: number;
+  avgWalkMin: number;
+  avgGroundMin: number;
+  unprocessedPax: number;
+  missedPax: number;
+  leftBags: number;
+  diverted: number;
+  cancelled: number;
+  /** 旅客満足度・航空会社満足度（対象なしは null）と、締め後の空港評価 */
+  paxSatisfaction: number | null;
+  airlineSatisfaction: number | null;
+  rating: number;
+}
+
+export interface DailyReport {
+  day: number;
+  partial: boolean;
+  revenue: Partial<Record<RevenueCategory, number>>;
+  cost: Partial<Record<CostCategory, number>>;
+  construction: number;
+  totalRevenue: number;
+  totalCost: number;
+  operatingProfit: number;
+  cashEnd: number;
+  kpi: DailyKpi;
+}
+
+export interface CompanyState {
+  version: 1;
+  mode: 'career' | 'sandbox';
+  seed: string;
+  rng: RngState;
+  /** 次に運航する日（0 = 1日目） */
+  day: number;
+  cash: number;
+  counters: Record<string, number>;
+  airlines: Record<string, AirlineRelation>;
+  contracts: Record<string, Contract>;
+  fees: FeeSettings;
+  hours: OperatingHours;
+  /** 当日の収支（日次締めで日報に移す） */
+  today: Partial<Record<LedgerCategory, number>>;
+  reports: DailyReport[];
+  /** 空港評価（0〜100） */
+  rating: number;
+  /** 資金がマイナスの連続日数と、経営破綻の判定 */
+  negativeDays: number;
+  bankrupt: boolean;
+}
+
+export const REPORT_LIMIT = 120;
+
+export function createCompany(mode: CompanyState['mode'] = 'career', seed = 'company'): CompanyState {
+  const airlines: Record<string, AirlineRelation> = {};
+  for (const a of AIRLINES) airlines[a.id] = { satisfaction: 60, lowDays: 0 };
+  return {
+    version: 1,
+    mode,
+    seed,
+    rng: new Rng(`company:${seed}`).state(),
+    day: 0,
+    cash: BALANCE.initialCash[mode],
+    counters: {},
+    airlines,
+    contracts: {},
+    fees: { landing: 1, terminal: 1, parking: 1 },
+    hours: { openMin: 6 * 60, closeMin: 23 * 60, peaks: [{ fromMin: 7 * 60, toMin: 9 * 60 }, { fromMin: 17 * 60, toMin: 19 * 60 }] },
+    today: {},
+    reports: [],
+    rating: 50,
+    negativeDays: 0,
+    bankrupt: false,
+  };
+}
+
+function nextId(c: CompanyState, prefix: string): string {
+  const n = (c.counters[prefix] ?? 0) + 1;
+  c.counters[prefix] = n;
+  return `${prefix}_${n}`;
+}
+
+/** 収支を記録する（現金残高も更新） */
+export function post(c: CompanyState, category: LedgerCategory, amount: number): void {
+  if (!Number.isFinite(amount) || amount === 0) return;
+  const v = Math.round(amount);
+  c.today[category] = (c.today[category] ?? 0) + v;
+  c.cash += v;
+}
+
+export const isRevenue = (k: LedgerCategory): k is RevenueCategory => (REVENUE_CATEGORIES as readonly string[]).includes(k);
+
+export function contractsOf(c: CompanyState, status?: Contract['status']): Contract[] {
+  return Object.values(c.contracts)
+    .filter((k) => !status || k.status === status)
+    .sort((a, b) => compareIds(a.id, b.id));
+}
+
+/** その日に運航する契約 */
+export function activeContractsOn(c: CompanyState, day: number): Contract[] {
+  return contractsOf(c, 'active').filter((k) => k.startDay <= day && day <= k.endDay);
+}
+
+export function addContract(c: CompanyState, k: Omit<Contract, 'id' | 'numberBase'>): Contract {
+  const id = nextId(c, 'ct');
+  const n = Number(id.slice(3));
+  const contract: Contract = { ...k, id, numberBase: 100 + n * 20 };
+  c.contracts[id] = contract;
+  return contract;
+}
+
+// ---------------------------------------------------------------- プレイヤーの操作
+
+export type ContractActionResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'NOT_OFFERED' | 'NOT_ACTIVE' | 'UNSUPPORTED' | 'AIRLINE_REFUSED' | 'MIN_FREQUENCY' };
+
+/** 提案を受け入れる（翌運航日から有効）。supported = 空港で運航可能な機種か */
+export function acceptOffer(c: CompanyState, id: string, supported: boolean): ContractActionResult {
+  const k = c.contracts[id];
+  if (!k) return { ok: false, reason: 'NOT_FOUND' };
+  if (k.status !== 'offered') return { ok: false, reason: 'NOT_OFFERED' };
+  if (!supported) return { ok: false, reason: 'UNSUPPORTED' };
+  k.status = 'active';
+  k.startDay = c.day;
+  k.endDay = c.day + BALANCE.offers.contractDays - 1;
+  return { ok: true };
+}
+
+export function rejectOffer(c: CompanyState, id: string): ContractActionResult {
+  const k = c.contracts[id];
+  if (!k) return { ok: false, reason: 'NOT_FOUND' };
+  if (k.status !== 'offered') return { ok: false, reason: 'NOT_OFFERED' };
+  k.status = 'rejected';
+  return { ok: true };
+}
+
+/**
+ * 便数の変更を依頼する。増便は航空会社の満足度が一定以上のときだけ応じる。減便は満足度が下がる。
+ */
+export function changeFrequency(c: CompanyState, id: string, delta: 1 | -1): ContractActionResult {
+  const k = c.contracts[id];
+  if (!k) return { ok: false, reason: 'NOT_FOUND' };
+  if (k.status !== 'active') return { ok: false, reason: 'NOT_ACTIVE' };
+  const rel = c.airlines[k.airlineId]!;
+  if (delta > 0) {
+    if (rel.satisfaction < BALANCE.contracts.increaseMinSat) return { ok: false, reason: 'AIRLINE_REFUSED' };
+    k.perDay += 1;
+  } else {
+    if (k.perDay <= 1) return { ok: false, reason: 'MIN_FREQUENCY' };
+    k.perDay -= 1;
+    rel.satisfaction = Math.max(0, rel.satisfaction - BALANCE.contracts.decreasePenaltySat);
+  }
+  return { ok: true };
+}
+
+export function setFees(c: CompanyState, fees: Partial<FeeSettings>): void {
+  for (const [k, v] of Object.entries(fees) as [keyof FeeSettings, number][]) {
+    if (Number.isFinite(v)) c.fees[k] = Math.min(2, Math.max(0.5, Math.round(v * 20) / 20));
+  }
+}
+
+export function setHours(c: CompanyState, hours: Partial<OperatingHours>): void {
+  if (hours.openMin !== undefined && hours.closeMin !== undefined && hours.closeMin - hours.openMin < 6 * 60) return;
+  c.hours = { ...c.hours, ...hours };
+}
+
+// ---------------------------------------------------------------- 日次の更新（提案・契約・評価）
+
+function withRng<T>(c: CompanyState, fn: (rng: Rng) => T): T {
+  const rng = new Rng(c.rng);
+  const v = fn(rng);
+  c.rng = rng.state();
+  return v;
+}
+
+/**
+ * 新しい契約提案を作る。航空会社ごとに、空港評価が高いほど提案しやすい。
+ * operableTypes = 現在の空港で運航できる機種（それ以外の機種の提案も「受け入れ不可」として届く）
+ */
+export function generateOffers(c: CompanyState, operable: readonly AircraftTypeId[]): Contract[] {
+  const out: Contract[] = [];
+  const open = () => contractsOf(c, 'offered').length;
+  withRng(c, (rng) => {
+    for (const a of AIRLINES) {
+      if (open() >= BALANCE.offers.maxOpen) break;
+      const rel = c.airlines[a.id]!;
+      const p = BALANCE.offers.baseProb + BALANCE.offers.ratingProb * (c.rating / 100) * (rel.satisfaction / 60);
+      if (rng.next() >= p) continue;
+      const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && (k.status === 'active' || k.status === 'offered')).map((k) => k.destinationId));
+      const dests = DESTINATIONS.filter((d) => !served.has(d.id));
+      if (dests.length === 0) continue;
+      const dest = dests[rng.int(0, dests.length - 1)]!;
+      // 運航できる機種を優先しつつ、評価が高いと大型機の提案も来る
+      const fleet = a.fleet.filter((t) => operable.includes(t) || (AIRCRAFT_TYPES[t].size === 'L' && c.rating >= 60) || rng.next() < 0.25);
+      const typeId = (fleet.length > 0 ? fleet : a.fleet)[rng.int(0, (fleet.length > 0 ? fleet : a.fleet).length - 1)]!;
+      const maxPerDay = c.rating >= 70 ? 4 : c.rating >= 50 ? 3 : 2;
+      const windows: TimeWindow[] = ['morning', 'daytime', 'evening', 'any'];
+      const discount =
+        a.type === 'lcc' ? 0.2 + rng.next() * 0.2 : a.type === 'regional' ? 0.1 + rng.next() * 0.15 : rng.next() * 0.15;
+      out.push(
+        addContract(c, {
+          airlineId: a.id,
+          destinationId: dest.id,
+          typeId,
+          perDay: rng.int(1, maxPerDay),
+          window: windows[rng.int(0, windows.length - 1)]!,
+          feeDiscount: Math.round(discount * 100) / 100,
+          startDay: c.day,
+          endDay: c.day + BALANCE.offers.contractDays - 1,
+          status: 'offered',
+          offerExpiresDay: c.day + BALANCE.offers.expireDays,
+        }),
+      );
+    }
+  });
+  return out;
+}
+
+/** 航空会社ごとの当日の実績（満足度の更新に使う） */
+export interface AirlineDayResult {
+  flights: number;
+  onTime: number;
+  paxBoarded: number;
+  missedPax: number;
+  leftBags: number;
+  cancelled: number;
+}
+
+/**
+ * 日次の契約更新: 航空会社の満足度、撤退、契約満了と更新、提案の期限切れ。
+ * 満足度の変化 = 定時率が要求以上なら +2、未満なら −(要求 − 定時率)×40
+ *              − (料金倍率 − 1) × 料金への敏感さ × 12 − 乗り遅れ率 × 100 − 積み残し率 × 50 − 欠航 × 5
+ */
+export function updateContracts(c: CompanyState, results: Record<string, AirlineDayResult>): string[] {
+  const events: string[] = [];
+  const feeRatio = (c.fees.landing + c.fees.terminal + c.fees.parking) / 3;
+  for (const a of AIRLINES) {
+    const rel = c.airlines[a.id]!;
+    const r = results[a.id];
+    const hasContract = contractsOf(c, 'active').some((k) => k.airlineId === a.id);
+    if (!hasContract && !r) continue;
+    let delta = 0;
+    if (r && r.flights > 0) {
+      const otp = r.onTime / r.flights;
+      delta += otp >= a.minOtp ? 2 : -(a.minOtp - otp) * 40;
+      if (r.paxBoarded + r.missedPax > 0) delta -= (r.missedPax / (r.paxBoarded + r.missedPax)) * 100;
+      if (r.paxBoarded > 0) delta -= Math.min(20, (r.leftBags / Math.max(1, r.paxBoarded)) * 50);
+      delta -= r.cancelled * 5;
+    }
+    delta -= (feeRatio - 1) * a.priceSensitivity * BALANCE.feeSensitivity.satisfactionPerRatio;
+    rel.satisfaction = Math.max(0, Math.min(100, rel.satisfaction + delta));
+    rel.lowDays = rel.satisfaction < BALANCE.contracts.withdrawSat ? rel.lowDays + 1 : 0;
+  }
+  for (const k of contractsOf(c)) {
+    const rel = c.airlines[k.airlineId]!;
+    if (k.status === 'offered' && c.day >= k.offerExpiresDay) k.status = 'expired';
+    if (k.status !== 'active') continue;
+    if (rel.lowDays >= BALANCE.contracts.withdrawDays) {
+      k.status = 'withdrawn';
+      events.push(`${airlineDef(k.airlineId).name} が撤退しました（満足度の低下）`);
+    } else if (c.day >= k.endDay) {
+      if (rel.satisfaction >= BALANCE.contracts.renewGoodSat) {
+        k.endDay = c.day + BALANCE.offers.contractDays;
+        k.perDay += 1;
+        events.push(`${airlineDef(k.airlineId).name} が契約を増便して更新しました`);
+      } else if (rel.satisfaction >= BALANCE.contracts.renewOkSat) {
+        k.endDay = c.day + BALANCE.offers.contractDays;
+        events.push(`${airlineDef(k.airlineId).name} が契約を更新しました`);
+      } else {
+        k.status = 'ended';
+        events.push(`${airlineDef(k.airlineId).name} の契約が満了し、更新されませんでした`);
+      }
+    }
+  }
+  return events;
+}
+
+/**
+ * キャリアモードの開始状態: 小さな飛行場向けの初期契約（リージョナル機2便・ナローボディ機1便）つき。
+ */
+export function createCareerCompany(seed = 'career'): CompanyState {
+  const c = createCompany('career', seed);
+  const base = { feeDiscount: 0.1, startDay: 0, endDay: BALANCE.offers.contractDays - 1, status: 'active' as const, offerExpiresDay: 0 };
+  addContract(c, { ...base, airlineId: 'RJ', destinationId: 'KTA', typeId: 'regional70', perDay: 2, window: 'any' });
+  addContract(c, { ...base, airlineId: 'HB', destinationId: 'MSK', typeId: 'narrow180', perDay: 1, window: 'daytime' });
+  return c;
+}
+
+/**
+ * サンドボックスモードの開始状態: 資金はほぼ無制限で、サンプル空港の規模に合わせた契約つき。
+ */
+export function createSandboxCompany(seed = 'sandbox'): CompanyState {
+  const c = createCompany('sandbox', seed);
+  const base = { feeDiscount: 0.1, startDay: 0, endDay: 9999, status: 'active' as const, offerExpiresDay: 0 };
+  const list: [string, string, AircraftTypeId, number, TimeWindow][] = [
+    ['SK', 'TWN', 'narrow180', 3, 'any'],
+    ['SK', 'HSM', 'wide300', 1, 'daytime'],
+    ['NP', 'YKH', 'narrow180', 3, 'any'],
+    ['NP', 'AOS', 'wide300', 1, 'evening'],
+    ['RJ', 'KTA', 'regional70', 4, 'any'],
+    ['AQ', 'MSK', 'narrow180', 4, 'any'],
+    ['HB', 'NSH', 'regional70', 3, 'any'],
+  ];
+  for (const [airlineId, destinationId, typeId, perDay, window] of list) addContract(c, { ...base, airlineId, destinationId, typeId, perDay, window });
+  return c;
+}
+
+/** 保存データの読み込み（形式が合わなければ null） */
+export function importCompany(json: string): CompanyState | null {
+  try {
+    const c = JSON.parse(json) as CompanyState;
+    if (c?.version !== 1 || typeof c.cash !== 'number' || typeof c.contracts !== 'object') return null;
+    return c;
+  } catch {
+    return null;
+  }
+}

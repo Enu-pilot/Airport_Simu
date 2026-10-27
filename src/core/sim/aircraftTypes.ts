@@ -8,6 +8,8 @@ export interface AircraftType {
   label: string;
   size: SizeClass;
   seats: number;
+  /** 最大離陸重量（t）。着陸料の計算に使う（ゲーム用の値） */
+  mtowT: number;
   /** 機体長（m）。誘導路の予約を解放する距離（尾部の通過）に使う */
   lengthM: number;
   wingspanM: number;
@@ -32,6 +34,7 @@ export const AIRCRAFT_TYPES: Record<AircraftTypeId, AircraftType> = {
     label: 'リージョナル機（70席）',
     size: 'S',
     seats: 70,
+    mtowT: 38,
     lengthM: 27,
     wingspanM: 26,
     taxiSpeed: 8,
@@ -46,6 +49,7 @@ export const AIRCRAFT_TYPES: Record<AircraftTypeId, AircraftType> = {
     label: 'ナローボディ機（180席）',
     size: 'M',
     seats: 180,
+    mtowT: 78,
     lengthM: 38,
     wingspanM: 36,
     taxiSpeed: 8,
@@ -60,6 +64,7 @@ export const AIRCRAFT_TYPES: Record<AircraftTypeId, AircraftType> = {
     label: 'ワイドボディ機（300席）',
     size: 'L',
     seats: 300,
+    mtowT: 250,
     lengthM: 64,
     wingspanM: 61,
     taxiSpeed: 7,

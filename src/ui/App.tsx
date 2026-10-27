@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { MapView } from '../render/MapView';
-import { actions, replaceLayout, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { actions, formatCr, newGame, replaceLayout, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
+import { MODE_LABEL } from '../i18n/ja';
 import { onKeyDown, onKeyUp } from '../editor/input';
 import { exportLayout, importLayout } from '../core/io/serialize';
 import { setBuildState } from '../core/layout/operations';
@@ -55,31 +57,61 @@ export function App() {
         <Toast />
       </main>
       <aside className="right">{mode === 'operate' && hasAircraft ? <AircraftPanel /> : <PropertiesPanel />}</aside>
-      <footer className="bottom">{mode === 'build' ? <IssuesPanel /> : <OpsBottom />}</footer>
+      <footer className="bottom">{mode === 'build' ? <BuildBottom /> : <OpsBottom />}</footer>
+    </div>
+  );
+}
+
+type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance';
+
+function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
+  return (
+    <div className="tabs">
+      {tabs.map(([k, label]) => (
+        <button key={k} className={tab === k ? 'tab active' : 'tab'} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function BuildBottom() {
+  const [tab, setTab] = useState<BottomTab>('issues');
+  return (
+    <div className="tabbed">
+      <Tabs
+        tabs={[
+          ['issues', '配置チェック'],
+          ['plan', '運航計画'],
+          ['finance', '経営'],
+        ]}
+        tab={tab}
+        setTab={setTab}
+      />
+      <div className="tab-body">{tab === 'plan' ? <PlanPanel /> : tab === 'finance' ? <FinancePanel /> : <IssuesPanel />}</div>
     </div>
   );
 }
 
 function OpsBottom() {
-  const [tab, setTab] = useState<'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues'>('flights');
+  const [tab, setTab] = useState<BottomTab>('flights');
   return (
     <div className="tabbed">
-      <div className="tabs">
-        {(
-          [
-            ['flights', '運航表'],
-            ['terminal', 'ターミナル'],
-            ['ground', '地上支援'],
-            ['baggage', '手荷物'],
-            ['events', 'イベント'],
-            ['issues', '配置チェック'],
-          ] as const
-        ).map(([k, label]) => (
-          <button key={k} className={tab === k ? 'tab active' : 'tab'} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          ['flights', '運航表'],
+          ['terminal', 'ターミナル'],
+          ['ground', '地上支援'],
+          ['baggage', '手荷物'],
+          ['plan', '運航計画'],
+          ['finance', '経営'],
+          ['events', 'イベント'],
+          ['issues', '配置チェック'],
+        ]}
+        tab={tab}
+        setTab={setTab}
+      />
       <div className="tab-body">{tab === 'flights' ? (
           <FlightBoard />
         ) : tab === 'terminal' ? (
@@ -88,6 +120,10 @@ function OpsBottom() {
           <GroundBoard />
         ) : tab === 'baggage' ? (
           <BaggageBoard />
+        ) : tab === 'plan' ? (
+          <PlanPanel />
+        ) : tab === 'finance' ? (
+          <FinancePanel />
         ) : tab === 'events' ? (
           <EventLog />
         ) : (
@@ -125,6 +161,7 @@ function TopBar() {
     <header className="top">
       <span className="brand">✈ SkyPort</span>
       <span className="subtitle">{mode === 'build' ? '建設モード' : '運航モード'}</span>
+      <CompanyBadge />
       <div className="top-group">
         {mode === 'build' ? (
           <button className="primary" onClick={() => ops.start()} data-testid="start-ops">
@@ -136,7 +173,7 @@ function TopBar() {
             <button
               className="primary"
               onClick={() => {
-                if (window.confirm('運航を終了して建設モードに戻りますか？（運航の状態は破棄されます）')) ops.stop();
+                if (window.confirm('運航を終了して建設モードに戻りますか？（その日を途中で締め、運航の状態は破棄されます）')) ops.stop();
               }}
               data-testid="stop-ops"
             >
@@ -156,7 +193,19 @@ function TopBar() {
           </button>
         </div>
         <div className="top-group">
-          <button onClick={actions.loadSample} data-testid="load-sample">サンプル空港を生成</button>
+          <button
+            onClick={() => window.confirm('新しいゲームを始めますか？（小さな飛行場・初期資金から。現在の空港と経営データは失われます）') && newGame('career')}
+            data-testid="new-career"
+          >
+            新しいゲーム（小さな飛行場から）
+          </button>
+          <button
+            onClick={() => window.confirm('サンドボックスを始めますか？（サンプル空港・潤沢な資金。現在の空港と経営データは失われます）') && newGame('sandbox')}
+            data-testid="new-sandbox"
+          >
+            サンドボックス
+          </button>
+          <button onClick={actions.loadSample} data-testid="load-sample" title="現在の資金で建設（キャリアでは建設費がかかる）">サンプル空港を生成</button>
           <button onClick={actions.newEmpty} data-testid="new-empty">空の敷地</button>
           <button onClick={() => applyOp(setBuildState(layout, 'operational'))} title="計画・建設中の施設をすべて運用中にする">
             全施設を完成
@@ -188,6 +237,20 @@ function TopBar() {
         ))}
       </div>
     </header>
+  );
+}
+
+/** 資金・日・評価 */
+function CompanyBadge() {
+  const c = useCompany();
+  return (
+    <span className={`company-badge ${c.cash < 0 ? 'negative' : ''}`} data-testid="company-badge">
+      <span>{MODE_LABEL[c.mode]}</span>
+      <b data-testid="cash">💴 {formatCr(c.cash)}</b>
+      <span data-testid="company-day">{c.day + 1}日目</span>
+      <span title="空港評価（旅客満足度・航空会社満足度・定時率から）">評価 {c.rating.toFixed(1)}</span>
+      {c.bankrupt && <b className="ng-text">経営破綻</b>}
+    </span>
   );
 }
 

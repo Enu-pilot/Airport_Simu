@@ -14,6 +14,7 @@ import {
   setEquipmentBroken,
 } from './baggage';
 import type { Simulation } from './simulation';
+import { onTaskDone } from '../economy/ops';
 import {
   EVENT_LOG_LIMIT,
   type Aircraft,
@@ -302,6 +303,7 @@ function finishTask(sim: Simulation, t: GroundTask): void {
   t.doneAt = state.now;
   t.blockedReason = null;
   state.groundStats.tasksDone++;
+  onTaskDone(sim, t);
   log(state, { t: state.now, kind: 'taskDone', aircraftId: t.aircraftId, note: t.kind });
 }
 

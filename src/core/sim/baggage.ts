@@ -1,4 +1,5 @@
 import type { Simulation } from './simulation';
+import { onBagLeftBehind } from '../economy/ops';
 import { EVENT_LOG_LIMIT, type Bag, type BagState, type EquipmentState, type PaxGroup, type SimState } from './types';
 
 /**
@@ -196,6 +197,7 @@ export function reconcileDepartureBags(sim: Simulation, flightId: string, finalC
       moveBag(state, b, 'leftBehind', b.location);
       state.groundStats.bagsLeftBehind++;
       left++;
+      if (!paxGone) onBagLeftBehind(sim);
     }
   }
   return left;

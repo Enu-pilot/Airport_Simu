@@ -171,6 +171,14 @@ export const TERMINAL_AREA_SPECS: Record<TerminalAreaKind, TerminalAreaSpec> = {
     defaultW: 1, defaultH: 1, minW: 1, minH: 1, zone: 'landside', zoneEditable: true,
     props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }], defaults: { travelSec: 60 },
   },
+  shop: {
+    defaultW: 3, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: true,
+    props: [{ key: 'capacity', type: 'int', min: 1, max: 100 }], defaults: { capacity: 8 },
+  },
+  restaurant: {
+    defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: true,
+    props: [{ key: 'capacity', type: 'int', min: 1, max: 100 }], defaults: { capacity: 10 },
+  },
 };
 
 export const TERMINAL_AREA_KINDS = Object.keys(TERMINAL_AREA_SPECS) as TerminalAreaKind[];

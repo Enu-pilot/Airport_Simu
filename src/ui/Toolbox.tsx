@@ -37,7 +37,7 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
   },
   {
     title: 'ターミナル内部（ドラッグで範囲）',
-    tools: (['entrance', 'checkIn', 'security', 'departureLobby', 'waiting', 'restroom', 'arrivalCorridor', 'baggageClaim', 'exit', 'hall', 'escalator', 'elevator'] as const).map((k) => ({
+    tools: (['entrance', 'checkIn', 'security', 'departureLobby', 'waiting', 'restroom', 'arrivalCorridor', 'baggageClaim', 'exit', 'hall', 'escalator', 'elevator', 'shop', 'restaurant'] as const).map((k) => ({
       id: `area:${k}` as ToolId,
       label: AREA_KIND_LABEL[k],
       hint: 'ターミナルの中でドラッグして範囲を指定（表示中の階に配置）',

@@ -743,6 +743,8 @@ const AREA_COLOR: Record<TerminalAreaKind, number> = {
   hall: 0x4a4f55,
   escalator: 0x8a7a2a,
   elevator: 0x8a6a2a,
+  shop: 0x9a5a2a,
+  restaurant: 0xa0603a,
 };
 const ZONE_COLOR: Record<PaxZone, number> = { landside: 0x9be7a8, departure: 0xe0a0ff, arrival: 0x8fd3ff };
 const AREA_SHORT = AREA_KIND_LABEL;

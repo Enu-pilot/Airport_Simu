@@ -1,5 +1,6 @@
 import type { RngState } from '../rng';
 import type { AircraftTypeId } from './aircraftTypes';
+import type { SimEconomy } from '../economy/ops';
 
 /**
  * 運航シミュレーションの状態。JSON シリアライズ可能な plain object とし、
@@ -170,6 +171,14 @@ export interface Flight {
   /** 出発便: 地上作業がすべて完了した時刻と、最後に完了した作業（遅延の主因） */
   readyAt: number | null;
   criticalTask: TaskKind | null;
+  /** 運航計画（契約）の情報。手動・ランダム生成の便は契約なし */
+  airlineId: string | null;
+  contractId: string | null;
+  destinationId: string | null;
+  /** 計画上の旅客数（null なら搭乗率の既定範囲から決める） */
+  plannedPax: number | null;
+  /** 計画上のスポット（空いていれば優先して割り当てる） */
+  plannedStandId: string | null;
 }
 
 // ---------------------------------------------------------------- 地上支援
@@ -314,7 +323,7 @@ export type PaxState =
 
 export const PAX_FINAL_STATES: readonly PaxState[] = ['boarded', 'exited', 'missed', 'cancelled'];
 
-export type PaxStep = 'checkIn' | 'security' | 'restroom' | 'gate' | 'claim' | 'exit';
+export type PaxStep = 'checkIn' | 'security' | 'shop' | 'restroom' | 'gate' | 'claim' | 'exit';
 export type MissReason = 'late' | 'unreachable' | 'facilityClosed' | 'noGate' | 'cancelled';
 
 export interface PaxGroup {
@@ -411,7 +420,8 @@ export type SimEventKind =
   | 'taskDone'
   | 'equipmentDown'
   | 'equipmentUp'
-  | 'bagsLeftBehind';
+  | 'bagsLeftBehind'
+  | 'finance';
 
 export interface SimEvent {
   t: number;
@@ -491,6 +501,8 @@ export interface SimState {
   /** 仕分け設備の処理の端数（個） */
   sorterAcc: Record<string, number>;
   groundStats: GroundStats;
+  /** 経営の集計（会社と一緒に運航するときのみ） */
+  economy: SimEconomy | null;
 }
 
 export const EVENT_LOG_LIMIT = 1000;

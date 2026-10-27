@@ -2,7 +2,8 @@ import { buildAirsideNetwork, type AirsideNetwork } from '../airside/network';
 import { TILE_M } from '../model/catalog';
 import { compareIds, sortedValues } from '../model/ids';
 import { buildTerminalModel, type TerminalModel } from '../terminal/model';
-import type { AirportLayout, SizeClass } from '../model/types';
+import { sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
+import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, type AircraftTypeId } from './aircraftTypes';
 import { distance } from '../geometry/vec';
 import { runwayMaxSize } from '../layout/runway';
 import type { RunwayConfig, UnitKind } from './types';
@@ -131,4 +132,14 @@ export function orderedRunway(info: RunwayInfo, cfg: RunwayConfig): { nodes: str
     nodes: [...info.nodes].reverse(),
     dist: [...info.distFromStart].reverse().map((d) => info.lengthM - d),
   };
+}
+
+/** 空港で運航可能な機種（使用可能な滑走路と、接続済みのスポットがある区分） */
+export function operableTypes(ctx: SimContext): AircraftTypeId[] {
+  return AIRCRAFT_TYPE_IDS.filter((id) => {
+    const size = AIRCRAFT_TYPES[id].size;
+    const rwy = Object.values(ctx.runways).some((r) => r.operational && r.maxSize && sizeAtLeast(r.maxSize, size));
+    const stand = Object.values(ctx.stands).some((s) => s.operational && s.entry && sizeAtLeast(s.size, size));
+    return rwy && stand;
+  });
 }

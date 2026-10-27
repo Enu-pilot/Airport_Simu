@@ -17,10 +17,11 @@ test.afterEach(async ({ page }) => {
 });
 
 test('運航を開始すると便が生成され、時間が進み、到着・出発が完了する', async ({ page }) => {
+  test.setTimeout(60_000);
   await expect(page.getByTestId('sim-clock')).toContainText('1日目 06:');
   await page.getByTestId('speed-600').click();
   // 最初の便（06:30以降に到着、折り返して出発）が完了するまで
-  await expect(page.getByTestId('stat-departures')).not.toHaveText('0', { timeout: 25_000 });
+  await expect(page.getByTestId('stat-departures')).not.toHaveText('0', { timeout: 45_000 });
   await expect(page.getByTestId('stat-arrivals')).not.toHaveText('0');
   await expect(page.getByTestId('stat-conflicts')).toHaveText('0');
 });

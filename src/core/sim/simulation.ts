@@ -2,8 +2,8 @@ import { Rng } from '../rng';
 import { compareIds, sortedValues } from '../model/ids';
 import { sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
 import { canAircraftUse, otherEnd } from '../airside/network';
-import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, takeoffDistanceM, type AircraftType, type AircraftTypeId } from './aircraftTypes';
-import { createContext, orderedRunway, type SimContext } from './context';
+import { AIRCRAFT_TYPES, takeoffDistanceM, type AircraftType, type AircraftTypeId } from './aircraftTypes';
+import { createContext, operableTypes, orderedRunway, type SimContext } from './context';
 import { findPath } from './pathfinding';
 import {
   edgeIndexAt,
@@ -60,7 +60,10 @@ import {
   type SimState,
 } from './types';
 import { TILE_M } from '../model/catalog';
-import { emptyFlightPax, stepPassengers } from './passengers';
+import { emptyFlightPax, serversOf, stepPassengers } from './passengers';
+import type { CompanyState } from '../economy/company';
+import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
+import { analyzeDayPlan, planDay } from '../economy/planning';
 import { stepBaggage } from './baggage';
 import {
   allTurnaroundDone,
@@ -83,12 +86,15 @@ import {
 export interface Simulation {
   ctx: SimContext;
   state: SimState;
+  /** 空港会社（経営）。あれば契約から運航計画を作り、収支を記録する。運航中はこのオブジェクトを直接更新する */
+  company?: CompanyState | null;
 }
 
 export interface CreateOptions {
   seed?: string;
   startTime?: number;
   settings?: Partial<SimSettings>;
+  company?: CompanyState | null;
 }
 
 const DEFAULT_SETTINGS: SimSettings = {
@@ -152,8 +158,10 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
       bagsOffloaded: 0,
       bagsCollected: 0,
     },
+    economy: null,
   };
-  const sim = { ctx, state };
+  const sim: Simulation = { ctx, state, company: opts.company ?? null };
+  if (sim.company) state.economy = createEconomy(ctx, state, sim.company);
   createGroundUnits(sim);
   if (state.settings.autoSchedule) generateDaySchedule(sim, Math.floor(state.now / DAY_SEC));
   return sim;
@@ -222,22 +230,20 @@ const typeOf = (ac: Aircraft): AircraftType => AIRCRAFT_TYPES[ac.typeId];
 
 const AIRLINES = ['SK', 'NP', 'RJ', 'AQ'] as const;
 
-/** 空港で運航可能な機種（使用可能な滑走路と、接続済みのスポットがある区分） */
-export function operableTypes(ctx: SimContext): AircraftTypeId[] {
-  return AIRCRAFT_TYPE_IDS.filter((id) => {
-    const size = AIRCRAFT_TYPES[id].size;
-    const rwy = Object.values(ctx.runways).some((r) => r.operational && r.maxSize && sizeAtLeast(r.maxSize, size));
-    const stand = Object.values(ctx.stands).some((s) => s.operational && s.entry && sizeAtLeast(s.size, size));
-    return rwy && stand;
-  });
-}
+export { operableTypes };
 
 /** 到着便と折り返しの出発便を1組追加する（同じ機体が到着して出発する） */
 export function addTurnaround(
   sim: Simulation,
   typeId: AircraftTypeId,
   arrivalAt: number,
-  opts: { departureAt?: number; inboundDelaySec?: number; airline?: string } = {},
+  opts: {
+    departureAt?: number;
+    inboundDelaySec?: number;
+    airline?: string;
+    numbers?: [string, string];
+    plan?: { contractId: string; destinationId: string; arrPax: number; depPax: number; standId: string | null };
+  } = {},
 ): Aircraft {
   const { state } = sim;
   const type = AIRCRAFT_TYPES[typeId];
@@ -248,6 +254,8 @@ export function addTurnaround(
   const arrId = nextId(state, 'fl');
   const depId = nextId(state, 'fl');
   const depAt = opts.departureAt ?? arrivalAt + type.turnaroundSec + 20 * 60;
+  const [arrNumber, depNumber] = opts.numbers ?? [`${airline}${num}`, `${airline}${num + 1}`];
+  const plan = opts.plan;
   const flight = (id: string, direction: Flight['direction'], number: string, at: number, est: number): Flight => ({
     id,
     number,
@@ -264,15 +272,20 @@ export function addTurnaround(
     pax: emptyFlightPax(),
     readyAt: null,
     criticalTask: null,
+    airlineId: airline,
+    contractId: plan?.contractId ?? null,
+    destinationId: plan?.destinationId ?? null,
+    plannedPax: plan ? (direction === 'arrival' ? plan.arrPax : plan.depPax) : null,
+    plannedStandId: plan?.standId ?? null,
   });
   const arrEst = arrivalAt + (opts.inboundDelaySec ?? 0);
-  state.flights[arrId] = flight(arrId, 'arrival', `${airline}${num}`, arrivalAt, arrEst);
+  state.flights[arrId] = flight(arrId, 'arrival', arrNumber, arrivalAt, arrEst);
   if (arrEst > arrivalAt) addDelayCause(state.flights[arrId]!, 'inboundLate');
-  state.flights[depId] = flight(depId, 'departure', `${airline}${num + 1}`, depAt, Math.max(depAt, arrEst + type.turnaroundSec));
+  state.flights[depId] = flight(depId, 'departure', depNumber, depAt, Math.max(depAt, arrEst + type.turnaroundSec));
   const ac: Aircraft = {
     id: acId,
     typeId,
-    callsign: `${airline}${num}`,
+    callsign: arrNumber,
     arrivalFlightId: arrId,
     departureFlightId: depId,
     state: 'scheduled',
@@ -307,6 +320,10 @@ export function generateDaySchedule(sim: Simulation, day: number): void {
   const { state, ctx } = sim;
   if (state.scheduledDays.includes(day)) return;
   state.scheduledDays.push(day);
+  if (sim.company) {
+    generateContractSchedule(sim, day);
+    return;
+  }
   const types = operableTypes(ctx);
   const count = state.settings.flightsPerDay;
   if (types.length === 0 || count <= 0) return;
@@ -335,6 +352,28 @@ export function generateDaySchedule(sim: Simulation, day: number): void {
   });
   for (const p of plans) addTurnaround(sim, p.type, p.at, { inboundDelaySec: p.delay });
   logEvent(state, { t: state.now, kind: 'scheduleGenerated', note: `day ${day}: ${plans.length}` });
+}
+
+/**
+ * 契約に基づく1日分のスケジュール（economy/planning.ts）。計画上のスポットを優先して割り当てる。
+ * 開始直後で間に合わない便（20分以内）は到着を後ろへずらす。
+ */
+function generateContractSchedule(sim: Simulation, day: number): void {
+  const { state, ctx } = sim;
+  const plan = planDay(sim.company!, companyDayOf(sim, day));
+  const analysis = analyzeDayPlan(plan, ctx);
+  const earliest = state.now + 20 * 60;
+  for (const p of plan.flights) {
+    const arrivalAt = Math.max(day * DAY_SEC + p.arrivalAt, Math.ceil(earliest / 60) * 60);
+    addTurnaround(sim, p.typeId, arrivalAt, {
+      departureAt: Math.max(day * DAY_SEC + p.departureAt, arrivalAt + AIRCRAFT_TYPES[p.typeId].turnaroundSec),
+      inboundDelaySec: p.inboundDelaySec,
+      airline: p.airlineId,
+      numbers: [p.arrNumber, p.depNumber],
+      plan: { contractId: p.contractId, destinationId: p.destinationId, arrPax: p.arrPax, depPax: p.depPax, standId: analysis.assignments[p.key]?.standId ?? null },
+    });
+  }
+  logEvent(state, { t: state.now, kind: 'scheduleGenerated', note: `day ${day}: ${plan.flights.length}（契約）` });
 }
 
 // ---------------------------------------------------------------- 設定
@@ -476,11 +515,15 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     .filter((id) => runwayUsable(sim, id, type.size, 'arr'));
   if (runways.length === 0) return 'noRunway';
   const SIZE_RANK: Record<SizeClass, number> = { S: 1, M: 2, L: 3 };
+  const planned = state.flights[ac.arrivalFlightId]!.plannedStandId;
   const candidates = Object.values(ctx.stands)
     .filter((s) => s.operational && s.entry && sizeAtLeast(s.size, type.size) && !state.standAssignments[s.id])
     .sort(
       (a, b) =>
-        SIZE_RANK[a.size] - SIZE_RANK[b.size] || Number(b.contact) - Number(a.contact) || compareIds(a.id, b.id),
+        Number(b.id === planned) - Number(a.id === planned) ||
+        SIZE_RANK[a.size] - SIZE_RANK[b.size] ||
+        Number(b.contact) - Number(a.contact) ||
+        compareIds(a.id, b.id),
     );
   if (candidates.length === 0) return 'noStand';
   let anyRoute = false;
@@ -517,7 +560,10 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
 export function stepSimulation(sim: Simulation): void {
   const { state } = sim;
   const day = Math.floor(state.now / DAY_SEC);
-  if (state.settings.autoSchedule && state.now % DAY_SEC >= 23 * 3600) generateDaySchedule(sim, day + 1);
+  if (sim.company) {
+    // 0:00 に日次締めを行い、その日の運航計画を作る
+    if (stepEconomy(sim, (key) => serversOf(sim, key)) && state.settings.autoSchedule) generateDaySchedule(sim, day);
+  } else if (state.settings.autoSchedule && state.now % DAY_SEC >= 23 * 3600) generateDaySchedule(sim, day + 1);
 
   const all = sortedValues(state.aircraft);
   for (const ac of all) {
@@ -647,6 +693,7 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
           ac.speed = type.approachSpeed;
           const arr = state.flights[ac.arrivalFlightId]!;
           arr.actual = state.now;
+          onLanding(sim, ac);
           setState(state, ac, 'landing');
           placeOnRoute(sim, ac);
         } else {
@@ -796,6 +843,7 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
         dep.actual = state.now;
         dep.status = 'completed';
         state.stats.departures++;
+        onTakeoff(sim, ac);
         setState(state, ac, 'departed');
       }
       return;
@@ -892,6 +940,7 @@ function divert(sim: Simulation, ac: Aircraft): void {
   state.flights[ac.arrivalFlightId]!.status = 'diverted';
   state.flights[ac.departureFlightId]!.status = 'cancelled';
   state.stats.diverted++;
+  onFlightLost(sim);
   logEvent(state, { t: state.now, kind: 'diverted', aircraftId: ac.id, ...(ac.holdReason ? { reason: ac.holdReason } : {}) });
   setState(state, ac, 'diverted', ac.holdReason ?? undefined);
 }
@@ -953,6 +1002,7 @@ function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
     releaseEverything(sim, ac);
     dep.status = 'cancelled';
     state.stats.cancelled++;
+    onFlightLost(sim);
     logEvent(state, { t: state.now, kind: 'cannotOperate', aircraftId: ac.id, reason });
     setState(state, ac, 'cannotOperate', reason);
   }

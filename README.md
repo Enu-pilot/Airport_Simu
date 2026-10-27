@@ -9,8 +9,11 @@ PCブラウザで動作する空港デザイン・運営シミュレーション
 
 ## 現在の状態
 
-**Phase 4（地上支援・手荷物・折り返し作業）** — 建設エディタで空港とターミナル内部（階・エリア）、GSE基地・仕分け場などを作り、「▶ 運航開始」で航空機の運航、旅客の流れ、折り返し作業（降機・荷下ろし・給油・清掃・ケータリング・点検・搭乗・積み込み・プッシュバック）と手荷物をシミュレーションする。
-ルールは [docs/11](docs/11_operations_rules.md)（運航）、[docs/12](docs/12_passenger_rules.md)（旅客）、[docs/13](docs/13_ground_handling_rules.md)（地上支援・手荷物）。いずれもゲーム用の簡略化モデル。
+**Phase 5（運航計画・航空会社・経営）** — 「新しいゲーム（小さな飛行場から）」で初期資金と初期契約から始め、建設費を払って施設を拡張し、航空会社の契約・料金・運用時間を計画して運航する。
+運航実績に応じて着陸料・使用料・店舗・駐車場などの収入と、人件費・維持費・地上作業費・補償などの費用が計上され、日次締めで日報・KPI・空港評価・航空会社の満足度が更新される。
+建設エディタ（空港とターミナル内部）、航空機の運航、旅客の流れ、折り返し作業と手荷物（Phase 1〜4）はそのまま使える。
+ルールは [docs/11](docs/11_operations_rules.md)（運航）、[docs/12](docs/12_passenger_rules.md)（旅客）、[docs/13](docs/13_ground_handling_rules.md)（地上支援・手荷物）、[docs/14](docs/14_management_rules.md)（運航計画・経営）。
+いずれもゲーム用の簡略化モデルで、金額はゲーム内通貨 cr（実在の料金・費用とは無関係）。
 
 ## 使い方
 
@@ -64,6 +67,7 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 11 | [docs/11_operations_rules.md](docs/11_operations_rules.md) | 運航ルール仕様（Phase 2 実装、前提と制約・未実装の条件） |
 | 12 | [docs/12_passenger_rules.md](docs/12_passenger_rules.md) | ターミナル・旅客流動仕様（Phase 3 実装） |
 | 13 | [docs/13_ground_handling_rules.md](docs/13_ground_handling_rules.md) | 地上支援・手荷物・折り返し業務仕様（Phase 4 実装） |
+| 14 | [docs/14_management_rules.md](docs/14_management_rules.md) | 運航計画・航空会社・経営ルール（Phase 5 実装、料金・費用・KPI の式） |
 
 ## 技術構成
 
