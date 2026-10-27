@@ -14,6 +14,9 @@ import {
 import { pickAt } from '../core/layout/pick';
 import { actions, applyOp, editorStore, type EditorState } from './store';
 import { computePreview, facilityKindOf, nextPathPoint } from './tools';
+import { aircraftAt } from '../core/sim/query';
+import { SPEED_LEVELS } from '../core/sim/clock';
+import { ops } from './simRunner';
 
 /**
  * マップ上のマウス・キーボード操作を編集操作に変換する。DOM には依存せず、
@@ -39,6 +42,7 @@ function commitPreview(tile: Tile, opts: { select?: boolean } = {}): boolean {
 
 export function finishPath(): void {
   const s = get();
+  if (s.mode === 'operate') return;
   if (s.draft?.kind !== 'path') return;
   const pts = s.draft.points;
   if (pts.length >= 2) {
@@ -62,6 +66,15 @@ export function onPointerDown(screen: Vec2, button: number): void {
   if (button !== 0) return;
   const tile = tileAt(s, screen);
   actions.setHover(tile);
+
+  // 運航モード: 機体を優先して選択（レイアウトは表示のみ）
+  if (s.mode === 'operate' && s.ops) {
+    const world = screenToWorld(s.camera, screen);
+    const ac = aircraftAt(s.ops.sim.state, world);
+    ops.selectAircraft(ac);
+    if (!ac) actions.select(pickAt(s.history.present, world));
+    return;
+  }
 
   switch (s.tool) {
     case 'select': {
@@ -116,6 +129,7 @@ export function onPointerMove(screen: Vec2): void {
 
 export function onPointerUp(screen: Vec2, button: number): void {
   const s = get();
+  if (s.mode === 'operate' && !pan) return;
   if (pan) {
     const wasClick = !pan.moved && pan.button === 2;
     pan = null;
@@ -168,6 +182,7 @@ export function onKeyDown(k: KeyInfo): boolean {
   const s = get();
   const key = k.key.toLowerCase();
   const layout = s.history.present;
+  if (s.mode === 'operate') return onOperateKey(k);
   if (key === ' ') {
     spaceHeld = true;
     return true;
@@ -222,6 +237,37 @@ export function onKeyDown(k: KeyInfo): boolean {
     default:
       return false;
   }
+}
+
+/** 運航モードのキー操作: Space 一時停止、1〜5 時間倍率、Esc 選択解除、矢印 パン */
+function onOperateKey(k: KeyInfo): boolean {
+  const s = get();
+  const key = k.key.toLowerCase();
+  if (k.ctrl) return false;
+  if (key === ' ') {
+    ops.togglePause();
+    return true;
+  }
+  const level = Number(key);
+  if (Number.isInteger(level) && level >= 1 && level < SPEED_LEVELS.length) {
+    ops.setSpeed(SPEED_LEVELS[level]!.speed);
+    return true;
+  }
+  if (key === 'escape') {
+    ops.selectAircraft(null);
+    actions.select(null);
+    return true;
+  }
+  if (key.startsWith('arrow')) {
+    const d = 4 * (k.shift ? 10 : 1);
+    actions.setCamera({
+      ...s.camera,
+      x: s.camera.x + (key === 'arrowleft' ? -d : key === 'arrowright' ? d : 0) / 4,
+      y: s.camera.y + (key === 'arrowup' ? -d : key === 'arrowdown' ? d : 0) / 4,
+    });
+    return true;
+  }
+  return false;
 }
 
 export function onKeyUp(k: KeyInfo): void {

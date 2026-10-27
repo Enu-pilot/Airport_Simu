@@ -10,11 +10,14 @@ import { FacilityList } from './FacilityList';
 import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
 import type { Overlays } from '../editor/store';
+import { ops } from '../editor/simRunner';
+import { AircraftPanel, EventLog, FlightBoard, OpsControls } from './OpsPanels';
+import { useState } from 'react';
 
 const OVERLAY_LABEL: Record<keyof Overlays, string> = {
   grid: 'グリッド',
   buildable: '建設不可エリア',
-  network: '論理ネットワーク',
+  network: '論理ネットワーク・予約',
   issues: 'エラー表示',
   labels: 'ラベル',
 };
@@ -36,11 +39,13 @@ export function App() {
     };
   }, []);
 
+  const mode = useEditor((s) => s.mode);
+  const hasAircraft = useEditor((s) => !!s.ops?.selectedAircraft);
   return (
-    <div className="app">
+    <div className={`app mode-${mode}`}>
       <TopBar />
       <aside className="left">
-        <Toolbox />
+        {mode === 'build' ? <Toolbox /> : <OpsControls />}
         <FacilityList />
       </aside>
       <main className="center">
@@ -48,12 +53,30 @@ export function App() {
         <StatusBar />
         <Toast />
       </main>
-      <aside className="right">
-        <PropertiesPanel />
-      </aside>
-      <footer className="bottom">
-        <IssuesPanel />
-      </footer>
+      <aside className="right">{mode === 'operate' && hasAircraft ? <AircraftPanel /> : <PropertiesPanel />}</aside>
+      <footer className="bottom">{mode === 'build' ? <IssuesPanel /> : <OpsBottom />}</footer>
+    </div>
+  );
+}
+
+function OpsBottom() {
+  const [tab, setTab] = useState<'flights' | 'events' | 'issues'>('flights');
+  return (
+    <div className="tabbed">
+      <div className="tabs">
+        {(
+          [
+            ['flights', '運航表'],
+            ['events', 'イベント'],
+            ['issues', '配置チェック'],
+          ] as const
+        ).map(([k, label]) => (
+          <button key={k} className={tab === k ? 'tab active' : 'tab'} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="tab-body">{tab === 'flights' ? <FlightBoard /> : tab === 'events' ? <EventLog /> : <IssuesPanel />}</div>
     </div>
   );
 }
@@ -64,6 +87,7 @@ function TopBar() {
   const overlays = useEditor((s) => s.overlays);
   const layout = useLayout();
   const fileRef = useRef<HTMLInputElement>(null);
+  const mode = useEditor((s) => s.mode);
 
   const download = () => {
     const blob = new Blob([exportLayout(layout)], { type: 'application/json' });
@@ -84,37 +108,61 @@ function TopBar() {
   return (
     <header className="top">
       <span className="brand">✈ SkyPort</span>
-      <span className="subtitle">建設エディタ</span>
+      <span className="subtitle">{mode === 'build' ? '建設モード' : '運航モード'}</span>
       <div className="top-group">
-        <button onClick={actions.undo} disabled={!canUndo} title="Ctrl+Z" data-testid="undo">
-          ↶ 元に戻す
-        </button>
-        <button onClick={actions.redo} disabled={!canRedo} title="Ctrl+Shift+Z" data-testid="redo">
-          ↷ やり直し
-        </button>
+        {mode === 'build' ? (
+          <button className="primary" onClick={() => ops.start()} data-testid="start-ops">
+            ▶ 運航開始
+          </button>
+        ) : (
+          <>
+            <button onClick={() => ops.restart()} data-testid="restart-ops">最初から</button>
+            <button
+              className="primary"
+              onClick={() => {
+                if (window.confirm('運航を終了して建設モードに戻りますか？（運航の状態は破棄されます）')) ops.stop();
+              }}
+              data-testid="stop-ops"
+            >
+              ■ 建設モードに戻る
+            </button>
+          </>
+        )}
       </div>
-      <div className="top-group">
-        <button onClick={actions.loadSample} data-testid="load-sample">サンプル空港を生成</button>
-        <button onClick={actions.newEmpty} data-testid="new-empty">空の敷地</button>
-        <button onClick={() => applyOp(setBuildState(layout, 'operational'))} title="計画・建設中の施設をすべて運用中にする">
-          全施設を完成
-        </button>
-      </div>
-      <div className="top-group">
-        <button onClick={download}>書き出し</button>
-        <button onClick={() => fileRef.current?.click()}>読み込み</button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".json,application/json"
-          hidden
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void upload(f);
-            e.target.value = '';
-          }}
-        />
-      </div>
+      {mode === 'build' && (
+        <>
+        <div className="top-group">
+          <button onClick={actions.undo} disabled={!canUndo} title="Ctrl+Z" data-testid="undo">
+            ↶ 元に戻す
+          </button>
+          <button onClick={actions.redo} disabled={!canRedo} title="Ctrl+Shift+Z" data-testid="redo">
+            ↷ やり直し
+          </button>
+        </div>
+        <div className="top-group">
+          <button onClick={actions.loadSample} data-testid="load-sample">サンプル空港を生成</button>
+          <button onClick={actions.newEmpty} data-testid="new-empty">空の敷地</button>
+          <button onClick={() => applyOp(setBuildState(layout, 'operational'))} title="計画・建設中の施設をすべて運用中にする">
+            全施設を完成
+          </button>
+        </div>
+        <div className="top-group">
+          <button onClick={download}>書き出し</button>
+          <button onClick={() => fileRef.current?.click()}>読み込み</button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void upload(f);
+              e.target.value = '';
+            }}
+          />
+        </div>
+        </>
+      )}
       <div className="top-group overlays">
         {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
           <label key={k}>
@@ -134,6 +182,7 @@ function StatusBar() {
   const draft = useEditor((s) => s.draft);
   const analysis = useAnalysis();
   const layout = useLayout();
+  const mode = useEditor((s) => s.mode);
   return (
     <div className="status" data-testid="status">
       <span data-testid="status-tile">{hover ? `タイル (${hover.x}, ${hover.y})` : 'タイル —'}</span>
@@ -145,7 +194,7 @@ function StatusBar() {
       <span>
         エラー {analysis.counts.error} · 警告 {analysis.counts.warning}
       </span>
-      <span className="hint">{draft?.kind === 'path' ? `頂点 ${draft.points.length} — ダブルクリック/Enter/右クリックで確定、Esc で取り消し` : toolHint(tool)}</span>
+      <span className="hint">{mode === 'operate' ? '機体をクリックで選択 / Space: 一時停止 / 1〜5: 時間倍率 / 右ドラッグ: パン' : draft?.kind === 'path' ? `頂点 ${draft.points.length} — ダブルクリック/Enter/右クリックで確定、Esc で取り消し` : toolHint(tool)}</span>
     </div>
   );
 }

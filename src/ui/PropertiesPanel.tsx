@@ -37,7 +37,23 @@ import {
 
 export function PropertiesPanel() {
   const selection = useEditor((s) => s.selection);
+  const mode = useEditor((s) => s.mode);
   const layout = useLayout();
+  if ((!selection || !entityTypeOf(selection)) && mode === 'operate') {
+    return (
+      <div className="properties empty" data-testid="properties">
+        <p>運航中です。機体をクリック（または運航表の行を選択）すると状態・経路・運航履歴を表示します。</p>
+        <ul className="help">
+          <li>Space: 一時停止 / 再開</li>
+          <li>1〜5: 時間倍率（実時間〜×600）</li>
+          <li>右ドラッグ・中ドラッグ: パン / ホイール: ズーム</li>
+          <li>「論理ネットワーク・予約」表示で、各機が予約中の誘導路を色分け表示</li>
+          <li>滑走路の枠: 赤 = 使用中、黄 = 進入予約あり</li>
+          <li>運航中はレイアウトを編集できません</li>
+        </ul>
+      </div>
+    );
+  }
   if (!selection || !entityTypeOf(selection)) {
     return (
       <div className="properties empty" data-testid="properties">

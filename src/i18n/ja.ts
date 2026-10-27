@@ -1,3 +1,4 @@
+import type { AircraftState, DelayCause, FlightStatus, HoldReason, RunwayMode, SimEvent } from '../core/sim/types';
 import type { BuildState, EntityType, FacilityKind, RoadClass, SizeClass } from '../core/model/types';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/validation/validate';
@@ -149,4 +150,103 @@ export function issueText(layout: AirportLayout, issue: Issue): string {
     [...issue.targets, ...issue.related].map((t) => displayName(layout, t)),
     issue.params,
   );
+}
+
+// ---------------------------------------------------------------- 運航
+
+
+export const AIRCRAFT_STATE_LABEL: Record<AircraftState, string> = {
+  scheduled: '到着予定',
+  inbound: '到着処理中',
+  holding: '空中待機',
+  approach: '最終進入',
+  landing: '着陸',
+  vacating: '滑走路離脱',
+  taxiIn: '到着走行',
+  docking: 'スポット進入',
+  parked: '駐機中',
+  turnaround: '出発準備中',
+  readyForPushback: '出発待機',
+  pushback: 'プッシュバック',
+  taxiOut: '出発走行',
+  holdShort: '離陸待ち',
+  lineUp: '滑走路進入',
+  takeoff: '離陸滑走',
+  departed: '出発完了',
+  diverted: '運航不能（ダイバート）',
+  cannotOperate: '運航不能（欠航）',
+};
+
+export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
+  noStand: '空きスポットなし',
+  noRunway: '使用できる滑走路なし',
+  noRoute: '経路なし',
+  routeBusy: '経路上に他機',
+  separation: '先行機との間隔待ち',
+  runwayBusy: '滑走路使用中',
+  departurePriority: '出発優先',
+  crossing: '滑走路横断待ち',
+  goAround: '着陸復行',
+};
+
+export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
+  inboundLate: '出発地からの遅れ',
+  noStand: 'スポット不足',
+  runwayQueue: '滑走路の混雑',
+  taxiCongestion: '誘導路の混雑',
+  turnaround: '折り返し作業',
+  noRoute: '経路なし',
+};
+
+export const FLIGHT_STATUS_LABEL: Record<FlightStatus, string> = {
+  scheduled: '予定',
+  active: '運航中',
+  completed: '完了',
+  diverted: 'ダイバート',
+  cancelled: '欠航',
+};
+
+export const RUNWAY_MODE_LABEL: Record<RunwayMode, string> = {
+  mixed: '離着陸',
+  arrivals: '着陸専用',
+  departures: '離陸専用',
+  closed: '閉鎖',
+};
+
+/** ゲーム内時刻（1日目 08:05） */
+export function formatSimTime(sec: number, withSeconds = false): string {
+  const day = Math.floor(sec / 86400) + 1;
+  const s = sec % 86400;
+  const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const ss = String(Math.floor(s % 60)).padStart(2, '0');
+  return `${day}日目 ${hh}:${mm}${withSeconds ? `:${ss}` : ''}`;
+}
+
+/** 時刻のみ（08:05） */
+export function formatClock(sec: number): string {
+  const s = ((sec % 86400) + 86400) % 86400;
+  return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`;
+}
+
+export function eventText(e: SimEvent, callsign: (id: string) => string): string {
+  const who = e.aircraftId ? callsign(e.aircraftId) : '';
+  switch (e.kind) {
+    case 'spawn':
+      return `${who} が空域に進入`;
+    case 'state':
+      return `${who}: ${AIRCRAFT_STATE_LABEL[e.state!]}${e.note ? `（${HOLD_REASON_LABEL[e.note as HoldReason] ?? e.note}）` : ''}`;
+    case 'hold':
+      return `${who} 待機: ${HOLD_REASON_LABEL[e.reason!]}`;
+    case 'goAround':
+      return `${who} 着陸復行（滑走路が空いていない）`;
+    case 'diverted':
+      return `${who} ダイバート（${e.reason ? HOLD_REASON_LABEL[e.reason] : '待機上限'}）`;
+    case 'cannotOperate':
+      return `${who} 欠航（${e.reason ? HOLD_REASON_LABEL[e.reason] : ''}）`;
+    case 'conflict':
+      return `⚠ 競合検知: ${who} と ${e.note ? callsign(e.note) : ''} が接近`;
+    case 'scheduleGenerated':
+      return `スケジュール生成（${e.note}）`;
+  }
 }

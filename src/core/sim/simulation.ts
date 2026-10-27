@@ -1,0 +1,1072 @@
+import { Rng } from '../rng';
+import { compareIds, sortedValues } from '../model/ids';
+import { sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
+import { canAircraftUse, otherEnd } from '../airside/network';
+import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, takeoffDistanceM, type AircraftType, type AircraftTypeId } from './aircraftTypes';
+import { createContext, orderedRunway, type SimContext } from './context';
+import { findPath } from './pathfinding';
+import {
+  edgeIndexAt,
+  headingOf,
+  holdShortDistance,
+  isFree,
+  makeRoute,
+  pointAt,
+  releaseAll,
+  releasePassed,
+  reservableParts,
+  reserve,
+  routeLength,
+  turnAngleAt,
+} from './routes';
+import {
+  APPROACH_SEC,
+  ARRIVAL_AFTER_DEPARTURE_SEC,
+  CROSSING_WINDOW_SEC,
+  DAY_SEC,
+  DEPARTED_DESPAWN_SEC,
+  DEPARTURE_GIVE_UP_SEC,
+  DEPARTURE_STARVATION_SEC,
+  DEPARTURE_WINDOW_SEC,
+  ENGINE_START_SEC,
+  EXIT_SPEED,
+  HOLD_DIVERT_SEC,
+  INBOUND_LEAD_SEC,
+  LINEUP_ALIGN_SEC,
+  LINEUP_SPEED,
+  MIN_GROUND_SEPARATION_M,
+  PUSHBACK_SPEED,
+  RETRY_SEC,
+  SEPARATION_SEC,
+  SIM_START_SEC,
+  STAND_SPEED,
+  TAXI_ACCEL,
+  TAXI_DECEL,
+  TICK_SEC,
+  TURN_SPEED,
+} from './rules';
+import {
+  EVENT_LOG_LIMIT,
+  GROUND_MOVING_STATES,
+  TERMINAL_STATES,
+  type Aircraft,
+  type AircraftState,
+  type DelayCause,
+  type Flight,
+  type HoldReason,
+  type Route,
+  type RunwayConfig,
+  type SimSettings,
+  type SimState,
+} from './types';
+import { TILE_M } from '../model/catalog';
+
+/**
+ * 運航シミュレーション本体。`stepSimulation` が 1 ティック（1ゲーム秒）を進める。
+ * 状態は SimState を直接更新する（性能のため）。実時間・描画には依存しない。
+ */
+
+export interface Simulation {
+  ctx: SimContext;
+  state: SimState;
+}
+
+export interface CreateOptions {
+  seed?: string;
+  startTime?: number;
+  settings?: Partial<SimSettings>;
+}
+
+const DEFAULT_SETTINGS: SimSettings = {
+  flightsPerDay: 0,
+  inboundDelayProb: 0.25,
+  inboundDelayMaxMin: 40,
+  autoSchedule: true,
+};
+
+export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}): Simulation {
+  const ctx = createContext(layout);
+  const seed = opts.seed ?? `${layout.site.seed}:ops`;
+  const runwayConfig: Record<string, RunwayConfig> = {};
+  const runways: SimState['runways'] = {};
+  for (const id of Object.keys(ctx.runways).sort(compareIds)) {
+    runwayConfig[id] = { direction: 'forward', mode: 'mixed' };
+    runways[id] = { occupant: null, booking: null, lastOp: null };
+  }
+  const contactStands = Object.values(ctx.stands).filter((s) => s.operational).length;
+  const state: SimState = {
+    version: 1,
+    seed,
+    now: opts.startTime ?? SIM_START_SEC,
+    rng: new Rng(seed).state(),
+    counters: {},
+    settings: { ...DEFAULT_SETTINGS, flightsPerDay: Math.min(60, contactStands * 3), ...opts.settings },
+    runwayConfig,
+    runways,
+    flights: {},
+    aircraft: {},
+    standAssignments: {},
+    nodeReservations: {},
+    edgeReservations: {},
+    scheduledDays: [],
+    events: [],
+    stats: { arrivals: 0, departures: 0, diverted: 0, cancelled: 0, goArounds: 0, conflicts: 0, taxiInSecTotal: 0, taxiOutSecTotal: 0 },
+  };
+  const sim = { ctx, state };
+  if (state.settings.autoSchedule) generateDaySchedule(sim, Math.floor(state.now / DAY_SEC));
+  return sim;
+}
+
+// ---------------------------------------------------------------- 乱数・ID・記録
+
+function withRng<T>(state: SimState, fn: (rng: Rng) => T): T {
+  const rng = new Rng(state.rng);
+  const v = fn(rng);
+  state.rng = rng.state();
+  return v;
+}
+
+function nextId(state: SimState, prefix: string): string {
+  const n = (state.counters[prefix] ?? 0) + 1;
+  state.counters[prefix] = n;
+  return `${prefix}_${n}`;
+}
+
+function logEvent(state: SimState, e: SimState['events'][number]): void {
+  state.events.push(e);
+  if (state.events.length > EVENT_LOG_LIMIT) state.events.splice(0, state.events.length - EVENT_LOG_LIMIT);
+}
+
+function setState(state: SimState, ac: Aircraft, next: AircraftState, note?: string): void {
+  if (ac.state === next) return;
+  ac.state = next;
+  ac.stateSince = state.now;
+  ac.history.push({ t: state.now, state: next, ...(note ? { note } : {}) });
+  logEvent(state, { t: state.now, kind: 'state', aircraftId: ac.id, state: next, ...(note ? { note } : {}) });
+}
+
+function setHold(state: SimState, ac: Aircraft, reason: HoldReason | null): void {
+  if (reason === ac.holdReason) return;
+  ac.holdReason = reason;
+  if (reason) {
+    ac.waitSince ??= state.now;
+    logEvent(state, { t: state.now, kind: 'hold', aircraftId: ac.id, reason });
+  } else {
+    ac.waitSince = null;
+  }
+}
+
+function addDelayCause(f: Flight, c: DelayCause): void {
+  if (!f.delayCauses.includes(c)) f.delayCauses.push(c);
+}
+
+const HOLD_TO_DELAY: Partial<Record<HoldReason, DelayCause>> = {
+  noStand: 'noStand',
+  separation: 'runwayQueue',
+  runwayBusy: 'runwayQueue',
+  departurePriority: 'runwayQueue',
+  goAround: 'runwayQueue',
+  routeBusy: 'taxiCongestion',
+  crossing: 'taxiCongestion',
+  noRoute: 'noRoute',
+  noRunway: 'noRoute',
+};
+
+const typeOf = (ac: Aircraft): AircraftType => AIRCRAFT_TYPES[ac.typeId];
+
+// ---------------------------------------------------------------- 便の生成
+
+const AIRLINES = ['SK', 'NP', 'RJ', 'AQ'] as const;
+
+/** 空港で運航可能な機種（使用可能な滑走路と、接続済みのスポットがある区分） */
+export function operableTypes(ctx: SimContext): AircraftTypeId[] {
+  return AIRCRAFT_TYPE_IDS.filter((id) => {
+    const size = AIRCRAFT_TYPES[id].size;
+    const rwy = Object.values(ctx.runways).some((r) => r.operational && r.maxSize && sizeAtLeast(r.maxSize, size));
+    const stand = Object.values(ctx.stands).some((s) => s.operational && s.entry && sizeAtLeast(s.size, size));
+    return rwy && stand;
+  });
+}
+
+/** 到着便と折り返しの出発便を1組追加する（同じ機体が到着して出発する） */
+export function addTurnaround(
+  sim: Simulation,
+  typeId: AircraftTypeId,
+  arrivalAt: number,
+  opts: { departureAt?: number; inboundDelaySec?: number; airline?: string } = {},
+): Aircraft {
+  const { state } = sim;
+  const type = AIRCRAFT_TYPES[typeId];
+  const acId = nextId(state, 'ac');
+  const n = state.counters.ac!;
+  const airline = opts.airline ?? AIRLINES[n % AIRLINES.length]!;
+  const num = 100 + n * 2;
+  const arrId = nextId(state, 'fl');
+  const depId = nextId(state, 'fl');
+  const depAt = opts.departureAt ?? arrivalAt + type.turnaroundSec + 20 * 60;
+  const flight = (id: string, direction: Flight['direction'], number: string, at: number, est: number): Flight => ({
+    id,
+    number,
+    direction,
+    aircraftId: acId,
+    scheduled: at,
+    estimated: est,
+    actual: null,
+    block: null,
+    status: 'scheduled',
+    runwayId: null,
+    standId: null,
+    delayCauses: [],
+  });
+  const arrEst = arrivalAt + (opts.inboundDelaySec ?? 0);
+  state.flights[arrId] = flight(arrId, 'arrival', `${airline}${num}`, arrivalAt, arrEst);
+  if (arrEst > arrivalAt) addDelayCause(state.flights[arrId]!, 'inboundLate');
+  state.flights[depId] = flight(depId, 'departure', `${airline}${num + 1}`, depAt, Math.max(depAt, arrEst + type.turnaroundSec));
+  const ac: Aircraft = {
+    id: acId,
+    typeId,
+    callsign: `${airline}${num}`,
+    arrivalFlightId: arrId,
+    departureFlightId: depId,
+    state: 'scheduled',
+    stateSince: state.now,
+    runwayId: null,
+    standId: null,
+    route: null,
+    dist: 0,
+    speed: 0,
+    x: 0,
+    y: 0,
+    heading: 0,
+    px: 0,
+    py: 0,
+    pheading: 0,
+    holdReason: null,
+    waitSince: null,
+    eta: null,
+    timerUntil: null,
+    queuedSince: null,
+    retryAt: 0,
+    taxiStartedAt: null,
+    crossing: null,
+    history: [{ t: state.now, state: 'scheduled' }],
+  };
+  state.aircraft[acId] = ac;
+  return ac;
+}
+
+/** 1日分のスケジュールを生成する（06:30〜22:00 に到着、折り返して出発） */
+export function generateDaySchedule(sim: Simulation, day: number): void {
+  const { state, ctx } = sim;
+  if (state.scheduledDays.includes(day)) return;
+  state.scheduledDays.push(day);
+  const types = operableTypes(ctx);
+  const count = state.settings.flightsPerDay;
+  if (types.length === 0 || count <= 0) return;
+  const from = Math.max(day * DAY_SEC + 6.5 * 3600, state.now + 20 * 60);
+  const to = day * DAY_SEC + 22 * 3600;
+  if (from >= to) return;
+  const weights: Record<AircraftTypeId, number> = { regional70: 3, narrow180: 6, wide300: 1.5 };
+  const plans = withRng(state, (rng) => {
+    const out: { at: number; type: AircraftTypeId; delay: number }[] = [];
+    const total = types.reduce((s, t) => s + weights[t], 0);
+    for (let i = 0; i < count; i++) {
+      const at = Math.round((from + ((to - from) * (i + rng.next())) / count) / 60) * 60;
+      let pick = rng.next() * total;
+      let type = types[0]!;
+      for (const t of types) {
+        pick -= weights[t];
+        if (pick <= 0) {
+          type = t;
+          break;
+        }
+      }
+      const delay = rng.next() < state.settings.inboundDelayProb ? rng.int(3, state.settings.inboundDelayMaxMin) * 60 : 0;
+      out.push({ at, type, delay });
+    }
+    return out;
+  });
+  for (const p of plans) addTurnaround(sim, p.type, p.at, { inboundDelaySec: p.delay });
+  logEvent(state, { t: state.now, kind: 'scheduleGenerated', note: `day ${day}: ${plans.length}` });
+}
+
+// ---------------------------------------------------------------- 設定
+
+export function setRunwayConfig(sim: Simulation, runwayId: string, cfg: Partial<RunwayConfig>): boolean {
+  const cur = sim.state.runwayConfig[runwayId];
+  if (!cur) return false;
+  sim.state.runwayConfig[runwayId] = { ...cur, ...cfg };
+  return true;
+}
+
+// ---------------------------------------------------------------- 滑走路・スポットの選択
+
+interface RunwayEndInfo {
+  runwayId: string;
+  nodes: string[];
+  dist: number[];
+}
+
+function runwayFor(sim: Simulation, runwayId: string): RunwayEndInfo | null {
+  const info = sim.ctx.runways[runwayId];
+  const cfg = sim.state.runwayConfig[runwayId];
+  if (!info || !cfg || info.nodes.length < 2) return null;
+  return { runwayId, ...orderedRunway(info, cfg) };
+}
+
+function runwayUsable(sim: Simulation, runwayId: string, size: SizeClass, kind: 'arr' | 'dep'): boolean {
+  const info = sim.ctx.runways[runwayId]!;
+  const mode = sim.state.runwayConfig[runwayId]!.mode;
+  if (!info.operational || !info.maxSize || !sizeAtLeast(info.maxSize, size)) return false;
+  if (mode === 'closed') return false;
+  if (kind === 'arr' && mode === 'departures') return false;
+  if (kind === 'dep' && mode === 'arrivals') return false;
+  return true;
+}
+
+/** 滑走路ノードのうち、誘導路（運用中・機体区分可）が接続しているもの */
+function hasTaxiwayLink(sim: Simulation, node: string, size: SizeClass): boolean {
+  const net = sim.ctx.network;
+  return [...(net.outgoing[node] ?? []), ...(net.incoming[node] ?? [])].some((eid) => {
+    const e = net.edges[eid]!;
+    return e.kind === 'taxiway' && canAircraftUse(e, size, { operationalOnly: true });
+  });
+}
+
+/** 着陸後の離脱候補（接地から必要な減速距離以上先のノード）と、そこまでの滑走時間 */
+function exitCandidates(sim: Simulation, rw: RunwayEndInfo, type: AircraftType): { node: string; index: number; cost: number }[] {
+  const out: { node: string; index: number; cost: number }[] = [];
+  for (let i = 1; i < rw.nodes.length; i++) {
+    if (rw.dist[i]! < type.landingRollM) continue;
+    if (!hasTaxiwayLink(sim, rw.nodes[i]!, type.size)) continue;
+    out.push({ node: rw.nodes[i]!, index: i, cost: rw.dist[i]! / 30 });
+  }
+  return out;
+}
+
+/** 離陸の進入候補（残り距離が離陸滑走距離以上のノード）。全長に近いほど優先 */
+function entryCandidates(sim: Simulation, rw: RunwayEndInfo, type: AircraftType): Map<string, number> {
+  const goals = new Map<string, number>();
+  const total = rw.dist[rw.dist.length - 1]!;
+  const need = takeoffDistanceM(type) + 100;
+  for (let i = 0; i < rw.nodes.length - 1; i++) {
+    const remaining = total - rw.dist[i]!;
+    if (remaining < need) continue;
+    if (!hasTaxiwayLink(sim, rw.nodes[i]!, type.size)) continue;
+    goals.set(rw.nodes[i]!, rw.dist[i]! / 30);
+  }
+  return goals;
+}
+
+/** 他機の予約を避けるための判定 */
+function blockers(state: SimState, acId: string) {
+  return {
+    blockedEdge: (e: string) => (state.edgeReservations[e] ?? acId) !== acId,
+    blockedNode: (n: string) => (state.nodeReservations[n] ?? acId) !== acId,
+  };
+}
+
+function arrivalPath(sim: Simulation, ac: Aircraft, runwayId: string, standId: string, avoidTraffic: boolean) {
+  const type = typeOf(ac);
+  const rw = runwayFor(sim, runwayId);
+  const stand = sim.ctx.stands[standId];
+  if (!rw || !stand) return null;
+  const exits = exitCandidates(sim, rw, type);
+  if (exits.length === 0) return null;
+  const path = findPath(sim.ctx.network, {
+    sources: exits.map((e) => ({ node: e.node, cost: e.cost })),
+    goals: new Map([[stand.node, 0]]),
+    size: type.size,
+    speed: type.taxiSpeed,
+    allowStands: [standId],
+    ...(avoidTraffic ? blockers(sim.state, ac.id) : {}),
+  });
+  if (!path) return null;
+  const exit = exits.find((e) => e.node === path.nodes[0])!;
+  return { rw, exit, path };
+}
+
+function departurePath(sim: Simulation, ac: Aircraft, avoidTraffic: boolean) {
+  const type = typeOf(ac);
+  const stand = ac.standId ? sim.ctx.stands[ac.standId] : undefined;
+  if (!stand) return null;
+  const goals = new Map<string, number>();
+  const goalRunway = new Map<string, string>();
+  for (const id of Object.keys(sim.ctx.runways).sort(compareIds)) {
+    if (!runwayUsable(sim, id, type.size, 'dep')) continue;
+    const rw = runwayFor(sim, id);
+    if (!rw) continue;
+    for (const [node, cost] of entryCandidates(sim, rw, type)) {
+      const queue = Object.values(sim.state.aircraft).filter((a) => a.runwayId === id && (a.state === 'holdShort' || a.state === 'taxiOut')).length;
+      if (!goals.has(node) || cost + queue * 60 < goals.get(node)!) {
+        goals.set(node, cost + queue * 60);
+        goalRunway.set(node, id);
+      }
+    }
+  }
+  if (goals.size === 0) return null;
+  const path = findPath(sim.ctx.network, {
+    sources: [{ node: stand.node, cost: 0 }],
+    goals,
+    size: type.size,
+    speed: type.taxiSpeed,
+    allowStands: [stand.id],
+    ...(avoidTraffic ? blockers(sim.state, ac.id) : {}),
+  });
+  if (!path) return null;
+  return { path, runwayId: goalRunway.get(path.nodes[path.nodes.length - 1]!)! };
+}
+
+/**
+ * 到着機にスポットと滑走路を割り当てる。空きスポット（1スポットに1機）のうち、
+ * 区分が合い、使用可能な滑走路との間を往復できるものを、サイズの無駄が少ない順・ゲート付き優先で選ぶ。
+ */
+function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
+  const { state, ctx } = sim;
+  const type = typeOf(ac);
+  const runways = Object.keys(ctx.runways)
+    .sort(compareIds)
+    .filter((id) => runwayUsable(sim, id, type.size, 'arr'));
+  if (runways.length === 0) return 'noRunway';
+  const SIZE_RANK: Record<SizeClass, number> = { S: 1, M: 2, L: 3 };
+  const candidates = Object.values(ctx.stands)
+    .filter((s) => s.operational && s.entry && sizeAtLeast(s.size, type.size) && !state.standAssignments[s.id])
+    .sort(
+      (a, b) =>
+        SIZE_RANK[a.size] - SIZE_RANK[b.size] || Number(b.contact) - Number(a.contact) || compareIds(a.id, b.id),
+    );
+  if (candidates.length === 0) return 'noStand';
+  let anyRoute = false;
+  for (const s of candidates) {
+    // 到着経路があり、出発もできるスポット
+    const queueLen = (id: string) =>
+      Object.values(state.aircraft).filter((a) => a.runwayId === id && ['inbound', 'holding', 'approach'].includes(a.state)).length;
+    let best: { runwayId: string; cost: number } | null = null;
+    for (const r of runways) {
+      const p = arrivalPath(sim, ac, r, s.id, false);
+      if (p && (!best || p.path.cost + queueLen(r) * 120 < best.cost)) best = { runwayId: r, cost: p.path.cost + queueLen(r) * 120 };
+    }
+    if (!best) continue;
+    anyRoute = true;
+    const prevStand = ac.standId;
+    ac.standId = s.id;
+    const dep = departurePath(sim, ac, false);
+    ac.standId = prevStand;
+    if (!dep) continue;
+    state.standAssignments[s.id] = ac.id;
+    ac.standId = s.id;
+    ac.runwayId = best.runwayId;
+    const arr = state.flights[ac.arrivalFlightId]!;
+    arr.standId = s.id;
+    arr.runwayId = best.runwayId;
+    state.flights[ac.departureFlightId]!.standId = s.id;
+    return null;
+  }
+  return anyRoute ? 'noStand' : 'noRoute';
+}
+
+// ---------------------------------------------------------------- 1ティック
+
+export function stepSimulation(sim: Simulation): void {
+  const { state } = sim;
+  const day = Math.floor(state.now / DAY_SEC);
+  if (state.settings.autoSchedule && state.now % DAY_SEC >= 23 * 3600) generateDaySchedule(sim, day + 1);
+
+  const all = sortedValues(state.aircraft);
+  for (const ac of all) {
+    ac.px = ac.x;
+    ac.py = ac.y;
+    ac.pheading = ac.heading;
+  }
+  runwayControl(sim);
+  for (const ac of all) stepAircraft(sim, ac);
+  detectConflicts(sim);
+  state.now += TICK_SEC;
+}
+
+/** 滑走路ごとの出発・横断の許可（到着の進入許可は到着機側の処理で行う） */
+function runwayControl(sim: Simulation): void {
+  const { state } = sim;
+  const aircraft = sortedValues(state.aircraft);
+  for (const rid of Object.keys(state.runways).sort(compareIds)) {
+    const rs = state.runways[rid]!;
+    // 出発: 離陸待ちの先頭（到着順）
+    const queue = aircraft
+      .filter((a) => a.state === 'holdShort' && a.runwayId === rid)
+      .sort((a, b) => a.queuedSince! - b.queuedSince! || compareIds(a.id, b.id));
+    const head = queue[0];
+    if (head) {
+      const reason = departureBlocked(sim, rid, typeOf(head).size);
+      if (!reason) {
+        rs.occupant = { aircraftId: head.id, purpose: 'takeoff', since: state.now };
+        setHold(state, head, null);
+        setState(state, head, 'lineUp');
+      } else {
+        setHold(state, head, reason);
+        if (state.now - head.queuedSince! > 5 * 60) addDelayCause(state.flights[head.departureFlightId]!, 'runwayQueue');
+      }
+      for (const other of queue.slice(1)) setHold(state, other, 'runwayBusy');
+    }
+    // 横断: 停止位置の手前 100m 以内まで来た機体
+    for (const ac of aircraft) {
+      const req = pendingCrossing(sim, ac);
+      if (!req || req.runwayId !== rid || req.distToHold > 100) continue;
+      const booking = rs.booking;
+      if (!rs.occupant && (!booking || booking.eta - state.now >= CROSSING_WINDOW_SEC)) {
+        rs.occupant = { aircraftId: ac.id, purpose: 'crossing', since: state.now };
+        ac.crossing = { index: req.index, runwayId: rid };
+        if (ac.holdReason === 'crossing') setHold(state, ac, null);
+      }
+    }
+  }
+}
+
+function departureBlocked(sim: Simulation, rid: string, size: SizeClass): HoldReason | null {
+  const { state } = sim;
+  const rs = state.runways[rid]!;
+  if (!runwayUsable(sim, rid, size, 'dep')) return 'runwayBusy';
+  if (rs.occupant) return 'runwayBusy';
+  if (rs.booking && rs.booking.eta - state.now < DEPARTURE_WINDOW_SEC) return 'runwayBusy';
+  if (rs.lastOp?.kind === 'dep' && state.now < rs.lastOp.at + SEPARATION_SEC[rs.lastOp.size][size]) return 'separation';
+  return null;
+}
+
+/** 到着機の進入許可の判定（理由を返す。null なら許可） */
+function approachBlocked(sim: Simulation, ac: Aircraft, rid: string, eta: number): HoldReason | null {
+  const { state } = sim;
+  const rs = state.runways[rid]!;
+  const size = typeOf(ac).size;
+  if (!runwayUsable(sim, rid, size, 'arr')) return 'runwayBusy';
+  if (rs.booking) return 'separation';
+  // 進入順: 同じ滑走路の待機機のうち、予定の早い順
+  const ahead = Object.values(state.aircraft).some(
+    (o) =>
+      o.id !== ac.id &&
+      o.runwayId === rid &&
+      (o.state === 'inbound' || o.state === 'holding') &&
+      o.standId &&
+      state.now >= arrivalReadyAt(state, o) &&
+      (arrivalReadyAt(state, o) < arrivalReadyAt(state, ac) ||
+        (arrivalReadyAt(state, o) === arrivalReadyAt(state, ac) && compareIds(o.id, ac.id) < 0)),
+  );
+  if (ahead) return 'separation';
+  const starving = Object.values(state.aircraft).some(
+    (o) => o.state === 'holdShort' && o.runwayId === rid && state.now - o.queuedSince! >= DEPARTURE_STARVATION_SEC,
+  );
+  if (starving) return 'departurePriority';
+  const last = rs.lastOp;
+  if (last?.kind === 'arr' && eta < last.at + SEPARATION_SEC[last.size][size]) return 'separation';
+  if (last?.kind === 'dep' && eta < last.at + ARRIVAL_AFTER_DEPARTURE_SEC) return 'separation';
+  // 整列中の出発機は、これから滑走を始める
+  if (rs.occupant?.purpose === 'takeoff' && eta < state.now + LINEUP_ALIGN_SEC + 30 + ARRIVAL_AFTER_DEPARTURE_SEC) return 'runwayBusy';
+  return null;
+}
+
+/** 到着機が進入を始められる時刻（予定時刻 − 進入所要時間） */
+function arrivalReadyAt(state: SimState, ac: Aircraft): number {
+  return state.flights[ac.arrivalFlightId]!.estimated - APPROACH_SEC;
+}
+
+function stepAircraft(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  const type = typeOf(ac);
+  switch (ac.state) {
+    case 'scheduled': {
+      const arr = state.flights[ac.arrivalFlightId]!;
+      if (state.now >= arr.estimated - INBOUND_LEAD_SEC) {
+        arr.status = 'active';
+        setState(state, ac, 'inbound');
+        logEvent(state, { t: state.now, kind: 'spawn', aircraftId: ac.id });
+        placeAirborne(sim, ac);
+      }
+      return;
+    }
+    case 'inbound':
+    case 'holding':
+      stepInbound(sim, ac);
+      placeAirborne(sim, ac);
+      return;
+    case 'approach': {
+      const rs = state.runways[ac.runwayId!]!;
+      if (state.now >= ac.eta!) {
+        if (!rs.occupant) {
+          rs.occupant = { aircraftId: ac.id, purpose: 'landing', since: state.now };
+          rs.lastOp = { kind: 'arr', size: type.size, at: state.now };
+          rs.booking = null;
+          ac.dist = 0;
+          ac.speed = type.approachSpeed;
+          const arr = state.flights[ac.arrivalFlightId]!;
+          arr.actual = state.now;
+          setState(state, ac, 'landing');
+          placeOnRoute(sim, ac);
+        } else {
+          // 滑走路が空いていなければ着陸復行
+          goAround(sim, ac);
+          placeAirborne(sim, ac);
+        }
+      } else {
+        placeAirborne(sim, ac);
+      }
+      return;
+    }
+    case 'landing': {
+      const r = ac.route!;
+      const exitDist = r.cum[r.runwayEnd]!;
+      const a = (type.approachSpeed ** 2 - EXIT_SPEED ** 2) / (2 * Math.max(1, exitDist));
+      ac.speed = Math.max(EXIT_SPEED, ac.speed - a * TICK_SEC);
+      ac.dist = Math.min(ac.dist + ac.speed * TICK_SEC, movementLimit(sim, ac));
+      placeOnRoute(sim, ac);
+      if (ac.dist >= exitDist) setState(state, ac, 'vacating');
+      return;
+    }
+    case 'vacating': {
+      moveTaxi(sim, ac);
+      const r = ac.route!;
+      const exitIdx = r.runwayEnd;
+      const nextEdgeLen = r.cum[exitIdx + 1]! - r.cum[exitIdx]!;
+      if (ac.dist >= r.cum[exitIdx]! + Math.max(holdShortDistance(nextEdgeLen), type.lengthM)) {
+        const rs = state.runways[ac.runwayId!]!;
+        if (rs.occupant?.aircraftId === ac.id) rs.occupant = null;
+        ac.taxiStartedAt = state.now;
+        setState(state, ac, 'taxiIn');
+      }
+      return;
+    }
+    case 'taxiIn': {
+      moveTaxi(sim, ac);
+      const r = ac.route!;
+      if (ac.dist >= r.cum[r.nodes.length - 2]!) setState(state, ac, 'docking');
+      return;
+    }
+    case 'docking': {
+      moveTaxi(sim, ac);
+      const r = ac.route!;
+      if (ac.dist >= routeLength(r) - 0.01) {
+        releaseAll(state, ac.id);
+        ac.route = null;
+        ac.speed = 0;
+        const arr = state.flights[ac.arrivalFlightId]!;
+        arr.block = state.now;
+        arr.status = 'completed';
+        state.stats.arrivals++;
+        if (ac.taxiStartedAt !== null) state.stats.taxiInSecTotal += state.now - ac.taxiStartedAt;
+        ac.taxiStartedAt = null;
+        placeAtStand(sim, ac);
+        ac.timerUntil = state.now + 60;
+        setState(state, ac, 'parked');
+      }
+      return;
+    }
+    case 'parked':
+      if (state.now >= ac.timerUntil!) {
+        ac.timerUntil = state.now + type.turnaroundSec;
+        setState(state, ac, 'turnaround');
+      }
+      return;
+    case 'turnaround':
+      if (state.now >= ac.timerUntil!) {
+        const dep = state.flights[ac.departureFlightId]!;
+        if (state.now > dep.scheduled) addDelayCause(dep, 'turnaround');
+        dep.estimated = Math.max(dep.scheduled, state.now);
+        ac.timerUntil = null;
+        setState(state, ac, 'readyForPushback');
+      }
+      return;
+    case 'readyForPushback':
+      stepReadyForPushback(sim, ac);
+      return;
+    case 'pushback': {
+      const r = ac.route!;
+      if (ac.timerUntil === null) {
+        ac.speed = PUSHBACK_SPEED;
+        ac.dist = Math.min(ac.dist + PUSHBACK_SPEED * TICK_SEC, r.cum[1]!);
+        placeOnRoute(sim, ac, true);
+        if (ac.dist >= r.cum[1]!) {
+          ac.speed = 0;
+          ac.timerUntil = state.now + ENGINE_START_SEC;
+        }
+      } else if (state.now >= ac.timerUntil) {
+        ac.timerUntil = null;
+        // スポットを離れたので割り当てを解除する
+        if (ac.standId && state.standAssignments[ac.standId] === ac.id) delete state.standAssignments[ac.standId];
+        ac.standId = null;
+        ac.taxiStartedAt = state.now;
+        setState(state, ac, 'taxiOut');
+      }
+      return;
+    }
+    case 'taxiOut': {
+      moveTaxi(sim, ac);
+      const r = ac.route!;
+      const limit = movementLimit(sim, ac);
+      const holdAt = r.cum[r.nodes.length - 1]! - holdShortDistance(r.cum[r.nodes.length - 1]! - r.cum[r.nodes.length - 2]!);
+      if (ac.dist >= holdAt - 0.01 && limit <= holdAt + 0.01) {
+        ac.speed = 0;
+        ac.queuedSince = state.now;
+        setState(state, ac, 'holdShort');
+      }
+      return;
+    }
+    case 'holdShort':
+      return;
+    case 'lineUp': {
+      const r = ac.route!;
+      const end = routeLength(r);
+      if (ac.timerUntil === null) {
+        ac.speed = LINEUP_SPEED;
+        ac.dist = Math.min(ac.dist + LINEUP_SPEED * TICK_SEC, end);
+        placeOnRoute(sim, ac);
+        if (ac.dist >= end) {
+          ac.speed = 0;
+          ac.timerUntil = state.now + LINEUP_ALIGN_SEC;
+        }
+      } else if (state.now >= ac.timerUntil) {
+        startTakeoff(sim, ac);
+      }
+      return;
+    }
+    case 'takeoff': {
+      ac.speed += type.takeoffAccel * TICK_SEC;
+      ac.dist += ac.speed * TICK_SEC;
+      placeOnRoute(sim, ac);
+      if (ac.dist >= takeoffDistanceM(type)) {
+        const rs = state.runways[ac.runwayId!]!;
+        if (rs.occupant?.aircraftId === ac.id) rs.occupant = null;
+        const dep = state.flights[ac.departureFlightId]!;
+        dep.actual = state.now;
+        dep.status = 'completed';
+        state.stats.departures++;
+        setState(state, ac, 'departed');
+      }
+      return;
+    }
+    case 'departed':
+      if (state.now - ac.stateSince < DEPARTED_DESPAWN_SEC && ac.route) {
+        ac.speed = Math.min(ac.speed + 1, 90);
+        ac.dist += ac.speed * TICK_SEC;
+        placeOnRoute(sim, ac);
+      } else {
+        ac.route = null;
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+function stepInbound(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  const arr = state.flights[ac.arrivalFlightId]!;
+  const dep = state.flights[ac.departureFlightId]!;
+  const ready = state.now >= arr.estimated - APPROACH_SEC;
+
+  if (!ac.standId && state.now >= ac.retryAt) {
+    const reason = assignStand(sim, ac);
+    if (reason) {
+      ac.retryAt = state.now + 30;
+      if (ready) holdArrival(sim, ac, reason);
+    }
+  }
+  if (ac.standId && ac.runwayId && ready && state.now >= ac.retryAt) {
+    const eta = state.now + APPROACH_SEC;
+    let reason = approachBlocked(sim, ac, ac.runwayId, eta);
+    if (!reason) {
+      // 着陸後に滑走路を離脱してスポットまで行ける経路を先に確保する
+      const p = arrivalPath(sim, ac, ac.runwayId, ac.standId, true);
+      if (p) {
+        const nodes = [...p.rw.nodes.slice(0, p.exit.index), ...p.path.nodes];
+        const runwayEdges: string[] = [];
+        for (let i = 0; i < p.exit.index; i++) runwayEdges.push(edgeBetween(sim, p.rw.nodes[i]!, p.rw.nodes[i + 1]!));
+        const route = makeRoute(sim.ctx, 'landing', nodes, [...runwayEdges, ...p.path.edges], p.exit.index);
+        const parts = reservableParts(sim.ctx, route, p.exit.index);
+        if (isFree(state, ac.id, parts)) {
+          reserve(state, ac.id, parts);
+          route.released = p.exit.index;
+          ac.route = route;
+          ac.dist = 0;
+          ac.eta = eta;
+          state.runways[ac.runwayId]!.booking = { aircraftId: ac.id, eta };
+          arr.estimated = Math.max(arr.estimated, eta);
+          dep.estimated = Math.max(dep.scheduled, arr.estimated + typeOf(ac).turnaroundSec + 60);
+          setHold(state, ac, null);
+          setState(state, ac, 'approach');
+          return;
+        }
+      }
+      reason = arrivalPath(sim, ac, ac.runwayId, ac.standId, false) ? 'routeBusy' : 'noRoute';
+    }
+    ac.retryAt = state.now + RETRY_SEC;
+    holdArrival(sim, ac, reason);
+  }
+  if (ac.waitSince !== null && state.now - ac.waitSince >= HOLD_DIVERT_SEC) {
+    divert(sim, ac);
+  }
+}
+
+function holdArrival(sim: Simulation, ac: Aircraft, reason: HoldReason): void {
+  const { state } = sim;
+  setHold(state, ac, reason);
+  const arr = state.flights[ac.arrivalFlightId]!;
+  const cause = HOLD_TO_DELAY[reason];
+  if (cause) addDelayCause(arr, cause);
+  arr.estimated = Math.max(arr.estimated, state.now + APPROACH_SEC);
+  if (ac.state !== 'holding') setState(state, ac, 'holding', reason);
+}
+
+function goAround(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  const rs = state.runways[ac.runwayId!]!;
+  if (rs.booking?.aircraftId === ac.id) rs.booking = null;
+  releaseAll(state, ac.id);
+  ac.route = null;
+  ac.eta = null;
+  ac.retryAt = state.now + 4 * 60;
+  state.stats.goArounds++;
+  logEvent(state, { t: state.now, kind: 'goAround', aircraftId: ac.id });
+  holdArrival(sim, ac, 'goAround');
+}
+
+function divert(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  releaseEverything(sim, ac);
+  state.flights[ac.arrivalFlightId]!.status = 'diverted';
+  state.flights[ac.departureFlightId]!.status = 'cancelled';
+  state.stats.diverted++;
+  logEvent(state, { t: state.now, kind: 'diverted', aircraftId: ac.id, ...(ac.holdReason ? { reason: ac.holdReason } : {}) });
+  setState(state, ac, 'diverted', ac.holdReason ?? undefined);
+}
+
+function releaseEverything(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  releaseAll(state, ac.id);
+  if (ac.standId && state.standAssignments[ac.standId] === ac.id) delete state.standAssignments[ac.standId];
+  for (const rs of Object.values(state.runways)) {
+    if (rs.booking?.aircraftId === ac.id) rs.booking = null;
+    if (rs.occupant?.aircraftId === ac.id) rs.occupant = null;
+  }
+  ac.route = null;
+  ac.standId = null;
+  ac.crossing = null;
+}
+
+function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  const dep = state.flights[ac.departureFlightId]!;
+  if (state.now < dep.estimated || state.now < ac.retryAt) return;
+  const p = departurePath(sim, ac, true);
+  if (p) {
+    const route = makeRoute(sim.ctx, 'pushback', p.path.nodes, p.path.edges);
+    const parts = reservableParts(sim.ctx, route, 0);
+    if (isFree(state, ac.id, parts)) {
+      reserve(state, ac.id, parts);
+      ac.route = route;
+      ac.dist = 0;
+      ac.runwayId = p.runwayId;
+      dep.runwayId = p.runwayId;
+      dep.block = state.now;
+      dep.status = 'active';
+      setHold(state, ac, null);
+      setState(state, ac, 'pushback');
+      return;
+    }
+  }
+  const reason: HoldReason = p || departurePath(sim, ac, false) ? 'routeBusy' : 'noRoute';
+  setHold(state, ac, reason);
+  addDelayCause(dep, reason === 'noRoute' ? 'noRoute' : 'taxiCongestion');
+  ac.retryAt = state.now + RETRY_SEC;
+  if (reason === 'noRoute' && ac.waitSince !== null && state.now - ac.waitSince >= DEPARTURE_GIVE_UP_SEC) {
+    releaseEverything(sim, ac);
+    dep.status = 'cancelled';
+    state.stats.cancelled++;
+    logEvent(state, { t: state.now, kind: 'cannotOperate', aircraftId: ac.id, reason });
+    setState(state, ac, 'cannotOperate', reason);
+  }
+}
+
+function startTakeoff(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  const rw = runwayFor(sim, ac.runwayId!)!;
+  const startNode = ac.route!.nodes[ac.route!.nodes.length - 1]!;
+  const idx = rw.nodes.indexOf(startNode);
+  releaseAll(state, ac.id);
+  const nodes = rw.nodes.slice(idx);
+  const edges: string[] = [];
+  for (let i = 0; i + 1 < nodes.length; i++) edges.push(edgeBetween(sim, nodes[i]!, nodes[i + 1]!));
+  ac.route = makeRoute(sim.ctx, 'takeoff', nodes, edges, nodes.length - 1);
+  ac.dist = 0;
+  ac.speed = 0;
+  ac.timerUntil = null;
+  state.runways[ac.runwayId!]!.lastOp = { kind: 'dep', size: typeOf(ac).size, at: state.now };
+  if (ac.taxiStartedAt !== null) state.stats.taxiOutSecTotal += state.now - ac.taxiStartedAt;
+  ac.taxiStartedAt = null;
+  setState(state, ac, 'takeoff');
+}
+
+function edgeBetween(sim: Simulation, a: string, b: string): string {
+  for (const eid of sim.ctx.network.outgoing[a] ?? []) {
+    const e = sim.ctx.network.edges[eid]!;
+    if (otherEnd(e, a) === b) return eid;
+  }
+  throw new Error(`no edge between ${a} and ${b}`);
+}
+
+// ---------------------------------------------------------------- 移動
+
+/** 次に横断許可が必要な滑走路ノード（経路の途中にある滑走路ノード） */
+function pendingCrossing(sim: Simulation, ac: Aircraft): { index: number; runwayId: string; distToHold: number } | null {
+  if (!['taxiIn', 'taxiOut', 'vacating'].includes(ac.state) || !ac.route) return null;
+  const r = ac.route;
+  const from = edgeIndexAt(r, ac.dist) + 1;
+  for (let i = Math.max(from, r.runwayEnd + 1, 1); i < r.nodes.length - 1; i++) {
+    const n = sim.ctx.network.nodes[r.nodes[i]!]!;
+    if (n.runwayIds.length === 0) continue;
+    if (ac.crossing?.index === i) return null;
+    const hold = r.cum[i]! - holdShortDistance(r.cum[i]! - r.cum[i - 1]!);
+    return { index: i, runwayId: n.runwayIds[0]!, distToHold: hold - ac.dist };
+  }
+  return null;
+}
+
+/** 現在進んでよい最遠の位置（経路上の距離） */
+function movementLimit(sim: Simulation, ac: Aircraft): number {
+  const r = ac.route!;
+  const last = r.nodes.length - 1;
+  let limit = r.cum[last]!;
+  // 出発機は滑走路手前の停止位置まで（離陸許可後は滑走路ノードまで）
+  if (r.kind === 'pushback' && ac.state !== 'lineUp') limit = r.cum[last]! - holdShortDistance(r.cum[last]! - r.cum[last - 1]!);
+  const req = pendingCrossing(sim, ac);
+  if (req) limit = Math.min(limit, req.distToHold + ac.dist);
+  return limit;
+}
+
+/** 速度と位置を更新する。停止位置を越えないよう、毎ティック制動距離を考慮する */
+function moveTaxi(sim: Simulation, ac: Aircraft): void {
+  const r = ac.route!;
+  const type = typeOf(ac);
+  const limit = movementLimit(sim, ac);
+  const i = edgeIndexAt(r, ac.dist);
+  const edge = sim.ctx.network.edges[r.edges[i]!]!;
+  let vmax = edge.kind === 'standLink' ? STAND_SPEED : type.taxiSpeed;
+  // 次のノードでの制限（曲がり角・スポット進入）
+  for (let k = i + 1; k < r.nodes.length - 1 && r.cum[k]! - ac.dist < 300; k++) {
+    const nextEdge = sim.ctx.network.edges[r.edges[k]!]!;
+    let vNode = nextEdge.kind === 'standLink' ? STAND_SPEED : type.taxiSpeed;
+    if (turnAngleAt(sim.ctx, r, k) >= 45) vNode = Math.min(vNode, TURN_SPEED);
+    const d = Math.max(0, r.cum[k]! - ac.dist);
+    vmax = Math.min(vmax, Math.sqrt(vNode * vNode + 2 * TAXI_DECEL * d));
+  }
+  const toLimit = Math.max(0, limit - ac.dist);
+  const vBrake = Math.sqrt(2 * TAXI_DECEL * toLimit);
+  const target = Math.min(vmax, vBrake);
+  ac.speed = ac.speed < target ? Math.min(target, ac.speed + TAXI_ACCEL * TICK_SEC) : Math.max(target, ac.speed - TAXI_DECEL * 4 * TICK_SEC);
+  ac.dist = Math.min(ac.dist + ac.speed * TICK_SEC, limit);
+  if (limit - ac.dist < 0.01 && ac.speed < 0.5) ac.speed = 0;
+  releasePassed(sim.state, ac, type.lengthM);
+  // 横断を終えたら滑走路を解放する
+  if (ac.crossing) {
+    const k = ac.crossing.index;
+    const after = r.cum[k + 1]! - r.cum[k]!;
+    if (ac.dist >= r.cum[k]! + Math.max(holdShortDistance(after), type.lengthM)) {
+      const rs = sim.state.runways[ac.crossing.runwayId]!;
+      if (rs.occupant?.aircraftId === ac.id) rs.occupant = null;
+      ac.crossing = null;
+    }
+  }
+  if (ac.state === 'taxiIn' || ac.state === 'taxiOut' || ac.state === 'vacating') {
+    const req = pendingCrossing(sim, ac);
+    if (req && req.distToHold < 1 && ac.speed === 0) setHold(sim.state, ac, 'crossing');
+    else if (ac.holdReason === 'crossing') setHold(sim.state, ac, null);
+  }
+  placeOnRoute(sim, ac);
+}
+
+// ---------------------------------------------------------------- 表示位置
+
+function placeOnRoute(sim: Simulation, ac: Aircraft, reverse = false): void {
+  const r = ac.route!;
+  const end = routeLength(r);
+  if (ac.dist <= end) {
+    const p = pointAt(sim.ctx, r, ac.dist);
+    ac.x = p.x;
+    ac.y = p.y;
+    ac.heading = reverse ? (p.heading + 180) % 360 : p.heading;
+  } else {
+    // 経路の先（離陸後の上昇）は最後の区間の延長線上
+    const a = sim.ctx.network.nodes[r.nodes[r.nodes.length - 2]!]!.pos;
+    const b = sim.ctx.network.nodes[r.nodes[r.nodes.length - 1]!]!.pos;
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const extra = (ac.dist - end) / TILE_M;
+    ac.x = b.x + ((b.x - a.x) / len) * extra;
+    ac.y = b.y + ((b.y - a.y) / len) * extra;
+    ac.heading = headingOf(b.x - a.x, b.y - a.y);
+  }
+}
+
+function placeAtStand(sim: Simulation, ac: Aircraft): void {
+  const s = sim.ctx.stands[ac.standId!]!;
+  const p = sim.ctx.network.nodes[s.node]!.pos;
+  ac.x = p.x;
+  ac.y = p.y;
+  ac.heading = s.heading;
+}
+
+/** 空中の機体の表示位置（表示用に距離を縮めた進入経路・待機旋回） */
+function placeAirborne(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  const rw = ac.runwayId ? runwayFor(sim, ac.runwayId) : null;
+  const firstRwy = rw ?? (Object.keys(sim.ctx.runways).length > 0 ? runwayFor(sim, Object.keys(sim.ctx.runways).sort(compareIds)[0]!) : null);
+  if (!firstRwy) return;
+  const t0 = sim.ctx.network.nodes[firstRwy.nodes[0]!]!.pos;
+  const t1 = sim.ctx.network.nodes[firstRwy.nodes[1]!]!.pos;
+  const len = Math.hypot(t1.x - t0.x, t1.y - t0.y) || 1;
+  const ux = (t1.x - t0.x) / len;
+  const uy = (t1.y - t0.y) / len;
+  if (ac.state === 'approach' && ac.eta !== null) {
+    const back = 40 * Math.max(0, (ac.eta - state.now) / APPROACH_SEC);
+    ac.x = t0.x - ux * back;
+    ac.y = t0.y - uy * back;
+    ac.heading = headingOf(ux, uy);
+    return;
+  }
+  // 待機: 進入経路の手前で旋回
+  const cx = t0.x - ux * 55;
+  const cy = t0.y - uy * 55;
+  const n = Number(ac.id.slice(3));
+  const ang = (state.now / 120) * 2 * Math.PI + n;
+  const rad = 6 + (n % 3) * 2;
+  ac.x = cx + Math.cos(ang) * rad;
+  ac.y = cy + Math.sin(ang) * rad;
+  ac.heading = headingOf(-Math.sin(ang), Math.cos(ang));
+}
+
+// ---------------------------------------------------------------- 競合の検知
+
+/** 地上で動いている機体同士が近づきすぎていないか（予約制御が正しければ常に 0 件） */
+function detectConflicts(sim: Simulation): void {
+  const { state } = sim;
+  const moving = sortedValues(state.aircraft).filter((a) => GROUND_MOVING_STATES.includes(a.state) && a.state !== 'takeoff');
+  for (let i = 0; i < moving.length; i++) {
+    for (let j = i + 1; j < moving.length; j++) {
+      const a = moving[i]!;
+      const b = moving[j]!;
+      const d = Math.hypot(a.x - b.x, a.y - b.y) * TILE_M;
+      if (d < MIN_GROUND_SEPARATION_M) {
+        state.stats.conflicts++;
+        logEvent(state, { t: state.now, kind: 'conflict', aircraftId: a.id, note: b.id });
+      }
+    }
+  }
+}
+
+export const isTerminal = (ac: Aircraft): boolean => TERMINAL_STATES.includes(ac.state);
+
+/** 予定時刻に対する遅れ（分）。到着便は着陸時刻、出発便はブロックアウト時刻で判定する */
+export function flightDelayMin(f: Flight, now: number): number | null {
+  if (f.status === 'diverted' || f.status === 'cancelled') return null;
+  let ref: number;
+  if (f.direction === 'arrival') ref = f.actual ?? f.estimated;
+  else ref = f.block ?? Math.max(f.estimated, now);
+  return Math.max(0, Math.round((ref - f.scheduled) / 60));
+}
+
+export type { Route };

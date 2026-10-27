@@ -11,6 +11,8 @@ import { createSampleAirport } from '../core/sample/sampleAirport';
 import { analyzeLayout, type LayoutAnalysis } from '../core/validation/validate';
 import { exportLayout, importLayout } from '../core/io/serialize';
 import { OP_FAILURE_LABEL } from '../i18n/ja';
+import type { Simulation } from '../core/sim/simulation';
+import type { SimClock } from '../core/sim/clock';
 
 export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | `facility:${FacilityKind}`;
 
@@ -57,6 +59,23 @@ export interface EditorState {
   draft: Draft;
   overlays: Overlays;
   toast: Toast | null;
+  /** build: 建設（編集）モード / operate: 運航モード（レイアウトの編集は不可） */
+  mode: 'build' | 'operate';
+  ops: OpsState | null;
+}
+
+/**
+ * 運航モードの状態。sim は毎ティック直接更新される可変オブジェクトなので、
+ * React は uiVersion（約10Hz）、描画は frame（毎フレーム）の変化で再描画する。
+ */
+export interface OpsState {
+  sim: Simulation;
+  clock: SimClock;
+  selectedAircraft: string | null;
+  frame: number;
+  uiVersion: number;
+  /** 直近のフレームで処理が追いつかずティックを捨てたか */
+  dropped: boolean;
 }
 
 const STORAGE_KEY = 'skyport.layout.v1';
@@ -90,6 +109,8 @@ export const editorStore = createStore<EditorState>(() => ({
   draft: null,
   overlays: { grid: true, buildable: false, network: false, issues: true, labels: true },
   toast: null,
+  mode: 'build',
+  ops: null,
 }));
 
 export function useEditor<T>(selector: (s: EditorState) => T): T {
@@ -147,6 +168,10 @@ export function showToast(text: string, kind: Toast['kind'] = 'info'): void {
 
 /** 編集操作の結果を履歴に確定する。失敗時は理由を通知して何もしない */
 export function applyOp(result: OpResult, opts: { select?: boolean; quietNoChange?: boolean } = {}): boolean {
+  if (get().mode === 'operate') {
+    showToast('運航中はレイアウトを編集できません（建設モードに戻ってください）', 'error');
+    return false;
+  }
   if (!result.ok) {
     if (!(opts.quietNoChange && result.reason === 'NO_CHANGE')) showToast(OP_FAILURE_LABEL[result.reason], 'error');
     return false;
@@ -175,6 +200,10 @@ function entityExists(layout: AirportLayout, id: string): boolean {
 }
 
 export function replaceLayout(layout: AirportLayout, message: string): void {
+  if (get().mode === 'operate') {
+    showToast('運航中はレイアウトを変更できません', 'error');
+    return;
+  }
   set((s) => ({ history: commit(s.history, layout), selection: null, draft: null }));
   showToast(message);
 }
@@ -182,12 +211,14 @@ export function replaceLayout(layout: AirportLayout, message: string): void {
 export const actions = {
   undo(): void {
     const s = get();
+    if (s.mode === 'operate') return;
     if (s.history.past.length === 0) return;
     const history = undo(s.history);
     set({ history, draft: null, selection: s.selection && entityExists(history.present, s.selection) ? s.selection : null });
   },
   redo(): void {
     const s = get();
+    if (s.mode === 'operate') return;
     if (s.history.future.length === 0) return;
     const history = redo(s.history);
     set({ history, draft: null, selection: s.selection && entityExists(history.present, s.selection) ? s.selection : null });

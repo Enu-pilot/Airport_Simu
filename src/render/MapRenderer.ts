@@ -11,7 +11,11 @@ import { runwayDesignators, runwayEnd, runwayPolygon, runwayStripPolygon, headin
 import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
 import { computePreview, facilityKindOf, nextPathPoint, rectFromDrag } from '../editor/tools';
-import { getAnalysis, type EditorState } from '../editor/store';
+import { getAnalysis, type EditorState, type OpsState } from '../editor/store';
+import { AIRCRAFT_TYPES } from '../core/sim/aircraftTypes';
+import { isVisible } from '../core/sim/query';
+import { edgeIndexAt, pointAt } from '../core/sim/routes';
+import type { Aircraft } from '../core/sim/types';
 
 /**
  * PixiJS による空港マップ描画。シミュレーション・編集の状態は一切変更せず、
@@ -61,7 +65,7 @@ export class MapRenderer {
   }
 
   draw(s: EditorState): void {
-    const preview = computePreview(s);
+    const preview = s.mode === 'build' ? computePreview(s) : null;
     const layout = preview?.result.ok ? preview.result.layout : s.history.present;
     const analysis = getAnalysis(layout);
     const ghostIds = new Set(preview?.ghostIds ?? []);
@@ -92,6 +96,7 @@ export class MapRenderer {
     }
     this.drawDraft(s);
     if (s.overlays.labels) this.drawLabels(layout, analysis, cam);
+    if (s.ops) this.drawOps(s.ops, cam, s.overlays.network);
     for (const [k, t] of this.textPool) t.visible = this.usedTexts.has(k);
   }
 
@@ -487,6 +492,94 @@ export class MapRenderer {
     void analysis;
   }
 
+
+  // ------------------------------------------------------------ 運航
+
+  private drawOps(ops: OpsState, cam: Camera, showReservations: boolean): void {
+    const o = this.overlay;
+    const { sim } = ops;
+    const net = sim.ctx.network;
+    const node = (id: string) => c(net.nodes[id]!.pos);
+
+    // 滑走路の状態: 占有中 = 赤、進入予約 = 黄
+    for (const [rid, rs] of Object.entries(sim.state.runways)) {
+      const r = sim.ctx.layout.runways[rid];
+      if (!r) continue;
+      const poly = flat(runwayPolygon(r).map(c));
+      if (rs.occupant) o.poly(poly).stroke({ width: this.px(3), color: 0xff4d4f });
+      else if (rs.booking) o.poly(poly).stroke({ width: this.px(3), color: 0xffd400 });
+    }
+
+    // 予約中の区間（論理ネットワーク表示時）
+    if (showReservations) {
+      for (const [eid, acId] of Object.entries(sim.state.edgeReservations)) {
+        const e = net.edges[eid];
+        if (!e) continue;
+        const a = node(e.from);
+        const b = node(e.to);
+        o.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: this.px(5), color: aircraftColor(acId), alpha: 0.55 });
+      }
+      for (const [nid, acId] of Object.entries(sim.state.nodeReservations)) {
+        const p = node(nid);
+        o.circle(p.x, p.y, this.px(6)).stroke({ width: this.px(2), color: aircraftColor(acId) });
+      }
+    }
+
+    // 選択中の機体の残りの経路と予約
+    const sel = ops.selectedAircraft ? sim.state.aircraft[ops.selectedAircraft] : undefined;
+    if (sel?.route && isVisible(sel)) {
+      const r = sel.route;
+      const here = pointAt(sim.ctx, r, Math.min(sel.dist, r.cum[r.cum.length - 1]!));
+      o.moveTo(here.x + 0.5, here.y + 0.5);
+      for (let i = edgeIndexAt(r, sel.dist) + 1; i < r.nodes.length; i++) {
+        const p = node(r.nodes[i]!);
+        o.lineTo(p.x, p.y);
+      }
+      o.stroke({ width: this.px(3), color: COLOR.selection, alpha: 0.9 });
+      for (const [nid, acId] of Object.entries(sim.state.nodeReservations)) {
+        if (acId !== sel.id) continue;
+        const p = node(nid);
+        o.circle(p.x, p.y, this.px(5)).fill({ color: COLOR.selection, alpha: 0.8 });
+      }
+    }
+
+    // 機体（前ティックと現ティックの間を補間）
+    const alpha = ops.clock.acc;
+    const list = Object.values(sim.state.aircraft).filter(isVisible);
+    for (const ac of list) {
+      const x = ac.px + (ac.x - ac.px) * alpha + 0.5;
+      const y = ac.py + (ac.y - ac.py) * alpha + 0.5;
+      const dh = ((ac.heading - ac.pheading + 540) % 360) - 180;
+      const heading = ac.pheading + dh * alpha;
+      this.drawAircraft(ac, x, y, heading, ac.id === ops.selectedAircraft);
+      if (this.zoom >= 6 || ac.id === ops.selectedAircraft) {
+        this.label(`ac:${ac.id}`, ac.callsign, { x, y: y - 1.4 }, cam, { size: 11, color: 0xffffff });
+      }
+    }
+  }
+
+  private drawAircraft(ac: Aircraft, x: number, y: number, heading: number, selected: boolean): void {
+    const g = this.overlay;
+    const t = AIRCRAFT_TYPES[ac.typeId];
+    const half = Math.max(0.5, t.lengthM / 25 / 2);
+    const span = Math.max(0.5, t.wingspanM / 25 / 2);
+    const rad = (heading * Math.PI) / 180;
+    const fx = Math.sin(rad);
+    const fy = -Math.cos(rad);
+    // a: 機首方向、b: 右翼方向
+    const P = (a: number, b: number) => [x + fx * a * half - fy * b * span, y + fy * a * half + fx * b * span];
+    const fw = 0.12;
+    const poly = [
+      ...P(1, 0), ...P(0.75, fw), ...P(0.2, fw), ...P(-0.15, 1), ...P(-0.35, 1), ...P(-0.2, fw), ...P(-0.7, fw),
+      ...P(-0.95, 0.4), ...P(-1, 0.4), ...P(-0.92, 0), ...P(-1, -0.4), ...P(-0.95, -0.4), ...P(-0.7, -fw),
+      ...P(-0.2, -fw), ...P(-0.35, -1), ...P(-0.15, -1), ...P(0.2, -fw), ...P(0.75, -fw),
+    ];
+    const color = aircraftStateColor(ac);
+    g.poly(poly).fill({ color, alpha: 0.95 });
+    const outline = selected ? COLOR.selection : ac.holdReason ? 0xff4d4f : 0x000000;
+    g.poly(poly).stroke({ width: this.px(selected || ac.holdReason ? 2.5 : 1), color: outline, alpha: selected || ac.holdReason ? 1 : 0.6 });
+  }
+
   // ------------------------------------------------------------ 描画補助
 
   private dashed(g: Graphics, a: Vec2, b: Vec2, dash: number, gap: number, style: { width: number; color: number; alpha?: number }): void {
@@ -513,5 +606,33 @@ export class MapRenderer {
 }
 
 const flat = (pts: Vec2[]): number[] => pts.flatMap((p) => [p.x, p.y]);
+
+/** 状態ごとの機体色: 到着系 = 水色、駐機・準備 = 白、出発系 = 橙、空中 = 薄青 */
+function aircraftStateColor(ac: Aircraft): number {
+  switch (ac.state) {
+    case 'inbound':
+    case 'holding':
+    case 'approach':
+      return 0xb3e5fc;
+    case 'landing':
+    case 'vacating':
+    case 'taxiIn':
+    case 'docking':
+      return 0x4fc3f7;
+    case 'parked':
+    case 'turnaround':
+    case 'readyForPushback':
+      return 0xeeeeee;
+    default:
+      return 0xffb74d;
+  }
+}
+
+/** 機体ごとの区別用の色（予約表示） */
+function aircraftColor(id: string): number {
+  const n = Number(id.slice(id.indexOf('_') + 1));
+  const palette = [0xff8a65, 0x4db6ac, 0xba68c8, 0xffd54f, 0x64b5f6, 0xaed581, 0xf06292, 0x90a4ae];
+  return palette[n % palette.length]!;
+}
 const add = (a: Vec2, b: Vec2): Vec2 => ({ x: a.x + b.x, y: a.y + b.y });
 const scale = (a: Vec2, k: number): Vec2 => ({ x: a.x * k, y: a.y * k });

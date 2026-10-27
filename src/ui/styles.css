@@ -123,3 +123,38 @@ input[type='number'] { width: 80px; }
 .issue.warning { border-left-color: var(--warning); }
 .issue.info { border-left-color: var(--info); }
 .empty { color: var(--muted); padding: 6px; }
+
+/* ---------------- 運航モード ---------------- */
+button.primary { background: #1d6b3a; border-color: #2c9a57; font-weight: 600; }
+.mode-operate button.primary { background: #6b3a1d; border-color: #b0602c; }
+.mode-operate .top { border-bottom-color: #b0602c; }
+.ops { display: flex; flex-direction: column; gap: 4px; }
+.sim-clock { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: center; padding: 2px 0 4px; }
+.speed-buttons { display: flex; gap: 3px; justify-content: center; flex-wrap: wrap; }
+.stat-grid { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 1px 8px; font-size: 12px; color: var(--muted); }
+.stat-grid b { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.runway-row { background: var(--panel-2); border-radius: 4px; padding: 4px 6px; font-size: 12px; }
+.runway-name { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.runway-ctl { display: flex; gap: 4px; margin: 3px 0; }
+.runway-ctl select { flex: 1; }
+.runway-q { color: var(--muted); }
+.pill { font-size: 11px; font-weight: 400; padding: 0 6px; border-radius: 8px; }
+.pill.free { background: #16351f; color: var(--ok); }
+.pill.busy { background: #3a1c1c; color: #ff9a9a; }
+.pill.booked { background: #3a331a; color: #ffd400; }
+.warn-text { color: var(--warning); font-size: 12px; }
+.muted { color: var(--muted); }
+.time { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.history { max-height: 260px; overflow-y: auto; font-size: 12px; }
+.history-row { display: flex; gap: 4px; padding: 1px 0; }
+.tabbed { display: flex; flex-direction: column; height: 100%; }
+.tabs { display: flex; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--border); }
+.tab { border-bottom: none; border-radius: 4px 4px 0 0; font-size: 12px; }
+.tab.active { background: var(--accent); color: #062026; border-color: var(--accent); }
+.tab-body { flex: 1; min-height: 0; }
+table.board { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.board th { position: sticky; top: 0; background: var(--panel); text-align: left; color: var(--muted); font-weight: 400; padding: 2px 6px; }
+table.board td { padding: 1px 6px; white-space: nowrap; border-top: 1px solid #2a3139; }
+table.board tr { cursor: pointer; }
+table.board tbody tr:hover { background: var(--panel-2); }
+table.board tr.selected { background: #1d4652; }
