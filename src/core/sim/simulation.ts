@@ -60,6 +60,7 @@ import {
   type SimState,
 } from './types';
 import { TILE_M } from '../model/catalog';
+import { emptyFlightPax, stepPassengers } from './passengers';
 
 /**
  * 運航シミュレーション本体。`stepSimulation` が 1 ティック（1ゲーム秒）を進める。
@@ -111,6 +112,13 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     scheduledDays: [],
     events: [],
     stats: { arrivals: 0, departures: 0, diverted: 0, cancelled: 0, goArounds: 0, conflicts: 0, taxiInSecTotal: 0, taxiOutSecTotal: 0 },
+    paxGroups: {},
+    activePax: [],
+    flightPax: {},
+    facilities: {},
+    closedAreas: [],
+    claimBelts: {},
+    paxStats: { spawned: 0, boarded: 0, missed: 0, deplaned: 0, exited: 0, waitTotal: 0, walkTotal: 0, finished: 0 },
   };
   const sim = { ctx, state };
   if (state.settings.autoSchedule) generateDaySchedule(sim, Math.floor(state.now / DAY_SEC));
@@ -170,6 +178,7 @@ const HOLD_TO_DELAY: Partial<Record<HoldReason, DelayCause>> = {
   crossing: 'taxiCongestion',
   noRoute: 'noRoute',
   noRunway: 'noRoute',
+  boarding: 'boarding',
 };
 
 const typeOf = (ac: Aircraft): AircraftType => AIRCRAFT_TYPES[ac.typeId];
@@ -217,6 +226,7 @@ export function addTurnaround(
     runwayId: null,
     standId: null,
     delayCauses: [],
+    pax: emptyFlightPax(),
   });
   const arrEst = arrivalAt + (opts.inboundDelaySec ?? 0);
   state.flights[arrId] = flight(arrId, 'arrival', `${airline}${num}`, arrivalAt, arrEst);
@@ -480,6 +490,7 @@ export function stepSimulation(sim: Simulation): void {
   }
   runwayControl(sim);
   for (const ac of all) stepAircraft(sim, ac);
+  stepPassengers(sim);
   detectConflicts(sim);
   state.now += TICK_SEC;
 }
@@ -853,6 +864,12 @@ function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
   const { state } = sim;
   const dep = state.flights[ac.departureFlightId]!;
   if (state.now < dep.estimated || state.now < ac.retryAt) return;
+  // 搭乗締切（搭乗手続きの完了）まではプッシュバックしない
+  if (dep.pax.boarding !== 'closed') {
+    setHold(state, ac, 'boarding');
+    addDelayCause(dep, 'boarding');
+    return;
+  }
   const p = departurePath(sim, ac, true);
   if (p) {
     const route = makeRoute(sim.ctx, 'pushback', p.path.nodes, p.path.edges);

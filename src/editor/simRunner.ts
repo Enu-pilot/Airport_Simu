@@ -1,6 +1,7 @@
 import { addTurnaround, createSimulation, setRunwayConfig, stepSimulation } from '../core/sim/simulation';
 import { advanceClock, createClock } from '../core/sim/clock';
 import { INBOUND_LEAD_SEC } from '../core/sim/rules';
+import { setAreaClosed } from '../core/sim/passengers';
 import type { AircraftTypeId } from '../core/sim/aircraftTypes';
 import type { RunwayConfig } from '../core/sim/types';
 import { editorStore, showToast, type OpsState } from './store';
@@ -90,6 +91,13 @@ export const ops = {
     const ac = addTurnaround(o.sim, typeId, o.sim.state.now + INBOUND_LEAD_SEC);
     patchOps({ uiVersion: o.uiVersion + 1 });
     showToast(`${ac.callsign} を追加しました`);
+  },
+  /** ターミナル内の施設を閉鎖 / 再開する */
+  setAreaClosed(areaId: string, closed: boolean): void {
+    const o = get().ops;
+    if (!o) return;
+    setAreaClosed(o.sim, areaId, closed);
+    patchOps({ uiVersion: o.uiVersion + 1 });
   },
   setFlightsPerDay(n: number): void {
     const o = get().ops;

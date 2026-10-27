@@ -118,3 +118,8 @@
 | `tests/e2e/operations.spec.ts` | 運航開始から出発完了まで、一時停止と再開、機体の選択と運航履歴、運航中の編集禁止 |
 
 シミュレーションのテストは `runUntil`（`tests/unit/sim/helpers.ts`）で進め、**毎ティック不変条件を検査する**。
+
+## 12. Phase 3 で追加したテスト（旅客流動）
+
+`tests/unit/sim/passengers.test.ts`: 正常な搭乗、締切超過、到達不能なゲート、保安検査の混雑（レーン数による待ち時間の差）、処理能力超過（窓口数以上を同時に処理しない）、施設閉鎖（待機→再開、迂回、未処理）、到着旅客の処理、配置変更による歩行時間の変化。
+不変条件 P1〜P5（`checkPaxInvariants`）を毎ティック検査する。E2E: `tests/e2e/terminal.spec.ts`。

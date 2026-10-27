@@ -135,6 +135,8 @@ export function collectFootprints(layout: AirportLayout): FootprintPart[] {
 
 /** エンティティ1つの主な占有タイル（保護区域を除く） */
 export function entityTiles(layout: AirportLayout, id: string): Tile[] {
+  const area = layout.terminalAreas?.[id];
+  if (area) return rectTiles(area.origin, area.w, area.h);
   return footprintOf(layout, id)
     .filter((p) => p.layer !== 'strip')
     .flatMap((p) => p.tiles);

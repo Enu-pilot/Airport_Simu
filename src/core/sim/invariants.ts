@@ -110,6 +110,55 @@ export function checkInvariants(sim: Simulation): string[] {
     const vmax = ac.state === 'takeoff' || ac.state === 'landing' ? 100 : 20;
     if (moved > vmax * TICK_SEC + 1e-6) out.push(`M1 ${ac.id}(${ac.state}) が1ティックで ${moved.toFixed(1)}m 移動`);
   }
+  out.push(...checkPaxInvariants(sim, false));
+  return out;
+}
+
+/**
+ * 旅客の整合性。full = false のときは処理中の便・グループだけを見る（毎ティック用）。
+ * P1 便の搭乗・乗り遅れ・退出人数 = グループの合計 / P2 搭乗済みは自便のゲートを通過している /
+ * P3 待ち行列の所属と処理中グループ数 ≤ 窓口数 / P4 保安検査を通らずに出発区域にいない / P5 所在エリアが存在する
+ */
+export function checkPaxInvariants(sim: Simulation, full: boolean): string[] {
+  const { state, ctx } = sim;
+  const out: string[] = [];
+  for (const f of Object.values(state.flights)) {
+    const p = f.pax;
+    if (!p.generated) continue;
+    if (!full && ((f.direction === 'departure' && p.boarding === 'closed') || (f.direction === 'arrival' && p.exited === p.deplaned))) continue;
+    const groups = (state.flightPax[f.id] ?? []).map((id) => state.paxGroups[id]!);
+    const sum = (pred: (g: (typeof groups)[number]) => boolean) => groups.filter(pred).reduce((s, g) => s + g.count, 0);
+    if (f.direction === 'departure') {
+      if (sum(() => true) !== p.booked) out.push(`P1 ${f.number} 予約 ${p.booked} ≠ グループ合計 ${sum(() => true)}`);
+      if (sum((g) => g.state === 'boarded') !== p.boarded) out.push(`P1 ${f.number} 搭乗 ${p.boarded} ≠ 搭乗済みグループ ${sum((g) => g.state === 'boarded')}`);
+      if (sum((g) => g.state === 'missed') !== p.missed) out.push(`P1 ${f.number} 乗り遅れ ${p.missed} ≠ グループ ${sum((g) => g.state === 'missed')}`);
+      for (const g of groups) {
+        if (g.state === 'boarded' && (!p.gateId || g.boardedGate !== p.gateId)) out.push(`P2 ${g.id} が自便のゲートを通らずに搭乗済み`);
+      }
+    } else {
+      if (sum(() => true) !== p.deplaned) out.push(`P1 ${f.number} 降機 ${p.deplaned} ≠ グループ合計 ${sum(() => true)}`);
+      if (sum((g) => g.state === 'exited') !== p.exited) out.push(`P1 ${f.number} 退出 ${p.exited} ≠ グループ ${sum((g) => g.state === 'exited')}`);
+    }
+  }
+  for (const [key, fac] of Object.entries(state.facilities)) {
+    const area = ctx.layout.terminalAreas[key];
+    const cap = key.startsWith('gate:') ? 1 : Number(area?.props.counters ?? area?.props.lanes ?? area?.props.fixtures ?? 0);
+    if (fac.inService.length > cap) out.push(`P3 ${key} の処理中 ${fac.inService.length} > 窓口数 ${cap}`);
+    for (const id of fac.queue) if (state.paxGroups[id]?.facility !== key) out.push(`P3 ${id} が ${key} の待ち行列にいるが所属が不一致`);
+    for (const id of fac.inService) if (state.paxGroups[id]?.state !== 'inService') out.push(`P3 ${id} が ${key} で処理中だが状態が不一致`);
+  }
+  const ids = full ? Object.keys(state.paxGroups) : state.activePax;
+  for (const id of ids) {
+    const g = state.paxGroups[id]!;
+    if (g.area && !ctx.terminal.areas[g.area]) out.push(`P5 ${g.id} の所在エリア ${g.area} が存在しない`);
+    const a = g.area ? ctx.terminal.areas[g.area] : undefined;
+    if (g.direction === 'departure' && a && a.zone === 'departure' && a.kind !== 'security' && !g.securityCleared) {
+      out.push(`P4 ${g.id} が保安検査を通らずに出発区域 ${a.id} にいる`);
+    }
+    if ((g.state === 'queuing' || g.state === 'boardingQueue') && !state.facilities[g.facility ?? '']?.queue.includes(g.id)) {
+      out.push(`P3 ${g.id} は待ち状態だが待ち行列にいない`);
+    }
+  }
   return out;
 }
 

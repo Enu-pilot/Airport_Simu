@@ -88,8 +88,9 @@ describe('プロパティ編集', () => {
   it('検証を通る値のみ反映する', () => {
     const { layout, created } = must(placeFacility(emptyLayout(), 'terminal', { x: 5, y: 5 }));
     const id = created[0]!;
-    const ok = must(updateEntity(layout, id, { w: 10, props: { securityLanes: 6 }, name: 'T1' })).layout.facilities[id]!;
-    expect(ok).toMatchObject({ w: 10, name: 'T1', props: { securityLanes: 6, checkInCounters: 10 } });
+    const ok = must(updateEntity(layout, id, { w: 10, props: { levels: 3 }, name: 'T1' })).layout.facilities[id]!;
+    expect(ok).toMatchObject({ w: 10, name: 'T1', props: { levels: 3 } });
+    expect(updateEntity(layout, id, { props: { levels: 4 } })).toEqual({ ok: false, reason: 'INVALID_VALUE' });
     expect(updateEntity(layout, id, { w: 1 })).toEqual({ ok: false, reason: 'INVALID_VALUE' });
     expect(updateEntity(layout, id, { props: { unknown: 1 } })).toEqual({ ok: false, reason: 'INVALID_VALUE' });
     expect(updateEntity(layout, id, { color: 'red' })).toEqual({ ok: false, reason: 'INVALID_VALUE' });

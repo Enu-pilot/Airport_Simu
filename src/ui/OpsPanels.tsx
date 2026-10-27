@@ -4,6 +4,7 @@ import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, type AircraftTypeId } from '../core/
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { flightDelayMin, operableTypes } from '../core/sim/simulation';
 import { routeLength } from '../core/sim/routes';
+import { areaOccupancy, facilityLoad, serversOf } from '../core/sim/passengers';
 import type { Flight, RunwayMode, SimState } from '../core/sim/types';
 import { runwayDesignators } from '../core/layout/runway';
 import { editorStore, useEditor, type OpsState } from '../editor/store';
@@ -16,6 +17,8 @@ import {
   FLIGHT_STATUS_LABEL,
   HOLD_REASON_LABEL,
   RUNWAY_MODE_LABEL,
+  BOARDING_LABEL,
+  ZONE_LABEL,
   displayName,
   eventText,
   formatClock,
@@ -33,6 +36,8 @@ function useOps(): OpsState | null {
 export function OpsControls() {
   const o = useOps();
   const [type, setType] = useState<AircraftTypeId>('narrow180');
+  const level = useEditor((s) => s.interiorLevel);
+  const interior = useEditor((s) => s.overlays.interior);
   if (!o) return null;
   const { state, ctx } = o.sim;
   const st = state.stats;
@@ -57,6 +62,18 @@ export function OpsControls() {
         ))}
       </div>
       {o.dropped && <div className="warn-text">処理が追いつかないため、ゲーム内時間を遅らせています</div>}
+
+      <div className="tool-group-title">ターミナル内部の表示</div>
+      <div className="speed-buttons">
+        {[0, 1, 2].map((l) => (
+          <button key={l} className={interior && level === l ? 'tool active' : 'tool'} onClick={() => actions.setInteriorLevel(l)}>
+            {l + 1}F
+          </button>
+        ))}
+        <button className={!interior ? 'tool active' : 'tool'} onClick={() => interior && actions.toggleOverlay('interior')}>
+          外観
+        </button>
+      </div>
 
       <div className="tool-group-title">運航状況</div>
       <div className="stat-grid">
@@ -194,6 +211,14 @@ export function AircraftPanel() {
         <div className="prop-section-title">便</div>
         <FlightRows f={arr} now={state.now} label="到着" />
         <FlightRows f={dep} now={state.now} label="出発" />
+        {dep.pax.generated && (
+          <Row label="搭乗">
+            {BOARDING_LABEL[dep.pax.boarding]} {dep.pax.boarded}/{dep.pax.booked}
+            {dep.pax.deadline !== null ? ` · 締切 ${formatClock(dep.pax.deadline)}` : ''}
+            {dep.pax.missed ? ` · 乗り遅れ ${dep.pax.missed}` : ''}
+          </Row>
+        )}
+        {arr.pax.generated && <Row label="到着旅客">{`降機 ${arr.pax.deplaned}/${arr.pax.booked} · 退出 ${arr.pax.exited}`}</Row>}
       </div>
       <div className="prop-section">
         <div className="prop-section-title">運航履歴</div>
@@ -293,6 +318,7 @@ export function FlightBoard() {
               <th>遅延</th>
               <th>滑走路</th>
               <th>スポット</th>
+              <th>旅客</th>
               <th>便の状態</th>
               <th>機体の状態</th>
               <th>遅延理由</th>
@@ -313,6 +339,7 @@ export function FlightBoard() {
                   <td className={delay && delay >= 15 ? 'ng-text' : ''}>{delay ? `${delay}分` : ''}</td>
                   <td>{rw ? runwayDesignators(rw.heading).join('/') : ''}</td>
                   <td>{f.standId ? displayName(o.sim.ctx.layout, f.standId).replace('スポット ', '') : ''}</td>
+                  <td data-testid={`pax-${f.number}`}>{paxCell(f)}</td>
                   <td>{FLIGHT_STATUS_LABEL[f.status]}</td>
                   <td>
                     {AIRCRAFT_STATE_LABEL[ac.state]}
@@ -325,6 +352,102 @@ export function FlightBoard() {
           </tbody>
         </table>
         {flights.length === 0 && <div className="empty">表示する便はありません</div>}
+      </div>
+    </div>
+  );
+}
+
+/** 運航表の旅客欄: 出発便 = 搭乗/予約（乗り遅れ）、到着便 = 退出/降機 */
+function paxCell(f: Flight): string {
+  const p = f.pax;
+  if (!p.generated) return '';
+  if (f.direction === 'departure') return `${BOARDING_LABEL[p.boarding]} ${p.boarded}/${p.booked}${p.missed ? `（乗遅${p.missed}）` : ''}`;
+  return `退出 ${p.exited}/${p.deplaned + p.deplaneRemaining}`;
+}
+
+/** ターミナル: 施設ごとの処理状況と旅客の集計 */
+export function TerminalBoard() {
+  const o = useOps();
+  if (!o) return null;
+  const { state, ctx } = o.sim;
+  const model = ctx.terminal;
+  const occ = areaOccupancy(state);
+  const inTerminal = state.activePax.reduce((s, id) => {
+    const g = state.paxGroups[id]!;
+    return s + (g.area ? g.count : 0);
+  }, 0);
+  const ps = state.paxStats;
+  const stranded = state.activePax.reduce((s, id) => s + (['stranded', 'waitingFacility'].includes(state.paxGroups[id]!.state) ? state.paxGroups[id]!.count : 0), 0);
+  const rows = Object.values(model.areas).sort((a, b) => a.level - b.level || compareIds(a.id, b.id));
+  return (
+    <div className="issues" data-testid="terminal-board">
+      <div className="issues-header">
+        <strong>ターミナル</strong>
+        <span>館内 {inTerminal}人</span>
+        <span>搭乗 {ps.boarded}</span>
+        <span className={ps.missed ? 'ng-text' : ''} data-testid="pax-missed">乗り遅れ {ps.missed}</span>
+        <span>到着退出 {ps.exited}</span>
+        <span className={stranded ? 'warn-text' : ''}>待機・到達不能 {stranded}</span>
+        <span>平均待ち {ps.finished ? Math.round(ps.waitTotal / ps.finished / 6) / 10 : 0}分</span>
+        <span>平均歩行 {ps.finished ? Math.round(ps.walkTotal / ps.finished / 6) / 10 : 0}分</span>
+      </div>
+      <div className="issues-list">
+        <table className="board">
+          <thead>
+            <tr>
+              <th>階</th>
+              <th>施設</th>
+              <th>区域</th>
+              <th>窓口</th>
+              <th>滞在</th>
+              <th>待ち</th>
+              <th>手続き中</th>
+              <th>処理済み</th>
+              <th>平均待ち</th>
+              <th>最大待ち</th>
+              <th>混雑</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((a) => {
+              const fac = state.facilities[a.id];
+              const load = facilityLoad(state, a.id);
+              const here = occ.get(a.id) ?? 0;
+              const closed = state.closedAreas.includes(a.id);
+              const servers = serversOf(o.sim, a.id);
+              const crowd = Math.round((here / a.capacity) * 100);
+              return (
+                <tr key={a.id} onClick={() => focusEntity(a.id)} className={closed ? 'closed' : ''}>
+                  <td>{a.level + 1}F</td>
+                  <td>{displayName(ctx.layout, a.id).replace(/^\dF /, '')}</td>
+                  <td className="muted">{ZONE_LABEL[a.zone].replace(/（.*）/, '')}</td>
+                  <td>{['checkIn', 'security', 'restroom'].includes(a.kind) ? servers : ''}</td>
+                  <td>{here || ''}</td>
+                  <td className={load.queued > 50 ? 'ng-text' : ''}>{load.queued || ''}</td>
+                  <td>{load.inService || ''}</td>
+                  <td>{fac?.served || ''}</td>
+                  <td>{fac?.served ? `${Math.round(fac.waitTotal / fac.served / 6) / 10}分` : ''}</td>
+                  <td>{fac?.maxQueue || ''}</td>
+                  <td className={crowd > 100 ? 'ng-text' : crowd > 50 ? 'warn-text' : ''}>{crowd ? `${crowd}%` : ''}</td>
+                  <td>
+                    <button
+                      className="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        ops.setAreaClosed(a.id, !closed);
+                      }}
+                      data-testid={`close-${a.id}`}
+                    >
+                      {closed ? '再開' : '閉鎖'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {rows.length === 0 && <div className="empty">ターミナル内部のエリアがありません（建設モードの「ターミナル内部」で配置）</div>}
       </div>
     </div>
   );

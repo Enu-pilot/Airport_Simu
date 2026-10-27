@@ -1,5 +1,5 @@
-import { FACILITY_SPECS, STAND_DIMS } from '../core/model/catalog';
-import type { AirportLayout, FacilityKind, Heading } from '../core/model/types';
+import { FACILITY_SPECS, STAND_DIMS, TERMINAL_AREA_SPECS } from '../core/model/catalog';
+import type { AirportLayout, FacilityKind, Heading, TerminalAreaKind } from '../core/model/types';
 import { snapToOctant, sameTile, type Tile } from '../core/geometry/vec';
 import { rotatedDims } from '../core/layout/footprint';
 import {
@@ -9,6 +9,7 @@ import {
   placeFacility,
   placeRunway,
   placeStand,
+  placeTerminalArea,
   type OpResult,
 } from '../core/layout/operations';
 import type { EditorState, ToolId } from './store';
@@ -18,6 +19,19 @@ import type { EditorState, ToolId } from './store';
  * 「確定したらどうなるか」のプレビュー操作を作る。描画はこの結果をそのまま表示し、
  * 確定時は同じ操作を履歴に積む（プレビューと確定結果が食い違わない）。
  */
+
+export const areaKindOf = (tool: ToolId): TerminalAreaKind | null =>
+  tool.startsWith('area:') ? (tool.slice('area:'.length) as TerminalAreaKind) : null;
+
+/** 指定タイルを含むターミナル */
+export function terminalAt(layout: AirportLayout, tile: Tile): string | null {
+  for (const f of Object.values(layout.facilities)) {
+    if (f.kind !== 'terminal') continue;
+    const d = rotatedDims(f.w, f.h, f.rotation);
+    if (tile.x >= f.origin.x && tile.x < f.origin.x + d.w && tile.y >= f.origin.y && tile.y < f.origin.y + d.h) return f.id;
+  }
+  return null;
+}
 
 export const facilityKindOf = (tool: ToolId): FacilityKind | null =>
   tool.startsWith('facility:') ? (tool.slice('facility:'.length) as FacilityKind) : null;
@@ -71,7 +85,7 @@ export interface Preview {
 }
 
 /** 現在のツール状態でのプレビュー。表示すべきものが無ければ null */
-export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover' | 'draft' | 'history'>): Preview | null {
+export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover' | 'draft' | 'history' | 'interiorLevel'>): Preview | null {
   const layout: AirportLayout = s.history.present;
   const { hover, draft, options, tool } = s;
   const wrap = (result: OpResult, extra: string[] = []): Preview | null =>
@@ -108,6 +122,16 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
       return wrap(placeStand(layout, centeredOrigin(hover, dims.w, dims.h), options.standSize, options.rotation, options.buildState));
     }
     default: {
+      const areaKind = areaKindOf(tool);
+      if (areaKind) {
+        // 内部エリア: ターミナル内でドラッグ（クリックは既定サイズ）
+        const start = draft?.kind === 'rect' ? draft.start : hover;
+        const terminal = terminalAt(layout, start);
+        if (!terminal) return null;
+        const spec = TERMINAL_AREA_SPECS[areaKind];
+        const r = draft?.kind === 'rect' ? rectFromDrag(draft.start, hover) : { origin: hover, w: spec.defaultW, h: spec.defaultH };
+        return wrap(placeTerminalArea(layout, terminal, s.interiorLevel, areaKind, r.origin, { w: Math.max(r.w, spec.minW), h: Math.max(r.h, spec.minH) }));
+      }
       const kind = facilityKindOf(tool);
       if (!kind) return null;
       const spec = FACILITY_SPECS[kind];

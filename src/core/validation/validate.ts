@@ -16,7 +16,9 @@ import { buildAirsideNetwork, reachableNodes, type AirsideNetwork } from '../air
 import { collectFootprints, facilityTiles, standTiles, type FootprintPart } from '../layout/footprint';
 import { edgesOfNode, type AnyEdge } from '../layout/network';
 import { positionOnRunway, runwayEnd, runwayMaxSize } from '../layout/runway';
-import type { NetNode } from '../model/types';
+import type { NetNode, TerminalAreaKind } from '../model/types';
+import { areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
+import { findPaxRoute } from '../terminal/route';
 
 /**
  * 配置エラー・接続エラーの検出と、各エンティティの運用可否の判定。
@@ -61,6 +63,19 @@ export type IssueCode =
   | 'PARKING_NO_ROAD'
   | 'ROAD_NO_ENTRANCE'
   | 'ROAD_CROSSING_NO_JUNCTION'
+  // ターミナル内部
+  | 'TERMINAL_AREA_OUTSIDE'
+  | 'TERMINAL_AREA_OVERLAP'
+  | 'TERMINAL_NO_ENTRANCE'
+  | 'TERMINAL_NO_EXIT'
+  | 'TERMINAL_NO_CHECKIN'
+  | 'TERMINAL_NO_SECURITY'
+  | 'TERMINAL_NO_BAGGAGE_CLAIM'
+  | 'SECURITY_NOT_CONNECTED'
+  | 'GATE_NO_BOARDING_ACCESS'
+  | 'GATE_NO_ARRIVAL_ACCESS'
+  | 'GATE_UNREACHABLE'
+  | 'GATE_ARRIVAL_NO_EXIT'
   // 空港全体
   | 'NO_RUNWAY'
   | 'NO_TOWER';
@@ -96,6 +111,18 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   PARKING_NO_ROAD: 'warning',
   ROAD_NO_ENTRANCE: 'warning',
   ROAD_CROSSING_NO_JUNCTION: 'warning',
+  TERMINAL_AREA_OUTSIDE: 'error',
+  TERMINAL_AREA_OVERLAP: 'error',
+  TERMINAL_NO_ENTRANCE: 'warning',
+  TERMINAL_NO_EXIT: 'warning',
+  TERMINAL_NO_CHECKIN: 'warning',
+  TERMINAL_NO_SECURITY: 'warning',
+  TERMINAL_NO_BAGGAGE_CLAIM: 'warning',
+  SECURITY_NOT_CONNECTED: 'warning',
+  GATE_NO_BOARDING_ACCESS: 'warning',
+  GATE_NO_ARRIVAL_ACCESS: 'warning',
+  GATE_UNREACHABLE: 'warning',
+  GATE_ARRIVAL_NO_EXIT: 'warning',
   NO_RUNWAY: 'warning',
   NO_TOWER: 'warning',
 };
@@ -123,6 +150,7 @@ export interface Operability {
 
 export interface LayoutAnalysis {
   network: AirsideNetwork;
+  terminal: TerminalModel;
   issues: Issue[];
   byTarget: Record<string, Issue[]>;
   operability: Record<string, Operability>;
@@ -509,12 +537,93 @@ function checkRoads(layout: AirportLayout, parts: FootprintPart[], sink: IssueSi
   }
 }
 
+// ---------------------------------------------------------------- ターミナル内部
+
+function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: IssueSink): void {
+  // 配置: ターミナルの敷地・階の範囲内、同じ階で重ならない
+  const areas = sortedValues(layout.terminalAreas);
+  for (const a of areas) {
+    const t = layout.facilities[a.terminalId];
+    const inside =
+      !!t &&
+      t.kind === 'terminal' &&
+      a.level >= 0 &&
+      a.level < Number(t.props.levels ?? 1) &&
+      (() => {
+        const own = new Set(facilityTiles(t).map((p) => tileKey(p.x, p.y)));
+        return areaRectTiles(a).every((p) => own.has(tileKey(p.x, p.y)));
+      })();
+    if (!inside) sink.add('TERMINAL_AREA_OUTSIDE', [a.id], {}, a.origin);
+  }
+  for (let i = 0; i < areas.length; i++) {
+    for (let j = i + 1; j < areas.length; j++) {
+      const a = areas[i]!;
+      const b = areas[j]!;
+      if (a.terminalId !== b.terminalId || a.level !== b.level) continue;
+      const ox = Math.min(a.origin.x + a.w, b.origin.x + b.w) - Math.max(a.origin.x, b.origin.x);
+      const oy = Math.min(a.origin.y + a.h, b.origin.y + b.h) - Math.max(a.origin.y, b.origin.y);
+      if (ox > 0 && oy > 0) sink.add('TERMINAL_AREA_OVERLAP', [a.id, b.id], {}, { x: Math.max(a.origin.x, b.origin.x), y: Math.max(a.origin.y, b.origin.y) });
+    }
+  }
+
+  // ターミナルごとの必須施設
+  const terminals = sortedValues(layout.facilities).filter((f) => f.kind === 'terminal');
+  const required: [TerminalAreaKind, IssueCode][] = [
+    ['entrance', 'TERMINAL_NO_ENTRANCE'],
+    ['exit', 'TERMINAL_NO_EXIT'],
+    ['checkIn', 'TERMINAL_NO_CHECKIN'],
+    ['security', 'TERMINAL_NO_SECURITY'],
+    ['baggageClaim', 'TERMINAL_NO_BAGGAGE_CLAIM'],
+  ];
+  for (const t of terminals) {
+    const kinds = new Set((model.byTerminal[t.id] ?? []).map((id) => model.areas[id]!.kind));
+    for (const [kind, code] of required) if (!kinds.has(kind)) sink.add(code, [t.id], {}, t.origin);
+  }
+
+  // 保安検査場は一般区域と出発区域の両方に接している
+  for (const a of Object.values(model.areas)) {
+    if (a.kind !== 'security') continue;
+    const near = (model.links[a.id] ?? []).map((l) => model.areas[l.to]!);
+    if (!near.some((n) => n.zone === 'landside') || !near.some((n) => n.zone === 'departure' && n.kind !== 'security')) {
+      sink.add('SECURITY_NOT_CONNECTED', [a.id], {}, { x: a.x, y: a.y });
+    }
+  }
+
+  // ゲート: 搭乗口・降機口があり、入口から保安検査を経て到達でき、降機口から出口へ出られる
+  for (const g of sortedValues(layout.facilities).filter((f) => f.kind === 'gate')) {
+    const access = model.gates[g.id];
+    if (!access?.terminalId) continue;
+    const ids = model.byTerminal[access.terminalId] ?? [];
+    const ofKind = (k: TerminalAreaKind) => ids.filter((id) => model.areas[id]!.kind === k);
+    if (!access.boarding) {
+      sink.add('GATE_NO_BOARDING_ACCESS', [g.id], {}, g.origin);
+    } else {
+      const securities = ofKind('security');
+      const reachable = ofKind('entrance').some((e) =>
+        securities.some(
+          (sec) =>
+            findPaxRoute(model, { from: e, goals: new Map([[sec, 0]]) }) &&
+            findPaxRoute(model, { from: sec, goals: new Map([[access.boarding!, 0]]) }),
+        ),
+      );
+      if (!reachable) sink.add('GATE_UNREACHABLE', [g.id], {}, g.origin);
+    }
+    if (!access.deplane) {
+      sink.add('GATE_NO_ARRIVAL_ACCESS', [g.id], {}, g.origin);
+    } else {
+      const exits = new Map(ofKind('exit').map((id) => [id, 0] as const));
+      if (!findPaxRoute(model, { from: access.deplane, goals: exits })) sink.add('GATE_ARRIVAL_NO_EXIT', [g.id], {}, g.origin);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- 全体
 
 export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   const sink = new IssueSink();
   const parts = collectFootprints(layout);
   const network = buildAirsideNetwork(layout);
+  const terminal = buildTerminalModel(layout);
   const isolatedEdges = new Set<string>();
 
   if (Object.keys(layout.runways).length === 0) sink.add('NO_RUNWAY', []);
@@ -526,6 +635,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   checkAirside(layout, network, sink, isolatedEdges);
   checkFacilities(layout, parts, sink);
   checkRoads(layout, parts, sink);
+  checkTerminals(layout, terminal, sink);
 
   const issues = sink.issues;
   const byTarget: Record<string, Issue[]> = {};
@@ -570,5 +680,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
     judge(n.id, edgesOfNode(layout.roads, n.id).some((e) => e.buildState === 'operational'));
   }
 
-  return { network, issues, byTarget, operability, counts };
+  for (const a of Object.values(layout.terminalAreas)) judge(a.id, true);
+
+  return { network, terminal, issues, byTarget, operability, counts };
 }

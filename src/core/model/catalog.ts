@@ -1,4 +1,4 @@
-import type { FacilityKind, PropValue, SizeClass } from './types';
+import type { FacilityKind, PaxZone, PropValue, SizeClass, TerminalAreaKind } from './types';
 
 /** 1タイルの実寸（m）。距離・滑走路長の換算に使う */
 export const TILE_M = 25;
@@ -55,10 +55,7 @@ export type PropDef =
 
 export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
   apron: [],
-  terminal: [
-    { key: 'checkInCounters', type: 'int', min: 0, max: 200 },
-    { key: 'securityLanes', type: 'int', min: 0, max: 40 },
-  ],
+  terminal: [{ key: 'levels', type: 'int', min: 1, max: 3 }],
   gate: [
     { key: 'standId', type: 'standRef' },
     { key: 'jetBridge', type: 'bool' },
@@ -75,7 +72,7 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
 
 export const DEFAULT_PROPS: Record<FacilityKind, Record<string, PropValue>> = {
   apron: {},
-  terminal: { checkInCounters: 10, securityLanes: 2 },
+  terminal: { levels: 2 },
   gate: { standId: null, jetBridge: true },
   hangar: { maxSize: 'M' },
   tower: { level: 1 },
@@ -106,3 +103,60 @@ export const STRIP_END_EXTENSION = 2.5;
 
 /** ゲートと紐付けスポットの最大距離（チェビシェフ距離、タイル） */
 export const GATE_MAX_STAND_DISTANCE = 3;
+
+// ---------------------------------------------------------------- ターミナル内部
+
+export interface TerminalAreaSpec {
+  defaultW: number;
+  defaultH: number;
+  minW: number;
+  minH: number;
+  zone: PaxZone;
+  /** 区域をプレイヤーが選べる（通路・待合・トイレ・上下移動） */
+  zoneEditable: boolean;
+  props: readonly PropDef[];
+  defaults: Record<string, PropValue>;
+}
+
+export const TERMINAL_AREA_SPECS: Record<TerminalAreaKind, TerminalAreaSpec> = {
+  entrance: { defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'landside', zoneEditable: false, props: [], defaults: {} },
+  exit: { defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'landside', zoneEditable: false, props: [], defaults: {} },
+  checkIn: {
+    defaultW: 8, defaultH: 2, minW: 1, minH: 1, zone: 'landside', zoneEditable: false,
+    props: [{ key: 'counters', type: 'int', min: 0, max: 100 }, { key: 'serviceSecPerPax', type: 'int', min: 5, max: 600 }],
+    defaults: { counters: 8, serviceSecPerPax: 50 },
+  },
+  security: {
+    defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: false,
+    props: [{ key: 'lanes', type: 'int', min: 0, max: 30 }, { key: 'serviceSecPerPax', type: 'int', min: 3, max: 300 }],
+    defaults: { lanes: 3, serviceSecPerPax: 15 },
+  },
+  departureLobby: {
+    defaultW: 10, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: false,
+    props: [{ key: 'seats', type: 'int', min: 0, max: 5000 }], defaults: { seats: 200 },
+  },
+  waiting: {
+    defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: true,
+    props: [{ key: 'seats', type: 'int', min: 0, max: 5000 }], defaults: { seats: 100 },
+  },
+  restroom: {
+    defaultW: 2, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: true,
+    props: [{ key: 'fixtures', type: 'int', min: 0, max: 100 }], defaults: { fixtures: 6 },
+  },
+  arrivalCorridor: { defaultW: 10, defaultH: 1, minW: 1, minH: 1, zone: 'arrival', zoneEditable: false, props: [], defaults: {} },
+  baggageClaim: {
+    defaultW: 6, defaultH: 3, minW: 1, minH: 1, zone: 'arrival', zoneEditable: false,
+    props: [{ key: 'belts', type: 'int', min: 0, max: 20 }], defaults: { belts: 2 },
+  },
+  hall: { defaultW: 4, defaultH: 4, minW: 1, minH: 1, zone: 'landside', zoneEditable: true, props: [], defaults: {} },
+  escalator: {
+    defaultW: 2, defaultH: 1, minW: 1, minH: 1, zone: 'landside', zoneEditable: true,
+    props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }], defaults: { travelSec: 30 },
+  },
+  elevator: {
+    defaultW: 1, defaultH: 1, minW: 1, minH: 1, zone: 'landside', zoneEditable: true,
+    props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }], defaults: { travelSec: 60 },
+  },
+};
+
+export const TERMINAL_AREA_KINDS = Object.keys(TERMINAL_AREA_SPECS) as TerminalAreaKind[];

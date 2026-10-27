@@ -9,8 +9,8 @@ PCブラウザで動作する空港デザイン・運営シミュレーション
 
 ## 現在の状態
 
-**Phase 2（航空機運航・地上移動シミュレーション）** — 建設エディタで作った空港で「▶ 運航開始」を押すと、航空機が到着・着陸・地上走行・駐機・出発準備・プッシュバック・離陸を行う。
-旅客・手荷物・経営は Phase 3 以降。運航ルールは [docs/11_operations_rules.md](docs/11_operations_rules.md)（ゲーム用の簡略化モデル）。
+**Phase 3（ターミナル・旅客流動）** — 建設エディタで空港とターミナル内部（階・エリア）を作り、「▶ 運航開始」で航空機の運航と旅客の流れ（チェックイン → 保安検査 → 搭乗、降機 → 手荷物受取 → 出口）をシミュレーションする。
+ルールは [docs/11_operations_rules.md](docs/11_operations_rules.md)（運航）、[docs/12_passenger_rules.md](docs/12_passenger_rules.md)（旅客）。いずれもゲーム用の簡略化モデル。
 
 ## 使い方
 
@@ -62,6 +62,7 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 09 | [docs/09_roadmap.md](docs/09_roadmap.md) | フェーズ別ロードマップ |
 | 10 | [docs/10_open_issues.md](docs/10_open_issues.md) | 未決事項一覧 |
 | 11 | [docs/11_operations_rules.md](docs/11_operations_rules.md) | 運航ルール仕様（Phase 2 実装、前提と制約・未実装の条件） |
+| 12 | [docs/12_passenger_rules.md](docs/12_passenger_rules.md) | ターミナル・旅客流動仕様（Phase 3 実装） |
 
 ## 技術構成
 

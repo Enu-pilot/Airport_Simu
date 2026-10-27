@@ -13,7 +13,8 @@ import {
 } from '../core/layout/operations';
 import { pickAt } from '../core/layout/pick';
 import { actions, applyOp, editorStore, type EditorState } from './store';
-import { computePreview, facilityKindOf, nextPathPoint } from './tools';
+import { areaKindOf, computePreview, facilityKindOf, nextPathPoint } from './tools';
+import { pickTerminalArea } from '../core/layout/pick';
 import { aircraftAt } from '../core/sim/query';
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { ops } from './simRunner';
@@ -72,13 +73,15 @@ export function onPointerDown(screen: Vec2, button: number): void {
     const world = screenToWorld(s.camera, screen);
     const ac = aircraftAt(s.ops.sim.state, world);
     ops.selectAircraft(ac);
-    if (!ac) actions.select(pickAt(s.history.present, world));
+    if (!ac) actions.select((s.overlays.interior ? pickTerminalArea(s.history.present, world, s.interiorLevel) : null) ?? pickAt(s.history.present, world));
     return;
   }
 
   switch (s.tool) {
     case 'select': {
-      const id = pickAt(s.history.present, screenToWorld(s.camera, screen));
+      const world = screenToWorld(s.camera, screen);
+      // 内部表示中は、表示している階のエリアを優先して選ぶ
+      const id = (s.overlays.interior ? pickTerminalArea(s.history.present, world, s.interiorLevel) : null) ?? pickAt(s.history.present, world);
       actions.select(id);
       if (id) actions.setDraft({ kind: 'move', id, start: tile });
       return;
@@ -103,7 +106,9 @@ export function onPointerDown(screen: Vec2, button: number): void {
     }
     default: {
       const kind = facilityKindOf(s.tool);
-      if (kind && FACILITY_SPECS[kind].dragPlace) {
+      if (areaKindOf(s.tool)) {
+        actions.setDraft({ kind: 'rect', start: tile });
+      } else if (kind && FACILITY_SPECS[kind].dragPlace) {
         actions.setDraft({ kind: 'rect', start: tile });
       } else {
         commitPreview(tile);

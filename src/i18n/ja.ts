@@ -1,5 +1,5 @@
-import type { AircraftState, DelayCause, FlightStatus, HoldReason, RunwayMode, SimEvent } from '../core/sim/types';
-import type { BuildState, EntityType, FacilityKind, RoadClass, SizeClass } from '../core/model/types';
+import type { AircraftState, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent } from '../core/sim/types';
+import type { BuildState, EntityType, FacilityKind, PaxZone, RoadClass, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/validation/validate';
 import type { OpFailure } from '../core/layout/operations';
@@ -27,6 +27,7 @@ export const ENTITY_LABEL: Record<EntityType, string> = {
   road: '道路',
   stand: '駐機スポット',
   facility: '施設',
+  terminalArea: 'ターミナル内エリア',
 };
 
 export const NODE_KIND_LABEL: Record<AirsideNodeKind, string> = {
@@ -103,6 +104,11 @@ export function displayName(layout: AirportLayout, id: string): string {
       if (!f) return id;
       return f.name ? `${FACILITY_LABEL[f.kind]} ${f.name}` : `${FACILITY_LABEL[f.kind]} #${num}`;
     }
+    case 'terminalArea': {
+      const a = layout.terminalAreas[id];
+      if (!a) return id;
+      return `${a.level + 1}F ${a.name || AREA_KIND_LABEL[a.kind]}`;
+    }
     default:
       return id;
   }
@@ -140,6 +146,18 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   PARKING_NO_ROAD: (n) => `${n[0]} が道路に接していません`,
   ROAD_NO_ENTRANCE: (n, p) => `敷地の出入口につながらない道路があります（${n[0]} ほか計${p.count}区間）`,
   ROAD_CROSSING_NO_JUNCTION: (n) => `${n[0]} と ${n[1]} が交差点なしで交差しています`,
+  TERMINAL_AREA_OUTSIDE: (n) => `${n[0]} がターミナルの範囲（敷地・階数）からはみ出しています`,
+  TERMINAL_AREA_OVERLAP: (n) => `${n[0]} と ${n[1]} が同じ階で重なっています`,
+  TERMINAL_NO_ENTRANCE: (n) => `${n[0]} に入口がありません（出発旅客が来られません）`,
+  TERMINAL_NO_EXIT: (n) => `${n[0]} に出口がありません（到着旅客が出られません）`,
+  TERMINAL_NO_CHECKIN: (n) => `${n[0]} にチェックインカウンターがありません`,
+  TERMINAL_NO_SECURITY: (n) => `${n[0]} に保安検査場がありません`,
+  TERMINAL_NO_BAGGAGE_CLAIM: (n) => `${n[0]} に手荷物受取所がありません`,
+  SECURITY_NOT_CONNECTED: (n) => `${n[0]} が一般区域と出発区域の両方に接していません`,
+  GATE_NO_BOARDING_ACCESS: (n) => `${n[0]} に接する出発区域のエリア（出発ロビー等）がありません`,
+  GATE_NO_ARRIVAL_ACCESS: (n) => `${n[0]} に接する到着通路がありません`,
+  GATE_UNREACHABLE: (n) => `出発旅客が入口から保安検査を経て ${n[0]} に到達できません`,
+  GATE_ARRIVAL_NO_EXIT: (n) => `${n[0]} から降りた旅客が出口へ行けません`,
   NO_RUNWAY: () => '滑走路がありません',
   NO_TOWER: () => '管制塔がありません',
 };
@@ -187,6 +205,7 @@ export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
   departurePriority: '出発優先',
   crossing: '滑走路横断待ち',
   goAround: '着陸復行',
+  boarding: '搭乗手続き中',
 };
 
 export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
@@ -196,6 +215,7 @@ export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
   taxiCongestion: '誘導路の混雑',
   turnaround: '折り返し作業',
   noRoute: '経路なし',
+  boarding: '搭乗手続き',
 };
 
 export const FLIGHT_STATUS_LABEL: Record<FlightStatus, string> = {
@@ -248,5 +268,75 @@ export function eventText(e: SimEvent, callsign: (id: string) => string): string
       return `⚠ 競合検知: ${who} と ${e.note ? callsign(e.note) : ''} が接近`;
     case 'scheduleGenerated':
       return `スケジュール生成（${e.note}）`;
+    case 'boardingOpen':
+      return `${e.note} 搭乗開始`;
+    case 'boardingClosed':
+      return `${e.note}`.replace(/^/, '搭乗締切 ');
+    case 'paxMissed':
+      return `⚠ 乗り遅れ: ${e.note}`;
+    case 'areaClosed':
+      return `施設を閉鎖: ${e.note}`;
+    case 'areaOpened':
+      return `施設を再開: ${e.note}`;
   }
 }
+
+// ---------------------------------------------------------------- ターミナル内部・旅客
+
+export const AREA_KIND_LABEL: Record<TerminalAreaKind, string> = {
+  entrance: '入口',
+  exit: '出口',
+  checkIn: 'チェックイン',
+  security: '保安検査場',
+  departureLobby: '出発ロビー',
+  waiting: '待合スペース',
+  restroom: 'トイレ',
+  arrivalCorridor: '到着通路',
+  baggageClaim: '手荷物受取所',
+  hall: '通路・ホール',
+  escalator: 'エスカレーター',
+  elevator: 'エレベーター',
+};
+
+export const ZONE_LABEL: Record<PaxZone, string> = {
+  landside: '一般区域（保安検査前）',
+  departure: '出発区域（保安検査後）',
+  arrival: '到着区域',
+};
+
+export const AREA_PROP_LABEL: Record<string, string> = {
+  counters: 'カウンター数',
+  serviceSecPerPax: '1人あたり処理時間（秒）',
+  lanes: 'レーン数',
+  seats: '座席数',
+  fixtures: '個室・設備数',
+  belts: 'ベルト数',
+  travelSec: '上下移動の所要時間（秒）',
+  levels: '階数',
+};
+
+export const PAX_STATE_LABEL: Record<PaxState, string> = {
+  toAirport: '空港へ移動中',
+  walking: '移動中',
+  queuing: '順番待ち',
+  inService: '手続き中',
+  dwelling: '待機（自由時間）',
+  boardingQueue: '搭乗待ち',
+  boarded: '搭乗済み',
+  waitingBaggage: '手荷物待ち',
+  exited: '退出済み',
+  stranded: '到達不能',
+  waitingFacility: '施設閉鎖で待機',
+  missed: '乗り遅れ',
+  cancelled: '欠航',
+};
+
+export const MISS_REASON_LABEL: Record<MissReason, string> = {
+  late: '締切に間に合わず',
+  unreachable: 'ゲートに到達できず',
+  facilityClosed: '施設閉鎖で未処理',
+  noGate: 'ゲートなし',
+  cancelled: '欠航',
+};
+
+export const BOARDING_LABEL: Record<FlightPax['boarding'], string> = { notStarted: '搭乗前', open: '搭乗中', closed: '搭乗締切' };

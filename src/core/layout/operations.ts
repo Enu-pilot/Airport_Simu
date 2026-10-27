@@ -1,4 +1,4 @@
-import { DEFAULT_PROPS, FACILITY_SPECS, PROP_SCHEMAS } from '../model/catalog';
+import { DEFAULT_PROPS, FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS } from '../model/catalog';
 import { createSite } from '../model/site';
 import {
   BUILD_STATES,
@@ -17,6 +17,9 @@ import {
   type SizeClass,
   type Site,
   type Stand,
+  type PaxZone,
+  type TerminalArea,
+  type TerminalAreaKind,
 } from '../model/types';
 import { add, sameTile, type Tile } from '../geometry/vec';
 import { sortedValues } from '../model/ids';
@@ -73,6 +76,7 @@ export function createEmptyLayout(site: Site = createSite(), name = '新しい�
     roads: {},
     stands: {},
     facilities: {},
+    terminalAreas: {},
   };
 }
 
@@ -193,6 +197,53 @@ export function placeRunway(
   return ok(finalize(d), [id]);
 }
 
+export interface PlaceAreaOptions {
+  w?: number;
+  h?: number;
+  name?: string;
+  zone?: PaxZone;
+  props?: Record<string, PropValue>;
+}
+
+/** ターミナル内部のエリアを配置する（level は 0 = 1F） */
+export function placeTerminalArea(
+  layout: AirportLayout,
+  terminalId: string,
+  level: number,
+  kind: TerminalAreaKind,
+  origin: Tile,
+  opts: PlaceAreaOptions = {},
+): OpResult {
+  const t = layout.facilities[terminalId];
+  if (!t || t.kind !== 'terminal') return fail('NOT_FOUND');
+  const spec = TERMINAL_AREA_SPECS[kind];
+  const levels = Number(t.props.levels ?? 1);
+  const w = opts.w ?? spec.defaultW;
+  const h = opts.h ?? spec.defaultH;
+  if (!isInt(level, 0, levels - 1) || w < spec.minW || h < spec.minH) return fail('INVALID_VALUE');
+  if (opts.zone && !spec.zoneEditable && opts.zone !== spec.zone) return fail('INVALID_VALUE');
+  const d = cloneLayout(layout);
+  const id = allocId(d, 'ta');
+  d.terminalAreas[id] = {
+    id,
+    terminalId,
+    level,
+    kind,
+    name: opts.name ?? '',
+    origin: { ...origin },
+    w,
+    h,
+    zone: opts.zone ?? spec.zone,
+    props: { ...spec.defaults, ...opts.props },
+  };
+  return ok(finalize(d), [id]);
+}
+
+/** ターミナルに属するエリア（ID 順） */
+export function areasOf(layout: AirportLayout, terminalId: string): TerminalArea[] {
+  return sortedValues(layout.terminalAreas).filter((a) => a.terminalId === terminalId);
+}
+
 export interface TaxiwayOptions {
   widthClass?: SizeClass;
   oneWay?: boolean;
@@ -276,6 +327,14 @@ export function moveEntity(layout: AirportLayout, id: string, delta: Tile): OpRe
       const f = d.facilities[id];
       if (!f) return fail('NOT_FOUND');
       f.origin = add(f.origin, delta);
+      // ターミナル内部のエリアも一緒に動かす
+      for (const a of areasOf(d, id)) a.origin = add(a.origin, delta);
+      break;
+    }
+    case 'terminalArea': {
+      const a = d.terminalAreas[id];
+      if (!a) return fail('NOT_FOUND');
+      a.origin = add(a.origin, delta);
       break;
     }
     case 'taxiNode':
@@ -307,8 +366,22 @@ export function rotateEntity(layout: AirportLayout, id: string): OpResult {
     const f = d.facilities[id];
     if (!f) return fail('NOT_FOUND');
     const old = facilityDims(f);
+    const oldOrigin = f.origin;
     f.rotation = ((f.rotation + 90) % 360) as Rotation;
     f.origin = originAfterRotation(f.origin, old, facilityDims(f), f.rotation);
+    // 内部のエリアをターミナルと一緒に時計回りに回す（相対位置 (x, y) → (H − y − h, x)）
+    for (const a of areasOf(d, id)) {
+      const rx = a.origin.x - oldOrigin.x;
+      const ry = a.origin.y - oldOrigin.y;
+      a.origin = { x: f.origin.x + old.h - (ry + a.h), y: f.origin.y + rx };
+      [a.w, a.h] = [a.h, a.w];
+    }
+  } else if (type === 'terminalArea') {
+    const a = d.terminalAreas[id];
+    if (!a) return fail('NOT_FOUND');
+    const o = originAfterRotation(a.origin, { w: a.w, h: a.h }, { w: a.h, h: a.w }, a.w > a.h ? 90 : 0);
+    [a.w, a.h] = [a.h, a.w];
+    a.origin = o;
   } else if (type === 'stand') {
     const s = d.stands[id];
     if (!s) return fail('NOT_FOUND');
@@ -336,6 +409,8 @@ function setRunwayHeadingAroundMid(r: Runway, heading: Heading): void {
 export function defaultDuplicateOffset(layout: AirportLayout, id: string): Tile {
   const f = layout.facilities[id];
   if (f) return { x: facilityDims(f).w + 1, y: 0 };
+  const a = layout.terminalAreas[id];
+  if (a) return { x: a.w, y: 0 };
   const s = layout.stands[id];
   if (s) return { x: standDims(s).w + 1, y: 0 };
   const r = layout.runways[id];
@@ -359,6 +434,15 @@ export function duplicateEntity(layout: AirportLayout, id: string, offset?: Tile
     const props = { ...f.props };
     if (f.kind === 'gate') props.standId = null;
     d.facilities[newId] = { ...f, id: newId, origin: add(f.origin, off), props, name: f.name ? `${f.name} copy` : '' };
+    for (const a of areasOf(d, id)) {
+      const aid = allocId(d, 'ta');
+      d.terminalAreas[aid] = { ...structuredClone(a), id: aid, terminalId: newId, origin: add(a.origin, off) };
+    }
+  } else if (type === 'terminalArea') {
+    const a = d.terminalAreas[id];
+    if (!a) return fail('NOT_FOUND');
+    newId = allocId(d, 'ta');
+    d.terminalAreas[newId] = { ...structuredClone(a), id: newId, origin: add(a.origin, off), name: a.name ? `${a.name} copy` : '' };
   } else if (type === 'stand') {
     const s = d.stands[id];
     if (!s) return fail('NOT_FOUND');
@@ -389,6 +473,11 @@ export function deleteEntity(layout: AirportLayout, id: string): OpResult {
     case 'facility':
       if (!d.facilities[id]) return fail('NOT_FOUND');
       delete d.facilities[id];
+      for (const a of areasOf(d, id)) delete d.terminalAreas[a.id];
+      break;
+    case 'terminalArea':
+      if (!d.terminalAreas[id]) return fail('NOT_FOUND');
+      delete d.terminalAreas[id];
       break;
     case 'taxiNode':
     case 'roadNode': {
@@ -494,6 +583,36 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
         return updateEntity(d, id, rest);
       }
       err = apply<Stand>(s, { name: str, size, buildState: isBuildState });
+      break;
+    }
+    case 'terminalArea': {
+      const a = d.terminalAreas[id];
+      if (!a) return fail('NOT_FOUND');
+      const spec = TERMINAL_AREA_SPECS[a.kind];
+      const levels = Number(d.facilities[a.terminalId]?.props.levels ?? 1);
+      for (const [k, v] of entries) {
+        if (k === 'name') {
+          if (!str(v)) return fail('INVALID_VALUE');
+        } else if (k === 'w' || k === 'h') {
+          if (!isInt(v, k === 'w' ? spec.minW : spec.minH, 150)) return fail('INVALID_VALUE');
+        } else if (k === 'level') {
+          if (!isInt(v, 0, levels - 1)) return fail('INVALID_VALUE');
+        } else if (k === 'zone') {
+          if (!spec.zoneEditable || !['landside', 'departure', 'arrival'].includes(v as string)) return fail('INVALID_VALUE');
+        } else if (k === 'props') {
+          if (typeof v !== 'object' || v === null) return fail('INVALID_VALUE');
+          for (const [pk, pv] of Object.entries(v)) {
+            const def = spec.props.find((p) => p.key === pk);
+            if (!def || def.type !== 'int' || !isInt(pv, def.min, def.max)) return fail('INVALID_VALUE');
+          }
+        } else {
+          return fail('INVALID_VALUE');
+        }
+      }
+      const { props, ...rest } = patch as { props?: Record<string, PropValue> } & Partial<TerminalArea>;
+      Object.assign(a, rest);
+      if (props) a.props = { ...a.props, ...props };
+      err = null;
       break;
     }
     case 'facility': {

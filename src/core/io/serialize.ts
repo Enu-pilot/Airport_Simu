@@ -13,15 +13,22 @@ export function exportLayout(layout: AirportLayout): string {
   return JSON.stringify(file);
 }
 
-const RECORD_KEYS = ['counters', 'runways', 'taxiNodes', 'taxiways', 'roadNodes', 'roads', 'stands', 'facilities'] as const;
+const RECORD_KEYS = ['counters', 'runways', 'taxiNodes', 'taxiways', 'roadNodes', 'roads', 'stands', 'facilities', 'terminalAreas'] as const;
 
 /** JSON から読み込む。形式が不正な場合は例外 */
 export function importLayout(json: string): AirportLayout {
   const data = JSON.parse(json) as Partial<LayoutFile>;
   if (data.format !== SAVE_FORMAT) throw new Error('SkyPort のレイアウトファイルではありません');
-  if (data.schemaVersion !== SCHEMA_VERSION) throw new Error(`未対応のバージョンです: ${String(data.schemaVersion)}`);
+  if (typeof data.schemaVersion !== 'number' || data.schemaVersion < 1 || data.schemaVersion > SCHEMA_VERSION) {
+    throw new Error(`未対応のバージョンです: ${String(data.schemaVersion)}`);
+  }
   const l = data.layout;
   if (!l || typeof l !== 'object') throw new Error('レイアウトがありません');
+  // v1 → v2: ターミナル内部のエリアを追加
+  if (data.schemaVersion < 2) {
+    l.terminalAreas = {};
+    l.schemaVersion = 2;
+  }
   for (const k of RECORD_KEYS) {
     if (typeof l[k] !== 'object' || l[k] === null) throw new Error(`項目 ${k} が不正です`);
   }

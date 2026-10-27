@@ -3,7 +3,7 @@ import type { BuildState, FacilityKind, SizeClass } from '../core/model/types';
 import { BUILD_STATES } from '../core/model/types';
 import { actions, useEditor, type ToolId } from '../editor/store';
 import { facilityKindOf } from '../editor/tools';
-import { BUILD_STATE_LABEL, FACILITY_LABEL, ROAD_CLASS_LABEL } from '../i18n/ja';
+import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, ROAD_CLASS_LABEL } from '../i18n/ja';
 
 interface ToolDef {
   id: ToolId;
@@ -36,6 +36,14 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
     tools: [fac('tower'), fac('hangar'), fac('maintenance'), fac('fuelFarm'), fac('fireStation'), fac('gseBase')],
   },
   {
+    title: 'ターミナル内部（ドラッグで範囲）',
+    tools: (['entrance', 'checkIn', 'security', 'departureLobby', 'waiting', 'restroom', 'arrivalCorridor', 'baggageClaim', 'exit', 'hall', 'escalator', 'elevator'] as const).map((k) => ({
+      id: `area:${k}` as ToolId,
+      label: AREA_KIND_LABEL[k],
+      hint: 'ターミナルの中でドラッグして範囲を指定（表示中の階に配置）',
+    })),
+  },
+  {
     title: '道路・エリア',
     tools: [
       { id: 'road', label: '道路', hint: 'クリックで頂点を追加、ダブルクリック/Enter/右クリックで確定' },
@@ -55,6 +63,8 @@ export function Toolbox() {
   const tool = useEditor((s) => s.tool);
   const options = useEditor((s) => s.options);
   const kind = facilityKindOf(tool);
+  const level = useEditor((s) => s.interiorLevel);
+  const interior = useEditor((s) => s.overlays.interior);
   const rotatable = tool === 'stand' || (kind !== null && !FACILITY_SPECS[kind].dragPlace);
 
   return (
@@ -80,6 +90,16 @@ export function Toolbox() {
 
       <div className="tool-options">
         <div className="tool-group-title">配置オプション</div>
+        <label>
+          ターミナル内部の階
+          <span>
+            {[0, 1, 2].map((l) => (
+              <button key={l} className={interior && level === l ? 'small tool active' : 'small'} onClick={() => actions.setInteriorLevel(l)} data-testid={`level-${l}`}>
+                {l + 1}F
+              </button>
+            ))}
+          </span>
+        </label>
         <label>
           新規の状態
           <select

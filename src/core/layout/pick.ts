@@ -64,3 +64,11 @@ export function pickAt(layout: AirportLayout, world: Vec2): string | null {
   const area = [...inFacility('area'), ...inFacility('apron')];
   return first(area);
 }
+
+/** 指定階のターミナル内エリアを選ぶ（小さいものを優先） */
+export function pickTerminalArea(layout: AirportLayout, world: Vec2, level: number): string | null {
+  const hits = Object.values(layout.terminalAreas)
+    .filter((a) => a.level === level && world.x >= a.origin.x && world.x < a.origin.x + a.w && world.y >= a.origin.y && world.y < a.origin.y + a.h)
+    .sort((a, b) => a.w * a.h - b.w * b.h || compareIds(a.id, b.id));
+  return hits[0]?.id ?? null;
+}

@@ -1,6 +1,7 @@
 import { buildAirsideNetwork, type AirsideNetwork } from '../airside/network';
 import { TILE_M } from '../model/catalog';
-import { sortedValues } from '../model/ids';
+import { compareIds, sortedValues } from '../model/ids';
+import { buildTerminalModel, type TerminalModel } from '../terminal/model';
 import type { AirportLayout, SizeClass } from '../model/types';
 import { distance } from '../geometry/vec';
 import { runwayMaxSize } from '../layout/runway';
@@ -38,6 +39,11 @@ export interface SimContext {
   network: AirsideNetwork;
   runways: Record<string, RunwayInfo>;
   stands: Record<string, StandInfo>;
+  terminal: TerminalModel;
+  /** スポット → 紐付けゲート */
+  standGate: Record<string, string>;
+  /** 出発旅客が来るターミナル（入口のある最初のターミナル） */
+  paxTerminal: string | null;
 }
 
 export function createContext(layout: AirportLayout): SimContext {
@@ -73,7 +79,16 @@ export function createContext(layout: AirportLayout): SimContext {
       heading: s.rotation,
     };
   }
-  return { layout, network, runways, stands };
+  const terminal = buildTerminalModel(layout);
+  const standGate: Record<string, string> = {};
+  for (const f of sortedValues(layout.facilities)) {
+    if (f.kind === 'gate' && typeof f.props.standId === 'string' && !standGate[f.props.standId]) standGate[f.props.standId] = f.id;
+  }
+  const paxTerminal =
+    Object.keys(terminal.byTerminal)
+      .sort(compareIds)
+      .find((t) => terminal.byTerminal[t]!.some((id) => terminal.areas[id]!.kind === 'entrance')) ?? null;
+  return { layout, network, runways, stands, terminal, standGate, paxTerminal };
 }
 
 /** 運用方向に並べた滑走路上ノードと、進入端からの距離 */

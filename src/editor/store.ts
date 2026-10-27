@@ -6,7 +6,7 @@ import type { Tile, Vec2 } from '../core/geometry/vec';
 import { commit, createHistory, redo, undo, type History } from '../core/editor/history';
 import type { OpResult } from '../core/layout/operations';
 import { createEmptyLayout } from '../core/layout/operations';
-import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass } from '../core/model/types';
+import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { createSampleAirport } from '../core/sample/sampleAirport';
 import { analyzeLayout, type LayoutAnalysis } from '../core/validation/validate';
 import { exportLayout, importLayout } from '../core/io/serialize';
@@ -14,7 +14,7 @@ import { OP_FAILURE_LABEL } from '../i18n/ja';
 import type { Simulation } from '../core/sim/simulation';
 import type { SimClock } from '../core/sim/clock';
 
-export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | `facility:${FacilityKind}`;
+export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
 
 export interface ToolOptions {
   rotation: Rotation;
@@ -36,6 +36,8 @@ export type Draft =
 
 export interface Overlays {
   grid: boolean;
+  /** ターミナル内部（選択中の階）を表示する */
+  interior: boolean;
   buildable: boolean;
   network: boolean;
   issues: boolean;
@@ -58,6 +60,8 @@ export interface EditorState {
   hover: Tile | null;
   draft: Draft;
   overlays: Overlays;
+  /** ターミナル内部の表示・編集中の階（0 = 1F） */
+  interiorLevel: number;
   toast: Toast | null;
   /** build: 建設（編集）モード / operate: 運航モード（レイアウトの編集は不可） */
   mode: 'build' | 'operate';
@@ -78,7 +82,7 @@ export interface OpsState {
   dropped: boolean;
 }
 
-const STORAGE_KEY = 'skyport.layout.v1';
+const STORAGE_KEY = 'skyport.layout.v2';
 
 function loadInitialLayout(): AirportLayout {
   try {
@@ -107,7 +111,8 @@ export const editorStore = createStore<EditorState>(() => ({
   viewSize: { w: 800, h: 600 },
   hover: null,
   draft: null,
-  overlays: { grid: true, buildable: false, network: false, issues: true, labels: true },
+  overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true },
+  interiorLevel: 1,
   toast: null,
   mode: 'build',
   ops: null,
@@ -195,7 +200,8 @@ function entityExists(layout: AirportLayout, id: string): boolean {
     layout.roadNodes[id] ||
     layout.roads[id] ||
     layout.stands[id] ||
-    layout.facilities[id]
+    layout.facilities[id] ||
+    layout.terminalAreas[id]
   );
 }
 
@@ -227,7 +233,13 @@ export const actions = {
     set({ selection: id });
   },
   setTool(tool: ToolId): void {
-    set({ tool, draft: null, ...(tool !== 'select' ? { selection: null } : {}) });
+    set((s) => ({
+      tool,
+      draft: null,
+      ...(tool !== 'select' ? { selection: null } : {}),
+      // 内部エリアのツールでは内部表示を自動で有効にする
+      ...(tool.startsWith('area:') ? { overlays: { ...s.overlays, interior: true } } : {}),
+    }));
   },
   setOption<K extends keyof ToolOptions>(key: K, value: ToolOptions[K]): void {
     set((s) => ({ options: { ...s.options, [key]: value } }));
@@ -248,6 +260,9 @@ export const actions = {
   },
   setDraft(draft: Draft): void {
     set({ draft });
+  },
+  setInteriorLevel(level: number): void {
+    set((s) => ({ interiorLevel: level, overlays: { ...s.overlays, interior: true } }));
   },
   toggleOverlay(key: keyof Overlays): void {
     set((s) => ({ overlays: { ...s.overlays, [key]: !s.overlays[key] } }));

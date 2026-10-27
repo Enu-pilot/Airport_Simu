@@ -140,7 +140,43 @@ export interface Facility {
   props: Record<string, PropValue>;
 }
 
-export const SCHEMA_VERSION = 1;
+/** ターミナル内部のエリア種別 */
+export type TerminalAreaKind =
+  | 'entrance'
+  | 'exit'
+  | 'checkIn'
+  | 'security'
+  | 'departureLobby'
+  | 'waiting'
+  | 'restroom'
+  | 'arrivalCorridor'
+  | 'baggageClaim'
+  | 'hall'
+  | 'escalator'
+  | 'elevator';
+
+/**
+ * 旅客の区域。landside = 保安検査前（一般区域）、departure = 保安検査後の出発区域、arrival = 到着区域。
+ * 区域をまたぐ移動は保安検査（landside → departure）と手荷物受取所・出口（arrival → landside）でのみ可能。
+ */
+export type PaxZone = 'landside' | 'departure' | 'arrival';
+
+/** ターミナル内部のエリア（ターミナルの敷地内、階ごとの矩形） */
+export interface TerminalArea {
+  id: string;
+  terminalId: string;
+  /** 階（0 = 1F） */
+  level: number;
+  kind: TerminalAreaKind;
+  name: string;
+  origin: Tile;
+  w: number;
+  h: number;
+  zone: PaxZone;
+  props: Record<string, PropValue>;
+}
+
+export const SCHEMA_VERSION = 2;
 
 export interface AirportLayout {
   schemaVersion: number;
@@ -155,9 +191,10 @@ export interface AirportLayout {
   roads: Record<string, RoadEdge>;
   stands: Record<string, Stand>;
   facilities: Record<string, Facility>;
+  terminalAreas: Record<string, TerminalArea>;
 }
 
-export type EntityType = 'runway' | 'taxiNode' | 'taxiway' | 'roadNode' | 'road' | 'stand' | 'facility';
+export type EntityType = 'runway' | 'taxiNode' | 'taxiway' | 'roadNode' | 'road' | 'stand' | 'facility' | 'terminalArea';
 
 export const ID_PREFIX: Record<EntityType, string> = {
   runway: 'rwy',
@@ -167,6 +204,7 @@ export const ID_PREFIX: Record<EntityType, string> = {
   road: 'rd',
   stand: 'std',
   facility: 'fac',
+  terminalArea: 'ta',
 };
 
 const PREFIX_TO_TYPE: Record<string, EntityType> = Object.fromEntries(

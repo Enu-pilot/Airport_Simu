@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { FACILITY_SPECS, PROP_SCHEMAS, TILE_M } from '../core/model/catalog';
+import { FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M } from '../core/model/catalog';
 import { sortedValues } from '../core/model/ids';
 import {
   BUILD_STATES,
@@ -20,7 +20,9 @@ import {
   updateEntity,
 } from '../core/layout/operations';
 import { runwayDesignators, runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
-import { applyOp, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { applyOp, editorStore, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { ops } from '../editor/simRunner';
+import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { focusEntity } from '../editor/input';
 import {
   BUILD_STATE_LABEL,
@@ -33,6 +35,9 @@ import {
   SIZE_LABEL,
   displayName,
   issueText,
+  AREA_KIND_LABEL,
+  AREA_PROP_LABEL,
+  ZONE_LABEL,
 } from '../i18n/ja';
 
 export function PropertiesPanel() {
@@ -83,7 +88,7 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
   const type = entityTypeOf(id)!;
   const issues = analysis.byTarget[id] ?? [];
   const op = analysis.operability[id];
-  const canTransform = type === 'facility' || type === 'stand' || type === 'runway';
+  const canTransform = type === 'facility' || type === 'stand' || type === 'runway' || type === 'terminalArea';
   const buildState = (layout.runways[id] ?? layout.taxiways[id] ?? layout.roads[id] ?? layout.stands[id] ?? layout.facilities[id])?.buildState;
   const typeLabel = type === 'facility' ? FACILITY_LABEL[layout.facilities[id]!.kind] : ENTITY_LABEL[type];
 
@@ -304,6 +309,61 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
     );
   }
 
+  if (type === 'terminalArea') {
+    const a = layout.terminalAreas[id]!;
+    const spec = TERMINAL_AREA_SPECS[a.kind];
+    const terminal = layout.facilities[a.terminalId];
+    const levels = Number(terminal?.props.levels ?? 1);
+    const node = analysis.terminal.areas[id];
+    const links = (analysis.terminal.links[id] ?? []).map((l) => l.to);
+    return (
+      <>
+        <NameField layout={layout} id={id} value={a.name} />
+        <Info label="種類">{AREA_KIND_LABEL[a.kind]}</Info>
+        <Field label="階">
+          <select value={a.level} onChange={(e) => update(layout, id, { level: Number(e.target.value) })} data-testid="prop-level">
+            {Array.from({ length: levels }, (_, l) => (
+              <option key={l} value={l}>
+                {l + 1}F
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="区域">
+          {spec.zoneEditable ? (
+            <select value={a.zone} onChange={(e) => update(layout, id, { zone: e.target.value })}>
+              {(['landside', 'departure', 'arrival'] as const).map((z) => (
+                <option key={z} value={z}>
+                  {ZONE_LABEL[z]}
+                </option>
+              ))}
+            </select>
+          ) : (
+            ZONE_LABEL[a.zone]
+          )}
+        </Field>
+        <Field label="幅（タイル）">
+          <NumberInput value={a.w} min={spec.minW} max={150} onCommit={(v) => update(layout, id, { w: v })} />
+        </Field>
+        <Field label="奥行き（タイル）">
+          <NumberInput value={a.h} min={spec.minH} max={150} onCommit={(v) => update(layout, id, { h: v })} />
+        </Field>
+        {spec.props.map((def) =>
+          def.type === 'int' ? (
+            <Field key={def.key} label={AREA_PROP_LABEL[def.key] ?? def.key}>
+              <NumberInput value={Number(a.props[def.key])} min={def.min} max={def.max} onCommit={(v) => update(layout, id, { props: { [def.key]: v } })} testid={`prop-${def.key}`} />
+            </Field>
+          ) : null,
+        )}
+        {node && <Info label="混雑の目安">{`${node.capacity} 人`}</Info>}
+        <Info label={`接続（${links.length}）`}>
+          {links.length === 0 ? <span className="ng-text">どこにも接していません</span> : links.map((l) => <EntityLink key={l} layout={layout} id={l} />)}
+        </Info>
+        <AreaOpsSection id={id} />
+      </>
+    );
+  }
+
   if (type === 'facility') {
     const f = layout.facilities[id]!;
     const spec = FACILITY_SPECS[f.kind];
@@ -483,5 +543,28 @@ function NumberInput({ value, min, max, onCommit, testid }: { value: number; min
       onKeyDown={(e) => e.key === 'Enter' && commit()}
       data-testid={testid}
     />
+  );
+}
+
+/** 運航中の施設の状況と閉鎖・再開 */
+function AreaOpsSection({ id }: { id: string }) {
+  useEditor((s) => s.ops?.uiVersion ?? -1);
+  const o = editorStore.getState().ops;
+  if (!o) return null;
+  const st = o.sim.state;
+  const closed = st.closedAreas.includes(id);
+  const fac = st.facilities[id];
+  const load = facilityLoad(st, id);
+  const here = areaOccupancy(st).get(id) ?? 0;
+  return (
+    <div className="prop-section" data-testid="area-ops">
+      <div className="prop-section-title">運用状況</div>
+      <Info label="滞在中">{`${here} 人`}</Info>
+      <Info label="待ち / 手続き中">{`${load.queued} 人 / ${load.inService} 人`}</Info>
+      {fac && <Info label="処理済み / 平均待ち">{`${fac.served} 人 / ${fac.served ? Math.round(fac.waitTotal / fac.served / 6) / 10 : 0} 分`}</Info>}
+      <button className={closed ? 'primary' : 'danger'} onClick={() => ops.setAreaClosed(id, !closed)} data-testid="toggle-area">
+        {closed ? '再開する' : '閉鎖する'}
+      </button>
+    </div>
   );
 }

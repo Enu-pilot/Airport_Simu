@@ -59,9 +59,10 @@ export type HoldReason =
   | 'runwayBusy' // 滑走路が使用中
   | 'departurePriority' // 出発優先のため進入保留
   | 'crossing' // 滑走路横断の許可待ち
-  | 'goAround'; // 着陸復行
+  | 'goAround' // 着陸復行
+  | 'boarding'; // 搭乗手続きの完了待ち
 
-export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute';
+export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding';
 
 export interface Route {
   kind: 'landing' | 'taxiIn' | 'pushback' | 'taxiOut' | 'takeoff';
@@ -125,6 +126,28 @@ export interface Aircraft {
 
 export type FlightStatus = 'scheduled' | 'active' | 'completed' | 'diverted' | 'cancelled';
 
+/** 便ごとの旅客の集計（旅客グループの状態から更新し、常に一致させる） */
+export interface FlightPax {
+  /** 出発便: 予約旅客数 / 到着便: 搭乗してきた旅客数 */
+  booked: number;
+  generated: boolean;
+  /** 出発便 */
+  boarded: number;
+  missed: number;
+  boarding: 'notStarted' | 'open' | 'closed';
+  boardingOpenedAt: number | null;
+  /** 搭乗締切 */
+  deadline: number | null;
+  gateId: string | null;
+  /** 到着便 */
+  deplaned: number;
+  exited: number;
+  deplaneRemaining: number;
+  deplaneAcc: number;
+  claimAreaId: string | null;
+  bagsReadyAt: number | null;
+}
+
 export interface Flight {
   id: string;
   number: string;
@@ -142,6 +165,88 @@ export interface Flight {
   runwayId: string | null;
   standId: string | null;
   delayCauses: DelayCause[];
+  pax: FlightPax;
+}
+
+// ---------------------------------------------------------------- 旅客
+
+/**
+ * 旅客グループの状態
+ * 出発: toAirport → walking ⇄ queuing → inService → … → dwelling → boardingQueue → boarded
+ * 到着: walking → waitingBaggage → inService(受取) → walking → exited
+ * 異常: stranded（到達不能）/ waitingFacility（施設閉鎖で待機）/ missed（乗り遅れ）/ cancelled（欠航）
+ */
+export type PaxState =
+  | 'toAirport'
+  | 'walking'
+  | 'queuing'
+  | 'inService'
+  | 'dwelling'
+  | 'boardingQueue'
+  | 'boarded'
+  | 'waitingBaggage'
+  | 'exited'
+  | 'stranded'
+  | 'waitingFacility'
+  | 'missed'
+  | 'cancelled';
+
+export const PAX_FINAL_STATES: readonly PaxState[] = ['boarded', 'exited', 'missed', 'cancelled'];
+
+export type PaxStep = 'checkIn' | 'security' | 'restroom' | 'gate' | 'claim' | 'exit';
+export type MissReason = 'late' | 'unreachable' | 'facilityClosed' | 'noGate' | 'cancelled';
+
+export interface PaxGroup {
+  id: string;
+  flightId: string;
+  direction: 'departure' | 'arrival';
+  terminalId: string | null;
+  count: number;
+  bags: number;
+  state: PaxState;
+  steps: PaxStep[];
+  stepIndex: number;
+  /** 現在いるエリア（歩行中は出発側のエリア）。空港到着前・搭乗後は null */
+  area: string | null;
+  /** これから通るエリア（先頭が次のエリア） */
+  route: string[];
+  /** 歩行中の区間の進み具合（m） */
+  legProgress: number;
+  legLength: number;
+  /** 並んでいる / 処理中の施設キー（エリアID または gate:ゲートID） */
+  facility: string | null;
+  serviceUntil: number | null;
+  appearAt: number;
+  finishedAt: number | null;
+  /** 保安検査を通過済み */
+  securityCleared: boolean;
+  boardedGate: string | null;
+  /** 累計の待ち時間・歩行時間（秒） */
+  waitSec: number;
+  walkSec: number;
+  reason: MissReason | null;
+  retryAt: number;
+}
+
+export interface FacilityRuntime {
+  queue: string[];
+  inService: string[];
+  /** 処理した旅客数・待ち時間の合計（人・秒）・最大待ち人数 */
+  served: number;
+  waitTotal: number;
+  maxQueue: number;
+}
+
+export interface PaxStats {
+  spawned: number;
+  boarded: number;
+  missed: number;
+  deplaned: number;
+  exited: number;
+  /** 搭乗・退出した旅客の待ち時間・歩行時間の合計（人・秒） */
+  waitTotal: number;
+  walkTotal: number;
+  finished: number;
 }
 
 export type RunwayMode = 'mixed' | 'arrivals' | 'departures' | 'closed';
@@ -175,7 +280,12 @@ export type SimEventKind =
   | 'diverted'
   | 'cannotOperate'
   | 'conflict'
-  | 'scheduleGenerated';
+  | 'scheduleGenerated'
+  | 'boardingOpen'
+  | 'boardingClosed'
+  | 'paxMissed'
+  | 'areaClosed'
+  | 'areaOpened';
 
 export interface SimEvent {
   t: number;
@@ -227,6 +337,17 @@ export interface SimState {
   scheduledDays: number[];
   events: SimEvent[];
   stats: SimStats;
+  paxGroups: Record<string, PaxGroup>;
+  /** 処理中（終了していない）のグループ ID（発行順） */
+  activePax: string[];
+  /** 便 → グループ ID（発行順） */
+  flightPax: Record<string, string[]>;
+  facilities: Record<string, FacilityRuntime>;
+  /** 閉鎖中のターミナル内エリア（ID 順） */
+  closedAreas: string[];
+  /** 手荷物受取所のベルト使用予定 */
+  claimBelts: Record<string, { flightId: string; until: number }[]>;
+  paxStats: PaxStats;
 }
 
 export const EVENT_LOG_LIMIT = 1000;

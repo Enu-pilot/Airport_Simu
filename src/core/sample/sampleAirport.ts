@@ -1,5 +1,5 @@
 import { createSite } from '../model/site';
-import type { AirportLayout, FacilityKind } from '../model/types';
+import type { AirportLayout, FacilityKind, TerminalAreaKind } from '../model/types';
 import type { Tile } from '../geometry/vec';
 import {
   addRoadPath,
@@ -8,6 +8,7 @@ import {
   placeFacility,
   placeRunway,
   placeStand,
+  placeTerminalArea,
   updateEntity,
   type OpResult,
   type PlaceFacilityOptions,
@@ -25,7 +26,7 @@ import { findNodeAt } from '../layout/network';
  *   y=41  エプロン ┴──── エプロン誘導路 B ─────┴
  *                  [1][2][3][4][5][6][7][8] [L1]  スポット
  *   y=48            ゲート
- *   y=49-56         ターミナル
+ *   y=49-56         ターミナル（2階建て。1F 到着・入口、2F 出発）
  *   y=57  ───────── 一般道路 ─────────
  */
 export function createSampleAirport(seed = 'skyport'): AirportLayout {
@@ -69,7 +70,20 @@ export function createSampleAirport(seed = 'skyport'): AirportLayout {
   standIds.push(run(placeStand(layout, { x: 88, y: 42 }, 'L', 180, 'operational', 'L1'))[0]!);
 
   // ターミナルとゲート
-  fac('terminal', { x: 46, y: 49 }, { w: 48, h: 8, name: '旅客ターミナル' });
+  const terminal = fac('terminal', { x: 46, y: 49 }, { w: 48, h: 8, name: '旅客ターミナル', props: { levels: 2 } });
+  // ターミナル内部: 1F = 到着・入口、2F = チェックイン・保安検査・出発ロビー（入口からエスカレーターで2Fへ）
+  const area = (level: number, kind: TerminalAreaKind, x: number, y: number, w: number, h: number, name: string, props?: Record<string, number>) =>
+    run(placeTerminalArea(layout, terminal, level, kind, { x, y }, { w, h, name, ...(props ? { props } : {}) }));
+  area(0, 'arrivalCorridor', 46, 49, 48, 2, '到着通路');
+  area(0, 'baggageClaim', 58, 51, 20, 3, '手荷物受取所', { belts: 3 });
+  area(0, 'exit', 58, 54, 20, 3, '到着出口');
+  area(0, 'entrance', 80, 54, 14, 3, '出発入口');
+  area(0, 'escalator', 86, 52, 4, 2, 'エスカレーター');
+  area(1, 'departureLobby', 46, 49, 48, 2, '出発ロビー');
+  area(1, 'restroom', 46, 51, 4, 2, 'トイレ');
+  area(1, 'security', 66, 51, 8, 2, '保安検査場', { lanes: 4 });
+  area(1, 'waiting', 80, 51, 10, 2, '待合スペース');
+  area(1, 'checkIn', 50, 53, 40, 2, 'チェックイン', { counters: 16 });
   standIds.forEach((standId, i) => {
     const x = i < 8 ? 49 + i * 5 : 90;
     fac('gate', { x, y: 48 }, { name: i < 8 ? String(i + 1) : 'L1', props: { standId, jetBridge: true } });

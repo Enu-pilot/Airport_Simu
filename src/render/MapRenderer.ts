@@ -4,7 +4,7 @@ import { worldToScreen } from '../core/geometry/camera';
 import { distance, type Tile, type Vec2 } from '../core/geometry/vec';
 import { FACILITY_SPECS, STRIP_HALF_WIDTH } from '../core/model/catalog';
 import { isBuildable } from '../core/model/site';
-import type { AirportLayout, BuildState, Facility, NetNode, Site, Stand } from '../core/model/types';
+import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Site, Stand, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf } from '../core/model/types';
 import { facilityDims, standDims, standEntry } from '../core/layout/footprint';
 import { runwayDesignators, runwayEnd, runwayPolygon, runwayStripPolygon, headingVector } from '../core/layout/runway';
@@ -16,6 +16,9 @@ import { AIRCRAFT_TYPES } from '../core/sim/aircraftTypes';
 import { isVisible } from '../core/sim/query';
 import { edgeIndexAt, pointAt } from '../core/sim/routes';
 import type { Aircraft } from '../core/sim/types';
+import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
+import { linkBetween } from '../core/terminal/route';
+import { AREA_KIND_LABEL } from '../i18n/ja';
 
 /**
  * PixiJS による空港マップ描画。シミュレーション・編集の状態は一切変更せず、
@@ -42,6 +45,7 @@ export class MapRenderer {
   private usedTexts = new Set<string>();
   private terrainSite: Site | null = null;
   private zoom = 1;
+  private interiorShown = false;
 
   async init(host: HTMLElement): Promise<void> {
     await this.app.init({
@@ -74,6 +78,7 @@ export class MapRenderer {
     this.world.scale.set(cam.zoom);
     this.world.position.set(-cam.x * cam.zoom, -cam.y * cam.zoom);
     this.usedTexts.clear();
+    this.interiorShown = s.overlays.interior;
 
     this.updateTerrain(layout.site);
     this.buildable.visible = s.overlays.buildable;
@@ -84,6 +89,7 @@ export class MapRenderer {
 
     if (s.overlays.grid) this.drawGrid(cam, s.viewSize, layout.site);
     this.drawLayout(layout, analysis, s);
+    if (s.overlays.interior) this.drawInterior(layout, s, cam);
     if (s.overlays.network) this.drawNetwork(analysis);
     if (s.overlays.issues) this.drawIssues(layout, analysis);
 
@@ -403,6 +409,11 @@ export class MapRenderer {
         g.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ ...style, width: 1.1, alpha: 0.45, cap: 'round' });
         return;
       }
+      case 'terminalArea': {
+        const a = layout.terminalAreas[id];
+        if (a) g.rect(a.origin.x, a.origin.y, a.w, a.h).stroke(style);
+        return;
+      }
       case 'taxiNode':
       case 'roadNode': {
         const n: NetNode | undefined = layout.taxiNodes[id] ?? layout.roadNodes[id];
@@ -481,7 +492,7 @@ export class MapRenderer {
         if (st.name) this.label(`std:${st.id}`, st.name, { x: st.origin.x + d.w / 2, y: st.origin.y + d.h / 2 }, cam, { size: 11 });
       }
       for (const f of Object.values(layout.facilities)) {
-        if (!f.name || f.kind === 'gate') continue;
+        if (!f.name || f.kind === 'gate' || (f.kind === 'terminal' && this.interiorShown)) continue;
         const d = facilityDims(f);
         this.label(`fac:${f.id}`, f.name, { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 }, cam, { size: 11 });
       }
@@ -492,6 +503,96 @@ export class MapRenderer {
     void analysis;
   }
 
+
+
+  // ------------------------------------------------------------ ターミナル内部
+
+  private drawInterior(layout: AirportLayout, s: EditorState, cam: Camera): void {
+    const g = this.overlay;
+    const level = s.interiorLevel;
+    const ops = s.ops;
+    const occupancy = ops ? areaOccupancy(ops.sim.state) : null;
+    const closed = new Set(ops?.sim.state.closedAreas ?? []);
+    for (const t of Object.values(layout.facilities)) {
+      if (t.kind !== 'terminal') continue;
+      const d = facilityDims(t);
+      g.rect(t.origin.x, t.origin.y, d.w, d.h).fill({ color: 0x20262d, alpha: 0.85 });
+      if (s.overlays.labels) this.label(`lvl:${t.id}`, `${level + 1}F / ${Number(t.props.levels ?? 1)}階`, { x: t.origin.x + 1.2, y: t.origin.y - 0.6 }, cam, { size: 11, color: 0x9fd3ff });
+    }
+    for (const a of Object.values(layout.terminalAreas)) {
+      if (a.level !== level) continue;
+      g.rect(a.origin.x + 0.05, a.origin.y + 0.05, a.w - 0.1, a.h - 0.1).fill({ color: AREA_COLOR[a.kind], alpha: 0.9 });
+      g.rect(a.origin.x + 0.05, a.origin.y + 0.05, a.w - 0.1, a.h - 0.1).stroke({ width: this.px(1), color: ZONE_COLOR[a.zone], alpha: 0.9 });
+      if (occupancy && ops) {
+        const node = ops.sim.ctx.terminal.areas[a.id];
+        const load = node ? (occupancy.get(a.id) ?? 0) / node.capacity : 0;
+        if (load > 0.25) g.rect(a.origin.x, a.origin.y, a.w, a.h).fill({ color: load > 1 ? 0xff3030 : 0xffb020, alpha: Math.min(0.55, load * 0.4) });
+        if (closed.has(a.id)) {
+          g.rect(a.origin.x, a.origin.y, a.w, a.h).stroke({ width: this.px(3), color: 0xff4d4f });
+          for (let k = 0; k < a.w + a.h; k += 1) {
+            const x0 = a.origin.x + Math.min(k, a.w);
+            const y0 = a.origin.y + Math.max(0, k - a.w);
+            const x1 = a.origin.x + Math.max(0, k - a.h);
+            const y1 = a.origin.y + Math.min(k, a.h);
+            g.moveTo(x0, y0).lineTo(x1, y1);
+          }
+          g.stroke({ width: this.px(1.5), color: 0xff4d4f, alpha: 0.7 });
+        }
+      }
+      if (s.overlays.labels && this.zoom >= 6) {
+        let text = a.name || AREA_SHORT[a.kind];
+        if (ops) {
+          const load = facilityLoad(ops.sim.state, a.id);
+          const here = occupancy?.get(a.id) ?? 0;
+          text += load.queued > 0 ? ` 待${load.queued}` : here > 0 ? ` ${here}人` : '';
+        }
+        this.label(`area:${a.id}`, text, { x: a.origin.x + a.w / 2, y: a.origin.y + a.h / 2 }, cam, { size: 10 });
+      }
+    }
+    if (ops) this.drawPax(ops, level);
+  }
+
+  /** 旅客グループの代表点（業務計算は sim、ここでは表示だけ） */
+  private drawPax(ops: OpsState, level: number): void {
+    const g = this.overlay;
+    const { state, ctx } = ops.sim;
+    const model = ctx.terminal;
+    for (const id of state.activePax) {
+      const p = state.paxGroups[id]!;
+      if (!p.area) continue;
+      const here = model.areas[p.area];
+      if (!here) continue;
+      let x: number;
+      let y: number;
+      let onLevel = here.level === level;
+      if (p.state === 'walking' && p.route.length > 0 && p.legLength > 0) {
+        const next = model.areas[p.route[0]!]!;
+        const link = linkBetween(model, here.id, next.id);
+        const via = link?.via ?? next.center;
+        const t = Math.min(1, p.legProgress / p.legLength);
+        const d1 = Math.hypot(via.x - here.center.x, via.y - here.center.y);
+        const d2 = Math.hypot(next.center.x - via.x, next.center.y - via.y);
+        const k = d1 + d2 > 0 ? t * (d1 + d2) : 0;
+        if (k <= d1) {
+          x = here.center.x + (via.x - here.center.x) * (d1 > 0 ? k / d1 : 0);
+          y = here.center.y + (via.y - here.center.y) * (d1 > 0 ? k / d1 : 0);
+        } else {
+          x = via.x + (next.center.x - via.x) * (d2 > 0 ? (k - d1) / d2 : 0);
+          y = via.y + (next.center.y - via.y) * (d2 > 0 ? (k - d1) / d2 : 0);
+          onLevel = next.level === level;
+        }
+      } else {
+        // 滞在中: エリア内の決定的な位置にばらす
+        const h = hash(p.id);
+        x = here.x + 0.2 + ((h % 997) / 997) * Math.max(0.1, here.w - 0.4);
+        y = here.y + 0.2 + (((h >> 10) % 991) / 991) * Math.max(0.1, here.h - 0.4);
+      }
+      if (!onLevel) continue;
+      const color =
+        p.state === 'stranded' || p.state === 'waitingFacility' ? 0xff4d4f : p.direction === 'departure' ? 0xffb74d : 0x4fc3f7;
+      g.circle(x, y, Math.max(this.px(2), 0.06 + 0.03 * p.count)).fill({ color, alpha: 0.95 });
+    }
+  }
 
   // ------------------------------------------------------------ 運航
 
@@ -606,6 +707,29 @@ export class MapRenderer {
 }
 
 const flat = (pts: Vec2[]): number[] => pts.flatMap((p) => [p.x, p.y]);
+
+function hash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+const AREA_COLOR: Record<TerminalAreaKind, number> = {
+  entrance: 0x3d6b4a,
+  exit: 0x3d5a6b,
+  checkIn: 0x5a6b3d,
+  security: 0x7a4a2a,
+  departureLobby: 0x5a3d6b,
+  waiting: 0x6b3d5a,
+  restroom: 0x3d6b6b,
+  arrivalCorridor: 0x2a4a6b,
+  baggageClaim: 0x2a6b5a,
+  hall: 0x4a4f55,
+  escalator: 0x8a7a2a,
+  elevator: 0x8a6a2a,
+};
+const ZONE_COLOR: Record<PaxZone, number> = { landside: 0x9be7a8, departure: 0xe0a0ff, arrival: 0x8fd3ff };
+const AREA_SHORT = AREA_KIND_LABEL;
 
 /** 状態ごとの機体色: 到着系 = 水色、駐機・準備 = 白、出発系 = 橙、空中 = 薄青 */
 function aircraftStateColor(ac: Aircraft): number {
