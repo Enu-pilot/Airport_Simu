@@ -3,18 +3,49 @@ import { compareIds } from '../model/ids';
 import { AIRCRAFT_TYPES, type AircraftTypeId } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
 import { AIRLINES, DESTINATIONS, airlineDef } from './registry';
+import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
 
 /**
  * 空港会社（経営）の状態。建設モードと運航モードをまたいで保持し、レイアウトと一緒に保存する。
  * docs/14_management_rules.md
  */
 
-export type RevenueCategory = 'contract' | 'landing' | 'parking' | 'terminal' | 'groundHandling' | 'retail' | 'dining' | 'carPark';
-export type CostCategory = 'salary' | 'counterStaff' | 'vehicles' | 'maintenance' | 'utilities' | 'groundOps' | 'compensation';
+export type RevenueCategory = 'contract' | 'landing' | 'parking' | 'terminal' | 'groundHandling' | 'retail' | 'dining' | 'carPark' | 'transit' | 'hotel';
+export type CostCategory =
+  | 'salary'
+  | 'counterStaff'
+  | 'vehicles'
+  | 'maintenance'
+  | 'utilities'
+  | 'accessOps'
+  | 'staffCommute'
+  | 'groundOps'
+  | 'compensation';
 export type LedgerCategory = RevenueCategory | CostCategory | 'construction';
 
-export const REVENUE_CATEGORIES: readonly RevenueCategory[] = ['contract', 'landing', 'parking', 'terminal', 'groundHandling', 'retail', 'dining', 'carPark'];
-export const COST_CATEGORIES: readonly CostCategory[] = ['salary', 'counterStaff', 'vehicles', 'maintenance', 'utilities', 'groundOps', 'compensation'];
+export const REVENUE_CATEGORIES: readonly RevenueCategory[] = [
+  'contract',
+  'landing',
+  'parking',
+  'terminal',
+  'groundHandling',
+  'retail',
+  'dining',
+  'carPark',
+  'transit',
+  'hotel',
+];
+export const COST_CATEGORIES: readonly CostCategory[] = [
+  'salary',
+  'counterStaff',
+  'vehicles',
+  'maintenance',
+  'utilities',
+  'accessOps',
+  'staffCommute',
+  'groundOps',
+  'compensation',
+];
 
 export type TimeWindow = 'morning' | 'daytime' | 'evening' | 'any';
 
@@ -49,6 +80,11 @@ export interface FeeSettings {
   landing: number;
   terminal: number;
   parking: number;
+  /** 空港アクセス（Phase 6）: 駐車料金・タクシー/バス/鉄道の使用料（旅客の運賃に上乗せされる） */
+  carPark: number;
+  taxi: number;
+  bus: number;
+  rail: number;
 }
 
 export interface OperatingHours {
@@ -82,6 +118,12 @@ export interface DailyKpi {
   paxSatisfaction: number | null;
   airlineSatisfaction: number | null;
   rating: number;
+  /** 空港アクセス（Phase 6）: 手段別の旅客数、満車で停められなかった車、道路・車寄せの平均遅れ、乗り場の平均待ち、アクセス係数 */
+  modePax?: Partial<Record<AccessMode, number>>;
+  parkingFull?: number;
+  roadDelayMin?: number;
+  transitWaitMin?: number;
+  accessFactor?: number;
 }
 
 export interface DailyReport {
@@ -118,6 +160,21 @@ export interface CompanyState {
   /** 資金がマイナスの連続日数と、経営破綻の判定 */
   negativeDays: number;
   bankrupt: boolean;
+  /** 前日の運航で観測したアクセスの混雑（翌日の手段選択・需要に反映） */
+  accessFeedback: AccessFeedback;
+  /** 日をまたいで駐車している車の出庫時刻（翌日 0:00 からの秒） */
+  parkedCars: number[];
+  /** 工事（キャリアモード）: エンティティID → 工事の内容と残り日数（economy/expansion.ts） */
+  projects: Record<string, Project>;
+}
+
+/** 工事: 新設・改修（移設・拡張）は建設中、一時閉鎖は運用を止めるだけ。残り日数は運航した日で進む */
+export interface Project {
+  id: string;
+  kind: 'build' | 'renovation' | 'closure';
+  startDay: number;
+  days: number;
+  remaining: number;
 }
 
 export const REPORT_LIMIT = 120;
@@ -135,13 +192,16 @@ export function createCompany(mode: CompanyState['mode'] = 'career', seed = 'com
     counters: {},
     airlines,
     contracts: {},
-    fees: { landing: 1, terminal: 1, parking: 1 },
+    fees: { landing: 1, terminal: 1, parking: 1, carPark: 1, taxi: 1, bus: 1, rail: 1 },
     hours: { openMin: 6 * 60, closeMin: 23 * 60, peaks: [{ fromMin: 7 * 60, toMin: 9 * 60 }, { fromMin: 17 * 60, toMin: 19 * 60 }] },
     today: {},
     reports: [],
     rating: 50,
     negativeDays: 0,
     bankrupt: false,
+    accessFeedback: { ...NO_FEEDBACK, waitMin: {} },
+    parkedCars: [],
+    projects: {},
   };
 }
 
@@ -380,6 +440,11 @@ export function importCompany(json: string): CompanyState | null {
   try {
     const c = JSON.parse(json) as CompanyState;
     if (c?.version !== 1 || typeof c.cash !== 'number' || typeof c.contracts !== 'object') return null;
+    // Phase 5 の保存データ: アクセス関連の項目を補う
+    c.fees = Object.assign({ carPark: 1, taxi: 1, bus: 1, rail: 1 }, c.fees);
+    c.accessFeedback ??= { ...NO_FEEDBACK, waitMin: {} };
+    c.parkedCars ??= [];
+    c.projects ??= {};
     return c;
   } catch {
     return null;

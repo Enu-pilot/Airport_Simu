@@ -104,6 +104,9 @@ export function onPointerDown(screen: Vec2, button: number): void {
       }
       return;
     }
+    case 'land':
+      actions.setDraft({ kind: 'rect', start: tile });
+      return;
     default: {
       const kind = facilityKindOf(s.tool);
       if (areaKindOf(s.tool)) {

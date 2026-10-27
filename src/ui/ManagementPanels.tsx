@@ -5,9 +5,11 @@ import { contractsOf, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, ty
 import { analyzeDayPlan, planDay } from '../core/economy/planning';
 import { AIRLINES, airlineDef, destinationDef } from '../core/economy/registry';
 import { BALANCE } from '../core/economy/balance';
+import { analyzeAccess, type AccessMode } from '../core/access/model';
 import { companyActions } from '../editor/simRunner';
 import { editorStore, formatCr, useEditor, useLayout } from '../editor/store';
 import {
+  ACCESS_MODE_LABEL,
   AIRLINE_TYPE_LABEL,
   CONTRACT_STATUS_LABEL,
   COST_LABEL,
@@ -39,7 +41,8 @@ export function PlanPanel() {
   const layout = useLayout();
   const ctx = useMemo(() => createContext(layout), [layout]);
   const operable = operableTypes(ctx);
-  const plan = planDay(c, c.day);
+  // 実際の運航と同じアクセス係数（前日の混雑を反映）で計画する
+  const plan = planDay(c, c.day, analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback }).factor);
   const analysis = analyzeDayPlan(plan, ctx);
   const issueKeys = new Map<string, string[]>();
   for (const i of analysis.issues) for (const k of i.keys) issueKeys.set(k, [...(issueKeys.get(k) ?? []), PLAN_ISSUE_LABEL[i.code]]);
@@ -285,7 +288,8 @@ function KpiCard({ k, value }: { k: keyof DailyKpi; value: string }) {
 
 function kpiValue(k: keyof DailyKpi, v: DailyKpi): string {
   const x = v[k];
-  if (x === null) return '—';
+  if (x === null || x === undefined) return '—';
+  if (typeof x === 'object') return Object.entries(x).map(([m, n]) => `${ACCESS_MODE_LABEL[m as AccessMode]} ${n}`).join(' / ');
   switch (k) {
     case 'otp':
     case 'runwayUtil':
@@ -296,7 +300,11 @@ function kpiValue(k: keyof DailyKpi, v: DailyKpi): string {
     case 'avgWaitMin':
     case 'avgWalkMin':
     case 'avgGroundMin':
+    case 'roadDelayMin':
+    case 'transitWaitMin':
       return `${x}分`;
+    case 'accessFactor':
+      return `×${x.toFixed(2)}`;
     default:
       return String(Math.round(x * 10) / 10);
   }

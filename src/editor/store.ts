@@ -14,11 +14,12 @@ import { OP_FAILURE_LABEL } from '../i18n/ja';
 import type { Simulation } from '../core/sim/simulation';
 import { createCareerCompany, createSandboxCompany, importCompany, post, type CompanyState } from '../core/economy/company';
 import { constructionCost } from '../core/economy/construction';
+import { applyCompletedProjects, prepareCareerEdit, startClosure, syncProjects } from '../core/economy/expansion';
 import { createStarterAirfield } from '../core/sample/starterAirfield';
 import { CURRENCY } from '../core/economy/balance';
 import type { SimClock } from '../core/sim/clock';
 
-export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
+export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | 'land' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
 
 export interface ToolOptions {
   rotation: Rotation;
@@ -222,14 +223,28 @@ export function applyOp(result: OpResult, opts: { select?: boolean; quietNoChang
   const s = get();
   const charged = charge(s.history.present, result.layout);
   if (charged === false) return false;
+  const layout = withProjects(charged.company, s.history.present, result.layout);
   const selection =
     opts.select && result.created.length > 0
       ? result.created[0]!
-      : s.selection && entityExists(result.layout, s.selection)
+      : s.selection && entityExists(layout, s.selection)
         ? s.selection
         : null;
-  commitCharged(result.layout, charged.cost, charged.company, { selection });
+  commitCharged(layout, charged.cost, charged.company, { selection });
   return true;
+}
+
+/** キャリアモード: 新設・改修を工事にする（docs/15 §6）。新しく始まった工事を通知する */
+function withProjects(company: CompanyState, before: AirportLayout, after: AirportLayout): AirportLayout {
+  const known = new Set(Object.keys(company.projects));
+  const layout = prepareCareerEdit(company, before, after);
+  const started = Object.values(company.projects).filter((p) => !known.has(p.id));
+  if (started.length > 0) {
+    const days = Math.max(...started.map((p) => p.days));
+    const renovation = started.some((p) => p.kind === 'renovation');
+    showToast(`${renovation ? '改修工事（工事中は閉鎖）' : '建設工事'}を始めました（工期 ${days}日。運航した日ごとに進みます）`);
+  }
+  return layout;
 }
 
 export const formatCr = (v: number): string => `${Math.round(v).toLocaleString('ja-JP')} ${CURRENCY}`;
@@ -244,9 +259,9 @@ function charge(before: AirportLayout, after: AirportLayout, cost = construction
     showToast(`資金不足: 建設費 ${formatCr(cost)} に対して所持金 ${formatCr(c.cash)}`, 'error');
     return false;
   }
-  if (cost === 0) return { cost, company: c };
+  // 工事の登録でも会社を更新するので、常に複製する
   const next = structuredClone(c);
-  post(next, 'construction', -cost);
+  if (cost !== 0) post(next, 'construction', -cost);
   return { cost, company: next };
 }
 
@@ -281,10 +296,35 @@ export function replaceLayout(layout: AirportLayout, message: string): void {
     showToast('運航中はレイアウトを変更できません', 'error');
     return;
   }
-  const charged = charge(get().history.present, layout);
+  const before = get().history.present;
+  const charged = charge(before, layout);
   if (charged === false) return;
-  commitCharged(layout, charged.cost, charged.company, { selection: null, draft: null });
+  commitCharged(withProjects(charged.company, before, layout), charged.cost, charged.company, { selection: null, draft: null });
   showToast(charged.cost > 0 ? `${message}（建設費 ${formatCr(charged.cost)}）` : message);
+}
+
+/** 運航を終えたとき: 完了した工事をレイアウトに反映する（建設費はかからない） */
+export function applyFinishedProjects(): void {
+  const s = get();
+  const company = structuredClone(s.company);
+  const layout = applyCompletedProjects(company, s.history.present);
+  if (!layout) return;
+  commitCharged(layout, 0, company);
+  showToast('工事が完了した施設を運用中にしました');
+}
+
+/** 運用中の施設を一時閉鎖する（キャリアモード、days 日） */
+export function closeTemporarily(id: string, days: number): void {
+  const s = get();
+  if (s.mode === 'operate' || s.company.mode !== 'career') return;
+  const company = structuredClone(s.company);
+  const layout = startClosure(company, s.history.present, id, days);
+  if (!layout) {
+    showToast('運用中の施設だけ一時閉鎖できます', 'error');
+    return;
+  }
+  commitCharged(layout, 0, company);
+  showToast(`${days}日間の一時閉鎖を始めました（運航した日ごとに進みます）`);
 }
 
 /** 新しいゲーム: キャリア = 小さな飛行場と初期資金・初期契約 / サンドボックス = サンプル空港と潤沢な資金 */
@@ -306,6 +346,7 @@ export const actions = {
     const paid = s.charges.past[s.charges.past.length - 1] ?? null;
     const charged = charge(s.history.present, history.present, paid !== null ? -paid : undefined);
     if (charged === false) return;
+    syncProjects(charged.company, history.present);
     set({
       history,
       company: charged.company,
@@ -323,6 +364,7 @@ export const actions = {
     const cost = s.charges.future[0] ?? null;
     const charged = charge(s.history.present, history.present, cost ?? undefined);
     if (charged === false) return;
+    syncProjects(charged.company, history.present);
     set({
       history,
       company: charged.company,

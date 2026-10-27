@@ -23,6 +23,11 @@ export const FACILITY_COLOR: Record<FacilityKind, number> = {
   baggageSort: 0x6b8f4f,
   serviceArea: 0x857b5e,
   parking: 0x5d6673,
+  taxiStand: 0xf2c230,
+  busStop: 0x3d8fd6,
+  railStation: 0x9c5fbf,
+  staffParking: 0x4d5560,
+  hotel: 0xc98a5c,
 };
 
 export const SIZE_COLOR: Record<SizeClass, number> = { S: 0x66bb6a, M: 0x42a5f5, L: 0xba68c8 };
@@ -50,6 +55,7 @@ export const COLOR = {
   taxiCenter: 0xf4d03f,
   roadPublic: 0x2e3135,
   roadService: 0x7a6a48,
+  rail: 0x6e5a7e,
   roadMarking: 0xdedede,
   selection: 0x3ff0ff,
   ghostOk: 0x5cff8d,

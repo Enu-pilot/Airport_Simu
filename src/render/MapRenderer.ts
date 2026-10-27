@@ -7,6 +7,7 @@ import { isBuildable } from '../core/model/site';
 import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Site, Stand, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf } from '../core/model/types';
 import { facilityDims, standDims, standEntry } from '../core/layout/footprint';
+import { offsiteTilesIn } from '../core/layout/operations';
 import { runwayDesignators, runwayEnd, runwayPolygon, runwayStripPolygon, headingVector } from '../core/layout/runway';
 import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
@@ -205,6 +206,13 @@ export class MapRenderer {
       const b = layout.roadNodes[e.to];
       if (!a || !b) continue;
       const alpha = BUILD_ALPHA[e.buildState];
+      if (e.roadClass === 'rail') {
+        // 鉄道: 細い道床と枕木
+        g.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ width: 0.5, color: COLOR.rail, alpha, cap: 'round' });
+        this.dashed(g, c(a.pos), c(b.pos), 0.15, 0.35, { width: 0.8, color: COLOR.rail, alpha: 0.8 * alpha });
+        if (e.buildState !== 'operational') this.edgeStateMarks(g, c(a.pos), c(b.pos), e.buildState);
+        continue;
+      }
       const color = e.roadClass === 'public' ? COLOR.roadPublic : COLOR.roadService;
       g.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ width: 0.9, color, alpha, cap: 'round' });
       if (e.roadClass === 'public') {
@@ -437,6 +445,10 @@ export class MapRenderer {
     if (d?.kind === 'runway') o.circle(c(d.start).x, c(d.start).y, 0.4).fill({ color: COLOR.ghostOk });
     if (d?.kind === 'rect' && s.hover) {
       const r = rectFromDrag(d.start, s.hover);
+      if (s.tool === 'land') {
+        // 購入できる未取得地を塗る
+        for (const t of offsiteTilesIn(s.history.present, d.start, s.hover)) o.rect(t.x, t.y, 1, 1).fill({ color: COLOR.ghostOk, alpha: 0.35 });
+      }
       o.rect(r.origin.x, r.origin.y, r.w, r.h).stroke({ width: this.px(1.5), color: COLOR.ghostOk });
     }
     if (s.hover && s.tool !== 'select' && !facilityKindOf(s.tool)) {

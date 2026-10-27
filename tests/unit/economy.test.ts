@@ -4,7 +4,7 @@ import { analyzeLayout } from '../../src/core/validation/validate';
 import { deleteEntity, placeFacility, placeStand, placeTerminalArea, setBuildState } from '../../src/core/layout/operations';
 import type { AirportLayout } from '../../src/core/model/types';
 import { BALANCE } from '../../src/core/economy/balance';
-import { chargeConstruction, constructionCost, layoutValue } from '../../src/core/economy/construction';
+import { chargeConstruction, constructionCost, layoutValue, scaleFactor } from '../../src/core/economy/construction';
 import {
   acceptOffer,
   addContract,
@@ -80,18 +80,21 @@ describe('小さな飛行場と建設費', () => {
     expect(layoutValue(layout)).toBeGreaterThan(0);
   });
 
+  // 建設費には空港の規模による割増（docs/15 §5）が掛かる
+  const k = scaleFactor(layout);
+
   it('スポットを建設すると区分の建設費、撤去すると25%が戻る', () => {
     const r = must(placeStand(layout, { x: 63, y: 42 }, 'M', 180, 'operational', '4'));
-    expect(constructionCost(layout, r.layout)).toBe(BALANCE.construction.stand.M);
+    expect(constructionCost(layout, r.layout)).toBe(Math.round(BALANCE.construction.stand.M * k));
     const removed = must(deleteEntity(r.layout, r.created[0]!)).layout;
-    expect(constructionCost(r.layout, removed)).toBe(-BALANCE.construction.stand.M * BALANCE.construction.refundRate);
+    expect(constructionCost(r.layout, removed)).toBe(Math.round(-BALANCE.construction.stand.M * BALANCE.construction.refundRate * scaleFactor(r.layout)));
   });
 
   it('計画中の施設は無料で、建設中・運用中に変えた時点で支払う', () => {
     const r = must(placeFacility(layout, 'hangar', { x: 90, y: 60 }, { buildState: 'planned' }));
     expect(constructionCost(layout, r.layout)).toBe(0);
     const built = must(setBuildState(r.layout, 'operational', r.created)).layout;
-    expect(constructionCost(r.layout, built)).toBe(BALANCE.construction.facility.hangar);
+    expect(constructionCost(r.layout, built)).toBe(Math.round(BALANCE.construction.facility.hangar! * k));
   });
 
   it('資金不足: 建設費が現金を超える編集は受け付けず、現金は変わらない', () => {
@@ -99,7 +102,7 @@ describe('小さな飛行場と建設費', () => {
     c.cash = 500_000;
     const r = must(placeFacility(layout, 'hangar', { x: 90, y: 60 }));
     const res = chargeConstruction(c, layout, r.layout);
-    expect(res).toMatchObject({ ok: false, reason: 'INSUFFICIENT_FUNDS', cost: 1_200_000 });
+    expect(res).toMatchObject({ ok: false, reason: 'INSUFFICIENT_FUNDS', cost: Math.round(1_200_000 * k) });
     expect(c.cash).toBe(500_000);
     // 撤去（払い戻し）は資金不足でも可能
     const gate = facilityOf(layout, 'gate');
@@ -113,8 +116,8 @@ describe('小さな飛行場と建設費', () => {
     const c = createCompany('career');
     const r = must(placeStand(layout, { x: 63, y: 42 }, 'M', 180, 'operational', '4'));
     expect(chargeConstruction(c, layout, r.layout).ok).toBe(true);
-    expect(c.cash).toBe(BALANCE.initialCash.career - BALANCE.construction.stand.M);
-    expect(c.today.construction).toBe(-BALANCE.construction.stand.M);
+    expect(c.cash).toBe(BALANCE.initialCash.career - Math.round(BALANCE.construction.stand.M * k));
+    expect(c.today.construction).toBe(-Math.round(BALANCE.construction.stand.M * k));
   });
 });
 
@@ -290,7 +293,7 @@ describe('費用の計算', () => {
     expect(f.vehicles).toBe((1 + 2 + 2 + 1 + 1 + 1) * 300);
     expect(f.counterStaff).toBe(6 * 800 + 2 * 2500 + 3 * 600);
     expect(f.utilities).toBe(20 * 8 * 2 * 30);
-    expect(f.maintenance).toBe(Math.round(layoutValue(layout) * 0.0003));
+    expect(f.maintenance).toBe(Math.round(layoutValue(layout) * 0.0003 * scaleFactor(layout)));
   });
 
   it('丸1日運航すると固定費が1日分、地上作業費が作業ごとに計上される', () => {

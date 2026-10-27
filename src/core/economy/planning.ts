@@ -69,18 +69,20 @@ export function arrivalRange(window: TimeWindow, typeId: AircraftTypeId, hours: 
  * 搭乗率 = 基本搭乗率（航空会社の種類） × 路線需要 × 料金係数 × 評価係数 × (1 ± 揺らぎ)
  *   料金係数 = 1 − (ターミナル使用料の倍率 − 1) × 0.3
  *   評価係数 = 0.75 + (1.15 − 0.75) × 空港評価 / 100
+ *   アクセス係数 = 空港へのアクセスの良さ（access/model.ts、0.3〜1.1。指定なしは 1）
  * 0.15〜1.0 に丸める。
  */
-export function loadFactor(c: CompanyState, k: Pick<Contract, 'airlineId' | 'destinationId'>, u: number): number {
+export function loadFactor(c: CompanyState, k: Pick<Contract, 'airlineId' | 'destinationId'>, u: number, access = 1): number {
   const D = BALANCE.demand;
   const base = D.baseLoadFactor[airlineDef(k.airlineId).type];
   const fee = 1 - (c.fees.terminal - 1) * BALANCE.feeSensitivity.loadFactorPerRatio;
   const rating = D.ratingFactorMin + ((D.ratingFactorMax - D.ratingFactorMin) * c.rating) / 100;
   const noise = 1 + D.noise * (2 * u - 1);
-  return Math.min(1, Math.max(0.15, base * destinationDef(k.destinationId).demand * fee * rating * noise));
+  return Math.min(1, Math.max(0.15, base * destinationDef(k.destinationId).demand * fee * rating * access * noise));
 }
 
-export function planDay(c: CompanyState, day: number): DayPlan {
+/** access = アクセス係数（運航では analyzeAccess の値を渡す。プレビューも同じ値を渡せば実際の運航と一致する） */
+export function planDay(c: CompanyState, day: number, access = 1): DayPlan {
   const flights: PlannedFlight[] = [];
   const dropped: string[] = [];
   for (const k of activeContractsOn(c, day)) {
@@ -98,8 +100,8 @@ export function planDay(c: CompanyState, day: number): DayPlan {
       const arrMin = Math.round((from + (to - from) * pos) / 5) * 5;
       const arrivalAt = Math.min(to, Math.max(from, arrMin)) * 60;
       const departureAt = arrivalAt + AIRCRAFT_TYPES[k.typeId].turnaroundSec + PLAN_TURN_BUFFER_SEC;
-      const arrPax = Math.round(seats * loadFactor(c, k, rng.next()));
-      const depPax = Math.round(seats * loadFactor(c, k, rng.next()));
+      const arrPax = Math.round(seats * loadFactor(c, k, rng.next(), access));
+      const depPax = Math.round(seats * loadFactor(c, k, rng.next(), access));
       const D = BALANCE.demand;
       const inboundDelaySec = rng.next() < D.inboundDelayProb ? rng.int(3, D.inboundDelayMaxMin) * 60 : 0;
       const n = k.numberBase + i * 2;

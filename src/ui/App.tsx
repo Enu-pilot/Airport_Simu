@@ -1,7 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { MapView } from '../render/MapView';
-import { actions, formatCr, newGame, replaceLayout, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { actions, editorStore, formatCr, newGame, replaceLayout, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
+import { AccessPanel, ExpansionPanel } from './AccessPanels';
+import { computePreview } from '../editor/tools';
+import { constructionCost } from '../core/economy/construction';
 import { MODE_LABEL } from '../i18n/ja';
 import { onKeyDown, onKeyUp } from '../editor/input';
 import { exportLayout, importLayout } from '../core/io/serialize';
@@ -62,7 +65,7 @@ export function App() {
   );
 }
 
-type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance';
+type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance' | 'access' | 'expansion';
 
 function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
   return (
@@ -85,11 +88,25 @@ function BuildBottom() {
           ['issues', '配置チェック'],
           ['plan', '運航計画'],
           ['finance', '経営'],
+          ['access', 'アクセス'],
+          ['expansion', '拡張計画'],
         ]}
         tab={tab}
         setTab={setTab}
       />
-      <div className="tab-body">{tab === 'plan' ? <PlanPanel /> : tab === 'finance' ? <FinancePanel /> : <IssuesPanel />}</div>
+      <div className="tab-body">
+        {tab === 'plan' ? (
+          <PlanPanel />
+        ) : tab === 'finance' ? (
+          <FinancePanel />
+        ) : tab === 'access' ? (
+          <AccessPanel />
+        ) : tab === 'expansion' ? (
+          <ExpansionPanel />
+        ) : (
+          <IssuesPanel />
+        )}
+      </div>
     </div>
   );
 }
@@ -106,6 +123,8 @@ function OpsBottom() {
           ['baggage', '手荷物'],
           ['plan', '運航計画'],
           ['finance', '経営'],
+          ['access', 'アクセス'],
+          ['expansion', '拡張計画'],
           ['events', 'イベント'],
           ['issues', '配置チェック'],
         ]}
@@ -124,6 +143,10 @@ function OpsBottom() {
           <PlanPanel />
         ) : tab === 'finance' ? (
           <FinancePanel />
+        ) : tab === 'access' ? (
+          <AccessPanel />
+        ) : tab === 'expansion' ? (
+          <ExpansionPanel />
         ) : tab === 'events' ? (
           <EventLog />
         ) : (
@@ -140,6 +163,7 @@ function TopBar() {
   const layout = useLayout();
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = useEditor((s) => s.mode);
+  const career = useEditor((s) => s.company.mode === 'career');
 
   const download = () => {
     const blob = new Blob([exportLayout(layout)], { type: 'application/json' });
@@ -207,8 +231,11 @@ function TopBar() {
           </button>
           <button onClick={actions.loadSample} data-testid="load-sample" title="現在の資金で建設（キャリアでは建設費がかかる）">サンプル空港を生成</button>
           <button onClick={actions.newEmpty} data-testid="new-empty">空の敷地</button>
-          <button onClick={() => applyOp(setBuildState(layout, 'operational'))} title="計画・建設中の施設をすべて運用中にする">
-            全施設を完成
+          <button
+            onClick={() => applyOp(setBuildState(layout, 'operational'))}
+            title={career ? '計画中の施設をすべて着工する（工期を待って完成）' : '計画・建設中の施設をすべて運用中にする'}
+          >
+            {career ? '全施設を着工' : '全施設を完成'}
           </button>
         </div>
         <div className="top-group">
@@ -262,6 +289,15 @@ function StatusBar() {
   const analysis = useAnalysis();
   const layout = useLayout();
   const mode = useEditor((s) => s.mode);
+  const cash = useEditor((s) => s.company.cash);
+  // 配置・移動・土地購入のプレビューの建設費（確定時と同じ計算）
+  const estimate = (() => {
+    if (mode !== 'build' || (tool === 'select' && draft?.kind !== 'move')) return null;
+    const p = computePreview(editorStore.getState());
+    if (!p?.result.ok) return null;
+    const cost = constructionCost(layout, p.result.layout);
+    return cost === 0 ? null : cost;
+  })();
   return (
     <div className="status" data-testid="status">
       <span data-testid="status-tile">{hover ? `タイル (${hover.x}, ${hover.y})` : 'タイル —'}</span>
@@ -273,6 +309,12 @@ function StatusBar() {
       <span>
         エラー {analysis.counts.error} · 警告 {analysis.counts.warning}
       </span>
+      {estimate !== null && (
+        <span className={estimate > cash ? 'ng-text' : ''} data-testid="cost-estimate">
+          {estimate >= 0 ? `建設費 ${formatCr(estimate)}` : `払い戻し ${formatCr(-estimate)}`}
+          {estimate > cash ? '（資金不足）' : ''}
+        </span>
+      )}
       <span className="hint">{mode === 'operate' ? '機体をクリックで選択 / Space: 一時停止 / 1〜5: 時間倍率 / 右ドラッグ: パン' : draft?.kind === 'path' ? `頂点 ${draft.points.length} — ダブルクリック/Enter/右クリックで確定、Esc で取り消し` : toolHint(tool)}</span>
     </div>
   );

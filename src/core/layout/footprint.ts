@@ -105,7 +105,7 @@ export function footprintOf(layout: AirportLayout, id: string): FootprintPart[] 
     return [
       {
         ownerId: id,
-        layer: rd.roadClass === 'public' ? 'roadPublic' : 'roadService',
+        layer: rd.roadClass === 'public' ? 'roadPublic' : rd.roadClass === 'rail' ? 'rail' : 'roadService',
         tiles: edgeTiles(layout.roadNodes, rd.from, rd.to),
       },
     ];

@@ -6,7 +6,7 @@ import { setUnitBroken } from '../core/sim/ground';
 import { setEquipmentBroken } from '../core/sim/baggage';
 import type { AircraftTypeId } from '../core/sim/aircraftTypes';
 import type { RunwayConfig } from '../core/sim/types';
-import { editorStore, forgetCharges, formatCr, showToast, type OpsState } from './store';
+import { applyFinishedProjects, editorStore, forgetCharges, formatCr, showToast, type OpsState } from './store';
 import { settleDay } from '../core/economy/ops';
 import {
   acceptOffer,
@@ -165,6 +165,7 @@ function endOps(): void {
     const report = o.sim.company.bankrupt ? null : settleDay(o.sim, true);
     set({ mode: 'build', ops: null, company: o.sim.company });
     if (report) showToast(`${report.day + 1}日目を締めました（営業利益 ${formatCr(report.operatingProfit)}）`);
+    applyFinishedProjects();
     return;
   }
   set({ mode: 'build', ops: null });

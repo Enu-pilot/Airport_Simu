@@ -30,6 +30,8 @@ export function facilityValue(f: Facility): number {
   const tiles = f.w * f.h;
   const perTile = C.perTile[f.kind];
   if (perTile !== undefined) return tiles * perTile * (f.kind === 'terminal' ? Math.max(1, num(f.props.levels)) : 1);
+  if (f.kind === 'staffParking') return tiles * C.access.staffParkingPerTile;
+  if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'railStation' || f.kind === 'hotel') return C.access[f.kind];
   let v = C.facility[f.kind] ?? 0;
   if (f.kind === 'gate' && f.props.jetBridge) v += C.jetBridge;
   if (f.kind === 'gseBase') for (const [prop, kind] of VEHICLE_PROPS) v += num(f.props[prop]) * (C.vehicle[kind] ?? 0);
@@ -64,8 +66,10 @@ export function layoutItems(layout: AirportLayout): Record<string, number> {
     const a = layout.roadNodes[e.from];
     const b = layout.roadNodes[e.to];
     if (!a || !b) continue;
-    out[e.id] = Math.round(distance(a.pos, b.pos) * C.roadPerTile);
+    out[e.id] = Math.round(distance(a.pos, b.pos) * (e.roadClass === 'rail' ? C.access.railPerTile : C.roadPerTile));
   }
+  // 購入した土地
+  if (layout.site.purchased) out['land'] = layout.site.purchased * C.landPerTile;
   for (const s of Object.values(layout.stands)) if (s.buildState !== 'planned') out[s.id] = C.stand[s.size];
   for (const f of Object.values(layout.facilities)) {
     const v = facilityValue(f);
@@ -81,8 +85,16 @@ export function layoutValue(layout: AirportLayout): number {
 }
 
 /**
+ * 空港の規模による割増係数 = min(上限, 1 + 0.5 × 資産額 / 1億cr)。
+ * 新しい建設費・払い戻し・施設維持費に掛かる（大きな空港ほど拡張に費用がかかる）。
+ */
+export function scaleFactor(layout: AirportLayout): number {
+  return Math.min(BALANCE.scale.max, 1 + BALANCE.scale.perValue * layoutValue(layout));
+}
+
+/**
  * 編集による支払額（正 = 支払い、負 = 払い戻し）。
- * エンティティごとに差を取り、増えた分は全額、減った分は refundRate だけ戻る。
+ * エンティティごとに差を取り、増えた分は全額、減った分は refundRate だけ戻る。合計に編集前の規模係数を掛ける。
  */
 export function constructionCost(before: AirportLayout, after: AirportLayout): number {
   const a = layoutItems(before);
@@ -92,7 +104,7 @@ export function constructionCost(before: AirportLayout, after: AirportLayout): n
     const d = (b[id] ?? 0) - (a[id] ?? 0);
     cost += d > 0 ? d : d * C.refundRate;
   }
-  return Math.round(cost);
+  return Math.round(cost * scaleFactor(before));
 }
 
 export type ChargeResult = { ok: true; cost: number } | { ok: false; reason: 'INSUFFICIENT_FUNDS'; cost: number };

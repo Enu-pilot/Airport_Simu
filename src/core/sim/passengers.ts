@@ -6,7 +6,8 @@ import { AIRCRAFT_TYPES } from './aircraftTypes';
 import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt } from './baggage';
 import { boardingAllowed } from './ground';
 import { BALANCE } from '../economy/balance';
-import { onPaxDeplaned, onPaxEnter, onPaxMissed, onShopDone } from '../economy/ops';
+import { onPaxDeplaned, onPaxMissed, onShopDone } from '../economy/ops';
+import { accessArrival, accessDeparture } from '../access/runtime';
 import type { Simulation } from './simulation';
 import {
   EVENT_LOG_LIMIT,
@@ -409,6 +410,14 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
       if (state.now >= g.appearAt) {
         const f = state.flights[g.flightId]!;
         if (f.pax.boarding === 'closed') return; // 締切後は closeBoarding が処理済み
+        // 空港アクセス: 交通手段の制約（満車・混雑・満員）と徒歩で遅れることがある
+        if (state.access && !g.accessDone) {
+          const delay = accessDeparture(sim, g);
+          if (delay > 0) {
+            g.appearAt = state.now + delay;
+            return;
+          }
+        }
         const entrances = (sim.ctx.terminal.byTerminal[g.terminalId!] ?? []).filter(
           (id) => sim.ctx.terminal.areas[id]!.kind === 'entrance' && !isClosed(state, id),
         );
@@ -419,7 +428,6 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
         }
         g.area = withRng(state, (rng) => entrances[rng.int(0, entrances.length - 1)]!);
         state.paxStats.spawned += g.count;
-        onPaxEnter(sim, g);
         planStep(sim, g);
       }
       return;
@@ -428,6 +436,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
       return;
     case 'queuing':
     case 'boardingQueue':
+    case 'waitingTransport':
       g.waitSec++;
       return;
     case 'waitingBaggage': {
@@ -643,19 +652,26 @@ function arrive(sim: Simulation, g: PaxGroup): void {
     case 'claim':
       g.state = 'waitingBaggage';
       return;
-    case 'exit': {
-      const f = state.flights[g.flightId]!;
-      g.state = 'exited';
-      g.finishedAt = state.now;
-      g.area = null;
-      f.pax.exited += g.count;
-      finish(state, g);
-      state.paxStats.exited += g.count;
+    case 'exit':
+      // 空港アクセス: タクシー・バス・鉄道は乗り場で待ってから退出する
+      if (state.access && !g.accessDone && accessArrival(sim, g)) return;
+      completeExit(sim, g);
       return;
-    }
     default:
       return;
   }
+}
+
+/** 到着グループの退出を確定する（出口、またはアクセスの乗り場で乗車したとき） */
+export function completeExit(sim: Simulation, g: PaxGroup): void {
+  const { state } = sim;
+  const f = state.flights[g.flightId]!;
+  g.state = 'exited';
+  g.finishedAt = state.now;
+  g.area = null;
+  f.pax.exited += g.count;
+  finish(state, g);
+  state.paxStats.exited += g.count;
 }
 
 function joinQueue(state: SimState, g: PaxGroup, key: string, s: 'queuing' | 'boardingQueue'): void {

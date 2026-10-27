@@ -5,7 +5,8 @@ import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/vali
 import type { OpFailure } from '../core/layout/operations';
 import type { AirsideNodeKind } from '../core/airside/network';
 import type { AirlineType } from '../core/economy/registry';
-import type { Contract, ContractActionResult, CostCategory, DailyKpi, RevenueCategory, TimeWindow } from '../core/economy/company';
+import type { Contract, ContractActionResult, CostCategory, DailyKpi, Project, RevenueCategory, TimeWindow } from '../core/economy/company';
+import type { AccessMode, AccessUnavailable } from '../core/access/model';
 import type { PlanIssueCode } from '../core/economy/planning';
 
 export const FACILITY_LABEL: Record<FacilityKind, string> = {
@@ -21,6 +22,11 @@ export const FACILITY_LABEL: Record<FacilityKind, string> = {
   baggageSort: '手荷物仕分け場',
   serviceArea: 'サービスエリア',
   parking: '駐車場',
+  taxiStand: 'タクシー乗り場',
+  busStop: 'バス乗り場',
+  railStation: '空港連絡駅',
+  staffParking: '職員用駐車場',
+  hotel: '空港ホテル',
 };
 
 export const ENTITY_LABEL: Record<EntityType, string> = {
@@ -50,7 +56,7 @@ export const BUILD_STATE_LABEL: Record<BuildState, string> = {
 };
 
 export const SIZE_LABEL: Record<SizeClass, string> = { S: 'S（小型）', M: 'M（中型）', L: 'L（大型）' };
-export const ROAD_CLASS_LABEL: Record<RoadClass, string> = { public: '一般道路', service: 'サービス道路' };
+export const ROAD_CLASS_LABEL: Record<RoadClass, string> = { public: '一般道路', service: 'サービス道路（業務用）', rail: '鉄道（空港連絡線）' };
 
 export const PROP_LABEL: Record<string, string> = {
   checkInCounters: 'チェックインカウンター数',
@@ -73,6 +79,11 @@ export const PROP_LABEL: Record<string, string> = {
   engineers: '整備士',
   capacityPerMin: '処理能力（個/分）',
   spaces: '駐車台数',
+  berths: '乗車枠',
+  busBays: '乗り場数',
+  busesPerHour: 'バス便数（毎時）',
+  trainsPerHour: '列車本数（毎時）',
+  rooms: '客室数',
 };
 
 export const SEVERITY_LABEL: Record<Severity, string> = { error: 'エラー', warning: '警告', info: '情報' };
@@ -91,6 +102,7 @@ export const OP_FAILURE_LABEL: Record<OpFailure, string> = {
   NODE_EXISTS: '移動先に別のノードがあります',
   EMPTY_PATH: '2点以上を指定してください',
   NO_CHANGE: '変更はありません',
+  LAND_NOT_ADJACENT: '取得済みの敷地に隣接する土地だけ購入できます',
 };
 
 /** エンティティの表示名（名前が無ければ種別名 + 番号） */
@@ -159,6 +171,10 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   PARKING_NO_ROAD: (n) => `${n[0]} が道路に接していません`,
   ROAD_NO_ENTRANCE: (n, p) => `敷地の出入口につながらない道路があります（${n[0]} ほか計${p.count}区間）`,
   ROAD_CROSSING_NO_JUNCTION: (n) => `${n[0]} と ${n[1]} が交差点なしで交差しています`,
+  ACCESS_NOT_CONNECTED: (n) => `${n[0]} が外部（敷地の出入口）につながる道路に接していません。利用されません`,
+  STATION_NO_RAIL: (n) => `${n[0]} が敷地の外へつながる鉄道線に接続されていません。列車は来ません`,
+  ACCESS_FAR_FROM_TERMINAL: (n, p) =>
+    Number(p.distance) < 0 ? `${n[0]} から歩いて行ける運用中のターミナルがありません` : `${n[0]} がターミナルから遠すぎます（${p.distance}タイル、上限16）`,
   TERMINAL_AREA_OUTSIDE: (n) => `${n[0]} がターミナルの範囲（敷地・階数）からはみ出しています`,
   TERMINAL_AREA_OVERLAP: (n) => `${n[0]} と ${n[1]} が同じ階で重なっています`,
   TERMINAL_NO_ENTRANCE: (n) => `${n[0]} に入口がありません（出発旅客が来られません）`,
@@ -363,6 +379,7 @@ export const PAX_STATE_LABEL: Record<PaxState, string> = {
   exited: '退出済み',
   stranded: '到達不能',
   waitingFacility: '施設閉鎖で待機',
+  waitingTransport: '交通機関を待機',
   missed: '乗り遅れ',
   cancelled: '欠航',
 };
@@ -457,6 +474,8 @@ export const REVENUE_LABEL: Record<RevenueCategory, string> = {
   retail: '店舗売上',
   dining: '飲食売上',
   carPark: '駐車場収入',
+  transit: '交通事業者の使用料（タクシー・バス・鉄道）',
+  hotel: '空港ホテル収入',
 };
 
 export const COST_LABEL: Record<CostCategory, string> = {
@@ -465,6 +484,8 @@ export const COST_LABEL: Record<CostCategory, string> = {
   vehicles: '車両維持費',
   maintenance: '施設維持費',
   utilities: '光熱費',
+  accessOps: '交通施設・ホテルの運営費',
+  staffCommute: '職員の通勤対策費（職員用駐車場の不足）',
   groundOps: '地上作業費',
   compensation: '補償・対応費',
 };
@@ -513,7 +534,12 @@ export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
 };
 
 /** KPI の名前と計算式（画面のツールチップに表示） */
-export const KPI_LABEL: Record<Exclude<keyof DailyKpi, 'rating'> | 'rating', { label: string; formula: string }> = {
+export const KPI_LABEL: Record<keyof DailyKpi, { label: string; formula: string }> = {
+  modePax: { label: '手段別の旅客', formula: '出発・到着旅客が空港への行き来に使った手段ごとの人数' },
+  parkingFull: { label: '駐車場満車', formula: '自家用車で来たが満車で停められなかったグループ数' },
+  roadDelayMin: { label: 'アクセス道路の遅れ', formula: '車で来た旅客の混雑による平均の遅れ（分）= 基本時間 × 0.15 × (交通量/容量)^4' },
+  transitWaitMin: { label: '乗り場の待ち', formula: '到着旅客がタクシー・バス・鉄道の乗り場で待った平均時間（分）' },
+  accessFactor: { label: 'アクセス係数', formula: 'min(1.1, 0.3 + 0.85 × (1 − exp(−A/0.2)))、A = Σ exp(手段の効用)。搭乗率に掛かる' },
   flights: { label: '運航便数', formula: '期間内に着陸した到着便 + ブロックアウトした出発便' },
   movements: { label: '離着陸回数', formula: '着陸 + 離陸の回数' },
   paxDeparted: { label: '出発旅客', formula: '搭乗した旅客数' },
@@ -540,6 +566,29 @@ export const KPI_LABEL: Record<Exclude<keyof DailyKpi, 'rating'> | 'rating', { l
 };
 
 export const MODE_LABEL = { career: 'キャリア', sandbox: 'サンドボックス' } as const;
+
+// ---------------------------------------------------------------- 空港アクセス（docs/15_access_rules.md）
+
+export const ACCESS_MODE_LABEL: Record<AccessMode, string> = {
+  car: '自家用車（駐車）',
+  dropoff: '送迎（車寄せ）',
+  taxi: 'タクシー',
+  bus: 'バス',
+  rail: '鉄道',
+  walk: '徒歩',
+};
+
+export const ACCESS_UNAVAILABLE_LABEL: Record<AccessUnavailable, string> = {
+  noTerminal: '運用中のターミナルがない',
+  noEntrance: '敷地の外へつながる一般道路（出入口）がない',
+  noFacility: '施設がない',
+  notConnected: '外部につながる道路・鉄道に接続されていない',
+  tooFar: 'ターミナルから遠すぎる',
+  noCurb: 'ターミナルが一般道路に接していない（車寄せなし）',
+  noCapacity: '台数・本数が 0',
+};
+
+export const PROJECT_KIND_LABEL: Record<Project['kind'], string> = { build: '新設工事', renovation: '改修工事（閉鎖中）', closure: '一時閉鎖' };
 
 /** 日内の分 → 06:30 */
 export function formatMinute(min: number): string {

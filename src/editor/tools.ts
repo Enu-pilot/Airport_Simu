@@ -10,6 +10,7 @@ import {
   placeRunway,
   placeStand,
   placeTerminalArea,
+  purchaseLand,
   type OpResult,
 } from '../core/layout/operations';
 import type { EditorState, ToolId } from './store';
@@ -115,6 +116,11 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
       return tool === 'taxiway'
         ? wrap(addTaxiwayPath(layout, points, { widthClass: options.taxiWidth, oneWay: options.oneWay, buildState: options.buildState }))
         : wrap(addRoadPath(layout, points, { roadClass: options.roadClass, oneWay: options.oneWay, buildState: options.buildState }));
+    }
+    case 'land': {
+      // 土地購入: ドラッグした矩形（クリックは1タイル）の未取得地
+      const start = draft?.kind === 'rect' ? draft.start : hover;
+      return wrap(purchaseLand(layout, start, hover));
     }
     case 'stand': {
       const { w, d } = STAND_DIMS[options.standSize];

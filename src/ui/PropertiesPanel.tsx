@@ -20,7 +20,7 @@ import {
   updateEntity,
 } from '../core/layout/operations';
 import { runwayDesignators, runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
-import { applyOp, editorStore, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { applyOp, closeTemporarily, editorStore, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { ops } from '../editor/simRunner';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { focusEntity } from '../editor/input';
@@ -31,6 +31,7 @@ import {
   NODE_KIND_LABEL,
   OPERABILITY_LABEL,
   PROP_LABEL,
+  PROJECT_KIND_LABEL,
   ROAD_CLASS_LABEL,
   SIZE_LABEL,
   displayName,
@@ -83,6 +84,38 @@ export function PropertiesPanel() {
 
 const update = (layout: AirportLayout, id: string, patch: Record<string, unknown>) => applyOp(updateEntity(layout, id, patch));
 
+/** 工事の状況（キャリア）と一時閉鎖 */
+function ProjectInfo({ layout, id, buildState }: { layout: AirportLayout; id: string; buildState: BuildState | undefined }) {
+  const company = useEditor((s) => s.company);
+  const mode = useEditor((s) => s.mode);
+  const [days, setDays] = useState(2);
+  if (company.mode !== 'career' || !buildState) return null;
+  const p = company.projects[id];
+  if (p) {
+    return (
+      <div className="operability ng" data-testid="project-info">
+        {PROJECT_KIND_LABEL[p.kind]}: 残り {p.remaining}日（工期 {p.days}日、{p.startDay + 1}日目に開始）
+        {p.remaining === 0 && <div className="reason">完了。運航を終えると運用中になります</div>}
+      </div>
+    );
+  }
+  if (buildState !== 'operational' || mode === 'operate') return null;
+  return (
+    <div className="prop-actions">
+      <select value={days} onChange={(e) => setDays(Number(e.target.value))} title="閉鎖する日数（運航した日で数える）">
+        {[1, 2, 3, 5, 7].map((d) => (
+          <option key={d} value={d}>
+            {d}日
+          </option>
+        ))}
+      </select>
+      <button onClick={() => closeTemporarily(id, days)} data-testid="prop-close" title={`${displayName(layout, id)} を指定の日数だけ閉鎖する（費用なし）`}>
+        一時閉鎖
+      </button>
+    </div>
+  );
+}
+
 function EntityProperties({ layout, id }: { layout: AirportLayout; id: string }) {
   const analysis = useAnalysis();
   const type = entityTypeOf(id)!;
@@ -112,6 +145,8 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
           削除
         </button>
       </div>
+
+      <ProjectInfo layout={layout} id={id} buildState={buildState} />
 
       {op && (
         <div className={op.operable ? 'operability ok' : 'operability ng'} data-testid="operability">
@@ -237,6 +272,7 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
           <select value={e.roadClass} onChange={(ev) => update(layout, id, { roadClass: ev.target.value })}>
             <option value="public">{ROAD_CLASS_LABEL.public}</option>
             <option value="service">{ROAD_CLASS_LABEL.service}</option>
+            <option value="rail">{ROAD_CLASS_LABEL.rail}</option>
           </select>
         </Field>
         <Field label="一方通行">

@@ -1,5 +1,5 @@
 import { FACILITY_SPECS } from '../core/model/catalog';
-import type { BuildState, FacilityKind, SizeClass } from '../core/model/types';
+import type { BuildState, FacilityKind, RoadClass, SizeClass } from '../core/model/types';
 import { BUILD_STATES } from '../core/model/types';
 import { actions, useEditor, type ToolId } from '../editor/store';
 import { facilityKindOf } from '../editor/tools';
@@ -46,9 +46,20 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
   {
     title: '道路・エリア',
     tools: [
-      { id: 'road', label: '道路', hint: 'クリックで頂点を追加、ダブルクリック/Enter/右クリックで確定' },
+      { id: 'road', label: '道路・鉄道', hint: 'クリックで頂点を追加、ダブルクリック/Enter/右クリックで確定（種別: 一般・業務用・鉄道）' },
       fac('serviceArea'),
       fac('parking'),
+    ],
+  },
+  {
+    title: '空港アクセス・周辺施設',
+    tools: [
+      fac('taxiStand', '一般道路に接して、ターミナルの近く（16タイル以内）に配置'),
+      fac('busStop', '一般道路に接して、ターミナルの近く（16タイル以内）に配置'),
+      fac('railStation', '鉄道線（道路ツールの種別「鉄道」）を敷地の外周までつなぐ'),
+      fac('staffParking', 'ドラッグで範囲を指定。道路（一般・業務用）に接して配置'),
+      fac('hotel', '一般道路に接して、ターミナルの近くに配置'),
+      { id: 'land', label: '土地を購入', hint: '敷地外（暗い部分）をドラッグして購入。取得済みの敷地に隣接する土地のみ' },
     ],
   },
 ];
@@ -140,9 +151,10 @@ export function Toolbox() {
           <>
             <label>
               種別
-              <select value={options.roadClass} onChange={(e) => actions.setOption('roadClass', e.target.value as 'public' | 'service')}>
+              <select value={options.roadClass} onChange={(e) => actions.setOption('roadClass', e.target.value as RoadClass)} data-testid="opt-roadClass">
                 <option value="public">{ROAD_CLASS_LABEL.public}</option>
                 <option value="service">{ROAD_CLASS_LABEL.service}</option>
+                <option value="rail">{ROAD_CLASS_LABEL.rail}</option>
               </select>
             </label>
             <label className="check">

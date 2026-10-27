@@ -39,7 +39,16 @@ export const BALANCE = {
     areaPerTile: 2_000,
     /** 撤去・縮小したときに戻る割合 */
     refundRate: 0.25,
+    /** 空港アクセス・周辺施設（Phase 6） */
+    access: { taxiStand: 60_000, busStop: 90_000, railStation: 2_500_000, hotel: 1_800_000, staffParkingPerTile: 600, railPerTile: 25_000 },
+    /** 土地の購入費（1タイルあたり） */
+    landPerTile: 2_000,
   },
+  /**
+   * 空港の規模による建設費・維持費の割増（調整・安全対策・管理の複雑さを表すゲーム上の係数）:
+   * 係数 = 1 + perValue × 資産額（cr）、上限 max
+   */
+  scale: { perValue: 0.5 / 100_000_000, max: 1.6 },
 
   // ------------------------------------------------------------ 収入
   fees: {
@@ -59,8 +68,11 @@ export const BALANCE = {
   },
   /** 料金の倍率をプレイヤーが変えたときの需要・航空会社満足度への影響 */
   feeSensitivity: { loadFactorPerRatio: 0.3, satisfactionPerRatio: 12 },
+  /** 交通事業者から受け取る使用料（旅客1人あたり）と、駐車場・ホテルの収入 */
+  accessFees: { taxi: 100, bus: 60, rail: 80, hotelPerRoomNight: 60 },
   retail: { shopPerPax: 15, restaurantPerPax: 22, shopVisitProb: 0.5, shopSec: 8 * 60, restaurantSec: 20 * 60, minSlackSec: 40 * 60 },
-  carPark: { carShare: 0.3, feePerCar: 400, stayDays: 2 },
+  /** 駐車料金（1台・1回の駐車あたり）と平均の駐車日数 */
+  carPark: { feePerCar: 400, stayDays: 2 },
 
   // ------------------------------------------------------------ 費用（1日あたり）
   daily: {
@@ -75,6 +87,10 @@ export const BALANCE = {
     maintenanceRate: 0.0003,
     /** 光熱費（ターミナル1タイル・1階あたり） */
     utilitiesPerTerminalTile: 30,
+    /** 交通施設の運営費（1か所あたり） */
+    access: { taxiStand: 300, busStop: 800, railStation: 6_000, hotel: 2_000 },
+    /** 職員用駐車場が足りない分の通勤対策費（1台分あたり） */
+    staffCommutePerMissing: 600,
   },
   /** 地上支援の作業ごとの運営費 */
   taskCost: { unload: 300, load: 300, fuel: 600, clean: 400, cater: 300, inspect: 600, pushback: 200, defect: 3_000 } as Record<string, number>,
@@ -94,6 +110,38 @@ export const BALANCE = {
   offers: { baseProb: 0.12, ratingProb: 0.3, maxOpen: 6, expireDays: 3, contractDays: 30 },
   contracts: { renewGoodSat: 70, renewOkSat: 45, withdrawSat: 25, withdrawDays: 3, increaseMinSat: 60, decreasePenaltySat: 10 },
   bankruptcyDays: 30,
+
+  // ------------------------------------------------------------ 空港アクセス（docs/15_access_rules.md）
+  accessModel: {
+    /** 市街地から敷地の出入口までの所要時間（分） */
+    externalMin: { car: 35, dropoff: 35, taxi: 35, bus: 50, rail: 30, walk: 120 },
+    /** 旅客が払う運賃・料金（cr、空港の使用料を除く。駐車料金は1台分） */
+    baseFare: { car: 0, dropoff: 0, taxi: 2_500, bus: 900, rail: 700, walk: 0 },
+    /** 手段ごとの好み（定数項）と、時間の重み（1分あたり）、時間価値（cr/分） */
+    asc: { car: 0, dropoff: 0.2, taxi: 0, bus: -0.3, rail: 0, walk: -1 },
+    beta: 0.05,
+    valueOfTime: 60,
+    /** 1台に乗る旅客数（自家用車・タクシー） */
+    paxPerCar: 1.6,
+    /** アクセス係数 = min(max, floor + span × (1 − exp(−A / a0))) */
+    factor: { floor: 0.3, span: 0.85, a0: 0.2, max: 1.1 },
+    /** 処理能力: 出入口1か所あたりの道路（台/時）、ターミナルに接する一般道路1タイルあたりの車寄せ（台/時） */
+    roadPerEntrance: 900,
+    curbPerTile: 40,
+    /** タクシー乗車枠1つあたり（人/時）、バス1台・列車1本の定員（空港利用分） */
+    taxiPaxPerBerth: 30,
+    busSeats: 50,
+    busesPerBay: 6,
+    trainSeats: 200,
+    /** 混雑による遅れ（BPR 型）: 遅れ = 基本時間 × 0.15 × (交通量/容量)^4、上限（分） */
+    congestionMaxMin: 90,
+    /** 駐車場が満車のときに探し回る時間（分） */
+    parkingSearchMin: 10,
+    /** ホテル: 歩いて来る宿泊客の割合の上限に効く客室数 */
+    hotelRoomsForFull: 400,
+    /** 職員1人あたりの必要な職員用駐車台数 */
+    staffParkingPerStaff: 0.5,
+  },
 } as const;
 
 /** 定時運航の判定（予定から15分以内） */

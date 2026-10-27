@@ -39,7 +39,8 @@ test('新しいゲームは小さな飛行場と初期資金・初期契約で�
 test('建設すると建設費を支払い、元に戻すと同額が戻る。資金が足りない建設はできない', async ({ page }) => {
   await page.getByTestId('tool-facility:tower').click();
   await clickTile(page, 86, 52);
-  await expect(page.getByTestId('cash')).toContainText('3,200,000 cr');
+  // 管制塔 800,000 × 規模係数 1.0968（docs/15 §5）
+  await expect(page.getByTestId('cash')).toContainText('3,122,555 cr');
   await page.keyboard.press('Escape');
   await page.getByTestId('undo').click();
   await expect(page.getByTestId('cash')).toContainText('4,000,000 cr');

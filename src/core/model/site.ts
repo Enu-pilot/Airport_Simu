@@ -11,6 +11,8 @@ export interface SiteOptions {
   height?: number;
   seed?: string;
   offsiteMargin?: number;
+  /** false のとき外周の未取得地を置かない（土地購入時の元の地形の復元に使う） */
+  offsite?: boolean;
 }
 
 /**
@@ -53,6 +55,7 @@ export function createSite(opts: SiteOptions = {}): Site {
   blob(width * 0.08, height * 0.84, 3, 2, Terrain.rock);
 
   // 外周の未取得地
+  if (opts.offsite === false) return { width, height, terrain, seed };
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       if (x < margin || y < margin || x >= width - margin || y >= height - margin) {
@@ -87,4 +90,17 @@ export function isSiteEdge(site: Site, x: number, y: number): boolean {
     terrainAt(site, x, y - 1) === Terrain.offsite ||
     terrainAt(site, x, y + 1) === Terrain.offsite
   );
+}
+
+const baseCache = new Map<string, TerrainType[]>();
+
+/** 未取得地の下にある元の地形（同じシード・寸法で、未取得地を置かずに生成した地形） */
+export function baseTerrainAt(site: Site, x: number, y: number): TerrainType {
+  const key = `${site.seed}:${site.width}x${site.height}`;
+  let base = baseCache.get(key);
+  if (!base) {
+    base = createSite({ width: site.width, height: site.height, seed: site.seed, offsite: false }).terrain;
+    baseCache.set(key, base);
+  }
+  return base[y * site.width + x] ?? Terrain.grass;
 }

@@ -60,7 +60,8 @@ import {
   type SimState,
 } from './types';
 import { TILE_M } from '../model/catalog';
-import { emptyFlightPax, serversOf, stepPassengers } from './passengers';
+import { completeExit, emptyFlightPax, serversOf, stepPassengers } from './passengers';
+import { createAccessRuntime, refreshAccess, stepAccess } from '../access/runtime';
 import type { CompanyState } from '../economy/company';
 import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
 import { analyzeDayPlan, planDay } from '../economy/planning';
@@ -159,9 +160,13 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
       bagsCollected: 0,
     },
     economy: null,
+    access: null,
   };
   const sim: Simulation = { ctx, state, company: opts.company ?? null };
-  if (sim.company) state.economy = createEconomy(ctx, state, sim.company);
+  if (sim.company) {
+    state.economy = createEconomy(ctx, state, sim.company);
+    state.access = createAccessRuntime(sim, sim.company);
+  }
   createGroundUnits(sim);
   if (state.settings.autoSchedule) generateDaySchedule(sim, Math.floor(state.now / DAY_SEC));
   return sim;
@@ -360,7 +365,8 @@ export function generateDaySchedule(sim: Simulation, day: number): void {
  */
 function generateContractSchedule(sim: Simulation, day: number): void {
   const { state, ctx } = sim;
-  const plan = planDay(sim.company!, companyDayOf(sim, day));
+  // 需要にはアクセス係数（前日の混雑を反映）が掛かる。運航計画タブのプレビューも同じ値を使う
+  const plan = planDay(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!));
   const analysis = analyzeDayPlan(plan, ctx);
   const earliest = state.now + 20 * 60;
   for (const p of plan.flights) {
@@ -574,6 +580,7 @@ export function stepSimulation(sim: Simulation): void {
   runwayControl(sim);
   for (const ac of all) stepAircraft(sim, ac);
   stepPassengers(sim);
+  for (const g of stepAccess(sim)) completeExit(sim, g);
   stepBaggage(sim);
   stepGround(sim);
   detectConflicts(sim);

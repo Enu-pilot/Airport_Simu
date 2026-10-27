@@ -1,6 +1,8 @@
 import type { RngState } from '../rng';
 import type { AircraftTypeId } from './aircraftTypes';
 import type { SimEconomy } from '../economy/ops';
+import type { AccessMode } from '../access/model';
+import type { AccessRuntime } from '../access/runtime';
 
 /**
  * 運航シミュレーションの状態。JSON シリアライズ可能な plain object とし、
@@ -318,6 +320,7 @@ export type PaxState =
   | 'exited'
   | 'stranded'
   | 'waitingFacility'
+  | 'waitingTransport'
   | 'missed'
   | 'cancelled';
 
@@ -356,6 +359,9 @@ export interface PaxGroup {
   walkSec: number;
   reason: MissReason | null;
   retryAt: number;
+  /** 空港アクセスの手段（アクセスを扱う運航のみ）と、到着時のアクセス処理を済ませたか */
+  mode?: AccessMode | null;
+  accessDone?: boolean;
 }
 
 export interface FacilityRuntime {
@@ -503,6 +509,8 @@ export interface SimState {
   groundStats: GroundStats;
   /** 経営の集計（会社と一緒に運航するときのみ） */
   economy: SimEconomy | null;
+  /** 空港アクセス（会社と一緒に運航し、ターミナルがあるときのみ） */
+  access: AccessRuntime | null;
 }
 
 export const EVENT_LOG_LIMIT = 1000;

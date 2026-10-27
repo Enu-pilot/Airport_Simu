@@ -30,7 +30,10 @@ import {
   type DailyKpi,
   type DailyReport,
 } from './company';
-import { layoutValue } from './construction';
+import { layoutValue, scaleFactor } from './construction';
+import { advanceProjects } from './expansion';
+import { analyzeAccess, type AccessAnalysis, type AccessFeedback } from '../access/model';
+import { takeAccessStats } from '../access/runtime';
 import { isPeak, RUNWAY_HOURLY_CAPACITY } from './planning';
 import { airlineDef } from './registry';
 
@@ -56,18 +59,15 @@ export interface SimEconomy {
   /** チェックイン・保安検査の窓口の使用時間と、開いていた窓口の時間（窓口・秒） */
   facilityBusy: number;
   facilityCap: number;
-  /** 当日に駐車した台数と端数 */
-  cars: number;
-  carAcc: number;
   /** 補償の対象になった積み残し手荷物 */
   leftBags: number;
   /** 1日あたりの固定費（費目ごと）と契約料 */
   fixedDaily: Partial<Record<CostCategory, number>>;
   contractDaily: number;
-  /** 駐車場の1日あたりの受け入れ台数 */
-  carCapacity: number;
   /** 窓口の稼働率を測るエリア */
   processingAreas: string[];
+  /** 空港ホテルの客室数（外部とつながりターミナルに近いもの） */
+  hotelRooms: number;
 }
 
 const enabled = (sim: Simulation): sim is Simulation & { company: CompanyState } => !!sim.company && !!sim.state.economy;
@@ -86,10 +86,12 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
  *   人件費 = 作業員数 × 1,200 + 整備士数 × 2,000
  *   窓口要員 = チェックインカウンター数 × 800 + 保安検査レーン数 × 2,500 + ゲート数 × 600
  *   車両維持費 = 車両台数 × 300
- *   施設維持費 = 資産額 × 0.0003
+ *   施設維持費 = 資産額 × 0.0003 × 規模係数
  *   光熱費 = ターミナルの面積（タイル）× 階数 × 30
+ *   交通施設の運営費 = タクシー乗り場 300 / バス乗り場 800 / 駅 6,000 / ホテル 2,000（1か所あたり）
+ *   通勤対策費 = 職員用駐車場の不足台数 × 600（必要台数 = 職員数 × 0.5）
  */
-export function dailyFixedCosts(ctx: SimContext): Partial<Record<CostCategory, number>> {
+export function dailyFixedCosts(ctx: SimContext, access: AccessAnalysis = analyzeAccess(ctx.layout)): Partial<Record<CostCategory, number>> {
   const D = BALANCE.daily;
   let salary = 0;
   let vehicles = 0;
@@ -106,17 +108,21 @@ export function dailyFixedCosts(ctx: SimContext): Partial<Record<CostCategory, n
     if (a.kind === 'security') counterStaff += Number(a.props.lanes ?? 0) * D.securityLane;
   }
   let utilities = 0;
+  let accessOps = 0;
   for (const f of Object.values(ctx.layout.facilities)) {
     if (f.buildState !== 'operational') continue;
     if (f.kind === 'gate') counterStaff += D.gate;
     if (f.kind === 'terminal') utilities += f.w * f.h * Math.max(1, Number(f.props.levels ?? 1)) * D.utilitiesPerTerminalTile;
+    if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'railStation' || f.kind === 'hotel') accessOps += D.access[f.kind];
   }
   return {
     salary,
     counterStaff,
     vehicles: vehicles * D.vehicle,
-    maintenance: Math.round(layoutValue(ctx.layout) * D.maintenanceRate),
+    maintenance: Math.round(layoutValue(ctx.layout) * D.maintenanceRate * scaleFactor(ctx.layout)),
     utilities,
+    accessOps,
+    staffCommute: Math.max(0, access.staffSpacesNeeded - access.staffSpaces) * D.staffCommutePerMissing,
   };
 }
 
@@ -129,9 +135,7 @@ export function dailyContractRevenue(c: CompanyState, day: number): number {
 
 export function createEconomy(ctx: SimContext, state: SimState, c: CompanyState): SimEconomy {
   const simDay = Math.floor(state.now / DAY_SEC);
-  const spaces = Object.values(ctx.layout.facilities)
-    .filter((f) => f.kind === 'parking' && f.buildState === 'operational')
-    .reduce((s, f) => s + Math.max(0, Number(f.props.spaces ?? 0)), 0);
+  const access = analyzeAccess(ctx.layout, { fees: c.fees, feedback: c.accessFeedback });
   return {
     dayOffset: c.day - simDay,
     periodStart: state.now,
@@ -140,15 +144,13 @@ export function createEconomy(ctx: SimContext, state: SimState, c: CompanyState)
     standBusySec: 0,
     facilityBusy: 0,
     facilityCap: 0,
-    cars: 0,
-    carAcc: 0,
     leftBags: 0,
-    fixedDaily: dailyFixedCosts(ctx),
+    fixedDaily: dailyFixedCosts(ctx, access),
     contractDaily: dailyContractRevenue(c, c.day),
-    carCapacity: Math.floor(spaces / BALANCE.carPark.stayDays),
     processingAreas: Object.keys(ctx.terminal.areas)
       .filter((id) => ['checkIn', 'security'].includes(ctx.terminal.areas[id]!.kind))
       .sort(),
+    hotelRooms: access.hotelRooms,
   };
 }
 
@@ -231,18 +233,6 @@ export function onShopDone(sim: Simulation, g: PaxGroup, kind: 'shop' | 'restaur
   if (!enabled(sim)) return;
   if (kind === 'shop') post(sim.company, 'retail', g.count * BALANCE.retail.shopPerPax);
   else post(sim.company, 'dining', g.count * BALANCE.retail.restaurantPerPax);
-}
-
-/** 出発旅客の到着: 一部が車で来て駐車場を使う（1日の受け入れ台数まで） */
-export function onPaxEnter(sim: Simulation, g: PaxGroup): void {
-  if (!enabled(sim)) return;
-  const e = sim.state.economy!;
-  e.carAcc += g.count * BALANCE.carPark.carShare;
-  const cars = Math.floor(e.carAcc);
-  e.carAcc -= cars;
-  const parked = Math.max(0, Math.min(cars, e.carCapacity - e.cars));
-  e.cars += parked;
-  post(sim.company, 'carPark', parked * BALANCE.carPark.feePerCar);
 }
 
 export function onPaxMissed(sim: Simulation, _f: Flight, count: number): void {
@@ -446,6 +436,8 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   const e = state.economy!;
   accrue(sim, state.now);
   const { kpi, byAirline } = computeKpi(sim, c);
+  settleAccess(sim, c, kpi);
+  for (const ev of advanceProjects(c)) log(state, ev);
   for (const ev of updateContracts(c, byAirline)) log(state, ev);
   kpi.airlineSatisfaction = airlineSatisfaction(c);
   c.rating = nextRating(c.rating, kpi);
@@ -484,11 +476,45 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   e.standBusySec = 0;
   e.facilityBusy = 0;
   e.facilityCap = 0;
-  e.cars = 0;
   e.leftBags = 0;
   e.contractDaily = dailyContractRevenue(c, c.day);
   e.dayOffset = c.day - Math.floor(state.now / DAY_SEC);
   return report;
+}
+
+/**
+ * アクセスの締め: 手段別の旅客数・満車・混雑の遅れ・乗り場の待ちを KPI に記録し、翌日の手段選択への反映（feedback）と
+ * 日をまたぐ駐車を会社に保存する。旅客満足度から 0.5 × 道路の平均遅れ(分) + 20 × 満車率 を引く。
+ * 空港ホテルの収入 = min(客室数 × 0.9, 旅客数 × 0.03) × 60（1室1泊あたり）。
+ */
+function settleAccess(sim: Simulation, c: CompanyState, kpi: DailyKpi): void {
+  const e = sim.state.economy!;
+  const taken = takeAccessStats(sim);
+  if (e.hotelRooms > 0) {
+    const nights = Math.min(e.hotelRooms * 0.9, (kpi.paxDeparted + kpi.paxArrived) * 0.03);
+    post(c, 'hotel', nights * BALANCE.accessFees.hotelPerRoomNight);
+  }
+  if (!taken) return;
+  const s = taken.stats;
+  const roadDelay = s.roadDelayN > 0 ? s.roadDelaySum / s.roadDelayN : 0;
+  const curbDelay = s.curbDelayN > 0 ? s.curbDelaySum / s.curbDelayN : 0;
+  const fullRate = s.carGroups > 0 ? s.parkingFull / s.carGroups : 0;
+  const waitMin: AccessFeedback['waitMin'] = {};
+  let waitSum = 0;
+  let waitPax = 0;
+  for (const m of ['taxi', 'bus', 'rail'] as const) {
+    if (s.waitPax[m] > 0) waitMin[m] = round1(s.waitSum[m] / s.waitPax[m] / 60);
+    waitSum += s.waitSum[m];
+    waitPax += s.waitPax[m];
+  }
+  kpi.modePax = { ...s.pax };
+  kpi.parkingFull = s.parkingFull;
+  kpi.roadDelayMin = round1(roadDelay);
+  kpi.transitWaitMin = waitPax > 0 ? round1(waitSum / waitPax / 60) : 0;
+  kpi.accessFactor = sim.state.access!.factor;
+  if (kpi.paxSatisfaction !== null) kpi.paxSatisfaction = round1(clamp(kpi.paxSatisfaction - 0.5 * roadDelay - 20 * fullRate));
+  c.accessFeedback = { roadDelayMin: round1(roadDelay), curbDelayMin: round1(curbDelay), parkingFullRate: round1(fullRate * 100) / 100, waitMin };
+  c.parkedCars = taken.parkedCars;
 }
 
 /** 資金がマイナスの日が続くと経営破綻（キャリアモードのみ） */

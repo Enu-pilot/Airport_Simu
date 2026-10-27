@@ -9,10 +9,11 @@ PCブラウザで動作する空港デザイン・運営シミュレーション
 
 ## 現在の状態
 
-**Phase 5（運航計画・航空会社・経営）** — 「新しいゲーム（小さな飛行場から）」で初期資金と初期契約から始め、建設費を払って施設を拡張し、航空会社の契約・料金・運用時間を計画して運航する。
-運航実績に応じて着陸料・使用料・店舗・駐車場などの収入と、人件費・維持費・地上作業費・補償などの費用が計上され、日次締めで日報・KPI・空港評価・航空会社の満足度が更新される。
-建設エディタ（空港とターミナル内部）、航空機の運航、旅客の流れ、折り返し作業と手荷物（Phase 1〜4）はそのまま使える。
-ルールは [docs/11](docs/11_operations_rules.md)（運航）、[docs/12](docs/12_passenger_rules.md)（旅客）、[docs/13](docs/13_ground_handling_rules.md)（地上支援・手荷物）、[docs/14](docs/14_management_rules.md)（運航計画・経営）。
+**Phase 6（空港アクセス・周辺施設・拡張）** — 一般道路・業務用道路・鉄道線と、駐車場・タクシー乗り場・バス乗り場・空港連絡駅・職員用駐車場・空港ホテルを建設できる。
+旅客は所要時間・運賃・接続・容量から空港への交通手段を選び、アクセスの良さが需要（搭乗率）に反映される。運航中は駐車場の満車・道路の混雑・バスや鉄道の定員・乗り場の待ちが起き、待ち時間・乗り遅れ・満足度・収支に影響する。
+土地の購入、規模による建設費・維持費の割増、工期・改修工事・一時閉鎖（キャリア）で空港を拡張する。
+Phase 1〜5 の建設エディタ、運航、旅客、地上支援・手荷物、運航計画・経営はそのまま使える。
+ルールは [docs/11](docs/11_operations_rules.md)（運航）、[docs/12](docs/12_passenger_rules.md)（旅客）、[docs/13](docs/13_ground_handling_rules.md)（地上支援・手荷物）、[docs/14](docs/14_management_rules.md)（運航計画・経営）、[docs/15](docs/15_access_rules.md)（アクセス・拡張）。
 いずれもゲーム用の簡略化モデルで、金額はゲーム内通貨 cr（実在の料金・費用とは無関係）。
 
 ## 使い方
@@ -68,6 +69,7 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 12 | [docs/12_passenger_rules.md](docs/12_passenger_rules.md) | ターミナル・旅客流動仕様（Phase 3 実装） |
 | 13 | [docs/13_ground_handling_rules.md](docs/13_ground_handling_rules.md) | 地上支援・手荷物・折り返し業務仕様（Phase 4 実装） |
 | 14 | [docs/14_management_rules.md](docs/14_management_rules.md) | 運航計画・航空会社・経営ルール（Phase 5 実装、料金・費用・KPI の式） |
+| 15 | [docs/15_access_rules.md](docs/15_access_rules.md) | 空港アクセス・周辺施設・拡張ルール（Phase 6 実装、手段選択・混雑・土地・工事の式） |
 
 ## 技術構成
 

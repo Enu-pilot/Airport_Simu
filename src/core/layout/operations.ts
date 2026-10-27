@@ -1,5 +1,5 @@
 import { DEFAULT_PROPS, FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS } from '../model/catalog';
-import { createSite } from '../model/site';
+import { baseTerrainAt, createSite, inSite, terrainAt } from '../model/site';
 import {
   BUILD_STATES,
   HEADINGS,
@@ -20,6 +20,7 @@ import {
   type PaxZone,
   type TerminalArea,
   type TerminalAreaKind,
+  Terrain,
 } from '../model/types';
 import { add, sameTile, type Tile } from '../geometry/vec';
 import { sortedValues } from '../model/ids';
@@ -49,7 +50,8 @@ export type OpFailure =
   | 'INVALID_VALUE'
   | 'NODE_EXISTS'
   | 'EMPTY_PATH'
-  | 'NO_CHANGE';
+  | 'NO_CHANGE'
+  | 'LAND_NOT_ADJACENT';
 
 export type OpResult =
   | { ok: true; layout: AirportLayout; created: string[] }
@@ -282,6 +284,43 @@ export function addRoadPath(layout: AirportLayout, points: readonly Tile[], opts
   });
   if (edgeIds.length === 0) return fail('NO_CHANGE');
   return ok(finalize(d), edgeIds);
+}
+
+// ---------------------------------------------------------------- 土地
+
+/** 矩形内の未取得地のタイル（地図の範囲内） */
+export function offsiteTilesIn(layout: AirportLayout, a: Tile, b: Tile): Tile[] {
+  const out: Tile[] = [];
+  for (let y = Math.min(a.y, b.y); y <= Math.max(a.y, b.y); y++) {
+    for (let x = Math.min(a.x, b.x); x <= Math.max(a.x, b.x); x++) {
+      if (inSite(layout.site, x, y) && terrainAt(layout.site, x, y) === Terrain.offsite) out.push({ x, y });
+    }
+  }
+  return out;
+}
+
+/**
+ * 土地を購入する: 矩形内の未取得地を元の地形（草地・森・水域など）に戻し、購入タイル数を記録する。
+ * 取得済みの敷地に隣接していない土地は買えない。売却は未対応。費用は economy/construction.ts。
+ */
+export function purchaseLand(layout: AirportLayout, a: Tile, b: Tile): OpResult {
+  const tiles = offsiteTilesIn(layout, a, b);
+  if (tiles.length === 0) return fail('NO_CHANGE');
+  const site = layout.site;
+  const inRect = new Set(tiles.map((t) => `${t.x},${t.y}`));
+  const adjacent = tiles.some((t) =>
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+      const x = t.x + dx!;
+      const y = t.y + dy!;
+      return inSite(site, x, y) && !inRect.has(`${x},${y}`) && terrainAt(site, x, y) !== Terrain.offsite;
+    }),
+  );
+  if (!adjacent) return fail('LAND_NOT_ADJACENT');
+  const terrain = [...site.terrain];
+  for (const t of tiles) terrain[t.y * site.width + t.x] = baseTerrainAt(site, t.x, t.y);
+  const d = cloneLayout(layout);
+  d.site = { ...site, terrain, purchased: (site.purchased ?? 0) + tiles.length };
+  return ok(d);
 }
 
 // ---------------------------------------------------------------- 移動・回転・複製・削除
@@ -567,7 +606,7 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
     case 'road':
       err = apply(d.roads[id], {
         name: str,
-        roadClass: (v) => v === 'public' || v === 'service',
+        roadClass: (v) => v === 'public' || v === 'service' || v === 'rail',
         oneWay: bool,
         buildState: isBuildState,
       });

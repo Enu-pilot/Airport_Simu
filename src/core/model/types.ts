@@ -47,6 +47,8 @@ export interface Site {
   /** 行優先 (y * width + x) */
   terrain: TerrainType[];
   seed: string;
+  /** 購入した土地のタイル数（Phase 6。未設定は 0） */
+  purchased?: number;
 }
 
 export interface Runway {
@@ -86,7 +88,8 @@ export interface TaxiwayEdge {
   buildState: BuildState;
 }
 
-export type RoadClass = 'public' | 'service';
+/** public: 一般道路 / service: 構内サービス道路（業務用）/ rail: 鉄道（空港連絡線） */
+export type RoadClass = 'public' | 'service' | 'rail';
 
 export interface RoadEdge {
   id: string;
@@ -122,7 +125,13 @@ export type FacilityKind =
   | 'gseBase'
   | 'baggageSort'
   | 'serviceArea'
-  | 'parking';
+  | 'parking'
+  // 空港アクセス・周辺施設（Phase 6）
+  | 'taxiStand'
+  | 'busStop'
+  | 'railStation'
+  | 'staffParking'
+  | 'hotel';
 
 export type PropValue = string | number | boolean | null;
 

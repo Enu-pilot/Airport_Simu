@@ -14,7 +14,8 @@ export type FootprintLayer =
   | 'building'
   | 'area'
   | 'roadPublic'
-  | 'roadService';
+  | 'roadService'
+  | 'rail';
 
 export interface FacilitySpec {
   layer: FootprintLayer;
@@ -43,6 +44,11 @@ export const FACILITY_SPECS: Record<FacilityKind, FacilitySpec> = {
   baggageSort: { layer: 'building', defaultW: 4, defaultH: 4, resizable: false, minW: 4, minH: 4, dragPlace: false, needsAirsideAccess: true },
   serviceArea: { layer: 'area', defaultW: 6, defaultH: 4, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
   parking: { layer: 'area', defaultW: 8, defaultH: 5, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
+  taxiStand: { layer: 'area', defaultW: 3, defaultH: 2, resizable: false, minW: 3, minH: 2, dragPlace: false, needsAirsideAccess: false },
+  busStop: { layer: 'area', defaultW: 4, defaultH: 2, resizable: false, minW: 4, minH: 2, dragPlace: false, needsAirsideAccess: false },
+  railStation: { layer: 'building', defaultW: 6, defaultH: 3, resizable: false, minW: 6, minH: 3, dragPlace: false, needsAirsideAccess: false },
+  staffParking: { layer: 'area', defaultW: 6, defaultH: 4, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
+  hotel: { layer: 'building', defaultW: 5, defaultH: 4, resizable: false, minW: 5, minH: 4, dragPlace: false, needsAirsideAccess: false },
 };
 
 export const FACILITY_KINDS = Object.keys(FACILITY_SPECS) as FacilityKind[];
@@ -81,6 +87,14 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
   baggageSort: [{ key: 'capacityPerMin', type: 'int', min: 1, max: 500 }],
   serviceArea: [],
   parking: [{ key: 'spaces', type: 'int', min: 0, max: 20000 }],
+  taxiStand: [{ key: 'berths', type: 'int', min: 1, max: 20 }],
+  busStop: [
+    { key: 'busBays', type: 'int', min: 1, max: 10 },
+    { key: 'busesPerHour', type: 'int', min: 1, max: 30 },
+  ],
+  railStation: [{ key: 'trainsPerHour', type: 'int', min: 1, max: 20 }],
+  staffParking: [{ key: 'spaces', type: 'int', min: 0, max: 5000 }],
+  hotel: [{ key: 'rooms', type: 'int', min: 10, max: 2000 }],
 };
 
 export const DEFAULT_PROPS: Record<FacilityKind, Record<string, PropValue>> = {
@@ -96,6 +110,11 @@ export const DEFAULT_PROPS: Record<FacilityKind, Record<string, PropValue>> = {
   baggageSort: { capacityPerMin: 30 },
   serviceArea: {},
   parking: { spaces: 400 },
+  taxiStand: { berths: 4 },
+  busStop: { busBays: 2, busesPerHour: 4 },
+  railStation: { trainsPerHour: 4 },
+  staffParking: { spaces: 120 },
+  hotel: { rooms: 200 },
 };
 
 /** スポットの寸法（幅 = 機首と直交方向、奥行き = 機首方向）。幅は入口を中央に置くため奇数 */

@@ -19,6 +19,7 @@ import { positionOnRunway, runwayEnd, runwayMaxSize } from '../layout/runway';
 import type { NetNode, TerminalAreaKind } from '../model/types';
 import { areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
 import { findPaxRoute } from '../terminal/route';
+import { ACCESS_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTiles } from '../access/landside';
 
 /**
  * 配置エラー・接続エラーの検出と、各エンティティの運用可否の判定。
@@ -63,6 +64,10 @@ export type IssueCode =
   | 'PARKING_NO_ROAD'
   | 'ROAD_NO_ENTRANCE'
   | 'ROAD_CROSSING_NO_JUNCTION'
+  // 空港アクセス
+  | 'ACCESS_NOT_CONNECTED'
+  | 'STATION_NO_RAIL'
+  | 'ACCESS_FAR_FROM_TERMINAL'
   // ターミナル内部
   | 'TERMINAL_AREA_OUTSIDE'
   | 'TERMINAL_AREA_OVERLAP'
@@ -115,6 +120,9 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   PARKING_NO_ROAD: 'warning',
   ROAD_NO_ENTRANCE: 'warning',
   ROAD_CROSSING_NO_JUNCTION: 'warning',
+  ACCESS_NOT_CONNECTED: 'warning',
+  STATION_NO_RAIL: 'warning',
+  ACCESS_FAR_FROM_TERMINAL: 'warning',
   TERMINAL_AREA_OUTSIDE: 'error',
   TERMINAL_AREA_OVERLAP: 'error',
   TERMINAL_NO_ENTRANCE: 'warning',
@@ -200,6 +208,9 @@ const COMPATIBLE = new Set<string>(
     ['roadPublic', 'roadPublic'],
     ['roadPublic', 'roadService'],
     ['roadService', 'roadService'],
+    ['rail', 'rail'],
+    ['rail', 'roadPublic'],
+    ['rail', 'roadService'],
     ['strip', 'strip'],
   ].flatMap(([a, b]) => [`${a}|${b}`, `${b}|${a}`]),
 );
@@ -520,7 +531,7 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
 
 function checkRoads(layout: AirportLayout, parts: FootprintPart[], sink: IssueSink): void {
   const uf = new UnionFind();
-  for (const e of Object.values(layout.roads)) uf.union(e.from, e.to);
+  for (const e of Object.values(layout.roads)) if (e.roadClass !== 'rail') uf.union(e.from, e.to);
   const comps = new Map<string, string[]>();
   for (const e of sortedValues(layout.roads)) {
     if (e.roadClass !== 'public') continue;
@@ -533,7 +544,7 @@ function checkRoads(layout: AirportLayout, parts: FootprintPart[], sink: IssueSi
       .some((p) => p.tiles.some((t) => isSiteEdge(layout.site, t.x, t.y)));
     // 同じ連結成分のサービス道路が出口に届いていても可
     const viaService = Object.values(layout.roads)
-      .filter((e) => uf.find(e.from) === uf.find(layout.roads[ids[0]!]!.from))
+      .filter((e) => e.roadClass !== 'rail' && uf.find(e.from) === uf.find(layout.roads[ids[0]!]!.from))
       .some((e) => {
         const a = layout.roadNodes[e.from]?.pos;
         const b = layout.roadNodes[e.to]?.pos;
@@ -541,6 +552,25 @@ function checkRoads(layout: AirportLayout, parts: FootprintPart[], sink: IssueSi
       });
     if (!reachesEdge && !viaService) {
       sink.add('ROAD_NO_ENTRANCE', ids, { count: ids.length }, layout.roadNodes[layout.roads[ids[0]!]!.from]?.pos);
+    }
+  }
+}
+
+/** 空港アクセスの施設: 外部とつながる道路・鉄道、ターミナルまでの距離 */
+function checkAccess(layout: AirportLayout, sink: IssueSink): void {
+  const kinds = ['taxiStand', 'busStop', 'railStation', 'staffParking', 'hotel'];
+  const facilities = sortedValues(layout.facilities).filter((f) => kinds.includes(f.kind));
+  if (facilities.length === 0) return;
+  const net = buildLandsideNetwork(layout);
+  for (const f of facilities) {
+    if (f.kind === 'railStation') {
+      if (!touchesTiles(f, net.railTiles)) sink.add('STATION_NO_RAIL', [f.id], {}, f.origin);
+    } else if (!touchesTiles(f, f.kind === 'staffParking' ? net.anyRoadTiles : net.publicTiles)) {
+      sink.add('ACCESS_NOT_CONNECTED', [f.id], {}, f.origin);
+    }
+    if (f.kind !== 'staffParking') {
+      const d = distanceToTerminal(layout, f);
+      if (d > ACCESS_MAX_WALK_TILES) sink.add('ACCESS_FAR_FROM_TERMINAL', [f.id], { distance: Number.isFinite(d) ? d : -1 }, f.origin);
     }
   }
 }
@@ -651,6 +681,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   checkAirside(layout, network, sink, isolatedEdges);
   checkFacilities(layout, parts, sink);
   checkRoads(layout, parts, sink);
+  checkAccess(layout, sink);
   checkTerminals(layout, terminal, sink);
 
   const issues = sink.issues;
