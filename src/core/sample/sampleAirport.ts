@@ -97,6 +97,7 @@ export function createSampleAirport(seed = 'skyport'): AirportLayout {
   fac('fireStation', { x: 25, y: 39 }, { name: '消防' });
   fac('hangar', { x: 31, y: 39 }, { name: '格納庫' });
   fac('maintenance', { x: 36, y: 45 }, { name: '整備施設' });
+  fac('baggageSort', { x: 42, y: 49 }, { name: '手荷物仕分け場' });
 
   // 道路と駐車場
   run(addRoadPath(layout, [{ x: 30, y: 57 }, { x: 110, y: 57 }, { x: 110, y: 105 }], { roadClass: 'public', name: '空港通り' }));

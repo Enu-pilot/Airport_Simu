@@ -15,7 +15,7 @@ import { getAnalysis, type EditorState, type OpsState } from '../editor/store';
 import { AIRCRAFT_TYPES } from '../core/sim/aircraftTypes';
 import { isVisible } from '../core/sim/query';
 import { edgeIndexAt, pointAt } from '../core/sim/routes';
-import type { Aircraft } from '../core/sim/types';
+import type { Aircraft, UnitKind } from '../core/sim/types';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { linkBetween } from '../core/terminal/route';
 import { AREA_KIND_LABEL } from '../i18n/ja';
@@ -644,6 +644,22 @@ export class MapRenderer {
       }
     }
 
+    // 作業車両（待機中は基地にいるので描かない）。手荷物牽引車は積んでいる個数を表示
+    const cartBags = new Map<string, number>();
+    for (const id of sim.state.activeBags) {
+      const b = sim.state.bags[id]!;
+      if (b.state === 'onCart') cartBags.set(b.location.slice('cart:'.length), (cartBags.get(b.location.slice('cart:'.length)) ?? 0) + 1);
+    }
+    for (const u of Object.values(sim.state.units)) {
+      if (u.kind === 'staff' || u.status === 'idle') continue;
+      const x = u.x + 0.5;
+      const y = u.y + 0.5;
+      const color = u.status === 'broken' ? 0xff4d4f : UNIT_COLOR[u.kind];
+      o.rect(x - 0.28, y - 0.18, 0.56, 0.36).fill({ color }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.7 });
+      const n = cartBags.get(u.id);
+      if (n && this.zoom >= 8) this.label(`cart:${u.id}`, `🧳${n}`, { x, y: y - 0.6 }, cam, { size: 10, color: 0xffe082 });
+    }
+
     // 機体（前ティックと現ティックの間を補間）
     const alpha = ops.clock.acc;
     const list = Object.values(sim.state.aircraft).filter(isVisible);
@@ -730,6 +746,18 @@ const AREA_COLOR: Record<TerminalAreaKind, number> = {
 };
 const ZONE_COLOR: Record<PaxZone, number> = { landside: 0x9be7a8, departure: 0xe0a0ff, arrival: 0x8fd3ff };
 const AREA_SHORT = AREA_KIND_LABEL;
+
+/** 作業車両の色 */
+const UNIT_COLOR: Record<UnitKind, number> = {
+  staff: 0xffffff,
+  engineer: 0x9575cd,
+  tug: 0xffeb3b,
+  beltLoader: 0x8d6e63,
+  baggageTractor: 0xff7043,
+  fuelTruck: 0xe53935,
+  cateringTruck: 0x26a69a,
+  cleaningVan: 0x42a5f5,
+};
 
 /** 状態ごとの機体色: 到着系 = 水色、駐機・準備 = 白、出発系 = 橙、空中 = 薄青 */
 function aircraftStateColor(ac: Aircraft): number {

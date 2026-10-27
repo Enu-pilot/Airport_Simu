@@ -120,6 +120,7 @@ export type FacilityKind =
   | 'fuelFarm'
   | 'fireStation'
   | 'gseBase'
+  | 'baggageSort'
   | 'serviceArea'
   | 'parking';
 

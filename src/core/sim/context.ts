@@ -5,7 +5,8 @@ import { buildTerminalModel, type TerminalModel } from '../terminal/model';
 import type { AirportLayout, SizeClass } from '../model/types';
 import { distance } from '../geometry/vec';
 import { runwayMaxSize } from '../layout/runway';
-import type { RunwayConfig } from './types';
+import type { RunwayConfig, UnitKind } from './types';
+import { rotatedDims } from '../layout/footprint';
 
 /**
  * シミュレーションが参照する、レイアウトから導出した不変の情報。
@@ -44,6 +45,12 @@ export interface SimContext {
   standGate: Record<string, string>;
   /** 出発旅客が来るターミナル（入口のある最初のターミナル） */
   paxTerminal: string | null;
+  /** 作業員・車両の基地（GSE基地・整備施設）。位置はタイル番号空間 */
+  bases: { id: string; x: number; y: number; units: Partial<Record<UnitKind, number>> }[];
+  /** 手荷物仕分け場 */
+  sorters: { id: string; x: number; y: number; capacityPerMin: number }[];
+  /** 運用中の燃料施設があるか（給油の前提） */
+  hasFuelFarm: boolean;
 }
 
 export function createContext(layout: AirportLayout): SimContext {
@@ -88,7 +95,33 @@ export function createContext(layout: AirportLayout): SimContext {
     Object.keys(terminal.byTerminal)
       .sort(compareIds)
       .find((t) => terminal.byTerminal[t]!.some((id) => terminal.areas[id]!.kind === 'entrance')) ?? null;
-  return { layout, network, runways, stands, terminal, standGate, paxTerminal };
+  const center = (f: (typeof layout.facilities)[string]) => {
+    const d = rotatedDims(f.w, f.h, f.rotation);
+    return { x: f.origin.x + d.w / 2 - 0.5, y: f.origin.y + d.h / 2 - 0.5 };
+  };
+  const operational = sortedValues(layout.facilities).filter((f) => f.buildState === 'operational');
+  const n = (f: (typeof layout.facilities)[string], k: string) => Math.max(0, Number(f.props[k] ?? 0));
+  const bases = operational
+    .filter((f) => f.kind === 'gseBase' || f.kind === 'maintenance')
+    .map((f) => ({
+      id: f.id,
+      ...center(f),
+      units:
+        f.kind === 'gseBase'
+          ? {
+              staff: n(f, 'staff'),
+              tug: n(f, 'tugs'),
+              beltLoader: n(f, 'beltLoaders'),
+              baggageTractor: n(f, 'baggageTractors'),
+              fuelTruck: n(f, 'fuelTrucks'),
+              cateringTruck: n(f, 'cateringTrucks'),
+              cleaningVan: n(f, 'cleaningVans'),
+            }
+          : { engineer: n(f, 'engineers') },
+    }));
+  const sorters = operational.filter((f) => f.kind === 'baggageSort').map((f) => ({ id: f.id, ...center(f), capacityPerMin: n(f, 'capacityPerMin') }));
+  const hasFuelFarm = operational.some((f) => f.kind === 'fuelFarm');
+  return { layout, network, runways, stands, terminal, standGate, paxTerminal, bases, sorters, hasFuelFarm };
 }
 
 /** 運用方向に並べた滑走路上ノードと、進入端からの距離 */

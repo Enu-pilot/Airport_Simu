@@ -42,6 +42,10 @@ export function crossingAirport(): AirportLayout {
   step(addTaxiwayPath(l, [{ x: 45, y: 23 }, { x: 65, y: 23 }]));
   step(placeStand(l, { x: 47, y: 19 }, 'M', 0, 'operational', 'S1'));
   step(placeStand(l, { x: 58, y: 19 }, 'M', 0, 'operational', 'S2'));
+  // 地上支援の基地（GSE基地・燃料施設・整備施設）
+  step(placeFacility(l, 'gseBase', { x: 69, y: 18 }));
+  step(placeFacility(l, 'fuelFarm', { x: 69, y: 12 }));
+  step(placeFacility(l, 'maintenance', { x: 38, y: 18 }));
   return l;
 }
 

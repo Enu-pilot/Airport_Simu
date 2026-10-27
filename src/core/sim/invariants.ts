@@ -111,6 +111,62 @@ export function checkInvariants(sim: Simulation): string[] {
     if (moved > vmax * TICK_SEC + 1e-6) out.push(`M1 ${ac.id}(${ac.state}) が1ティックで ${moved.toFixed(1)}m 移動`);
   }
   out.push(...checkPaxInvariants(sim, false));
+  out.push(...checkGroundInvariants(sim, false));
+  return out;
+}
+
+/**
+ * 地上支援・手荷物の整合性。
+ * G1 作業員・車両は同時に1つの作業だけ / G2 作業中の作業は先行作業が完了している /
+ * G3 出発準備完了以降の機体は全作業が完了している /
+ * B1 手荷物は自便の機体にだけ1回積載 / B2 出発・到着の取り違えがない / B3 グループの手荷物数が一致
+ */
+export function checkGroundInvariants(sim: Simulation, full: boolean): string[] {
+  const { state } = sim;
+  const out: string[] = [];
+  const owner = new Map<string, string>();
+  for (const id of full ? Object.keys(state.tasks) : state.activeTasks) {
+    const t = state.tasks[id]!;
+    for (const u of t.units) {
+      if (owner.has(u)) out.push(`G1 ${u} が ${owner.get(u)} と ${t.id} に同時に割り当て`);
+      owner.set(u, t.id);
+      if (state.units[u]?.taskId !== t.id) out.push(`G1 ${u} の割り当て先が ${t.id} と不一致`);
+    }
+    if ((t.state === 'inProgress' || t.state === 'dispatched') && !t.deps.every((k) => (state.aircraftTasks[t.aircraftId] ?? []).some((x) => state.tasks[x]!.kind === k && state.tasks[x]!.state === 'done'))) {
+      out.push(`G2 ${t.id}(${t.kind}) が先行作業の完了前に開始`);
+    }
+  }
+  for (const u of Object.values(state.units)) {
+    if (u.taskId && !state.tasks[u.taskId]?.units.includes(u.id)) out.push(`G1 ${u.id} の作業 ${u.taskId} に自分が含まれない`);
+    if (u.status === 'broken' && u.taskId) out.push(`G1 故障中の ${u.id} が作業 ${u.taskId} に割り当て`);
+  }
+  for (const ac of Object.values(state.aircraft)) {
+    if (!['readyForPushback', 'pushback', 'taxiOut', 'holdShort', 'lineUp', 'takeoff', 'departed'].includes(ac.state)) continue;
+    const tasks = (state.aircraftTasks[ac.id] ?? []).map((id) => state.tasks[id]!).filter((t) => t.kind !== 'pushback');
+    if (tasks.length === 0 || tasks.some((t) => t.state !== 'done')) out.push(`G3 ${ac.id}(${ac.state}) の地上作業が未完了`);
+  }
+  const bagIds = full ? Object.keys(state.bags) : state.activeBags;
+  for (const id of bagIds) {
+    const b = state.bags[id]!;
+    const f = state.flights[b.flightId];
+    if (!f || (f.direction === 'departure') !== (b.direction === 'departure')) out.push(`B2 ${b.id} の便 ${b.flightId} と方向が不一致`);
+    const depStates = ['checkedIn', 'sorting', 'madeUp', 'onCart', 'loaded', 'leftBehind', 'offloaded'];
+    if (b.direction === 'arrival' && ['checkedIn', 'sorting', 'madeUp', 'loaded', 'leftBehind', 'offloaded'].includes(b.state)) out.push(`B2 到着手荷物 ${b.id} が出発の状態 ${b.state}`);
+    if (b.direction === 'departure' && !depStates.includes(b.state)) out.push(`B2 出発手荷物 ${b.id} が到着の状態 ${b.state}`);
+  }
+  if (full) {
+    for (const b of Object.values(state.bags)) {
+      const f = state.flights[b.flightId]!;
+      const loads = b.history.filter((h) => h.state === 'loaded').length;
+      if (loads > 1) out.push(`B1 ${b.id} が ${loads} 回積載`);
+      if (b.state === 'loaded' && b.loadedOn !== f.aircraftId) out.push(`B1 ${b.id} が別の機体 ${b.loadedOn} に積載`);
+      if (b.state !== 'loaded' && b.loadedOn !== null) out.push(`B1 ${b.id} は積載済みでないのに機体を参照`);
+    }
+    for (const g of Object.values(state.paxGroups)) {
+      const n = (state.groupBags[g.id] ?? []).length;
+      if (n !== 0 && n !== g.bags) out.push(`B3 ${g.id} の手荷物 ${n} 個 ≠ ${g.bags} 個`);
+    }
+  }
   return out;
 }
 

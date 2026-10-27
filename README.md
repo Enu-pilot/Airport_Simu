@@ -9,8 +9,8 @@ PCブラウザで動作する空港デザイン・運営シミュレーション
 
 ## 現在の状態
 
-**Phase 3（ターミナル・旅客流動）** — 建設エディタで空港とターミナル内部（階・エリア）を作り、「▶ 運航開始」で航空機の運航と旅客の流れ（チェックイン → 保安検査 → 搭乗、降機 → 手荷物受取 → 出口）をシミュレーションする。
-ルールは [docs/11_operations_rules.md](docs/11_operations_rules.md)（運航）、[docs/12_passenger_rules.md](docs/12_passenger_rules.md)（旅客）。いずれもゲーム用の簡略化モデル。
+**Phase 4（地上支援・手荷物・折り返し作業）** — 建設エディタで空港とターミナル内部（階・エリア）、GSE基地・仕分け場などを作り、「▶ 運航開始」で航空機の運航、旅客の流れ、折り返し作業（降機・荷下ろし・給油・清掃・ケータリング・点検・搭乗・積み込み・プッシュバック）と手荷物をシミュレーションする。
+ルールは [docs/11](docs/11_operations_rules.md)（運航）、[docs/12](docs/12_passenger_rules.md)（旅客）、[docs/13](docs/13_ground_handling_rules.md)（地上支援・手荷物）。いずれもゲーム用の簡略化モデル。
 
 ## 使い方
 
@@ -63,6 +63,7 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 10 | [docs/10_open_issues.md](docs/10_open_issues.md) | 未決事項一覧 |
 | 11 | [docs/11_operations_rules.md](docs/11_operations_rules.md) | 運航ルール仕様（Phase 2 実装、前提と制約・未実装の条件） |
 | 12 | [docs/12_passenger_rules.md](docs/12_passenger_rules.md) | ターミナル・旅客流動仕様（Phase 3 実装） |
+| 13 | [docs/13_ground_handling_rules.md](docs/13_ground_handling_rules.md) | 地上支援・手荷物・折り返し業務仕様（Phase 4 実装） |
 
 ## 技術構成
 

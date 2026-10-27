@@ -2,6 +2,8 @@ import { addTurnaround, createSimulation, setRunwayConfig, stepSimulation } from
 import { advanceClock, createClock } from '../core/sim/clock';
 import { INBOUND_LEAD_SEC } from '../core/sim/rules';
 import { setAreaClosed } from '../core/sim/passengers';
+import { setUnitBroken } from '../core/sim/ground';
+import { setEquipmentBroken } from '../core/sim/baggage';
 import type { AircraftTypeId } from '../core/sim/aircraftTypes';
 import type { RunwayConfig } from '../core/sim/types';
 import { editorStore, showToast, type OpsState } from './store';
@@ -97,6 +99,26 @@ export const ops = {
     const o = get().ops;
     if (!o) return;
     setAreaClosed(o.sim, areaId, closed);
+    patchOps({ uiVersion: o.uiVersion + 1 });
+  },
+  /** 作業員・車両の故障 / 復旧 */
+  setUnitBroken(unitId: string, broken: boolean): void {
+    const o = get().ops;
+    if (!o) return;
+    setUnitBroken(o.sim, unitId, broken);
+    patchOps({ uiVersion: o.uiVersion + 1 });
+  },
+  /** 仕分け設備・受取所ベルトの停止 / 復旧 */
+  setEquipmentBroken(key: string, broken: boolean): void {
+    const o = get().ops;
+    if (!o) return;
+    setEquipmentBroken(o.sim, key, broken);
+    patchOps({ uiVersion: o.uiVersion + 1 });
+  },
+  setRandomFailures(on: boolean): void {
+    const o = get().ops;
+    if (!o) return;
+    o.sim.state.settings.randomFailures = on;
     patchOps({ uiVersion: o.uiVersion + 1 });
   },
   setFlightsPerDay(n: number): void {

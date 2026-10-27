@@ -1,4 +1,4 @@
-import type { AircraftState, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent } from '../core/sim/types';
+import type { AircraftState, BagState, BlockReason, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent, TaskKind, TaskState, UnitKind, UnitStatus } from '../core/sim/types';
 import type { BuildState, EntityType, FacilityKind, PaxZone, RoadClass, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/validation/validate';
@@ -15,6 +15,7 @@ export const FACILITY_LABEL: Record<FacilityKind, string> = {
   fuelFarm: '燃料施設',
   fireStation: '消防施設',
   gseBase: 'GSE基地',
+  baggageSort: '手荷物仕分け場',
   serviceArea: 'サービスエリア',
   parking: '駐車場',
 };
@@ -59,6 +60,15 @@ export const PROP_LABEL: Record<string, string> = {
   capacityKL: '貯蔵量（kL）',
   category: '消防カテゴリー',
   crews: 'GSEクルー数',
+  staff: '作業員数',
+  tugs: 'トーイングカー',
+  beltLoaders: 'ベルトローダー',
+  baggageTractors: '手荷物牽引車',
+  fuelTrucks: '給油車',
+  cateringTrucks: 'ケータリング車',
+  cleaningVans: '清掃車',
+  engineers: '整備士',
+  capacityPerMin: '処理能力（個/分）',
   spaces: '駐車台数',
 };
 
@@ -160,6 +170,10 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   GATE_ARRIVAL_NO_EXIT: (n) => `${n[0]} から降りた旅客が出口へ行けません`,
   NO_RUNWAY: () => '滑走路がありません',
   NO_TOWER: () => '管制塔がありません',
+  NO_GSE_BASE: () => 'GSE基地がありません（作業員・車両がいないため折り返し作業ができません）',
+  NO_FUEL_FARM: () => '燃料施設がありません（給油できません）',
+  NO_MAINTENANCE: () => '整備施設がありません（整備士がいないため点検できません）',
+  NO_BAGGAGE_SORT: () => '手荷物仕分け場がありません（預け手荷物を積み込めません）',
 };
 
 export function issueText(layout: AirportLayout, issue: Issue): string {
@@ -206,6 +220,7 @@ export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
   crossing: '滑走路横断待ち',
   goAround: '着陸復行',
   boarding: '搭乗手続き中',
+  groundCrew: 'トーイングカー・作業員待ち',
 };
 
 export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
@@ -216,6 +231,7 @@ export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
   turnaround: '折り返し作業',
   noRoute: '経路なし',
   boarding: '搭乗手続き',
+  groundHandling: '地上支援作業',
 };
 
 export const FLIGHT_STATUS_LABEL: Record<FlightStatus, string> = {
@@ -278,6 +294,18 @@ export function eventText(e: SimEvent, callsign: (id: string) => string): string
       return `施設を閉鎖: ${e.note}`;
     case 'areaOpened':
       return `施設を再開: ${e.note}`;
+    case 'taskBlocked': {
+      const [task, reason] = (e.note ?? ':').split(':') as [TaskKind, BlockReason];
+      return `${who} ${TASK_LABEL[task] ?? task} 停止: ${BLOCK_REASON_LABEL[reason] ?? reason}`;
+    }
+    case 'taskDone':
+      return `${who} ${TASK_LABEL[e.note as TaskKind] ?? e.note} 完了`;
+    case 'equipmentDown':
+      return `⚠ 設備停止: ${e.note}`;
+    case 'equipmentUp':
+      return `設備復旧: ${e.note}`;
+    case 'bagsLeftBehind':
+      return `⚠ 積み残し: ${e.note}`;
   }
 }
 
@@ -340,3 +368,72 @@ export const MISS_REASON_LABEL: Record<MissReason, string> = {
 };
 
 export const BOARDING_LABEL: Record<FlightPax['boarding'], string> = { notStarted: '搭乗前', open: '搭乗中', closed: '搭乗締切' };
+
+// ---------------------------------------------------------------- 地上支援・手荷物
+
+export const TASK_LABEL: Record<TaskKind, string> = {
+  deplane: '降機',
+  unload: '荷下ろし',
+  fuel: '給油',
+  clean: '機内清掃',
+  cater: 'ケータリング',
+  inspect: '整備・点検',
+  board: '搭乗',
+  load: '積み込み',
+  pushback: 'プッシュバック',
+};
+
+export const TASK_STATE_LABEL: Record<TaskState, string> = {
+  pending: '未着手',
+  blocked: '停止中',
+  dispatched: '移動中',
+  inProgress: '作業中',
+  done: '完了',
+  cancelled: '中止',
+};
+
+export const BLOCK_REASON_LABEL: Record<BlockReason, string> = {
+  dependency: '先行作業待ち',
+  waitingTime: '開始時刻待ち',
+  noStaff: '作業員不足',
+  noEngineer: '整備士不足',
+  noVehicle: '車両不足',
+  noFuelFarm: '燃料施設なし',
+  unitBroken: '車両故障（再割り当て待ち）',
+  waitingPax: '旅客待ち',
+  waitingBags: '手荷物待ち',
+  sorterDown: '仕分け設備停止',
+};
+
+export const UNIT_KIND_LABEL: Record<UnitKind, string> = {
+  staff: '作業員',
+  engineer: '整備士',
+  tug: 'トーイングカー',
+  beltLoader: 'ベルトローダー',
+  baggageTractor: '手荷物牽引車',
+  fuelTruck: '給油車',
+  cateringTruck: 'ケータリング車',
+  cleaningVan: '清掃車',
+};
+
+export const UNIT_STATUS_LABEL: Record<UnitStatus, string> = {
+  idle: '待機',
+  enroute: '移動中',
+  working: '作業中',
+  returning: '帰還中',
+  broken: '故障',
+};
+
+export const BAG_STATE_LABEL: Record<BagState, string> = {
+  checkedIn: '預け入れ',
+  sorting: '仕分け',
+  madeUp: '仕分け済み',
+  onCart: '搬送中',
+  loaded: '積載済み',
+  leftBehind: '積み残し',
+  offloaded: '取り下ろし',
+  onAircraft: '機内（到着）',
+  atClaim: 'ベルト待ち',
+  onBelt: 'ベルト上',
+  collected: '受け取り済み',
+};

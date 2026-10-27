@@ -60,9 +60,10 @@ export type HoldReason =
   | 'departurePriority' // 出発優先のため進入保留
   | 'crossing' // 滑走路横断の許可待ち
   | 'goAround' // 着陸復行
-  | 'boarding'; // 搭乗手続きの完了待ち
+  | 'boarding' // 搭乗手続きの完了待ち
+  | 'groundCrew'; // プッシュバックの車両・作業員待ち
 
-export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding';
+export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling';
 
 export interface Route {
   kind: 'landing' | 'taxiIn' | 'pushback' | 'taxiOut' | 'takeoff';
@@ -166,6 +167,126 @@ export interface Flight {
   standId: string | null;
   delayCauses: DelayCause[];
   pax: FlightPax;
+  /** 出発便: 地上作業がすべて完了した時刻と、最後に完了した作業（遅延の主因） */
+  readyAt: number | null;
+  criticalTask: TaskKind | null;
+}
+
+// ---------------------------------------------------------------- 地上支援
+
+export type UnitKind = 'staff' | 'engineer' | 'tug' | 'beltLoader' | 'baggageTractor' | 'fuelTruck' | 'cateringTruck' | 'cleaningVan';
+export type UnitStatus = 'idle' | 'enroute' | 'working' | 'returning' | 'broken';
+
+/** 作業員・車両（1人・1台ずつ） */
+export interface GroundUnit {
+  id: string;
+  kind: UnitKind;
+  /** 所属する基地（GSE基地・整備施設） */
+  baseId: string;
+  status: UnitStatus;
+  taskId: string | null;
+  /** 表示位置（タイル番号空間）と移動の始点・終点・時刻 */
+  x: number;
+  y: number;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  moveStart: number;
+  moveEnd: number;
+  repairUntil: number | null;
+  /** 作業に割り当てられていた累計時間（稼働率用） */
+  busySec: number;
+}
+
+export type TaskKind = 'deplane' | 'unload' | 'fuel' | 'clean' | 'cater' | 'inspect' | 'board' | 'load' | 'pushback';
+export type TaskState = 'pending' | 'blocked' | 'dispatched' | 'inProgress' | 'done' | 'cancelled';
+export type BlockReason =
+  | 'dependency' // 先行作業の完了待ち
+  | 'waitingTime' // 作業開始時刻待ち（積み込み・プッシュバック）
+  | 'noStaff' // 作業員不足
+  | 'noEngineer' // 整備士不足
+  | 'noVehicle' // 車両不足
+  | 'noFuelFarm' // 燃料施設なし
+  | 'unitBroken' // 作業中の車両が故障
+  | 'waitingPax' // 旅客の降機・搭乗待ち
+  | 'waitingBags' // 手荷物の到着待ち
+  | 'sorterDown'; // 仕分け設備の停止
+
+export interface GroundTask {
+  id: string;
+  aircraftId: string;
+  kind: TaskKind;
+  state: TaskState;
+  deps: TaskKind[];
+  /** 必要な作業員・車両の数 */
+  needs: Partial<Record<UnitKind, number>>;
+  units: string[];
+  /** 作業時間（秒）と進捗（秒）。旅客・手荷物の作業は内部の段階で進む */
+  workSec: number;
+  doneSec: number;
+  createdAt: number;
+  startedAt: number | null;
+  doneAt: number | null;
+  /** 現在の停止理由と、停止の累計時間 */
+  blockedReason: BlockReason | null;
+  blockedSince: number | null;
+  blockedTotal: number;
+  /** 手荷物作業の段階（loading: 積み下ろし中、transport: 搬送中）と終了時刻 */
+  phase: 'idle' | 'working' | 'transport';
+  phaseUntil: number | null;
+  note: string | null;
+}
+
+export type BagState =
+  // 出発
+  | 'checkedIn' // 預け入れ（コンベヤーで仕分け場へ）
+  | 'sorting' // 仕分け待ち・仕分け中
+  | 'madeUp' // 便ごとに仕分け済み（積み込み待ち）
+  | 'onCart' // 搬送中（牽引車のカート）
+  | 'loaded' // 機内に積載
+  | 'leftBehind' // 積み残し
+  | 'offloaded' // 乗り遅れ旅客の手荷物を取り下ろし
+  // 到着
+  | 'onAircraft' // 到着機の貨物室
+  | 'atClaim' // 受取所でベルト待ち
+  | 'onBelt' // ベルト上
+  | 'collected'; // 旅客が受け取り済み
+
+export interface Bag {
+  id: string;
+  /** 所属する便（出発手荷物は出発便、到着手荷物は到着便） */
+  flightId: string;
+  paxGroupId: string;
+  direction: 'departure' | 'arrival';
+  state: BagState;
+  /** 所在（例: sorter:fac_3 / cart:gu_12 / aircraft:ac_4 / belt:ta_2） */
+  location: string;
+  since: number;
+  /** 積載した機体（出発手荷物、1回だけ） */
+  loadedOn: string | null;
+  history: { t: number; state: BagState; location: string }[];
+}
+
+export interface EquipmentState {
+  /** 停止中（故障）か、復旧予定時刻 */
+  broken: boolean;
+  repairUntil: number | null;
+  /** 停止中の累計時間 */
+  downSec: number;
+}
+
+export interface GroundStats {
+  tasksDone: number;
+  /** 停止理由ごとの累計停止時間（秒） */
+  blockedSec: Partial<Record<BlockReason, number>>;
+  /** 地上作業が原因で出発予定より準備完了が遅れた便数と遅れの合計（秒） */
+  lateReadyFlights: number;
+  lateReadySec: number;
+  bagsLoaded: number;
+  bagsLeftBehind: number;
+  bagsOffloaded: number;
+  bagsCollected: number;
 }
 
 // ---------------------------------------------------------------- 旅客
@@ -285,7 +406,12 @@ export type SimEventKind =
   | 'boardingClosed'
   | 'paxMissed'
   | 'areaClosed'
-  | 'areaOpened';
+  | 'areaOpened'
+  | 'taskBlocked'
+  | 'taskDone'
+  | 'equipmentDown'
+  | 'equipmentUp'
+  | 'bagsLeftBehind';
 
 export interface SimEvent {
   t: number;
@@ -315,6 +441,8 @@ export interface SimSettings {
   inboundDelayMaxMin: number;
   /** 日ごとのスケジュールを自動生成する */
   autoSchedule: boolean;
+  /** 車両・仕分け設備・ベルトのランダム故障 */
+  randomFailures: boolean;
 }
 
 export interface SimState {
@@ -345,9 +473,24 @@ export interface SimState {
   facilities: Record<string, FacilityRuntime>;
   /** 閉鎖中のターミナル内エリア（ID 順） */
   closedAreas: string[];
-  /** 手荷物受取所のベルト使用予定 */
-  claimBelts: Record<string, { flightId: string; until: number }[]>;
   paxStats: PaxStats;
+  units: Record<string, GroundUnit>;
+  tasks: Record<string, GroundTask>;
+  /** 機体 → 作業ID（生成順） */
+  aircraftTasks: Record<string, string[]>;
+  /** 処理中の作業（未完了）の ID（生成順） */
+  activeTasks: string[];
+  bags: Record<string, Bag>;
+  /** 便 → 手荷物ID / 旅客グループ → 手荷物ID */
+  flightBags: Record<string, string[]>;
+  groupBags: Record<string, string[]>;
+  /** 処理中の手荷物（終了状態でないもの）の ID */
+  activeBags: string[];
+  /** 仕分け設備・受取所ベルト・車両の故障状態（キー: 施設ID / `belt:エリアID` / 車両ID） */
+  equipment: Record<string, EquipmentState>;
+  /** 仕分け設備の処理の端数（個） */
+  sorterAcc: Record<string, number>;
+  groundStats: GroundStats;
 }
 
 export const EVENT_LOG_LIMIT = 1000;

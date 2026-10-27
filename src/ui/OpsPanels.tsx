@@ -4,8 +4,11 @@ import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, type AircraftTypeId } from '../core/
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { flightDelayMin, operableTypes } from '../core/sim/simulation';
 import { routeLength } from '../core/sim/routes';
+import { tasksOf } from '../core/sim/ground';
+import { SIM_START_SEC } from '../core/sim/rules';
+import type { Simulation } from '../core/sim/simulation';
 import { areaOccupancy, facilityLoad, serversOf } from '../core/sim/passengers';
-import type { Flight, RunwayMode, SimState } from '../core/sim/types';
+import type { BagState, BlockReason, Flight, RunwayMode, SimState } from '../core/sim/types';
 import { runwayDesignators } from '../core/layout/runway';
 import { editorStore, useEditor, type OpsState } from '../editor/store';
 import { ops } from '../editor/simRunner';
@@ -18,6 +21,12 @@ import {
   HOLD_REASON_LABEL,
   RUNWAY_MODE_LABEL,
   BOARDING_LABEL,
+  BAG_STATE_LABEL,
+  BLOCK_REASON_LABEL,
+  TASK_LABEL,
+  TASK_STATE_LABEL,
+  UNIT_KIND_LABEL,
+  UNIT_STATUS_LABEL,
   ZONE_LABEL,
   displayName,
   eventText,
@@ -220,6 +229,7 @@ export function AircraftPanel() {
         )}
         {arr.pax.generated && <Row label="到着旅客">{`降機 ${arr.pax.deplaned}/${arr.pax.booked} · 退出 ${arr.pax.exited}`}</Row>}
       </div>
+      <TurnaroundSection sim={o.sim} acId={ac.id} />
       <div className="prop-section">
         <div className="prop-section-title">運航履歴</div>
         <div className="history" data-testid="aircraft-history">
@@ -468,6 +478,283 @@ export function EventLog() {
             <span>{eventText(e, cs)}</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- 地上支援・手荷物
+
+function bagCounts(state: SimState, flightId: string): Partial<Record<BagState, number>> {
+  const m: Partial<Record<BagState, number>> = {};
+  for (const id of state.flightBags[flightId] ?? []) {
+    const b = state.bags[id]!;
+    m[b.state] = (m[b.state] ?? 0) + 1;
+  }
+  return m;
+}
+
+const fmtCounts = (m: Partial<Record<BagState, number>>) =>
+  (Object.entries(m) as [BagState, number][]).map(([k, v]) => `${BAG_STATE_LABEL[k]} ${v}`).join(' · ') || 'なし';
+
+/** 機体の折り返し作業の進捗 */
+function TurnaroundSection({ sim, acId }: { sim: Simulation; acId: string }) {
+  const { state } = sim;
+  const tasks = tasksOf(state, acId);
+  const ac = state.aircraft[acId]!;
+  const dep = state.flights[ac.departureFlightId]!;
+  const arr = state.flights[ac.arrivalFlightId]!;
+  if (tasks.length === 0) return null;
+  return (
+    <div className="prop-section" data-testid="turnaround">
+      <div className="prop-section-title">折り返し作業</div>
+      <table className="board tasks">
+        <tbody>
+          {tasks.map((t) => {
+            const pct =
+              t.state === 'done' ? 100 : t.workSec > 0 ? Math.min(99, Math.round((t.doneSec / t.workSec) * 100)) : t.state === 'inProgress' ? null : 0;
+            return (
+              <tr key={t.id} className={t.blockedReason && t.blockedReason !== 'dependency' && t.blockedReason !== 'waitingTime' ? 'blocked' : ''} data-testid={`task-${t.kind}`}>
+                <td>{TASK_LABEL[t.kind]}</td>
+                <td>{TASK_STATE_LABEL[t.state]}</td>
+                <td>
+                  <span className="bar">
+                    <span style={{ width: `${pct ?? 50}%` }} className={pct === null ? 'indeterminate' : ''} />
+                  </span>
+                </td>
+                <td className="muted">
+                  {t.blockedReason ? BLOCK_REASON_LABEL[t.blockedReason] : t.units.map((u) => UNIT_KIND_LABEL[state.units[u]!.kind]).join('・')}
+                  {t.note ? ` ${t.note}` : ''}
+                </td>
+                <td className="time">{t.doneAt !== null ? formatClock(t.doneAt) : ''}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {dep.readyAt !== null && (
+        <Row label="準備完了">
+          {formatClock(dep.readyAt)}（最後: {dep.criticalTask ? TASK_LABEL[dep.criticalTask] : '—'}）
+        </Row>
+      )}
+      <Row label="出発手荷物">{fmtCounts(bagCounts(state, dep.id))}</Row>
+      <Row label="到着手荷物">{fmtCounts(bagCounts(state, arr.id))}</Row>
+    </div>
+  );
+}
+
+/** 地上支援: 作業員・車両の配置と稼働、設備の状態、止まっている作業 */
+export function GroundBoard() {
+  const o = useOps();
+  if (!o) return null;
+  const { state, ctx } = o.sim;
+  const units = Object.values(state.units);
+  const kinds = [...new Set(units.map((u) => u.kind))];
+  const elapsed = Math.max(1, state.now - SIM_START_SEC);
+  const blocked = state.activeTasks
+    .map((id) => state.tasks[id]!)
+    .filter((t) => t.blockedReason && t.blockedReason !== 'dependency' && t.blockedReason !== 'waitingTime');
+  const claims = Object.values(ctx.terminal.areas).filter((a) => a.kind === 'baggageClaim');
+  const gs = state.groundStats;
+  return (
+    <div className="issues" data-testid="ground-board">
+      <div className="issues-header">
+        <strong>地上支援</strong>
+        <span>完了作業 {gs.tasksDone}</span>
+        <span className={gs.lateReadyFlights ? 'warn-text' : ''}>準備遅れ {gs.lateReadyFlights}便（計 {Math.round(gs.lateReadySec / 60)}分）</span>
+        <span>
+          停止時間 {(Object.entries(gs.blockedSec) as [BlockReason, number][])
+            .filter(([k]) => k !== 'dependency' && k !== 'waitingTime')
+            .map(([k, v]) => `${BLOCK_REASON_LABEL[k]} ${Math.round(v / 60)}分`)
+            .join(' / ') || 'なし'}
+        </span>
+        <label className="sev-toggle">
+          <input type="checkbox" checked={state.settings.randomFailures} onChange={(e) => ops.setRandomFailures(e.target.checked)} data-testid="random-failures" />
+          ランダム故障
+        </label>
+      </div>
+      <div className="issues-list ground-grid">
+        <table className="board">
+          <thead>
+            <tr>
+              <th>種類</th>
+              <th>台数</th>
+              <th>待機</th>
+              <th>移動</th>
+              <th>作業中</th>
+              <th>故障</th>
+              <th>稼働率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {kinds.map((k) => {
+              const list = units.filter((u) => u.kind === k);
+              const c = (st: string[]) => list.filter((u) => st.includes(u.status)).length;
+              const util = Math.round((list.reduce((s, u) => s + u.busySec, 0) / (list.length * elapsed)) * 100);
+              return (
+                <tr key={k} data-testid={`units-${k}`}>
+                  <td>{UNIT_KIND_LABEL[k]}</td>
+                  <td>{list.length}</td>
+                  <td>{c(['idle'])}</td>
+                  <td>{c(['enroute', 'returning'])}</td>
+                  <td>{c(['working'])}</td>
+                  <td className={c(['broken']) ? 'ng-text' : ''}>{c(['broken']) || ''}</td>
+                  <td>{util}%</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <table className="board">
+          <thead>
+            <tr>
+              <th>車両・作業員</th>
+              <th>状態</th>
+              <th>作業</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {units
+              .filter((u) => u.kind !== 'staff')
+              .map((u) => {
+                const t = u.taskId ? state.tasks[u.taskId] : undefined;
+                return (
+                  <tr key={u.id}>
+                    <td>
+                      {UNIT_KIND_LABEL[u.kind]} <span className="muted">{u.id}</span>
+                    </td>
+                    <td className={u.status === 'broken' ? 'ng-text' : ''}>{UNIT_STATUS_LABEL[u.status]}</td>
+                    <td>{t ? `${state.aircraft[t.aircraftId]!.callsign} ${TASK_LABEL[t.kind]}` : ''}</td>
+                    <td>
+                      <button className="small" onClick={() => ops.setUnitBroken(u.id, u.status !== 'broken')} data-testid={`break-${u.id}`}>
+                        {u.status === 'broken' ? '修理' : '故障'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+        <table className="board">
+          <thead>
+            <tr>
+              <th>設備</th>
+              <th>状態</th>
+              <th>停止時間</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...ctx.sorters.map((x) => ({ key: x.id, name: displayName(ctx.layout, x.id), detail: `${x.capacityPerMin}個/分` })), ...claims.map((a) => ({ key: `belt:${a.id}`, name: `${displayName(ctx.layout, a.id)} ベルト`, detail: `${Number(ctx.layout.terminalAreas[a.id]!.props.belts ?? 0)}本` }))].map((e) => {
+              const eq = state.equipment[e.key];
+              return (
+                <tr key={e.key} data-testid={`equipment-${e.key}`}>
+                  <td>
+                    {e.name} <span className="muted">{e.detail}</span>
+                  </td>
+                  <td className={eq?.broken ? 'ng-text' : ''}>{eq?.broken ? '停止中' : '稼働'}</td>
+                  <td>{eq ? `${Math.round(eq.downSec / 60)}分` : ''}</td>
+                  <td>
+                    <button className="small" onClick={() => ops.setEquipmentBroken(e.key, !eq?.broken)}>
+                      {eq?.broken ? '復旧' : '停止'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <table className="board">
+          <thead>
+            <tr>
+              <th>止まっている作業</th>
+              <th>理由</th>
+              <th>停止</th>
+            </tr>
+          </thead>
+          <tbody>
+            {blocked.map((t) => (
+              <tr key={t.id} onClick={() => ops.selectAircraft(t.aircraftId)}>
+                <td>
+                  {state.aircraft[t.aircraftId]!.callsign} {TASK_LABEL[t.kind]}
+                </td>
+                <td className="warn-text">{BLOCK_REASON_LABEL[t.blockedReason!]}</td>
+                <td>{t.blockedSince !== null ? `${Math.round((state.now - t.blockedSince) / 60)}分` : ''}</td>
+              </tr>
+            ))}
+            {blocked.length === 0 && (
+              <tr>
+                <td colSpan={3} className="muted">
+                  なし
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** 手荷物: 便ごとの処理状況と、手荷物の所在・履歴の検索 */
+export function BaggageBoard() {
+  const o = useOps();
+  const [query, setQuery] = useState('');
+  if (!o) return null;
+  const { state } = o.sim;
+  const gs = state.groundStats;
+  const flights = Object.values(state.flights)
+    .filter((f) => (state.flightBags[f.id] ?? []).length > 0)
+    .filter((f) => f.status !== 'completed' || state.now - (f.actual ?? f.block ?? 0) < 30 * 60 || (f.direction === 'arrival' && bagCounts(state, f.id).collected !== (state.flightBags[f.id] ?? []).length))
+    .slice(-40);
+  const found = query ? state.bags[query.trim()] : undefined;
+  return (
+    <div className="issues" data-testid="baggage-board">
+      <div className="issues-header">
+        <strong>手荷物</strong>
+        <span>処理中 {state.activeBags.length}個</span>
+        <span>積載 {gs.bagsLoaded}</span>
+        <span>受け取り {gs.bagsCollected}</span>
+        <span className={gs.bagsLeftBehind ? 'ng-text' : ''}>積み残し {gs.bagsLeftBehind}</span>
+        <span>取り下ろし {gs.bagsOffloaded}</span>
+        <label className="sev-toggle">
+          手荷物ID
+          <input type="text" value={query} placeholder="bg_123" onChange={(e) => setQuery(e.target.value)} data-testid="bag-search" />
+        </label>
+      </div>
+      <div className="issues-list">
+        {found && (
+          <div className="bag-history" data-testid="bag-history">
+            <b>{found.id}</b>（{state.flights[found.flightId]!.number}・{found.direction === 'departure' ? '出発' : '到着'}）現在: {BAG_STATE_LABEL[found.state]} @ {found.location}
+            {found.history.map((h, i) => (
+              <div key={i}>
+                <span className="time">{formatClock(h.t)}</span>
+                {BAG_STATE_LABEL[h.state]} <span className="muted">{h.location}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <table className="board">
+          <thead>
+            <tr>
+              <th>便名</th>
+              <th>区分</th>
+              <th>個数</th>
+              <th>状況</th>
+            </tr>
+          </thead>
+          <tbody>
+            {flights.map((f) => (
+              <tr key={f.id} onClick={() => ops.selectAircraft(f.aircraftId)}>
+                <td>{f.number}</td>
+                <td>{f.direction === 'arrival' ? '到着' : '出発'}</td>
+                <td>{(state.flightBags[f.id] ?? []).length}</td>
+                <td>{fmtCounts(bagCounts(state, f.id))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

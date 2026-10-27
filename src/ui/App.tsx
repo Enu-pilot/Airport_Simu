@@ -11,7 +11,7 @@ import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
 import type { Overlays } from '../editor/store';
 import { ops } from '../editor/simRunner';
-import { AircraftPanel, EventLog, FlightBoard, OpsControls, TerminalBoard } from './OpsPanels';
+import { AircraftPanel, BaggageBoard, EventLog, FlightBoard, GroundBoard, OpsControls, TerminalBoard } from './OpsPanels';
 import { useState } from 'react';
 
 const OVERLAY_LABEL: Record<keyof Overlays, string> = {
@@ -61,7 +61,7 @@ export function App() {
 }
 
 function OpsBottom() {
-  const [tab, setTab] = useState<'flights' | 'terminal' | 'events' | 'issues'>('flights');
+  const [tab, setTab] = useState<'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues'>('flights');
   return (
     <div className="tabbed">
       <div className="tabs">
@@ -69,6 +69,8 @@ function OpsBottom() {
           [
             ['flights', '運航表'],
             ['terminal', 'ターミナル'],
+            ['ground', '地上支援'],
+            ['baggage', '手荷物'],
             ['events', 'イベント'],
             ['issues', '配置チェック'],
           ] as const
@@ -78,7 +80,19 @@ function OpsBottom() {
           </button>
         ))}
       </div>
-      <div className="tab-body">{tab === 'flights' ? <FlightBoard /> : tab === 'terminal' ? <TerminalBoard /> : tab === 'events' ? <EventLog /> : <IssuesPanel />}</div>
+      <div className="tab-body">{tab === 'flights' ? (
+          <FlightBoard />
+        ) : tab === 'terminal' ? (
+          <TerminalBoard />
+        ) : tab === 'ground' ? (
+          <GroundBoard />
+        ) : tab === 'baggage' ? (
+          <BaggageBoard />
+        ) : tab === 'events' ? (
+          <EventLog />
+        ) : (
+          <IssuesPanel />
+        )}</div>
     </div>
   );
 }

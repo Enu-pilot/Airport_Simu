@@ -61,6 +61,19 @@ import {
 } from './types';
 import { TILE_M } from '../model/catalog';
 import { emptyFlightPax, stepPassengers } from './passengers';
+import { stepBaggage } from './baggage';
+import {
+  allTurnaroundDone,
+  cancelTasks,
+  completePushback,
+  createGroundUnits,
+  createPushbackTask,
+  createTurnaroundTasks,
+  pushbackReady,
+  PUSHBACK_DISPATCH_LEAD_SEC,
+  stepGround,
+  tasksOf,
+} from './ground';
 
 /**
  * 運航シミュレーション本体。`stepSimulation` が 1 ティック（1ゲーム秒）を進める。
@@ -83,6 +96,7 @@ const DEFAULT_SETTINGS: SimSettings = {
   inboundDelayProb: 0.25,
   inboundDelayMaxMin: 40,
   autoSchedule: true,
+  randomFailures: false,
 };
 
 export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}): Simulation {
@@ -117,10 +131,30 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     flightPax: {},
     facilities: {},
     closedAreas: [],
-    claimBelts: {},
     paxStats: { spawned: 0, boarded: 0, missed: 0, deplaned: 0, exited: 0, waitTotal: 0, walkTotal: 0, finished: 0 },
+    units: {},
+    tasks: {},
+    aircraftTasks: {},
+    activeTasks: [],
+    bags: {},
+    flightBags: {},
+    groupBags: {},
+    activeBags: [],
+    equipment: {},
+    sorterAcc: {},
+    groundStats: {
+      tasksDone: 0,
+      blockedSec: {},
+      lateReadyFlights: 0,
+      lateReadySec: 0,
+      bagsLoaded: 0,
+      bagsLeftBehind: 0,
+      bagsOffloaded: 0,
+      bagsCollected: 0,
+    },
   };
   const sim = { ctx, state };
+  createGroundUnits(sim);
   if (state.settings.autoSchedule) generateDaySchedule(sim, Math.floor(state.now / DAY_SEC));
   return sim;
 }
@@ -179,6 +213,7 @@ const HOLD_TO_DELAY: Partial<Record<HoldReason, DelayCause>> = {
   noRoute: 'noRoute',
   noRunway: 'noRoute',
   boarding: 'boarding',
+  groundCrew: 'groundHandling',
 };
 
 const typeOf = (ac: Aircraft): AircraftType => AIRCRAFT_TYPES[ac.typeId];
@@ -227,6 +262,8 @@ export function addTurnaround(
     standId: null,
     delayCauses: [],
     pax: emptyFlightPax(),
+    readyAt: null,
+    criticalTask: null,
   });
   const arrEst = arrivalAt + (opts.inboundDelaySec ?? 0);
   state.flights[arrId] = flight(arrId, 'arrival', `${airline}${num}`, arrivalAt, arrEst);
@@ -491,6 +528,8 @@ export function stepSimulation(sim: Simulation): void {
   runwayControl(sim);
   for (const ac of all) stepAircraft(sim, ac);
   stepPassengers(sim);
+  stepBaggage(sim);
+  stepGround(sim);
   detectConflicts(sim);
   state.now += TICK_SEC;
 }
@@ -665,21 +704,30 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
         placeAtStand(sim, ac);
         ac.timerUntil = state.now + 60;
         setState(state, ac, 'parked');
+        createTurnaroundTasks(sim, ac);
       }
       return;
     }
     case 'parked':
       if (state.now >= ac.timerUntil!) {
-        ac.timerUntil = state.now + type.turnaroundSec;
+        ac.timerUntil = null;
         setState(state, ac, 'turnaround');
       }
       return;
     case 'turnaround':
-      if (state.now >= ac.timerUntil!) {
+      // 出発準備完了 = プッシュバック以外の地上作業がすべて完了
+      if (allTurnaroundDone(state, ac.id)) {
         const dep = state.flights[ac.departureFlightId]!;
-        if (state.now > dep.scheduled) addDelayCause(dep, 'turnaround');
+        const tasks = tasksOf(state, ac.id).filter((t) => t.kind !== 'pushback');
+        const critical = tasks.reduce((a, b) => ((b.doneAt ?? 0) > (a.doneAt ?? 0) ? b : a));
+        dep.readyAt = state.now;
+        dep.criticalTask = critical.kind;
+        if (state.now > dep.scheduled) {
+          addDelayCause(dep, critical.kind === 'board' ? 'boarding' : 'groundHandling');
+          state.groundStats.lateReadyFlights++;
+          state.groundStats.lateReadySec += state.now - dep.scheduled;
+        }
         dep.estimated = Math.max(dep.scheduled, state.now);
-        ac.timerUntil = null;
         setState(state, ac, 'readyForPushback');
       }
       return;
@@ -702,6 +750,7 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
         if (ac.standId && state.standAssignments[ac.standId] === ac.id) delete state.standAssignments[ac.standId];
         ac.standId = null;
         ac.taxiStartedAt = state.now;
+        completePushback(sim, ac.id);
         setState(state, ac, 'taxiOut');
       }
       return;
@@ -849,6 +898,7 @@ function divert(sim: Simulation, ac: Aircraft): void {
 
 function releaseEverything(sim: Simulation, ac: Aircraft): void {
   const { state } = sim;
+  cancelTasks(sim, ac.id);
   releaseAll(state, ac.id);
   if (ac.standId && state.standAssignments[ac.standId] === ac.id) delete state.standAssignments[ac.standId];
   for (const rs of Object.values(state.runways)) {
@@ -863,11 +913,19 @@ function releaseEverything(sim: Simulation, ac: Aircraft): void {
 function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
   const { state } = sim;
   const dep = state.flights[ac.departureFlightId]!;
+  // 出発の10分前にトーイングカーと作業員を手配する
+  if (state.now >= dep.estimated - PUSHBACK_DISPATCH_LEAD_SEC) createPushbackTask(sim, ac);
   if (state.now < dep.estimated || state.now < ac.retryAt) return;
   // 搭乗締切（搭乗手続きの完了）まではプッシュバックしない
   if (dep.pax.boarding !== 'closed') {
     setHold(state, ac, 'boarding');
     addDelayCause(dep, 'boarding');
+    return;
+  }
+  // トーイングカーと作業員が機体に着いていること
+  if (!pushbackReady(state, ac.id)) {
+    setHold(state, ac, 'groundCrew');
+    if (state.now > dep.estimated + 60) addDelayCause(dep, 'groundHandling');
     return;
   }
   const p = departurePath(sim, ac, true);

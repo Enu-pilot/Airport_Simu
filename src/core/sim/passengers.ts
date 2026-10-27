@@ -3,6 +3,8 @@ import { compareIds } from '../model/ids';
 import { WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
 import { findPaxRoute, linkBetween } from '../terminal/route';
 import { AIRCRAFT_TYPES } from './aircraftTypes';
+import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt } from './baggage';
+import { boardingAllowed } from './ground';
 import type { Simulation } from './simulation';
 import {
   EVENT_LOG_LIMIT,
@@ -47,9 +49,7 @@ export const MIN_BOARDING_WINDOW_SEC = 15 * 60;
 export const BOARD_SEC_PER_PAX = { bridge: 3, stairs: 5 };
 /** 降機速度（人/分） */
 export const DEPLANE_PAX_PER_MIN = { bridge: 20, stairs: 12 };
-/** 手荷物がベルトに出るまで（ブロックインから）と、ベルトの占有時間、受け取り時間 */
-export const BAGS_FIRST_SEC = 10 * 60;
-export const BELT_OCCUPY_SEC = 20 * 60;
+/** 手荷物の受け取り時間 */
 export const PICKUP_SEC = 90;
 export const PAX_RETRY_SEC = 30;
 
@@ -185,9 +185,8 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
 
   if (p.boarding === 'notStarted') {
     const atStand = ac.state === 'turnaround' || ac.state === 'readyForPushback';
-    const arr = state.flights[ac.arrivalFlightId]!;
-    const deplaned = arr.pax.generated && arr.pax.deplaneRemaining === 0;
-    if (atStand && deplaned && state.now >= f.estimated - boardingLeadSec(sim, f)) {
+    // 降機・清掃・ケータリング・給油・点検が終わるまで搭乗を始めない
+    if (atStand && boardingAllowed(state, ac.id) && state.now >= f.estimated - boardingLeadSec(sim, f)) {
       p.boarding = 'open';
       p.boardingOpenedAt = state.now;
       log(state, { t: state.now, kind: 'boardingOpen', aircraftId: ac.id, note: f.number });
@@ -334,17 +333,8 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
           (ctx.terminal.byTerminal[access.terminalId!] ?? []).filter((id) => ctx.terminal.areas[id]!.kind === 'baggageClaim').map((id) => [id, 0] as const),
         );
         const r = findPaxRoute(ctx.terminal, { from: access.deplane, goals: claims });
-        if (r) {
-          const claim = r.areas[r.areas.length - 1]!;
-          p.claimAreaId = claim;
-          const belts = Math.max(1, Number(ctx.layout.terminalAreas[claim]!.props.belts ?? 1));
-          const list = (state.claimBelts[claim] ??= []).filter((b) => b.until > state.now);
-          const ready = state.now + BAGS_FIRST_SEC + rng.int(0, 300);
-          const start = list.length < belts ? ready : Math.max(ready, list.map((b) => b.until).sort((a, b) => a - b)[list.length - belts]!);
-          list.push({ flightId: f.id, until: start + BELT_OCCUPY_SEC });
-          state.claimBelts[claim] = list;
-          p.bagsReadyAt = start;
-        }
+        // 手荷物は荷下ろし作業で受取所へ運ばれ、ベルトに空きがあれば流れる（baggage.ts）
+        if (r) p.claimAreaId = r.areas[r.areas.length - 1]!;
       }
     });
   }
@@ -390,6 +380,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
         retryAt: 0,
       };
       registerGroup(state, g);
+      arrivalBags(sim, g, ac.id);
       if (!g.area) {
         // 降機口がない（ゲートなし・到着通路なし）: 到達不能として記録する
         g.state = 'stranded';
@@ -432,8 +423,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
       return;
     case 'waitingBaggage': {
       g.waitSec++;
-      const f = state.flights[g.flightId]!;
-      if (f.pax.bagsReadyAt !== null && state.now >= f.pax.bagsReadyAt) {
+      if (groupBagsOnBelt(state, g.id)) {
         g.state = 'inService';
         g.serviceUntil = state.now + PICKUP_SEC;
       }
@@ -443,6 +433,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
       // 手荷物の受け取り（施設キーなし）はここで終える。窓口の処理は stepFacility
       if (!g.facility && g.serviceUntil !== null && state.now >= g.serviceUntil) {
         g.serviceUntil = null;
+        if (g.steps[g.stepIndex] === 'claim') collectBags(sim, g.id);
         g.stepIndex++;
         planStep(sim, g);
       }
@@ -676,6 +667,7 @@ function stepFacility(sim: Simulation, key: string): void {
     }
     const area = sim.ctx.terminal.areas[key];
     if (area?.kind === 'security') g.securityCleared = true;
+    if (area?.kind === 'checkIn') checkInBags(sim, g, key);
     g.stepIndex++;
     planStep(sim, g);
   }

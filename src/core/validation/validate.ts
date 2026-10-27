@@ -78,7 +78,11 @@ export type IssueCode =
   | 'GATE_ARRIVAL_NO_EXIT'
   // 空港全体
   | 'NO_RUNWAY'
-  | 'NO_TOWER';
+  | 'NO_TOWER'
+  | 'NO_GSE_BASE'
+  | 'NO_FUEL_FARM'
+  | 'NO_MAINTENANCE'
+  | 'NO_BAGGAGE_SORT';
 
 export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   OUT_OF_BOUNDS: 'error',
@@ -125,6 +129,10 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   GATE_ARRIVAL_NO_EXIT: 'warning',
   NO_RUNWAY: 'warning',
   NO_TOWER: 'warning',
+  NO_GSE_BASE: 'warning',
+  NO_FUEL_FARM: 'warning',
+  NO_MAINTENANCE: 'warning',
+  NO_BAGGAGE_SORT: 'warning',
 };
 
 export interface Issue {
@@ -627,7 +635,15 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   const isolatedEdges = new Set<string>();
 
   if (Object.keys(layout.runways).length === 0) sink.add('NO_RUNWAY', []);
-  if (!Object.values(layout.facilities).some((f) => f.kind === 'tower')) sink.add('NO_TOWER', []);
+  const has = (k: string) => Object.values(layout.facilities).some((f) => f.kind === k);
+  if (!has('tower')) sink.add('NO_TOWER', []);
+  // 地上支援の基地: スポットがあるのに無いと折り返し作業ができない
+  if (Object.keys(layout.stands).length > 0) {
+    if (!has('gseBase')) sink.add('NO_GSE_BASE', []);
+    if (!has('fuelFarm')) sink.add('NO_FUEL_FARM', []);
+    if (!has('maintenance')) sink.add('NO_MAINTENANCE', []);
+    if (Object.values(layout.terminalAreas).some((a) => a.kind === 'checkIn') && !has('baggageSort')) sink.add('NO_BAGGAGE_SORT', []);
+  }
 
   checkPlacement(layout, parts, sink);
   checkNetworkGeometry(layout.taxiNodes, layout.taxiways, 'TAXIWAY_CROSSING_NO_JUNCTION', sink);

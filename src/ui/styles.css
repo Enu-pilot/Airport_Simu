@@ -158,3 +158,14 @@ table.board td { padding: 1px 6px; white-space: nowrap; border-top: 1px solid #2
 table.board tr { cursor: pointer; }
 table.board tbody tr:hover { background: var(--panel-2); }
 table.board tr.selected { background: #1d4652; }
+
+/* ---------------- 地上支援 ---------------- */
+.ground-grid { display: grid; grid-template-columns: 1.3fr 1.4fr 1fr 1fr; gap: 10px; align-items: start; }
+table.board th { white-space: nowrap; }
+table.board.tasks td { padding: 1px 4px; }
+table.board tr.blocked td { color: var(--warning); }
+table.board tr.closed td { color: var(--muted); text-decoration: line-through; }
+.bar { display: inline-block; width: 60px; height: 6px; background: #2a3139; border-radius: 3px; overflow: hidden; vertical-align: middle; }
+.bar > span { display: block; height: 100%; background: var(--accent); }
+.bar > span.indeterminate { background: repeating-linear-gradient(45deg, var(--accent) 0 4px, transparent 4px 8px); }
+.bag-history { background: var(--panel-2); padding: 4px 8px; margin-bottom: 6px; border-radius: 4px; font-size: 12px; }

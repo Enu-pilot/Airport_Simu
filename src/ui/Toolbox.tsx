@@ -33,7 +33,7 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
   { title: 'ターミナル', tools: [fac('terminal'), fac('gate', 'ターミナルに接して配置。近くのスポットに自動で紐付け')] },
   {
     title: '支援施設',
-    tools: [fac('tower'), fac('hangar'), fac('maintenance'), fac('fuelFarm'), fac('fireStation'), fac('gseBase')],
+    tools: [fac('tower'), fac('hangar'), fac('maintenance'), fac('fuelFarm'), fac('fireStation'), fac('gseBase'), fac('baggageSort')],
   },
   {
     title: 'ターミナル内部（ドラッグで範囲）',

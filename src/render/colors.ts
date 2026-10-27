@@ -20,6 +20,7 @@ export const FACILITY_COLOR: Record<FacilityKind, number> = {
   fuelFarm: 0xcaa52b,
   fireStation: 0xc8443a,
   gseBase: 0x4f9494,
+  baggageSort: 0x6b8f4f,
   serviceArea: 0x857b5e,
   parking: 0x5d6673,
 };

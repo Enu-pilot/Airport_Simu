@@ -48,12 +48,12 @@ test('起動するとサンプル空港がエラー・警告なしで表示さ�
 test('施設を配置して元に戻す・やり直す', async ({ page }) => {
   await page.getByTestId('tool-facility:tower').click();
   await clickTile(page, 115, 70);
-  await expect(page.getByTestId('status')).toContainText('施設 20');
+  await expect(page.getByTestId('status')).toContainText('施設 21');
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+z');
-  await expect(page.getByTestId('status')).toContainText('施設 19');
-  await page.getByTestId('redo').click();
   await expect(page.getByTestId('status')).toContainText('施設 20');
+  await page.getByTestId('redo').click();
+  await expect(page.getByTestId('status')).toContainText('施設 21');
 });
 
 test('選択してプロパティを表示し、削除を取り消す', async ({ page }) => {
