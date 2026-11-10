@@ -17,6 +17,17 @@ import { constructionCost } from '../core/economy/construction';
 import { applyCompletedProjects, prepareCareerEdit, startClosure, syncProjects } from '../core/economy/expansion';
 import { createStarterAirfield } from '../core/sample/starterAirfield';
 import { CURRENCY } from '../core/economy/balance';
+import {
+  changeScenarioAircraft,
+  changeScenarioFrequency,
+  createScenario,
+  duplicateScenario,
+  finishScenarioRun,
+  replaceScenarioLayout,
+  startScenarioRun,
+  stepScenarioRun,
+  type Scenario,
+} from '../core/scenario/scenario';
 import type { SimClock } from '../core/sim/clock';
 
 export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | 'land' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
@@ -47,6 +58,8 @@ export interface Overlays {
   network: boolean;
   issues: boolean;
   labels: boolean;
+  /** 混雑マップ（運航中: 滑走路・スポット・誘導路ノード・処理施設の混雑） */
+  congestion: boolean;
 }
 
 export interface Toast {
@@ -78,6 +91,10 @@ export interface EditorState {
    * null は「金額不明」（運航をはさんだ編集）で、元に戻すときは通常の建設費・払い戻しの規則で精算する。
    */
   charges: { past: (number | null)[]; future: (number | null)[] };
+  /** シナリオ（比較用の空港と運航条件の複製。プロジェクトに保存する） */
+  scenarios: Scenario[];
+  /** 実行中のシナリオ（ID と進捗 0〜1） */
+  scenarioRun: { id: string; progress: number } | null;
 }
 
 /**
@@ -135,13 +152,15 @@ export const editorStore = createStore<EditorState>(() => ({
   viewSize: { w: 800, h: 600 },
   hover: null,
   draft: null,
-  overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true },
+  overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true, congestion: false },
   interiorLevel: 1,
   toast: null,
   mode: 'build',
   ops: null,
   company: loadInitialCompany(),
   charges: { past: [], future: [] },
+  scenarios: [],
+  scenarioRun: null,
 }));
 
 export function useEditor<T>(selector: (s: EditorState) => T): T {
@@ -420,5 +439,88 @@ export const actions = {
   },
   loadSample(): void {
     replaceLayout(createSampleAirport(), 'サンプル空港を生成しました（元に戻す で復元できます）');
+  },
+};
+
+// ---------------------------------------------------------------- シナリオ
+
+let scenarioSeq = 0;
+const nowIso = () => new Date().toISOString();
+const newScenarioId = () => {
+  const used = new Set(get().scenarios.map((x) => x.id));
+  let id = `sc_${++scenarioSeq}`;
+  while (used.has(id)) id = `sc_${++scenarioSeq}`;
+  return id;
+};
+
+function updateScenario(id: string, fn: (s: Scenario) => void): void {
+  set((st) => ({
+    scenarios: st.scenarios.map((x) => {
+      if (x.id !== id) return x;
+      const c = structuredClone(x);
+      fn(c);
+      return c;
+    }),
+  }));
+}
+
+export const scenarioActions = {
+  /** 現在の空港と会社から作る */
+  createFromCurrent(name: string): void {
+    const s = get();
+    const sc = createScenario({ id: newScenarioId(), name, createdAt: nowIso(), layout: s.history.present, company: s.company, seed: `${s.company.seed}:scenario` });
+    set({ scenarios: [...s.scenarios, sc] });
+    showToast(`シナリオ「${name}」を作りました`);
+  },
+  duplicate(id: string): void {
+    const src = get().scenarios.find((x) => x.id === id);
+    if (!src) return;
+    set((st) => ({ scenarios: [...st.scenarios, duplicateScenario(src, newScenarioId(), `${src.name}（複製）`, nowIso())] }));
+  },
+  remove(id: string): void {
+    set((st) => ({ scenarios: st.scenarios.filter((x) => x.id !== id) }));
+  },
+  rename(id: string, name: string): void {
+    updateScenario(id, (s) => (s.name = name));
+  },
+  changeAircraft(id: string, contractId: string, typeId: string): void {
+    updateScenario(id, (s) => void changeScenarioAircraft(s, contractId, typeId));
+  },
+  changeFrequency(id: string, contractId: string, perDay: number): void {
+    updateScenario(id, (s) => void changeScenarioFrequency(s, contractId, perDay));
+  },
+  /** 現在編集中の空港の配置をシナリオに取り込む（施設の変更を比較する） */
+  useCurrentLayout(id: string): void {
+    const layout = get().history.present;
+    updateScenario(id, (s) => replaceScenarioLayout(s, layout, '編集中の配置を取り込み'));
+  },
+  setDuration(id: string, hours: number): void {
+    updateScenario(id, (s) => {
+      s.durationHours = Math.max(1, Math.min(48, Math.round(hours)));
+      s.results = [];
+    });
+  },
+  /** 少しずつ進めて実行する（画面を止めない）。useCurrentCatalog = 最新カタログで再実行（旧結果と区別） */
+  run(id: string, useCurrentCatalog = false): void {
+    if (get().scenarioRun) return;
+    const sc = get().scenarios.find((x) => x.id === id);
+    if (!sc) return;
+    const work = structuredClone(sc);
+    const run = startScenarioRun(work, { useCurrentCatalog });
+    const total = run.endAt - run.sim.state.now;
+    set({ scenarioRun: { id, progress: 0 } });
+    const tick = () => {
+      const done = stepScenarioRun(run, 1800);
+      if (!done) {
+        set({ scenarioRun: { id, progress: 1 - (run.endAt - run.sim.state.now) / total } });
+        setTimeout(tick, 0);
+        return;
+      }
+      const result = finishScenarioRun(work, run, nowIso());
+      updateScenario(id, (s) => s.results.push(result));
+      set({ scenarioRun: null });
+      showToast(`シナリオ「${sc.name}」の実行が終わりました`);
+    };
+    setTimeout(tick, 0);
   },
 };

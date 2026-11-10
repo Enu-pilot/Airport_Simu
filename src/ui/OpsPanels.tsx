@@ -8,10 +8,12 @@ import { tasksOf } from '../core/sim/ground';
 import { SIM_START_SEC } from '../core/sim/rules';
 import type { Simulation } from '../core/sim/simulation';
 import { areaOccupancy, facilityLoad, serversOf } from '../core/sim/passengers';
-import type { BagState, BlockReason, Flight, RunwayMode, SimState } from '../core/sim/types';
+import type { BagState, BlockReason, DisruptionKind, Flight, RunwayMode, SimState, WeatherKind } from '../core/sim/types';
 import { runwayDesignators } from '../core/layout/runway';
 import { editorStore, useEditor, type OpsState } from '../editor/store';
-import { ops } from '../editor/simRunner';
+import { disruptionActions, ops } from '../editor/simRunner';
+import { checkStand } from '../core/aircraft/compat';
+import { REPAIR_COST } from '../core/sim/disruptions';
 import { focusEntity } from '../editor/input';
 import { actions } from '../editor/store';
 import {
@@ -28,6 +30,9 @@ import {
   UNIT_KIND_LABEL,
   UNIT_STATUS_LABEL,
   ZONE_LABEL,
+  DISRUPTION_KIND_LABEL,
+  DISRUPTION_STATUS_LABEL,
+  WEATHER_LABEL,
   displayName,
   eventText,
   formatClock,
@@ -188,6 +193,189 @@ function RunwayRow({ state, rid, layoutRunway }: { state: SimState; rid: string;
 
 // ---------------------------------------------------------------- 右: 機体の詳細
 
+/** 障害への対応: 代替スポット・遅延・作業の優先（sim/disruptions.ts） */
+function ResponseSection({ acId }: { acId: string }) {
+  const o = useOps();
+  const [stand, setStand] = useState('');
+  if (!o) return null;
+  const { state, ctx } = o.sim;
+  const ac = state.aircraft[acId]!;
+  const dep = state.flights[ac.departureFlightId]!;
+  const arr = state.flights[ac.arrivalFlightId]!;
+  const beforeLanding = ac.state === 'scheduled' || ac.state === 'inbound' || ac.state === 'holding';
+  const type = resolveType(ctx.types, ac.typeId);
+  const stands = Object.values(ctx.layout.stands).filter((s) => checkStand(type, s, ctx.network).status === 'ok');
+  return (
+    <div className="prop-section" data-testid="aircraft-response">
+      <div className="prop-section-title">対応</div>
+      {beforeLanding && (
+        <Row label="代替スポット">
+          <select value={stand} onChange={(e) => setStand(e.target.value)} data-testid="reassign-stand">
+            <option value="">選択…</option>
+            {stands.map((s) => (
+              <option key={s.id} value={s.id} disabled={state.closures.stands.includes(s.id)}>
+                {displayName(ctx.layout, s.id)}
+                {state.closures.stands.includes(s.id) ? '（閉鎖中）' : state.standAssignments[s.id] ? '（使用中）' : ''}
+              </option>
+            ))}
+          </select>
+          <button disabled={!stand} onClick={() => disruptionActions.reassignStand(acId, stand)}>
+            変更
+          </button>
+        </Row>
+      )}
+      <Row label="遅延">
+        {beforeLanding && <button onClick={() => disruptionActions.delay(arr.id, 15)}>到着 +15分</button>}
+        {dep.block === null && <button onClick={() => disruptionActions.delay(dep.id, 15)}>出発 +15分</button>}
+      </Row>
+      <Row label="地上作業">
+        <label>
+          <input type="checkbox" checked={!!dep.priority} onChange={(e) => disruptionActions.prioritize(acId, e.target.checked)} data-testid="prioritize" />
+          優先する（便の順序変更）
+        </label>
+      </Row>
+    </div>
+  );
+}
+
+/** 天候・障害の一覧と設定（運航中） */
+export function DisruptionBoard() {
+  const o = useOps();
+  const [kind, setKind] = useState<DisruptionKind>('weather');
+  const [target, setTarget] = useState('');
+  const [weather, setWeather] = useState<WeatherKind>('rain');
+  const [minutes, setMinutes] = useState(60);
+  const [amount, setAmount] = useState(2);
+  if (!o) return null;
+  const { state, ctx } = o.sim;
+  const l = ctx.layout;
+  const targets: Partial<Record<DisruptionKind, [string, string][]>> = {
+    runwayClosed: Object.keys(l.runways).map((id) => [id, displayName(l, id)]),
+    taxiwayClosed: Object.keys(l.taxiways).map((id) => [id, displayName(l, id)]),
+    standClosed: Object.keys(l.stands).map((id) => [id, displayName(l, id)]),
+    gateFailure: Object.values(l.facilities)
+      .filter((f) => f.kind === 'gate')
+      .map((f) => [f.id, displayName(l, f.id)]),
+    baggageFailure: [
+      ...ctx.sorters.map((x): [string, string] => [x.id, displayName(l, x.id)]),
+      ...Object.values(ctx.terminal.areas)
+        .filter((a) => a.kind === 'baggageClaim')
+        .map((a): [string, string] => [`belt:${a.id}`, `${displayName(l, a.id)} のベルト`]),
+    ],
+    vehicleFailure: Object.values(state.units)
+      .filter((u) => u.kind !== 'staff' && u.kind !== 'engineer')
+      .map((u) => [u.id, `${UNIT_KIND_LABEL[u.kind]} ${u.id}`]),
+    maintenance: [...Object.keys(l.runways), ...Object.keys(l.stands), ...Object.keys(l.taxiways)].map((id) => [id, displayName(l, id)]),
+  };
+  const opts = targets[kind];
+  const add = () =>
+    disruptionActions.add({
+      kind,
+      targetId: opts ? target || opts[0]?.[0] || null : null,
+      ...(kind === 'weather' ? { weather } : {}),
+      ...(kind === 'staffAbsence' || kind === 'demandSurge' || kind === 'inboundDelay' ? { amount } : {}),
+      end: minutes > 0 ? state.now + minutes * 60 : null,
+    });
+  const list = [...state.disruptions].reverse();
+  return (
+    <div className="issues" data-testid="disruption-board">
+      <div className="issues-header">
+        <strong>天候・障害</strong>
+        <span data-testid="weather-now">天候: {WEATHER_LABEL[state.weather.kind]}</span>
+        <span>
+          閉鎖中: 誘導路 {state.closures.taxiways.length} · スポット {state.closures.stands.length} · ゲート {state.closures.gates.length}
+        </span>
+        <label className="sev-toggle">
+          <input type="checkbox" checked={!!state.settings.randomDisruptions} onChange={(e) => disruptionActions.setRandom(e.target.checked)} />
+          ランダムに発生させる
+        </label>
+        <span className="muted">影響はゲーム用の簡略化モデル</span>
+      </div>
+      <div className="issues-list">
+        <div className="fee-grid">
+          <select value={kind} onChange={(e) => (setKind(e.target.value as DisruptionKind), setTarget(''))} data-testid="disruption-kind">
+            {(Object.keys(DISRUPTION_KIND_LABEL) as DisruptionKind[]).map((k) => (
+              <option key={k} value={k}>
+                {DISRUPTION_KIND_LABEL[k]}
+              </option>
+            ))}
+          </select>
+          {opts && (
+            <select value={target} onChange={(e) => setTarget(e.target.value)} data-testid="disruption-target">
+              {opts.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
+          {kind === 'weather' && (
+            <select value={weather} onChange={(e) => setWeather(e.target.value as WeatherKind)}>
+              {(['rain', 'snow', 'fog'] as const).map((w) => (
+                <option key={w} value={w}>
+                  {WEATHER_LABEL[w]}
+                </option>
+              ))}
+            </select>
+          )}
+          {(kind === 'staffAbsence' || kind === 'demandSurge' || kind === 'inboundDelay') && (
+            <label>
+              {kind === 'staffAbsence' ? '人数' : kind === 'demandSurge' ? '倍率' : '遅延（分）'}
+              <input type="number" step={kind === 'demandSurge' ? 0.1 : 1} value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={{ width: 60 }} />
+            </label>
+          )}
+          <label>
+            継続（分、0 = 修理まで）
+            <input type="number" min={0} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} style={{ width: 60 }} />
+          </label>
+          <button onClick={add} data-testid="disruption-add">
+            発生させる
+          </button>
+        </div>
+        <table className="board">
+          <thead>
+            <tr>
+              <th>種類</th>
+              <th>対象</th>
+              <th>状態</th>
+              <th>開始</th>
+              <th>復旧予定</th>
+              <th>影響</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((d) => (
+              <tr key={d.id} data-testid={`disruption-${d.id}`}>
+                <td>
+                  {DISRUPTION_KIND_LABEL[d.kind]}
+                  {d.weather ? `（${WEATHER_LABEL[d.weather]}）` : ''}
+                  {d.amount !== undefined ? ` ×${d.amount}` : ''}
+                </td>
+                <td>{d.targetId ? displayName(l, d.targetId) : '全体'}</td>
+                <td className={d.status === 'active' ? 'ng-text' : ''}>{DISRUPTION_STATUS_LABEL[d.status]}</td>
+                <td>{formatClock(d.start)}</td>
+                <td>{d.status === 'resolved' ? `${formatClock(d.resolvedAt!)}（${d.resolvedBy === 'player' ? '修理' : '時間'}）` : d.end !== null ? formatClock(d.end) : '修理まで'}</td>
+                <td className="muted">
+                  便 {d.affected.flights.length} · 作業 {d.affected.tasks.length} · ユニット {d.affected.units.length}
+                </td>
+                <td>
+                  {d.status !== 'resolved' && !['weather', 'demandSurge', 'inboundDelay'].includes(d.kind) && (
+                    <button onClick={() => disruptionActions.resolve(d.id)} title={`費用 ${REPAIR_COST[d.kind].toLocaleString('ja-JP')} cr`} data-testid={`resolve-${d.id}`}>
+                      修理
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {list.length === 0 && <div className="empty">障害はありません</div>}
+      </div>
+    </div>
+  );
+}
+
 export function AircraftPanel() {
   const o = useOps();
   const id = o?.selectedAircraft;
@@ -205,9 +393,18 @@ export function AircraftPanel() {
       <div className="prop-header">
         <div className="prop-title">{ac.callsign}</div>
         <div className="prop-sub">
-          {type.label} · {type.size}級 · <code>{ac.id}</code>
+          {type.label} · {type.size}級{type.codeF ? '（コード F）' : ''} · <code>{ac.id}</code>
         </div>
       </div>
+      {type.unresolved && <div className="operability ng">機種ID {ac.typeId} がカタログにありません（代替の値で運航中）</div>}
+      <div className="prop-section" data-testid="aircraft-model">
+        <div className="prop-section-title">機種</div>
+        <Row label="機種ID">{ac.typeId}</Row>
+        <Row label="寸法">{`全長 ${type.lengthM} m · 翼幅 ${type.wingspanM} m${type.heightM !== null ? ` · 全高 ${type.heightM} m` : ''}`}</Row>
+        <Row label="座席">{`${dep.seats ?? type.seats}席${type.maxPax !== null ? `（最大旅客定員 ${type.maxPax}）` : ''}`}</Row>
+        <Row label="貨物室">{`手荷物 ${type.holdBags}個まで（ゲーム値）`}</Row>
+      </div>
+      <ResponseSection acId={ac.id} />
       <div className={ac.holdReason || ac.state === 'diverted' || ac.state === 'cannotOperate' ? 'operability ng' : 'operability ok'} data-testid="aircraft-state">
         {AIRCRAFT_STATE_LABEL[ac.state]}
         {ac.holdReason && <div className="reason">待機理由: {HOLD_REASON_LABEL[ac.holdReason]}（{ac.waitSince !== null ? Math.round((state.now - ac.waitSince) / 60) : 0}分）</div>}

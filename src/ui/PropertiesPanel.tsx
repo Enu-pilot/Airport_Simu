@@ -246,6 +246,11 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
             ))}
           </select>
         </Field>
+        {e.widthClass === 'L' && (
+          <Field label="コード F 対応">
+            <input type="checkbox" checked={!!e.codeF} onChange={(ev) => update(layout, id, { codeF: ev.target.checked })} data-testid="prop-codeF" title="翼幅 65〜80 m の機体（A380 など）が通行できる（ゲームの適合ルール）" />
+          </Field>
+        )}
         <Field label="一方通行">
           <input type="checkbox" checked={e.oneWay} onChange={(ev) => update(layout, id, { oneWay: ev.target.checked })} />
           {e.oneWay && (
@@ -336,6 +341,11 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
             ))}
           </select>
         </Field>
+        {s.size === 'L' && (
+          <Field label="コード F 対応">
+            <input type="checkbox" checked={!!s.codeF} onChange={(ev) => update(layout, id, { codeF: ev.target.checked })} data-testid="prop-codeF" title="翼幅 65〜80 m の機体（A380 など）が駐機できる（ゲームの適合ルール）" />
+          </Field>
+        )}
         <RotationField value={s.rotation} onChange={(r) => update(layout, id, { rotation: r })} label="機首の向き" />
         <Info label="位置">{`(${s.origin.x}, ${s.origin.y})`}</Info>
         <Info label="入口">{`(${entry.x}, ${entry.y})`}</Info>

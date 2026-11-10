@@ -10,6 +10,10 @@ import { applyFinishedProjects, editorStore, forgetCharges, formatCr, showToast,
 import { settleDay } from '../core/economy/ops';
 import {
   acceptOffer,
+  changeContractAircraft,
+  removeFleetEntry,
+  setFleetEntry,
+  type FleetResult,
   changeFrequency,
   rejectOffer,
   setFees,
@@ -20,7 +24,16 @@ import {
   type OperatingHours,
 } from '../core/economy/company';
 import { createContext, operableTypes } from '../core/sim/context';
-import { CONTRACT_ACTION_LABEL } from '../i18n/ja';
+import { CONTRACT_ACTION_LABEL, FLEET_RESULT_LABEL, RESPONSE_LABEL } from '../i18n/ja';
+import {
+  addDisruption,
+  delayFlight,
+  prioritize,
+  reassignStand,
+  resolveDisruption,
+  type DisruptionInput,
+  type ResponseResult,
+} from '../core/sim/disruptions';
 
 /**
  * 運航モードのループ。requestAnimationFrame の実時間からティック数を求め（core/sim/clock.ts）、
@@ -158,6 +171,41 @@ export const ops = {
 
 let pausedSpeed: number | null = null;
 
+/** 障害・天候と対応（運航中のみ） */
+function respond(fn: (o: OpsState) => ResponseResult | boolean, okText?: string): void {
+  const o = get().ops;
+  if (!o) return;
+  const r = fn(o);
+  patchOps({ uiVersion: o.uiVersion + 1 });
+  if (r === false) showToast('操作できません', 'error');
+  else if (r !== true && !r.ok) showToast(RESPONSE_LABEL[r.reason], 'error');
+  else if (okText) showToast(okText);
+}
+
+export const disruptionActions = {
+  add(input: DisruptionInput): void {
+    respond((o) => !!addDisruption(o.sim, { ...input, origin: 'manual' }), '障害・天候を設定しました');
+  },
+  resolve(id: string): void {
+    respond((o) => resolveDisruption(o.sim, id), '修理・解除しました（費用を計上）');
+  },
+  reassignStand(acId: string, standId: string): void {
+    respond((o) => reassignStand(o.sim, acId, standId), '代替スポットに変更しました');
+  },
+  delay(flightId: string, minutes: number): void {
+    respond((o) => delayFlight(o.sim, flightId, minutes), `${minutes}分遅らせました`);
+  },
+  prioritize(acId: string, on: boolean): void {
+    respond((o) => prioritize(o.sim, acId, on), on ? '地上作業を優先します' : '優先を解除しました');
+  },
+  setRandom(on: boolean): void {
+    const o = get().ops;
+    if (!o) return;
+    o.sim.state.settings.randomDisruptions = on;
+    patchOps({ uiVersion: o.uiVersion + 1 });
+  },
+};
+
 function endOps(): void {
   cancelAnimationFrame(raf);
   const o = get().ops;
@@ -174,9 +222,9 @@ function endOps(): void {
 /**
  * 会社の設定を変える。運航中はシミュレーションの会社（最新）を、建設中はストアの会社を更新する。
  */
-function mutateCompany(fn: (c: CompanyState) => ContractActionResult | void): boolean {
+function mutateCompany(fn: (c: CompanyState) => ContractActionResult | FleetResult | void): boolean {
   const o = get().ops;
-  let r: ContractActionResult | void;
+  let r: ContractActionResult | FleetResult | void;
   if (o?.sim.company) {
     r = fn(o.sim.company);
     patchOps({ uiVersion: o.uiVersion + 1 });
@@ -185,7 +233,7 @@ function mutateCompany(fn: (c: CompanyState) => ContractActionResult | void): bo
     r = fn(c);
     if (!r || r.ok) set({ company: c });
   }
-  if (r && !r.ok) showToast(CONTRACT_ACTION_LABEL[r.reason], 'error');
+  if (r && !r.ok) showToast((CONTRACT_ACTION_LABEL as Record<string, string>)[r.reason] ?? FLEET_RESULT_LABEL[r.reason as keyof typeof FLEET_RESULT_LABEL], 'error');
   return !r || r.ok;
 }
 
@@ -211,5 +259,16 @@ export const companyActions = {
   },
   setHours(hours: Partial<OperatingHours>): void {
     mutateCompany((c) => setHours(c, hours));
+  },
+  /** 保有機材の追加・座席数の変更（座席数は最大旅客定員まで） */
+  setFleetEntry(airlineId: string, typeId: string, seats: number): boolean {
+    return mutateCompany((c) => setFleetEntry(c, airlineId, typeId, seats));
+  },
+  removeFleetEntry(airlineId: string, typeId: string): void {
+    mutateCompany((c) => removeFleetEntry(c, airlineId, typeId));
+  },
+  /** 契約の機材変更（翌日の運航計画から） */
+  changeContractAircraft(contractId: string, typeId: string): void {
+    if (mutateCompany((c) => changeContractAircraft(c, contractId, typeId))) showToast('機材を変更しました（次の運航計画から反映）');
   },
 };

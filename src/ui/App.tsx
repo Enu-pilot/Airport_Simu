@@ -3,6 +3,8 @@ import { MapView } from '../render/MapView';
 import { actions, editorStore, formatCr, newGame, replaceLayout, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
+import { CatalogPanel } from './CatalogPanel';
+import { AnalyticsPanel, ScenarioPanel } from './AnalysisPanels';
 import { computePreview } from '../editor/tools';
 import { constructionCost } from '../core/economy/construction';
 import { MODE_LABEL } from '../i18n/ja';
@@ -16,7 +18,7 @@ import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
 import type { Overlays } from '../editor/store';
 import { ops } from '../editor/simRunner';
-import { AircraftPanel, BaggageBoard, EventLog, FlightBoard, GroundBoard, OpsControls, TerminalBoard } from './OpsPanels';
+import { AircraftPanel, BaggageBoard, DisruptionBoard, EventLog, FlightBoard, GroundBoard, OpsControls, TerminalBoard } from './OpsPanels';
 import { useState } from 'react';
 
 const OVERLAY_LABEL: Record<keyof Overlays, string> = {
@@ -26,6 +28,7 @@ const OVERLAY_LABEL: Record<keyof Overlays, string> = {
   network: '論理ネットワーク・予約',
   issues: 'エラー表示',
   labels: 'ラベル',
+  congestion: '混雑マップ',
 };
 
 export function App() {
@@ -65,7 +68,7 @@ export function App() {
   );
 }
 
-type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance' | 'access' | 'expansion';
+type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance' | 'access' | 'expansion' | 'catalog' | 'disruptions' | 'analytics' | 'scenarios';
 
 function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
   return (
@@ -90,6 +93,8 @@ function BuildBottom() {
           ['finance', '経営'],
           ['access', 'アクセス'],
           ['expansion', '拡張計画'],
+          ['catalog', '機種カタログ'],
+          ['scenarios', 'シナリオ'],
         ]}
         tab={tab}
         setTab={setTab}
@@ -103,6 +108,10 @@ function BuildBottom() {
           <AccessPanel />
         ) : tab === 'expansion' ? (
           <ExpansionPanel />
+        ) : tab === 'catalog' ? (
+          <CatalogPanel />
+        ) : tab === 'scenarios' ? (
+          <ScenarioPanel />
         ) : (
           <IssuesPanel />
         )}
@@ -123,8 +132,12 @@ function OpsBottom() {
           ['baggage', '手荷物'],
           ['plan', '運航計画'],
           ['finance', '経営'],
+          ['disruptions', '天候・障害'],
+          ['analytics', '分析'],
+          ['scenarios', 'シナリオ'],
           ['access', 'アクセス'],
           ['expansion', '拡張計画'],
+          ['catalog', '機種カタログ'],
           ['events', 'イベント'],
           ['issues', '配置チェック'],
         ]}
@@ -147,6 +160,14 @@ function OpsBottom() {
           <AccessPanel />
         ) : tab === 'expansion' ? (
           <ExpansionPanel />
+        ) : tab === 'catalog' ? (
+          <CatalogPanel />
+        ) : tab === 'disruptions' ? (
+          <DisruptionBoard />
+        ) : tab === 'analytics' ? (
+          <AnalyticsPanel />
+        ) : tab === 'scenarios' ? (
+          <ScenarioPanel />
         ) : tab === 'events' ? (
           <EventLog />
         ) : (

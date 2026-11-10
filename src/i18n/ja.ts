@@ -1,4 +1,4 @@
-import type { AircraftState, BagState, BlockReason, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent, TaskKind, TaskState, UnitKind, UnitStatus } from '../core/sim/types';
+import type { Disruption, DisruptionKind, WeatherKind, AircraftState, BagState, BlockReason, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent, TaskKind, TaskState, UnitKind, UnitStatus } from '../core/sim/types';
 import type { BuildState, EntityType, FacilityKind, PaxZone, RoadClass, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/validation/validate';
@@ -7,6 +7,12 @@ import type { AirsideNodeKind } from '../core/airside/network';
 import type { AirlineType } from '../core/economy/registry';
 import type { Contract, ContractActionResult, CostCategory, DailyKpi, Project, RevenueCategory, TimeWindow } from '../core/economy/company';
 import type { AccessMode, AccessUnavailable } from '../core/access/model';
+import type { DataStatus } from '../core/aircraft/catalog';
+import type { Bottleneck, GroupKey } from '../core/analytics/kpi';
+import type { ScenarioKpis } from '../core/scenario/scenario';
+import type { CompatReason, CompatStatus } from '../core/aircraft/compat';
+import type { FleetResult } from '../core/economy/company';
+import type { ResponseResult } from '../core/sim/disruptions';
 import type { PlanIssueCode } from '../core/economy/planning';
 
 export const FACILITY_LABEL: Record<FacilityKind, string> = {
@@ -597,3 +603,111 @@ export const PROJECT_KIND_LABEL: Record<Project['kind'], string> = { build: '新
 export function formatMinute(min: number): string {
   return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 }
+
+// ---------------------------------------------------------------- 機種・適合性・障害（Phase 7）
+
+export const DATA_STATUS_LABEL: Record<DataStatus, string> = {
+  official: '公式値',
+  game: 'ゲーム値',
+  unset: '未設定',
+};
+
+export const COMPAT_STATUS_LABEL: Record<CompatStatus, string> = { ok: '適合', ng: '不適合', unknown: '要確認' };
+
+export const COMPAT_REASON_LABEL: Record<CompatReason, string> = {
+  TYPE_UNRESOLVED: '機種データがない（未解決の機種ID）',
+  NOT_OPERATIONAL: '施設が運用中でない（計画・建設中・閉鎖中）',
+  RUNWAY_CLASS: '滑走路の区分（長さ・幅）が足りない',
+  RUNWAY_TAKEOFF_LENGTH: '離陸に必要な長さ（ゲーム値）が足りない',
+  RUNWAY_LANDING_LENGTH: '着陸に必要な長さ（ゲーム値）が足りない',
+  RUNWAY_CODE_F: 'コード F の機体には幅 60 m の滑走路が必要',
+  STAND_CLASS: 'スポットの区分が足りない',
+  STAND_CODE_F: 'スポットがコード F 対応に指定されていない',
+  STAND_NOT_CONNECTED: 'スポットが誘導路につながっていない',
+  TAXIWAY_CLASS: '誘導路の幅の区分が足りない',
+  TAXIWAY_CODE_F: '誘導路がコード F 対応に指定されていない',
+  GATE_NO_STAND: 'ゲートにスポットが紐付いていない（判定不能）',
+  GATE_STAND_NG: '紐付いたスポットが適合しない',
+  GATE_UPPER_DECK: '上階への搭乗橋はモデル化していない（使用は可）',
+  GSE_NONE: '必要な車両・作業員が空港に1台もいない',
+  GSE_FEWER: '車両・作業員が必要数より少ない（作業に時間がかかる）',
+  NO_FUEL_FARM: '燃料施設がない',
+  NO_ROUTE: '使える滑走路とスポットを結ぶ経路がない',
+};
+
+export const WEATHER_LABEL: Record<WeatherKind, string> = { clear: '晴れ', rain: '雨', snow: '雪', fog: '霧' };
+
+export const DISRUPTION_KIND_LABEL: Record<DisruptionKind, string> = {
+  weather: '天候の変化',
+  runwayClosed: '滑走路の一時閉鎖',
+  taxiwayClosed: '誘導路の使用不能',
+  standClosed: '駐機スポットの使用不能',
+  gateFailure: '搭乗ゲートの故障',
+  baggageFailure: '手荷物設備の故障',
+  vehicleFailure: '地上支援車両の故障',
+  staffAbsence: '作業員の欠勤',
+  demandSurge: '旅客需要の急増',
+  inboundDelay: '到着便の遅延',
+  maintenance: '整備による施設の一時停止',
+};
+
+export const DISRUPTION_STATUS_LABEL: Record<Disruption['status'], string> = { scheduled: '予定', active: '発生中', resolved: '復旧' };
+
+export const FLEET_RESULT_LABEL: Record<Exclude<FleetResult, { ok: true }>['reason'], string> = {
+  UNKNOWN_TYPE: 'カタログにない機種です',
+  SEATS_INVALID: '座席数は1以上の整数にしてください',
+  OVER_MAX_PAX: '座席数が最大旅客定員（公式値がない機種はゲーム上の上限）を超えています',
+  NOT_IN_FLEET: 'その航空会社の保有機材にない機種です（先に保有機材に追加してください）',
+  IN_USE: '契約で使っている機種は保有機材から外せません',
+  NOT_FOUND: '見つかりません',
+};
+
+export const RESPONSE_LABEL: Record<Exclude<ResponseResult, { ok: true }>['reason'], string> = {
+  NOT_FOUND: '対象が見つかりません',
+  TOO_LATE: '着陸後・出発後の便は変更できません',
+  INCOMPATIBLE: 'その機種に適合しないスポットです',
+  OCCUPIED: 'そのスポット（ユニット）は使用中です',
+  CLOSED: '閉鎖中のスポットです',
+};
+
+// ---------------------------------------------------------------- 分析・シナリオ（Phase 8）
+
+export const GROUP_KEY_LABEL: Record<GroupKey, string> = {
+  manufacturer: 'メーカー',
+  family: '機種ファミリー',
+  model: '機種・派生型',
+  airline: '航空会社',
+  flight: '運航便',
+  runway: '滑走路',
+  stand: '駐機スポット',
+  gate: '搭乗ゲート',
+};
+
+export const SCENARIO_KPI_LABEL: Record<keyof ScenarioKpis, string> = {
+  flights: '便数（機体の運航）',
+  completed: '運航完了',
+  failed: 'ダイバート・欠航',
+  otp: '定時運航率（出発）',
+  avgDepDelayMin: '平均出発遅延（分）',
+  paxBoarded: '搭乗者数',
+  seats: '座席数（運航完了分）',
+  loadFactor: '座席利用率',
+  missedPax: '乗り遅れ',
+  avgTurnMin: '平均折り返し時間（分）',
+  avgPaxWaitMin: '旅客の平均待ち（分）',
+  bagsLeft: '積み残し手荷物',
+  revenue: '収入（cr）',
+  cost: '費用（cr）',
+  operatingProfit: '営業利益（cr）',
+};
+
+export const BOTTLENECK_AREA_LABEL: Record<Bottleneck['area'], string> = {
+  runway: '滑走路',
+  taxiway: '誘導路・交差地点',
+  stand: '駐機スポット',
+  checkIn: 'チェックイン',
+  security: '保安検査',
+  gate: '搭乗ゲート',
+  ground: '地上支援（作業員・車両）',
+  baggage: '手荷物設備',
+};
