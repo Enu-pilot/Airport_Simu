@@ -95,6 +95,8 @@ export interface EditorState {
   scenarios: Scenario[];
   /** 実行中のシナリオ（ID と進捗 0〜1） */
   scenarioRun: { id: string; progress: number } | null;
+  /** 表示: 2D マップ / 3D ビュー（切り替えてもシミュレーションは止めない） */
+  viewMode: '2d' | '3d';
 }
 
 /**
@@ -161,6 +163,7 @@ export const editorStore = createStore<EditorState>(() => ({
   charges: { past: [], future: [] },
   scenarios: [],
   scenarioRun: null,
+  viewMode: '2d',
 }));
 
 export function useEditor<T>(selector: (s: EditorState) => T): T {
@@ -426,6 +429,9 @@ export const actions = {
   },
   setInteriorLevel(level: number): void {
     set((s) => ({ interiorLevel: level, overlays: { ...s.overlays, interior: true } }));
+  },
+  setViewMode(viewMode: '2d' | '3d'): void {
+    set({ viewMode });
   },
   toggleOverlay(key: keyof Overlays): void {
     set((s) => ({ overlays: { ...s.overlays, [key]: !s.overlays[key] } }));

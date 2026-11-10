@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { editorStore, actions } from '../editor/store';
+import { editorStore, actions, useEditor } from '../editor/store';
+import { View3D } from './View3D';
 import {
   onDoubleClick,
   onPointerDown,
@@ -83,4 +84,10 @@ export function MapView() {
       onContextMenu={(e) => e.preventDefault()}
     />
   );
+}
+
+/** 2D マップと 3D ビューの切り替え。シミュレーションのループ（simRunner）は表示と独立しているので止まらない */
+export function Viewport() {
+  const mode = useEditor((s) => s.viewMode);
+  return mode === '3d' ? <View3D /> : <MapView />;
 }

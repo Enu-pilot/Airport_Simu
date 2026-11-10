@@ -196,3 +196,8 @@ tr.warn-row td:first-child { box-shadow: inset 3px 0 var(--warning); }
 .badge.unset { color: var(--muted); }
 .ok-text { color: var(--ok, #5cd68d); }
 tr.selected td { background: rgba(63, 240, 255, 0.08); }
+
+/* 3D ビュー */
+.view3d { cursor: grab; }
+.view3d canvas { display: block; }
+.perf-hud { position: absolute; left: 8px; top: 8px; padding: 2px 8px; font-size: 11px; background: rgba(0, 0, 0, 0.55); color: #e5f2ff; border-radius: 4px; pointer-events: none; }

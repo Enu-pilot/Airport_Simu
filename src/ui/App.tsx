@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { MapView } from '../render/MapView';
+import { Viewport } from '../render/MapView';
 import { actions, editorStore, formatCr, newGame, replaceLayout, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
@@ -58,7 +58,7 @@ export function App() {
         <FacilityList />
       </aside>
       <main className="center">
-        <MapView />
+        <Viewport />
         <StatusBar />
         <Toast />
       </main>
@@ -181,6 +181,7 @@ function TopBar() {
   const canUndo = useEditor((s) => s.history.past.length > 0);
   const canRedo = useEditor((s) => s.history.future.length > 0);
   const overlays = useEditor((s) => s.overlays);
+  const viewMode = useEditor((s) => s.viewMode);
   const layout = useLayout();
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = useEditor((s) => s.mode);
@@ -276,6 +277,11 @@ function TopBar() {
         </div>
         </>
       )}
+      <div className="top-group">
+        <button data-testid="view-toggle" className={viewMode === '3d' ? 'active' : ''} onClick={() => actions.setViewMode(viewMode === '3d' ? '2d' : '3d')} title="2D マップと 3D ビューを切り替えます（運航は止まりません）">
+          {viewMode === '3d' ? '2D表示へ' : '3D表示へ'}
+        </button>
+      </div>
       <div className="top-group overlays">
         {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
           <label key={k}>
