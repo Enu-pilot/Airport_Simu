@@ -28,15 +28,15 @@ export interface FleetEntry {
 export const AIRLINES: AirlineDef[] = [
   {
     id: 'SK', code: 'SK', name: 'スカイライン航空', type: 'fullService',
-    fleet: [{ typeId: 'B737-800W', seats: 166 }, { typeId: 'B787-9', seats: 266 }, { typeId: 'B777-300ER', seats: 316 }],
+    fleet: [{ typeId: 'B737-800W', seats: 166 }, { typeId: 'B787-9', seats: 266 }, { typeId: 'B777-300ER', seats: 316 }, { typeId: 'B787-10', seats: 320 }, { typeId: 'B767-300ER', seats: 250 }],
     priceSensitivity: 0.3, minOtp: 0.85,
   },
   {
     id: 'NP', code: 'NP', name: 'ノースパシフィック航空', type: 'fullService',
-    fleet: [{ typeId: 'A320neo', seats: 180 }, { typeId: 'A350-900', seats: 310 }, { typeId: 'B777-300', seats: 400 }, { typeId: 'A380-800', seats: 520 }],
+    fleet: [{ typeId: 'A320neo', seats: 180 }, { typeId: 'A350-900', seats: 310 }, { typeId: 'B777-300', seats: 400 }, { typeId: 'A380-800', seats: 520 }, { typeId: 'A350-1000', seats: 370 }, { typeId: 'A321neo', seats: 194 }],
     priceSensitivity: 0.35, minOtp: 0.8,
   },
-  { id: 'RJ', code: 'RJ', name: 'リージョナルジェット', type: 'regional', fleet: [{ typeId: 'regional70', seats: 70 }], priceSensitivity: 0.5, minOtp: 0.75 },
+  { id: 'RJ', code: 'RJ', name: 'リージョナルジェット', type: 'regional', fleet: [{ typeId: 'regional70', seats: 70 }, { typeId: 'E190', seats: 95 }, { typeId: 'E175', seats: 76 }, { typeId: 'ATR72-600', seats: 70 }], priceSensitivity: 0.5, minOtp: 0.75 },
   {
     id: 'AQ', code: 'AQ', name: 'アクアエア', type: 'lcc',
     fleet: [{ typeId: 'A320-200', seats: 180 }, { typeId: 'A320neo', seats: 186 }],
@@ -44,7 +44,7 @@ export const AIRLINES: AirlineDef[] = [
   },
   {
     id: 'HB', code: 'HB', name: 'ハミングバード', type: 'lcc',
-    fleet: [{ typeId: 'regional70', seats: 70 }, { typeId: 'B737-800', seats: 184 }],
+    fleet: [{ typeId: 'regional70', seats: 70 }, { typeId: 'B737-800', seats: 184 }, { typeId: 'B737-8', seats: 189 }],
     priceSensitivity: 0.7, minOtp: 0.7,
   },
 ];

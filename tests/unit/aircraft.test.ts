@@ -345,3 +345,37 @@ describe('天候・障害と対応', { timeout: 120_000 }, () => {
     expect(surged).toBeLessThanOrEqual(180);
   });
 });
+
+describe('機種カタログの拡充（2026.11.0）', () => {
+  it('日本で運航されている主な機種を、派生型を区別して収録している', () => {
+    for (const id of ['B737-8', 'B767-300', 'B767-300ER', 'B777-200', 'B777-200ER', 'B787-8', 'B787-9', 'B787-10', 'A321-200', 'A321neo', 'A350-900', 'A350-1000', 'E175', 'E190', 'ATR42-600', 'ATR72-600']) {
+      expect(CATALOG[id], id).toBeDefined();
+      expect(CATALOG[id]!.generic).toBe(false);
+    }
+    // 名前が似た派生型は別の機種で、値も異なる
+    expect(CATALOG['B787-8']!.lengthM.value).not.toBe(CATALOG['B787-10']!.lengthM.value);
+    expect(CATALOG['B767-300']!.mtowKg.value).not.toBe(CATALOG['B767-300ER']!.mtowKg.value);
+    expect(CATALOG['A350-900']!.maxPax.value).not.toBe(CATALOG['A350-1000']!.maxPax.value);
+  });
+
+  it('追加した機種の公式値にはすべて出典があり、確認できなかった値は未設定のまま', () => {
+    for (const m of AIRCRAFT_MODELS.filter((x) => x.updated === '2026-11-10')) {
+      for (const v of [m.lengthM, m.wingspanM, m.heightM, m.mtowKg, m.maxPax, m.typicalSeats, m.cargoM3, m.fuelL]) {
+        if (v.status === 'official') expect(DATA_SOURCES[v.source!], `${m.id}`).toBeDefined();
+        if (v.status === 'unset') expect(v.value).toBeNull();
+      }
+      expect(m.lengthM.status).toBe('official');
+      expect(m.wingspanM.status).toBe('official');
+    }
+    expect(CATALOG['ATR72-600']!.heightM.status).toBe('unset');
+  });
+
+  it('翼幅からゲームの区分が決まる: ターボプロップ・リージョナルジェットは M、767・787 は L（コード F ではない）', () => {
+    const t = buildTypeTable();
+    for (const id of ['ATR42-600', 'ATR72-600', 'E175', 'E190', 'A321neo', 'B737-8']) expect(t[id]!.size, id).toBe('M');
+    for (const id of ['B767-300ER', 'B787-8', 'B787-10', 'B777-200', 'A350-1000']) {
+      expect(t[id]!.size, id).toBe('L');
+      expect(t[id]!.codeF, id).toBe(false);
+    }
+  });
+});
