@@ -327,6 +327,8 @@ export function eventText(e: SimEvent, callsign: (id: string) => string): string
       return `⚠ 積み残し: ${e.note}`;
     case 'finance':
       return `💴 ${e.note}`;
+    case 'disruption':
+      return `⚠ ${e.note}`;
   }
 }
 
@@ -488,6 +490,7 @@ export const COST_LABEL: Record<CostCategory, string> = {
   staffCommute: '職員の通勤対策費（職員用駐車場の不足）',
   groundOps: '地上作業費',
   compensation: '補償・対応費',
+  disruption: '障害の修理・早期復旧費',
 };
 
 export const WINDOW_LABEL: Record<TimeWindow, string> = {

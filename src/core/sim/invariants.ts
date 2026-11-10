@@ -1,7 +1,8 @@
 import { TILE_M } from '../model/catalog';
 import { sortedValues } from '../model/ids';
 import { otherEnd } from '../airside/network';
-import { AIRCRAFT_TYPES } from './aircraftTypes';
+import { resolveType } from './aircraftTypes';
+import { checkStand } from '../aircraft/compat';
 import { edgeIndexAt } from './routes';
 import { MIN_GROUND_SEPARATION_M, TICK_SEC } from './rules';
 import type { Simulation } from './simulation';
@@ -30,8 +31,13 @@ export function checkInvariants(sim: Simulation): string[] {
     const ac = state.aircraft[acId];
     if (!ac || !active(ac.state) || ac.standId !== stand) out.push(`S4 割り当て表 ${stand}→${acId} が不正`);
     const info = ctx.stands[stand];
-    if (ac && info && sizeRank(AIRCRAFT_TYPES[ac.typeId].size) > sizeRank(info.size)) {
-      out.push(`S3 ${acId} がサイズの合わないスポット ${stand} に割り当て`);
+    const t = ac ? resolveType(ctx.types, ac.typeId) : null;
+    if (ac && info && t && !t.unresolved && checkStand(t, ctx.layout.stands[stand]!).reasons.some((r) => r === 'STAND_CLASS' || r === 'STAND_CODE_F')) {
+      out.push(`S3 ${acId} が適合しないスポット ${stand} に割り当て`);
+    }
+    // D1 閉鎖中のスポットに、着陸前の機体を新しく割り当てない
+    if (ac && (ac.state === 'inbound' || ac.state === 'holding') && state.closures.stands.includes(stand)) {
+      out.push(`D1 ${acId} が閉鎖中のスポット ${stand} に割り当て`);
     }
   }
 
@@ -218,4 +224,3 @@ export function checkPaxInvariants(sim: Simulation, full: boolean): string[] {
   return out;
 }
 
-const sizeRank = (s: 'S' | 'M' | 'L'): number => ({ S: 1, M: 2, L: 3 })[s];

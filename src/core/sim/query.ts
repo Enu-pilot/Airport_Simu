@@ -1,5 +1,5 @@
 import type { Vec2 } from '../geometry/vec';
-import { AIRCRAFT_TYPES } from './aircraftTypes';
+import { AIRCRAFT_TYPES, resolveType } from './aircraftTypes';
 import type { Aircraft, SimState } from './types';
 
 /** 表示対象の機体（空域・地上にいるもの。出発後しばらくまで） */
@@ -16,7 +16,7 @@ export function aircraftAt(state: SimState, world: Vec2): string | null {
   let best: { id: string; d: number } | null = null;
   for (const ac of Object.values(state.aircraft)) {
     if (!isVisible(ac)) continue;
-    const r = Math.max(0.8, AIRCRAFT_TYPES[ac.typeId].wingspanM / 25 / 2 + 0.3);
+    const r = Math.max(0.8, resolveType(AIRCRAFT_TYPES, ac.typeId).wingspanM / 25 / 2 + 0.3);
     const d = Math.hypot(ac.x - p.x, ac.y - p.y);
     if (d <= r && (!best || d < best.d)) best = { id: ac.id, d };
   }

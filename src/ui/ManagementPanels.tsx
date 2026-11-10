@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AIRCRAFT_TYPES } from '../core/sim/aircraftTypes';
+import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
 import { contractsOf, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type DailyKpi, type DailyReport } from '../core/economy/company';
 import { analyzeDayPlan, planDay } from '../core/economy/planning';
@@ -81,7 +81,7 @@ export function PlanPanel() {
                 <tr key={k.id} data-testid={`contract-${k.id}`}>
                   <td>{airlineDef(k.airlineId).name}</td>
                   <td>{destinationDef(k.destinationId).name}</td>
-                  <td className={operable.includes(k.typeId) ? '' : 'ng-text'}>{AIRCRAFT_TYPES[k.typeId].label}</td>
+                  <td className={operable.includes(k.typeId) ? '' : 'ng-text'}>{resolveType(AIRCRAFT_TYPES, k.typeId).label}</td>
                   <td>{k.perDay}</td>
                   <td>{WINDOW_LABEL[k.window]}</td>
                   <td>{Math.round(k.feeDiscount * 100)}%</td>
@@ -112,7 +112,7 @@ export function PlanPanel() {
                     <td>{airlineDef(k.airlineId).name}</td>
                     <td>{destinationDef(k.destinationId).name}</td>
                     <td className={ok ? '' : 'ng-text'}>
-                      {AIRCRAFT_TYPES[k.typeId].label}
+                      {resolveType(AIRCRAFT_TYPES, k.typeId).label}
                       {ok ? '' : '（未対応）'}
                     </td>
                     <td>{k.perDay}便/日</td>
@@ -256,7 +256,7 @@ export function PlanPanel() {
                       {f.arrNumber}/{f.depNumber}
                     </td>
                     <td>{destinationDef(f.destinationId).name}</td>
-                    <td>{AIRCRAFT_TYPES[f.typeId].size}</td>
+                    <td>{resolveType(AIRCRAFT_TYPES, f.typeId).shortLabel}</td>
                     <td>
                       {f.arrPax}/{f.depPax}
                     </td>

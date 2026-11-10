@@ -13,7 +13,7 @@ import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
 import { computePreview, facilityKindOf, nextPathPoint, rectFromDrag } from '../editor/tools';
 import { getAnalysis, type EditorState, type OpsState } from '../editor/store';
-import { AIRCRAFT_TYPES } from '../core/sim/aircraftTypes';
+import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../core/sim/aircraftTypes';
 import { isVisible } from '../core/sim/query';
 import { edgeIndexAt, pointAt } from '../core/sim/routes';
 import type { Aircraft, UnitKind } from '../core/sim/types';
@@ -45,6 +45,8 @@ export class MapRenderer {
   private textPool = new Map<string, Text>();
   private usedTexts = new Set<string>();
   private terrainSite: Site | null = null;
+  /** 運航中の機種テーブル（保存時の機種データを使う運航ではそのスナップショット） */
+  private typeTable: TypeTable | null = null;
   private zoom = 1;
   private interiorShown = false;
 
@@ -609,6 +611,7 @@ export class MapRenderer {
   // ------------------------------------------------------------ 運航
 
   private drawOps(ops: OpsState, cam: Camera, showReservations: boolean): void {
+    this.typeTable = ops.sim.ctx.types;
     const o = this.overlay;
     const { sim } = ops;
     const net = sim.ctx.network;
@@ -689,7 +692,7 @@ export class MapRenderer {
 
   private drawAircraft(ac: Aircraft, x: number, y: number, heading: number, selected: boolean): void {
     const g = this.overlay;
-    const t = AIRCRAFT_TYPES[ac.typeId];
+    const t = resolveType(this.typeTable ?? AIRCRAFT_TYPES, ac.typeId);
     const half = Math.max(0.5, t.lengthM / 25 / 2);
     const span = Math.max(0.5, t.wingspanM / 25 / 2);
     const rad = (heading * Math.PI) / 180;

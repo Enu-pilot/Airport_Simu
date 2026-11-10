@@ -86,6 +86,8 @@ export interface TaxiwayEdge {
   /** true の場合 from → to の一方通行 */
   oneWay: boolean;
   buildState: BuildState;
+  /** コード F（翼幅 65〜80 m）の機体が通行できる（L 級のみ意味を持つ。Phase 7） */
+  codeF?: boolean;
 }
 
 /** public: 一般道路 / service: 構内サービス道路（業務用）/ rail: 鉄道（空港連絡線） */
@@ -111,6 +113,8 @@ export interface Stand {
   rotation: Rotation;
   size: SizeClass;
   buildState: BuildState;
+  /** コード F（翼幅 65〜80 m）の機体を駐機できる（L 級のみ意味を持つ。Phase 7） */
+  codeF?: boolean;
 }
 
 export type FacilityKind =

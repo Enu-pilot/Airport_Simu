@@ -1,8 +1,9 @@
 import { Rng } from '../rng';
 import { compareIds, sortedValues } from '../model/ids';
-import { sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
+import type { AirportLayout, SizeClass } from '../model/types';
 import { canAircraftUse, otherEnd } from '../airside/network';
-import { AIRCRAFT_TYPES, takeoffDistanceM, type AircraftType, type AircraftTypeId } from './aircraftTypes';
+import { resolveType, takeoffDistanceM, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
+import { checkRunway, checkStand } from '../aircraft/compat';
 import { createContext, operableTypes, orderedRunway, type SimContext } from './context';
 import { findPath } from './pathfinding';
 import {
@@ -62,6 +63,8 @@ import {
 import { TILE_M } from '../model/catalog';
 import { completeExit, emptyFlightPax, serversOf, stepPassengers } from './passengers';
 import { createAccessRuntime, refreshAccess, stepAccess } from '../access/runtime';
+import { stepDisruptions, weatherEffects } from './disruptions';
+import { createAnalytics, stepAnalytics } from '../analytics/records';
 import type { CompanyState } from '../economy/company';
 import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
 import { analyzeDayPlan, planDay } from '../economy/planning';
@@ -96,6 +99,8 @@ export interface CreateOptions {
   startTime?: number;
   settings?: Partial<SimSettings>;
   company?: CompanyState | null;
+  /** 機種テーブル（保存時のスナップショットなど。省略時は現在のカタログ） */
+  types?: TypeTable;
 }
 
 const DEFAULT_SETTINGS: SimSettings = {
@@ -107,7 +112,7 @@ const DEFAULT_SETTINGS: SimSettings = {
 };
 
 export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}): Simulation {
-  const ctx = createContext(layout);
+  const ctx = createContext(layout, opts.types ? { types: opts.types } : {});
   const seed = opts.seed ?? `${layout.site.seed}:ops`;
   const runwayConfig: Record<string, RunwayConfig> = {};
   const runways: SimState['runways'] = {};
@@ -161,6 +166,10 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     },
     economy: null,
     access: null,
+    weather: { kind: 'clear', since: opts.startTime ?? SIM_START_SEC },
+    disruptions: [],
+    closures: { taxiways: [], stands: [], gates: [] },
+    analytics: createAnalytics(opts.startTime ?? SIM_START_SEC),
   };
   const sim: Simulation = { ctx, state, company: opts.company ?? null };
   if (sim.company) {
@@ -229,7 +238,7 @@ const HOLD_TO_DELAY: Partial<Record<HoldReason, DelayCause>> = {
   groundCrew: 'groundHandling',
 };
 
-const typeOf = (ac: Aircraft): AircraftType => AIRCRAFT_TYPES[ac.typeId];
+const typeOf = (sim: Simulation, ac: Aircraft): AircraftType => resolveType(sim.ctx.types, ac.typeId);
 
 // ---------------------------------------------------------------- 便の生成
 
@@ -247,11 +256,11 @@ export function addTurnaround(
     inboundDelaySec?: number;
     airline?: string;
     numbers?: [string, string];
-    plan?: { contractId: string; destinationId: string; arrPax: number; depPax: number; standId: string | null };
+    plan?: { contractId: string; destinationId: string; arrPax: number; depPax: number; standId: string | null; seats?: number };
   } = {},
 ): Aircraft {
   const { state } = sim;
-  const type = AIRCRAFT_TYPES[typeId];
+  const type = resolveType(sim.ctx.types, typeId);
   const acId = nextId(state, 'ac');
   const n = state.counters.ac!;
   const airline = opts.airline ?? AIRLINES[n % AIRLINES.length]!;
@@ -282,6 +291,7 @@ export function addTurnaround(
     destinationId: plan?.destinationId ?? null,
     plannedPax: plan ? (direction === 'arrival' ? plan.arrPax : plan.depPax) : null,
     plannedStandId: plan?.standId ?? null,
+    ...(plan?.seats !== undefined ? { seats: plan.seats } : {}),
   });
   const arrEst = arrivalAt + (opts.inboundDelaySec ?? 0);
   state.flights[arrId] = flight(arrId, 'arrival', arrNumber, arrivalAt, arrEst);
@@ -329,22 +339,23 @@ export function generateDaySchedule(sim: Simulation, day: number): void {
     generateContractSchedule(sim, day);
     return;
   }
-  const types = operableTypes(ctx);
+  // 乱数のスケジュール（会社なしの運航・テスト用）は旧形式の汎用機材だけを使う
+  const weights: Record<AircraftTypeId, number> = { regional70: 3, narrow180: 6, wide300: 1.5 };
+  const types = operableTypes(ctx).filter((t) => weights[t] !== undefined);
   const count = state.settings.flightsPerDay;
   if (types.length === 0 || count <= 0) return;
   const from = Math.max(day * DAY_SEC + 6.5 * 3600, state.now + 20 * 60);
   const to = day * DAY_SEC + 22 * 3600;
   if (from >= to) return;
-  const weights: Record<AircraftTypeId, number> = { regional70: 3, narrow180: 6, wide300: 1.5 };
   const plans = withRng(state, (rng) => {
     const out: { at: number; type: AircraftTypeId; delay: number }[] = [];
-    const total = types.reduce((s, t) => s + weights[t], 0);
+    const total = types.reduce((s, t) => s + weights[t]!, 0);
     for (let i = 0; i < count; i++) {
       const at = Math.round((from + ((to - from) * (i + rng.next())) / count) / 60) * 60;
       let pick = rng.next() * total;
       let type = types[0]!;
       for (const t of types) {
-        pick -= weights[t];
+        pick -= weights[t]!;
         if (pick <= 0) {
           type = t;
           break;
@@ -366,17 +377,17 @@ export function generateDaySchedule(sim: Simulation, day: number): void {
 function generateContractSchedule(sim: Simulation, day: number): void {
   const { state, ctx } = sim;
   // 需要にはアクセス係数（前日の混雑を反映）が掛かる。運航計画タブのプレビューも同じ値を使う
-  const plan = planDay(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!));
+  const plan = planDay(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!), ctx.types);
   const analysis = analyzeDayPlan(plan, ctx);
   const earliest = state.now + 20 * 60;
   for (const p of plan.flights) {
     const arrivalAt = Math.max(day * DAY_SEC + p.arrivalAt, Math.ceil(earliest / 60) * 60);
     addTurnaround(sim, p.typeId, arrivalAt, {
-      departureAt: Math.max(day * DAY_SEC + p.departureAt, arrivalAt + AIRCRAFT_TYPES[p.typeId].turnaroundSec),
+      departureAt: Math.max(day * DAY_SEC + p.departureAt, arrivalAt + resolveType(ctx.types, p.typeId).turnaroundSec),
       inboundDelaySec: p.inboundDelaySec,
       airline: p.airlineId,
       numbers: [p.arrNumber, p.depNumber],
-      plan: { contractId: p.contractId, destinationId: p.destinationId, arrPax: p.arrPax, depPax: p.depPax, standId: analysis.assignments[p.key]?.standId ?? null },
+      plan: { contractId: p.contractId, destinationId: p.destinationId, arrPax: p.arrPax, depPax: p.depPax, standId: analysis.assignments[p.key]?.standId ?? null, seats: p.seats },
     });
   }
   logEvent(state, { t: state.now, kind: 'scheduleGenerated', note: `day ${day}: ${plan.flights.length}（契約）` });
@@ -406,10 +417,11 @@ function runwayFor(sim: Simulation, runwayId: string): RunwayEndInfo | null {
   return { runwayId, ...orderedRunway(info, cfg) };
 }
 
-function runwayUsable(sim: Simulation, runwayId: string, size: SizeClass, kind: 'arr' | 'dep'): boolean {
-  const info = sim.ctx.runways[runwayId]!;
+/** 滑走路が機種に適合し（aircraft/compat.ts）、運用モードが到着・出発を受け付けるか */
+function runwayUsable(sim: Simulation, runwayId: string, type: AircraftType, kind: 'arr' | 'dep'): boolean {
+  const r = sim.ctx.layout.runways[runwayId];
   const mode = sim.state.runwayConfig[runwayId]!.mode;
-  if (!info.operational || !info.maxSize || !sizeAtLeast(info.maxSize, size)) return false;
+  if (!r || checkRunway(type, r).status !== 'ok') return false;
   if (mode === 'closed') return false;
   if (kind === 'arr' && mode === 'departures') return false;
   if (kind === 'dep' && mode === 'arrivals') return false;
@@ -450,7 +462,7 @@ function entryCandidates(sim: Simulation, rw: RunwayEndInfo, type: AircraftType)
   return goals;
 }
 
-/** 他機の予約を避けるための判定 */
+/** 他機の予約を避けるための判定（閉鎖中の誘導路は常に通れない） */
 function blockers(state: SimState, acId: string) {
   return {
     blockedEdge: (e: string) => (state.edgeReservations[e] ?? acId) !== acId,
@@ -458,8 +470,18 @@ function blockers(state: SimState, acId: string) {
   };
 }
 
+/** 経路探索の通行止め: 閉鎖中の誘導路（障害・整備）と、avoidTraffic なら他機の予約 */
+function pathBlockers(sim: Simulation, acId: string, avoidTraffic: boolean) {
+  const closed = sim.state.closures.taxiways;
+  const net = sim.ctx.network;
+  const isClosed = (e: string) => closed.length > 0 && closed.includes(net.edges[e]!.sourceId);
+  if (!avoidTraffic) return closed.length > 0 ? { blockedEdge: isClosed } : {};
+  const b = blockers(sim.state, acId);
+  return { blockedEdge: (e: string) => isClosed(e) || b.blockedEdge(e), blockedNode: b.blockedNode };
+}
+
 function arrivalPath(sim: Simulation, ac: Aircraft, runwayId: string, standId: string, avoidTraffic: boolean) {
-  const type = typeOf(ac);
+  const type = typeOf(sim, ac);
   const rw = runwayFor(sim, runwayId);
   const stand = sim.ctx.stands[standId];
   if (!rw || !stand) return null;
@@ -469,9 +491,10 @@ function arrivalPath(sim: Simulation, ac: Aircraft, runwayId: string, standId: s
     sources: exits.map((e) => ({ node: e.node, cost: e.cost })),
     goals: new Map([[stand.node, 0]]),
     size: type.size,
+    codeF: type.codeF,
     speed: type.taxiSpeed,
     allowStands: [standId],
-    ...(avoidTraffic ? blockers(sim.state, ac.id) : {}),
+    ...pathBlockers(sim, ac.id, avoidTraffic),
   });
   if (!path) return null;
   const exit = exits.find((e) => e.node === path.nodes[0])!;
@@ -479,13 +502,13 @@ function arrivalPath(sim: Simulation, ac: Aircraft, runwayId: string, standId: s
 }
 
 function departurePath(sim: Simulation, ac: Aircraft, avoidTraffic: boolean) {
-  const type = typeOf(ac);
+  const type = typeOf(sim, ac);
   const stand = ac.standId ? sim.ctx.stands[ac.standId] : undefined;
   if (!stand) return null;
   const goals = new Map<string, number>();
   const goalRunway = new Map<string, string>();
   for (const id of Object.keys(sim.ctx.runways).sort(compareIds)) {
-    if (!runwayUsable(sim, id, type.size, 'dep')) continue;
+    if (!runwayUsable(sim, id, type, 'dep')) continue;
     const rw = runwayFor(sim, id);
     if (!rw) continue;
     for (const [node, cost] of entryCandidates(sim, rw, type)) {
@@ -501,12 +524,19 @@ function departurePath(sim: Simulation, ac: Aircraft, avoidTraffic: boolean) {
     sources: [{ node: stand.node, cost: 0 }],
     goals,
     size: type.size,
+    codeF: type.codeF,
     speed: type.taxiSpeed,
     allowStands: [stand.id],
-    ...(avoidTraffic ? blockers(sim.state, ac.id) : {}),
+    ...pathBlockers(sim, ac.id, avoidTraffic),
   });
   if (!path) return null;
   return { path, runwayId: goalRunway.get(path.nodes[path.nodes.length - 1]!)! };
+}
+
+/** スポットに紐付くゲートが故障・閉鎖中か */
+function gateClosed(sim: Simulation, standId: string): boolean {
+  const g = sim.ctx.standGate[standId];
+  return !!g && sim.state.closures.gates.includes(g);
 }
 
 /**
@@ -515,17 +545,24 @@ function departurePath(sim: Simulation, ac: Aircraft, avoidTraffic: boolean) {
  */
 function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
   const { state, ctx } = sim;
-  const type = typeOf(ac);
+  const type = typeOf(sim, ac);
   const runways = Object.keys(ctx.runways)
     .sort(compareIds)
-    .filter((id) => runwayUsable(sim, id, type.size, 'arr'));
+    .filter((id) => runwayUsable(sim, id, type, 'arr'));
   if (runways.length === 0) return 'noRunway';
   const SIZE_RANK: Record<SizeClass, number> = { S: 1, M: 2, L: 3 };
   const planned = state.flights[ac.arrivalFlightId]!.plannedStandId;
   const candidates = Object.values(ctx.stands)
-    .filter((s) => s.operational && s.entry && sizeAtLeast(s.size, type.size) && !state.standAssignments[s.id])
+    .filter(
+      (s) =>
+        s.entry &&
+        !state.standAssignments[s.id] &&
+        !state.closures.stands.includes(s.id) &&
+        checkStand(type, ctx.layout.stands[s.id]!).status === 'ok',
+    )
     .sort(
       (a, b) =>
+        Number(gateClosed(sim, a.id)) - Number(gateClosed(sim, b.id)) ||
         Number(b.id === planned) - Number(a.id === planned) ||
         SIZE_RANK[a.size] - SIZE_RANK[b.size] ||
         Number(b.contact) - Number(a.contact) ||
@@ -577,6 +614,7 @@ export function stepSimulation(sim: Simulation): void {
     ac.py = ac.y;
     ac.pheading = ac.heading;
   }
+  stepDisruptions(sim);
   runwayControl(sim);
   for (const ac of all) stepAircraft(sim, ac);
   stepPassengers(sim);
@@ -584,6 +622,7 @@ export function stepSimulation(sim: Simulation): void {
   stepBaggage(sim);
   stepGround(sim);
   detectConflicts(sim);
+  stepAnalytics(sim);
   state.now += TICK_SEC;
 }
 
@@ -599,7 +638,7 @@ function runwayControl(sim: Simulation): void {
       .sort((a, b) => a.queuedSince! - b.queuedSince! || compareIds(a.id, b.id));
     const head = queue[0];
     if (head) {
-      const reason = departureBlocked(sim, rid, typeOf(head).size);
+      const reason = departureBlocked(sim, rid, typeOf(sim, head));
       if (!reason) {
         rs.occupant = { aircraftId: head.id, purpose: 'takeoff', since: state.now };
         setHold(state, head, null);
@@ -624,13 +663,15 @@ function runwayControl(sim: Simulation): void {
   }
 }
 
-function departureBlocked(sim: Simulation, rid: string, size: SizeClass): HoldReason | null {
+function departureBlocked(sim: Simulation, rid: string, type: AircraftType): HoldReason | null {
+  const size = type.size;
   const { state } = sim;
   const rs = state.runways[rid]!;
-  if (!runwayUsable(sim, rid, size, 'dep')) return 'runwayBusy';
+  if (!runwayUsable(sim, rid, type, 'dep')) return 'runwayBusy';
   if (rs.occupant) return 'runwayBusy';
   if (rs.booking && rs.booking.eta - state.now < DEPARTURE_WINDOW_SEC) return 'runwayBusy';
-  if (rs.lastOp?.kind === 'dep' && state.now < rs.lastOp.at + SEPARATION_SEC[rs.lastOp.size][size]) return 'separation';
+  const wx = weatherEffects(state).separation;
+  if (rs.lastOp?.kind === 'dep' && state.now < rs.lastOp.at + SEPARATION_SEC[rs.lastOp.size][size] * wx) return 'separation';
   return null;
 }
 
@@ -638,8 +679,8 @@ function departureBlocked(sim: Simulation, rid: string, size: SizeClass): HoldRe
 function approachBlocked(sim: Simulation, ac: Aircraft, rid: string, eta: number): HoldReason | null {
   const { state } = sim;
   const rs = state.runways[rid]!;
-  const size = typeOf(ac).size;
-  if (!runwayUsable(sim, rid, size, 'arr')) return 'runwayBusy';
+  const size = typeOf(sim, ac).size;
+  if (!runwayUsable(sim, rid, typeOf(sim, ac), 'arr')) return 'runwayBusy';
   if (rs.booking) return 'separation';
   // 進入順: 同じ滑走路の待機機のうち、予定の早い順
   const ahead = Object.values(state.aircraft).some(
@@ -658,8 +699,10 @@ function approachBlocked(sim: Simulation, ac: Aircraft, rid: string, eta: number
   );
   if (starving) return 'departurePriority';
   const last = rs.lastOp;
-  if (last?.kind === 'arr' && eta < last.at + SEPARATION_SEC[last.size][size]) return 'separation';
-  if (last?.kind === 'dep' && eta < last.at + ARRIVAL_AFTER_DEPARTURE_SEC) return 'separation';
+  // 天候で間隔を広げる（ゲーム値。sim/disruptions.ts の WEATHER_EFFECTS）
+  const wx = weatherEffects(state).separation;
+  if (last?.kind === 'arr' && eta < last.at + SEPARATION_SEC[last.size][size] * wx) return 'separation';
+  if (last?.kind === 'dep' && eta < last.at + ARRIVAL_AFTER_DEPARTURE_SEC * wx) return 'separation';
   // 整列中の出発機は、これから滑走を始める
   if (rs.occupant?.purpose === 'takeoff' && eta < state.now + LINEUP_ALIGN_SEC + 30 + ARRIVAL_AFTER_DEPARTURE_SEC) return 'runwayBusy';
   return null;
@@ -672,7 +715,7 @@ function arrivalReadyAt(state: SimState, ac: Aircraft): number {
 
 function stepAircraft(sim: Simulation, ac: Aircraft): void {
   const { state } = sim;
-  const type = typeOf(ac);
+  const type = typeOf(sim, ac);
   switch (ac.state) {
     case 'scheduled': {
       const arr = state.flights[ac.arrivalFlightId]!;
@@ -902,7 +945,7 @@ function stepInbound(sim: Simulation, ac: Aircraft): void {
           ac.eta = eta;
           state.runways[ac.runwayId]!.booking = { aircraftId: ac.id, eta };
           arr.estimated = Math.max(arr.estimated, eta);
-          dep.estimated = Math.max(dep.scheduled, arr.estimated + typeOf(ac).turnaroundSec + 60);
+          dep.estimated = Math.max(dep.scheduled, arr.estimated + typeOf(sim, ac).turnaroundSec + 60);
           setHold(state, ac, null);
           setState(state, ac, 'approach');
           return;
@@ -1028,7 +1071,7 @@ function startTakeoff(sim: Simulation, ac: Aircraft): void {
   ac.dist = 0;
   ac.speed = 0;
   ac.timerUntil = null;
-  state.runways[ac.runwayId!]!.lastOp = { kind: 'dep', size: typeOf(ac).size, at: state.now };
+  state.runways[ac.runwayId!]!.lastOp = { kind: 'dep', size: typeOf(sim, ac).size, at: state.now };
   if (ac.taxiStartedAt !== null) state.stats.taxiOutSecTotal += state.now - ac.taxiStartedAt;
   ac.taxiStartedAt = null;
   setState(state, ac, 'takeoff');
@@ -1074,11 +1117,12 @@ function movementLimit(sim: Simulation, ac: Aircraft): number {
 /** 速度と位置を更新する。停止位置を越えないよう、毎ティック制動距離を考慮する */
 function moveTaxi(sim: Simulation, ac: Aircraft): void {
   const r = ac.route!;
-  const type = typeOf(ac);
+  const type = typeOf(sim, ac);
   const limit = movementLimit(sim, ac);
   const i = edgeIndexAt(r, ac.dist);
   const edge = sim.ctx.network.edges[r.edges[i]!]!;
-  let vmax = edge.kind === 'standLink' ? STAND_SPEED : type.taxiSpeed;
+  const wxTaxi = weatherEffects(sim.state).taxi;
+  let vmax = edge.kind === 'standLink' ? STAND_SPEED : type.taxiSpeed * wxTaxi;
   // 次のノードでの制限（曲がり角・スポット進入）
   for (let k = i + 1; k < r.nodes.length - 1 && r.cum[k]! - ac.dist < 300; k++) {
     const nextEdge = sim.ctx.network.edges[r.edges[k]!]!;

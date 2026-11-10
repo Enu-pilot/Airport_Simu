@@ -1,4 +1,5 @@
-import { AIRCRAFT_TYPES } from '../sim/aircraftTypes';
+import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../sim/aircraftTypes';
+import { attributeRevenue } from '../analytics/records';
 import { operableTypes, type SimContext } from '../sim/context';
 import { DAY_SEC } from '../sim/rules';
 import type { Simulation } from '../sim/simulation';
@@ -171,17 +172,17 @@ function discount(sim: Simulation & { company: CompanyState }, f: Flight): numbe
 }
 
 /** 着陸料 = 最大離陸重量(t) × 150 × 料金倍率 × (ピーク時 1.25) × (1 − 契約割引) */
-export function landingFee(c: CompanyState, ac: Pick<Aircraft, 'typeId'>, at: number, disc: number): number {
+export function landingFee(c: CompanyState, ac: Pick<Aircraft, 'typeId'>, at: number, disc: number, types: TypeTable = AIRCRAFT_TYPES): number {
   const F = BALANCE.fees;
   const peak = isPeak(c.hours, Math.floor((at % DAY_SEC) / 60)) ? 1 + F.peakSurcharge : 1;
-  return AIRCRAFT_TYPES[ac.typeId].mtowT * F.landingPerTonne * c.fees.landing * peak * disc;
+  return resolveType(types, ac.typeId).mtowT * F.landingPerTonne * c.fees.landing * peak * disc;
 }
 
 /** 駐機料 = 切り上げ(駐機時間 − 2時間) × 区分の時間料金 × 料金倍率 × (1 − 契約割引) */
-export function parkingFee(c: CompanyState, ac: Pick<Aircraft, 'typeId'>, parkedSec: number, disc: number): number {
+export function parkingFee(c: CompanyState, ac: Pick<Aircraft, 'typeId'>, parkedSec: number, disc: number, types: TypeTable = AIRCRAFT_TYPES): number {
   const F = BALANCE.fees;
   const hours = Math.max(0, Math.ceil(parkedSec / 3600 - F.parkingFreeHours));
-  return hours * F.parkingPerHour[AIRCRAFT_TYPES[ac.typeId].size] * c.fees.parking * disc;
+  return hours * F.parkingPerHour[resolveType(types, ac.typeId).size] * c.fees.parking * disc;
 }
 
 // ---------------------------------------------------------------- イベントごとの計上
@@ -189,13 +190,17 @@ export function parkingFee(c: CompanyState, ac: Pick<Aircraft, 'typeId'>, parked
 export function onLanding(sim: Simulation, ac: Aircraft): void {
   if (!enabled(sim)) return;
   const arr = sim.state.flights[ac.arrivalFlightId]!;
-  post(sim.company, 'landing', landingFee(sim.company, ac, sim.state.now, discount(sim, arr)));
+  const fee = landingFee(sim.company, ac, sim.state.now, discount(sim, arr), sim.ctx.types);
+  post(sim.company, 'landing', fee);
+  attributeRevenue(sim, ac.id, fee);
 }
 
 /** 到着旅客のターミナル使用料 = 人数 × 60 × 料金倍率 × (1 − 契約割引) */
 export function onPaxDeplaned(sim: Simulation, f: Flight, count: number): void {
   if (!enabled(sim)) return;
-  post(sim.company, 'terminal', count * BALANCE.fees.paxArriving * sim.company.fees.terminal * discount(sim, f));
+  const fee = count * BALANCE.fees.paxArriving * sim.company.fees.terminal * discount(sim, f);
+  post(sim.company, 'terminal', fee);
+  attributeRevenue(sim, f.aircraftId, fee);
 }
 
 /**
@@ -208,9 +213,13 @@ export function onTakeoff(sim: Simulation, ac: Aircraft): void {
   const dep = sim.state.flights[ac.departureFlightId]!;
   const arr = sim.state.flights[ac.arrivalFlightId]!;
   const disc = discount(sim, dep);
-  post(c, 'terminal', dep.pax.boarded * BALANCE.fees.paxDeparting * c.fees.terminal * disc);
-  post(c, 'groundHandling', BALANCE.fees.groundHandling[AIRCRAFT_TYPES[ac.typeId].size] * disc);
-  if (arr.block !== null && dep.block !== null) post(c, 'parking', parkingFee(c, ac, dep.block - arr.block, disc));
+  const terminal = dep.pax.boarded * BALANCE.fees.paxDeparting * c.fees.terminal * disc;
+  const handling = BALANCE.fees.groundHandling[resolveType(sim.ctx.types, ac.typeId).size] * disc;
+  const parking = arr.block !== null && dep.block !== null ? parkingFee(c, ac, dep.block - arr.block, disc, sim.ctx.types) : 0;
+  post(c, 'terminal', terminal);
+  post(c, 'groundHandling', handling);
+  post(c, 'parking', parking);
+  attributeRevenue(sim, ac.id, terminal + handling + parking);
   if (dep.block !== null && dep.block - dep.scheduled > 60 * 60) post(c, 'compensation', -BALANCE.compensation.delayedFlight60);
 }
 
@@ -224,7 +233,7 @@ export function onFlightLost(sim: Simulation): void {
 export function onTaskDone(sim: Simulation, t: GroundTask): void {
   if (!enabled(sim)) return;
   let cost = BALANCE.taskCost[t.kind] ?? 0;
-  if (t.kind === 'inspect' && t.note) cost += BALANCE.taskCost.defect ?? 0;
+  if (t.kind === 'inspect' && t.note?.startsWith('不具合')) cost += BALANCE.taskCost.defect ?? 0;
   post(sim.company, 'groundOps', -cost);
 }
 

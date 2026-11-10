@@ -3,6 +3,7 @@ import type { AircraftTypeId } from './aircraftTypes';
 import type { SimEconomy } from '../economy/ops';
 import type { AccessMode } from '../access/model';
 import type { AccessRuntime } from '../access/runtime';
+import type { AnalyticsState } from '../analytics/records';
 
 /**
  * 運航シミュレーションの状態。JSON シリアライズ可能な plain object とし、
@@ -181,6 +182,10 @@ export interface Flight {
   plannedPax: number | null;
   /** 計画上のスポット（空いていれば優先して割り当てる） */
   plannedStandId: string | null;
+  /** 地上作業を優先する（プレイヤーの「便の順序変更」） */
+  priority?: boolean;
+  /** 座席数（航空会社の座席構成。なければ機種の既定値） */
+  seats?: number;
 }
 
 // ---------------------------------------------------------------- 地上支援
@@ -427,7 +432,8 @@ export type SimEventKind =
   | 'equipmentDown'
   | 'equipmentUp'
   | 'bagsLeftBehind'
-  | 'finance';
+  | 'finance'
+  | 'disruption';
 
 export interface SimEvent {
   t: number;
@@ -459,6 +465,8 @@ export interface SimSettings {
   autoSchedule: boolean;
   /** 車両・仕分け設備・ベルトのランダム故障 */
   randomFailures: boolean;
+  /** 天候・障害のランダム発生（sim/disruptions.ts） */
+  randomDisruptions?: boolean;
 }
 
 export interface SimState {
@@ -511,6 +519,50 @@ export interface SimState {
   economy: SimEconomy | null;
   /** 空港アクセス（会社と一緒に運航し、ターミナルがあるときのみ） */
   access: AccessRuntime | null;
+  /** 天候・障害（sim/disruptions.ts） */
+  weather: { kind: WeatherKind; since: number };
+  disruptions: Disruption[];
+  /** 障害・整備で使えない施設（ID 順）。新しい機体・旅客・作業を割り当てない */
+  closures: { taxiways: string[]; stands: string[]; gates: string[] };
+  /** 分析用の運航記録（analytics/records.ts） */
+  analytics: AnalyticsState;
+}
+
+export type WeatherKind = 'clear' | 'rain' | 'snow' | 'fog';
+
+export type DisruptionKind =
+  | 'weather' // 天候の変化
+  | 'runwayClosed' // 滑走路の一時閉鎖
+  | 'taxiwayClosed' // 誘導路の使用不能
+  | 'standClosed' // 駐機スポットの使用不能
+  | 'gateFailure' // 搭乗ゲートの故障
+  | 'baggageFailure' // 手荷物設備（仕分け場・受取所ベルト）の故障
+  | 'vehicleFailure' // 地上支援車両の故障
+  | 'staffAbsence' // 作業員の欠勤
+  | 'demandSurge' // 旅客需要の急増
+  | 'inboundDelay' // 到着便の遅延
+  | 'maintenance'; // 整備による施設の一時停止
+
+export interface Disruption {
+  id: string;
+  kind: DisruptionKind;
+  /** 対象（施設・ユニット・設備キー）。全体に及ぶもの（天候・需要・遅延）は null */
+  targetId: string | null;
+  weather?: WeatherKind;
+  /** 量（欠勤人数・需要の倍率・遅延の分） */
+  amount?: number;
+  start: number;
+  /** 復旧予定（null = プレイヤーが修理するまで） */
+  end: number | null;
+  status: 'scheduled' | 'active' | 'resolved';
+  resolvedAt: number | null;
+  resolvedBy: 'time' | 'player' | null;
+  /** 開始時に影響を受けた作業・便・ユニット（原因の記録） */
+  affected: { tasks: string[]; flights: string[]; units: string[] };
+  /** 開始前の状態（滑走路の運用モードなど。復旧時に戻す） */
+  prev?: string;
+  /** 発生源（プレイヤーの設定・ランダム） */
+  origin: 'manual' | 'random' | 'scenario';
 }
 
 export const EVENT_LOG_LIMIT = 1000;

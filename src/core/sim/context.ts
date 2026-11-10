@@ -2,8 +2,9 @@ import { buildAirsideNetwork, type AirsideNetwork } from '../airside/network';
 import { TILE_M } from '../model/catalog';
 import { compareIds, sortedValues } from '../model/ids';
 import { buildTerminalModel, type TerminalModel } from '../terminal/model';
-import { sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
-import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, type AircraftTypeId } from './aircraftTypes';
+import type { AirportLayout, SizeClass } from '../model/types';
+import { AIRCRAFT_TYPES, resolveType, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
+import { canOperate } from '../aircraft/compat';
 import { distance } from '../geometry/vec';
 import { runwayMaxSize } from '../layout/runway';
 import type { RunwayConfig, UnitKind } from './types';
@@ -52,9 +53,11 @@ export interface SimContext {
   sorters: { id: string; x: number; y: number; capacityPerMin: number }[];
   /** 運用中の燃料施設があるか（給油の前提） */
   hasFuelFarm: boolean;
+  /** 機種テーブル（現在のカタログ、または保存時の機種データのスナップショット） */
+  types: TypeTable;
 }
 
-export function createContext(layout: AirportLayout): SimContext {
+export function createContext(layout: AirportLayout, opts: { types?: TypeTable } = {}): SimContext {
   const network = buildAirsideNetwork(layout);
   const runways: Record<string, RunwayInfo> = {};
   for (const r of sortedValues(layout.runways)) {
@@ -122,7 +125,7 @@ export function createContext(layout: AirportLayout): SimContext {
     }));
   const sorters = operational.filter((f) => f.kind === 'baggageSort').map((f) => ({ id: f.id, ...center(f), capacityPerMin: n(f, 'capacityPerMin') }));
   const hasFuelFarm = operational.some((f) => f.kind === 'fuelFarm');
-  return { layout, network, runways, stands, terminal, standGate, paxTerminal, bases, sorters, hasFuelFarm };
+  return { layout, network, runways, stands, terminal, standGate, paxTerminal, bases, sorters, hasFuelFarm, types: opts.types ?? AIRCRAFT_TYPES };
 }
 
 /** 運用方向に並べた滑走路上ノードと、進入端からの距離 */
@@ -134,12 +137,13 @@ export function orderedRunway(info: RunwayInfo, cfg: RunwayConfig): { nodes: str
   };
 }
 
-/** 空港で運航可能な機種（使用可能な滑走路と、接続済みのスポットがある区分） */
+/**
+ * 空港で運航可能な機種: 適合する滑走路と、そこから機体が通れる誘導路で到達できる適合スポットがある機種
+ * （判定は aircraft/compat.ts。地上支援の不足は運航可・遅延として扱う）
+ */
 export function operableTypes(ctx: SimContext): AircraftTypeId[] {
-  return AIRCRAFT_TYPE_IDS.filter((id) => {
-    const size = AIRCRAFT_TYPES[id].size;
-    const rwy = Object.values(ctx.runways).some((r) => r.operational && r.maxSize && sizeAtLeast(r.maxSize, size));
-    const stand = Object.values(ctx.stands).some((s) => s.operational && s.entry && sizeAtLeast(s.size, size));
-    return rwy && stand;
-  });
+  return Object.keys(ctx.types).filter((id) => canOperate(ctx.types[id]!, ctx.layout, ctx.network));
 }
+
+/** 機種を引く（未解決の ID は代替の値。aircraftTypes.ts の resolveType） */
+export const typeIn = (ctx: SimContext, id: AircraftTypeId): AircraftType => resolveType(ctx.types, id);

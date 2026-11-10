@@ -1,18 +1,39 @@
 import type { SizeClass } from '../model/types';
+import { CATALOG, sizeClassOf, type AircraftModel, type GameProfile } from '../aircraft/catalog';
 
 /**
- * 機種定義（架空の代表機種）。数値はゲーム用の簡略値で、実機の性能を再現するものではない。
+ * シミュレーションが使う機種の属性（機種カタログ core/aircraft/catalog.ts から作る）。
+ * 寸法・重量は実機データ（カタログの official 値）があればそれを使い、性能・作業時間はゲーム用の設定値。
+ *
+ * シミュレーションは SimContext.types（このテーブル）だけを参照する。保存済みプロジェクトを開くときは、
+ * 保存時の機種データ（スナップショット）からテーブルを作るので、カタログを更新しても過去の結果は変わらない。
  */
 export interface AircraftType {
+  /** 機種ID（便・契約・保存データはこの ID で機種を参照する） */
   id: AircraftTypeId;
   label: string;
+  /** 短い表示名（ICAO コードがあればそれ） */
+  shortLabel: string;
+  /** 旧形式の汎用機材 */
+  generic: boolean;
+  /** カタログにもスナップショットにもない機種ID（代替の値で動かしている） */
+  unresolved: boolean;
   size: SizeClass;
+  /** コード F 対応の施設が必要（翼幅 65 m 以上） */
+  codeF: boolean;
+  /** 航空会社の座席構成を指定しないときの座席数 */
   seats: number;
-  /** 最大離陸重量（t）。着陸料の計算に使う（ゲーム用の値） */
+  /** 最大旅客定員（不明は null） */
+  maxPax: number | null;
+  /** 最大離陸重量（t）。着陸料の計算に使う */
   mtowT: number;
-  /** 機体長（m）。誘導路の予約を解放する距離（尾部の通過）に使う */
+  /** 機体長・翼幅・全高（m）。誘導路の予約解放・表示の大きさに使う */
   lengthM: number;
   wingspanM: number;
+  heightM: number | null;
+  /** 2階建て客室（表示・搭乗橋の情報に使う） */
+  doubleDeck: boolean;
+  engines: number;
   /** 誘導路の最高速度（m/s） */
   taxiSpeed: number;
   /** 進入・接地速度（m/s） */
@@ -22,61 +43,68 @@ export interface AircraftType {
   /** 離陸滑走の加速度（m/s²）と浮揚速度（m/s） */
   takeoffAccel: number;
   rotateSpeed: number;
-  /** 最小折り返し時間（秒）。Phase 2 では地上作業をこの時間で一括して扱う */
+  /** 最小折り返し時間（秒） */
   turnaroundSec: number;
+  holdBags: number;
+  taskSec?: GameProfile['taskSec'];
+  unitNeeds?: GameProfile['unitNeeds'];
+  costPerBlockHour: number;
 }
 
-export type AircraftTypeId = 'regional70' | 'narrow180' | 'wide300';
+export type AircraftTypeId = string;
+export type TypeTable = Record<string, AircraftType>;
 
-export const AIRCRAFT_TYPES: Record<AircraftTypeId, AircraftType> = {
-  regional70: {
-    id: 'regional70',
-    label: 'リージョナル機（70席）',
-    size: 'S',
-    seats: 70,
-    mtowT: 38,
-    lengthM: 27,
-    wingspanM: 26,
-    taxiSpeed: 8,
-    approachSpeed: 65,
-    landingRollM: 900,
-    takeoffAccel: 2.5,
-    rotateSpeed: 60,
-    turnaroundSec: 30 * 60,
-  },
-  narrow180: {
-    id: 'narrow180',
-    label: 'ナローボディ機（180席）',
-    size: 'M',
-    seats: 180,
-    mtowT: 78,
-    lengthM: 38,
-    wingspanM: 36,
-    taxiSpeed: 8,
-    approachSpeed: 70,
-    landingRollM: 1300,
-    takeoffAccel: 2.2,
-    rotateSpeed: 72,
-    turnaroundSec: 45 * 60,
-  },
-  wide300: {
-    id: 'wide300',
-    label: 'ワイドボディ機（300席）',
-    size: 'L',
-    seats: 300,
-    mtowT: 250,
-    lengthM: 64,
-    wingspanM: 61,
-    taxiSpeed: 7,
-    approachSpeed: 75,
-    landingRollM: 1800,
-    takeoffAccel: 1.8,
-    rotateSpeed: 80,
-    turnaroundSec: 90 * 60,
-  },
-};
+export function typeFromModel(m: AircraftModel): AircraftType {
+  const { size, codeF } = sizeClassOf(m);
+  const p = m.profile;
+  return {
+    id: m.id,
+    label: m.name,
+    shortLabel: m.icao ? `${m.icao}` : m.name.replace(/^汎用 /, ''),
+    generic: m.generic,
+    unresolved: false,
+    size,
+    codeF,
+    seats: m.defaultSeats,
+    maxPax: m.maxPax.value,
+    mtowT: p.mtowT,
+    lengthM: m.lengthM.value ?? 40,
+    wingspanM: m.wingspanM.value ?? 40,
+    heightM: m.heightM.value,
+    doubleDeck: m.doubleDeck,
+    engines: m.engines,
+    taxiSpeed: p.taxiSpeed,
+    approachSpeed: p.approachSpeed,
+    landingRollM: p.landingRollM,
+    takeoffAccel: p.takeoffAccel,
+    rotateSpeed: p.rotateSpeed,
+    turnaroundSec: p.turnaroundSec,
+    holdBags: p.holdBags,
+    ...(p.taskSec ? { taskSec: p.taskSec } : {}),
+    ...(p.unitNeeds ? { unitNeeds: p.unitNeeds } : {}),
+    costPerBlockHour: p.costPerBlockHour,
+  };
+}
 
-export const AIRCRAFT_TYPE_IDS = Object.keys(AIRCRAFT_TYPES) as AircraftTypeId[];
+/** 機種データ（カタログまたは保存時のスナップショット）から機種テーブルを作る */
+export function buildTypeTable(models: Record<string, AircraftModel> = CATALOG): TypeTable {
+  return Object.fromEntries(Object.values(models).map((m) => [m.id, typeFromModel(m)]));
+}
+
+/** 現在のカタログの機種テーブル（UI・新規作成の既定値） */
+export const AIRCRAFT_TYPES: TypeTable = buildTypeTable();
+export const AIRCRAFT_TYPE_IDS: AircraftTypeId[] = Object.keys(AIRCRAFT_TYPES);
+
+/**
+ * 機種を引く。テーブルにない ID は「未解決の機種」として汎用ナローボディ機の値で代替する
+ * （データは消さず、表示・検証で未解決であることを示す）。
+ */
+export function resolveType(types: TypeTable, id: AircraftTypeId): AircraftType {
+  const t = types[id];
+  if (t) return t;
+  const base = AIRCRAFT_TYPES.narrow180!;
+  return { ...base, id, label: `未解決の機種（${id}）`, shortLabel: `?${id}`, generic: false, unresolved: true };
+}
 
 /** 浮揚までの離陸滑走距離（m） */
 export function takeoffDistanceM(t: AircraftType): number {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { compareIds } from '../core/model/ids';
-import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, type AircraftTypeId } from '../core/sim/aircraftTypes';
+import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, resolveType, type AircraftTypeId } from '../core/sim/aircraftTypes';
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { flightDelayMin, operableTypes } from '../core/sim/simulation';
 import { routeLength } from '../core/sim/routes';
@@ -122,7 +122,7 @@ export function OpsControls() {
           <select value={type} onChange={(e) => setType(e.target.value as AircraftTypeId)}>
             {AIRCRAFT_TYPE_IDS.map((id) => (
               <option key={id} value={id} disabled={!types.includes(id)}>
-                {AIRCRAFT_TYPES[id].label}（{AIRCRAFT_TYPES[id].size}）
+                {resolveType(AIRCRAFT_TYPES, id).label}（{resolveType(AIRCRAFT_TYPES, id).size}）
               </option>
             ))}
           </select>
@@ -194,7 +194,7 @@ export function AircraftPanel() {
   const ac = id ? o.sim.state.aircraft[id] : undefined;
   if (!o || !ac) return null;
   const { state, ctx } = o.sim;
-  const type = AIRCRAFT_TYPES[ac.typeId];
+  const type = resolveType(o.sim.ctx.types, ac.typeId);
   const arr = state.flights[ac.arrivalFlightId]!;
   const dep = state.flights[ac.departureFlightId]!;
   const remaining = ac.route ? Math.max(0, Math.round(routeLength(ac.route) - ac.dist)) : null;
@@ -347,7 +347,7 @@ export function FlightBoard() {
                 <tr key={f.id} onClick={() => select(ac.id)} className={ac.id === o.selectedAircraft ? 'selected' : ''} data-testid={`flight-${f.number}`}>
                   <td>{f.number}</td>
                   <td>{f.direction === 'arrival' ? '到着' : '出発'}</td>
-                  <td>{AIRCRAFT_TYPES[ac.typeId].size}</td>
+                  <td>{resolveType(o.sim.ctx.types, ac.typeId).shortLabel}</td>
                   <td>{formatClock(f.scheduled)}</td>
                   <td>{f.actual !== null ? formatClock(f.actual) : f.status === 'scheduled' || f.status === 'active' ? formatClock(f.estimated) : '—'}</td>
                   <td className={delay && delay >= 15 ? 'ng-text' : ''}>{delay ? `${delay}分` : ''}</td>
