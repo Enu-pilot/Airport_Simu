@@ -10,6 +10,9 @@ import { useLayout } from '../editor/store';
 import { useCompany } from './ManagementPanels';
 import { COMPAT_REASON_LABEL, COMPAT_STATUS_LABEL, DATA_STATUS_LABEL, displayName } from '../i18n/ja';
 import type { SizeClass } from '../core/model/types';
+import { ASSET_VERSION, assetOf, LIVERIES, supportList } from '../core/assets/registry';
+
+const SUPPORT_LABEL = { dedicated: '専用モデル', template: '系統テンプレート＋機種寸法', fallback: '汎用の形（代替）', missing: '未登録（代替表示）' } as const;
 
 /**
  * 機種カタログ（docs/16_aircraft_catalog.md）: 検索・メーカー/サイズでの絞り込み、詳細（値の出典と状態）、
@@ -91,6 +94,7 @@ export function CatalogPanel() {
             </tbody>
           </table>
           <FleetEditor />
+          <AssetSupport />
         </section>
         <section>{model ? <ModelDetail m={model} /> : <div className="empty">機種を選んでください</div>}</section>
       </div>
@@ -160,6 +164,7 @@ function ModelDetail({ m }: { m: AircraftModel }) {
         {max.official ? '・最大旅客定員' : '・ゲーム上の上限'}）／ 最小折り返し {Math.round(t.turnaroundSec / 60)}分 ／ 必要滑走路長 離陸 {need.takeoff} m・着陸 {need.landing} m ／
         貨物室の手荷物 {t.holdBags}個 ／ 運航費 {t.costPerBlockHour.toLocaleString('ja-JP')} cr/時 ／ 3D アセット {m.assetId}
       </div>
+      <AssetInfo m={m} />
       <h4>
         この空港での適合性: <span className={c.status === 'ok' ? 'ok-text' : 'ng-text'}>{COMPAT_STATUS_LABEL[c.status]}</span>
       </h4>
@@ -249,6 +254,44 @@ function FleetEditor() {
         </button>
       </div>
       <div className="muted small">同じ機種でも航空会社ごとに座席数を変えられます（上限は最大旅客定員。資料で確認できない機種は既定座席の1.25倍）。</div>
+    </div>
+  );
+}
+
+/** 選択中の機種の 3D アセット（登録簿の内容） */
+function AssetInfo({ m }: { m: AircraftModel }) {
+  const a = assetOf(m.assetId);
+  const level = supportList({ [m.id]: m })[0]!.level;
+  return (
+    <div className="muted small" data-testid="catalog-asset">
+      3D: {a.label}（{a.id} v{a.version}）／ {SUPPORT_LABEL[level]} ／ 原点 機体中心・接地面、1単位 = 1 m ／ LOD {a.lod.length}段階（
+      {a.lod.map((l) => `${l.detail}${Number.isFinite(l.maxDistanceM) ? `<${l.maxDistanceM}m` : ''}`).join('・')}）／ 出典 {a.source} ／ ライセンス {a.license}
+    </div>
+  );
+}
+
+/** 3D 表示の対応状況（全機種） */
+function AssetSupport() {
+  const rows = supportList(CATALOG);
+  const count = (k: keyof typeof SUPPORT_LABEL) => rows.filter((r) => r.level === k).length;
+  return (
+    <div data-testid="asset-support">
+      <h4>3D 表示の対応状況（アセット版 {ASSET_VERSION}）</h4>
+      <div className="muted small">
+        専用モデル {count('dedicated')} ／ 系統テンプレート {count('template')} ／ 汎用の形 {count('fallback')} ／ 未登録 {count('missing')}。
+        専用の精密モデルはなく、すべて手続き生成（寸法は機種カタログの値）。塗装は架空の航空会社 {Object.keys(LIVERIES).length} 社分。
+      </div>
+      <table className="board">
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.modelId}>
+              <td>{r.modelId}</td>
+              <td>{r.assetId}</td>
+              <td className={r.level === 'missing' ? 'ng-text' : r.level === 'fallback' ? 'warn-text' : ''}>{SUPPORT_LABEL[r.level]}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
