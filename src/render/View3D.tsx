@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { editorStore } from '../editor/store';
+import { actions, editorStore } from '../editor/store';
 import { ops as opsActions } from '../editor/simRunner';
 import { Scene3D, type PerfStats } from './three/Scene3D';
 
@@ -60,9 +60,15 @@ export function View3D() {
         const d = down.current;
         down.current = null;
         // ドラッグ（視点操作）ではなくクリックのときだけ選択する
-        if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4 || !editorStore.getState().ops) return;
-        const id = sceneRef.current?.pick(e.clientX, e.clientY) ?? null;
-        if (id) opsActions.selectAircraft(id);
+        if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4) return;
+        const hit = sceneRef.current?.pick(e.clientX, e.clientY) ?? null;
+        if (hit && 'aircraftId' in hit) {
+          if (editorStore.getState().ops) opsActions.selectAircraft(hit.aircraftId);
+        } else {
+          // 施設を選ぶとプロパティ欄に詳細が出る（運航中は閲覧のみ）。何もない所なら選択を外す
+          if (editorStore.getState().ops) opsActions.selectAircraft(null);
+          actions.select(hit ? hit.entityId : null);
+        }
       }}
     >
       {stats && (

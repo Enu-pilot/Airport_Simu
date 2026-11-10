@@ -158,16 +158,17 @@ export class Scene3D {
     ground.position.set(w(site.width) / 2, 0, w(site.height) / 2);
     this.staticGroup.add(ground);
 
-    const flat = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1) => {
+    const flat = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string) => {
       const shape = new THREE.Shape(pts.map((p) => new THREE.Vector2(w(p.x), w(p.y))));
       const g = new THREE.ShapeGeometry(shape);
       g.rotateX(Math.PI / 2);
       const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: opacity < 1, opacity }));
       m.position.y = y;
+      if (entityId) m.userData.entityId = entityId;
       this.staticGroup.add(m);
     };
 
-    for (const r of Object.values(layout.runways)) flat(runwayPolygon(r), 0.3, 0x3a3f45, r.buildState === 'operational' ? 1 : 0.5);
+    for (const r of Object.values(layout.runways)) flat(runwayPolygon(r), 0.3, 0x3a3f45, r.buildState === 'operational' ? 1 : 0.5, r.id);
 
     // 誘導路・道路（ノード間の帯）
     const band = (a: { x: number; y: number }, b: { x: number; y: number }, widthM: number, y: number, color: number, opacity: number) => {
@@ -206,6 +207,8 @@ export class Scene3D {
         ],
         0.25,
         0x6b7078,
+        1,
+        st.id,
       );
     }
     for (const f of Object.values(layout.facilities)) this.addFacility(f);
@@ -219,7 +222,7 @@ export class Scene3D {
     const mat = new THREE.MeshLambertMaterial({ color: FACILITY_COLOR[f.kind] ?? 0x999999, transparent: f.buildState !== 'operational', opacity: f.buildState === 'operational' ? 1 : 0.45 });
     const m = new THREE.Mesh(g, mat);
     m.position.set(w(f.origin.x + d.w / 2), h / 2, w(f.origin.y + d.h / 2));
-    m.userData.facilityId = f.id;
+    m.userData.entityId = f.id;
     this.staticGroup.add(m);
     if (f.kind === 'tower') {
       const cab = new THREE.Mesh(new THREE.CylinderGeometry(10, 8, 8, 12), new THREE.MeshLambertMaterial({ color: 0x9ad1ff }));
@@ -354,13 +357,15 @@ export class Scene3D {
     });
   }
 
-  /** 画面上の点にある機体（レイキャスト） */
-  pick(clientX: number, clientY: number): string | null {
+  /** 画面上の点にあるもの（レイキャスト）: 機体を優先し、なければ施設（滑走路・スポット・建物） */
+  pick(clientX: number, clientY: number): { aircraftId: string } | { entityId: string } | null {
     const r = this.renderer.domElement.getBoundingClientRect();
     const v = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(v, this.camera);
-    const hit = this.raycaster.intersectObjects(this.aircraftGroup.children, true)[0];
-    return (hit?.object.userData.aircraftId as string | undefined) ?? null;
+    const ac = this.raycaster.intersectObjects(this.aircraftGroup.children, true)[0]?.object.userData.aircraftId as string | undefined;
+    if (ac) return { aircraftId: ac };
+    const hit = this.raycaster.intersectObjects(this.staticGroup.children, false).find((h) => h.object.userData.entityId);
+    return hit ? { entityId: hit.object.userData.entityId as string } : null;
   }
 
   destroy(): void {
