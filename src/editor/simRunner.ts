@@ -1,4 +1,6 @@
-import { addTurnaround, createSimulation, setRunwayConfig, stepSimulation } from '../core/sim/simulation';
+import { addTurnaround, createSimulation, setRunwayConfig, stepSimulation, type Simulation } from '../core/sim/simulation';
+import { buildTypeTable } from '../core/sim/aircraftTypes';
+import { effectiveModels } from '../core/io/project';
 import { advanceClock, createClock } from '../core/sim/clock';
 import { INBOUND_LEAD_SEC } from '../core/sim/rules';
 import { setAreaClosed } from '../core/sim/passengers';
@@ -78,7 +80,9 @@ export const ops = {
       showToast('経営破綻しています。新しいゲームを始めてください', 'error');
       return;
     }
-    const sim = createSimulation(s.history.present, { ...(seed ? { seed } : {}), company: structuredClone(s.company) });
+    // プロジェクトが保存時の機種データで固定されていれば、その値で運航する
+    const types = s.catalogPin ? buildTypeTable(effectiveModels(s.catalogPin)) : undefined;
+    const sim = createSimulation(s.history.present, { ...(seed ? { seed } : {}), company: structuredClone(s.company), ...(types ? { types } : {}) });
     if (Object.keys(sim.ctx.runways).length === 0) {
       showToast('滑走路がないため運航できません', 'error');
       return;
@@ -96,6 +100,21 @@ export const ops = {
     raf = requestAnimationFrame(frame);
     const n = Object.keys(sim.state.flights).length / 2;
     showToast(n > 0 ? `運航を開始しました（本日 ${n} 往復）` : '運航を開始しました。運航できる機種がないため便は生成されていません', n > 0 ? 'info' : 'error');
+  },
+  /** 保存した運航状態から再開する（一時停止の状態で始める） */
+  resume(sim: Simulation): void {
+    cancelAnimationFrame(raf);
+    forgetCharges();
+    set({
+      mode: 'operate',
+      tool: 'select',
+      draft: null,
+      selection: null,
+      ops: { sim, clock: { ...createClock(60), speed: 0 }, selectedAircraft: null, frame: 0, uiVersion: 0, dropped: false },
+    });
+    pausedSpeed = 60;
+    lastTs = 0;
+    raf = requestAnimationFrame(frame);
   },
   /** 運航を終了する。その日を途中で締めて、経営の状態を建設モードへ引き継ぐ */
   stop(): void {

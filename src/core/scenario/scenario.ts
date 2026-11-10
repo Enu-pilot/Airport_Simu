@@ -94,8 +94,11 @@ export function createScenario(input: {
   seed?: string;
   durationHours?: number;
   disruptions?: ScenarioDisruption[];
+  /** プロジェクトが保存時の機種データで固定されているときはその値で作る */
+  pin?: { version: string; models: Record<string, AircraftModel> } | null;
 }): Scenario {
   const company = structuredClone(input.company);
+  const pinned = input.pin ? { ...CATALOG, ...input.pin.models } : CATALOG;
   return {
     id: input.id,
     name: input.name,
@@ -103,7 +106,7 @@ export function createScenario(input: {
     baseId: null,
     layout: structuredClone(input.layout),
     company,
-    catalog: { version: CATALOG_VERSION, models: snapshotModels(modelsUsed(company)) },
+    catalog: { version: input.pin?.version ?? CATALOG_VERSION, models: snapshotModels(modelsUsed(company), pinned) },
     seed: input.seed ?? 'scenario',
     durationHours: input.durationHours ?? 18,
     disruptions: structuredClone(input.disruptions ?? []),

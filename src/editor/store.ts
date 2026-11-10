@@ -12,6 +12,7 @@ import { analyzeLayout, type LayoutAnalysis } from '../core/validation/validate'
 import { exportLayout, importLayout } from '../core/io/serialize';
 import { OP_FAILURE_LABEL } from '../i18n/ja';
 import type { Simulation } from '../core/sim/simulation';
+import type { CatalogPin } from '../core/io/project';
 import { createCareerCompany, createSandboxCompany, importCompany, post, type CompanyState } from '../core/economy/company';
 import { constructionCost } from '../core/economy/construction';
 import { applyCompletedProjects, prepareCareerEdit, startClosure, syncProjects } from '../core/economy/expansion';
@@ -97,6 +98,11 @@ export interface EditorState {
   scenarioRun: { id: string; progress: number } | null;
   /** 表示: 2D マップ / 3D ビュー（切り替えてもシミュレーションは止めない） */
   viewMode: '2d' | '3d';
+  /** 開いているプロジェクト（保存スロットの ID。未保存なら null）と名前 */
+  projectId: string | null;
+  projectName: string;
+  /** 保存時の機種データ（プロジェクトを開いたときに固定。null なら現在のカタログ） */
+  catalogPin: CatalogPin | null;
 }
 
 /**
@@ -114,6 +120,22 @@ export interface OpsState {
 }
 
 const STORAGE_KEY = 'skyport.layout.v2';
+const META_KEY = 'skyport.projectMeta.v1';
+
+type ProjectMeta = Pick<EditorState, 'projectId' | 'projectName' | 'catalogPin'>;
+
+function loadInitialMeta(): ProjectMeta {
+  try {
+    const saved = globalThis.localStorage?.getItem(META_KEY);
+    if (saved) {
+      const m = JSON.parse(saved) as ProjectMeta;
+      if (typeof m.projectName === 'string') return { projectId: m.projectId ?? null, projectName: m.projectName, catalogPin: m.catalogPin ?? null };
+    }
+  } catch {
+    // 破損時は未保存のプロジェクトとして始める
+  }
+  return { projectId: null, projectName: '無題のプロジェクト', catalogPin: null };
+}
 const COMPANY_KEY = 'skyport.company.v1';
 
 function loadInitialCompany(): CompanyState {
@@ -164,6 +186,7 @@ export const editorStore = createStore<EditorState>(() => ({
   scenarios: [],
   scenarioRun: null,
   viewMode: '2d',
+  ...loadInitialMeta(),
 }));
 
 export function useEditor<T>(selector: (s: EditorState) => T): T {
@@ -206,6 +229,15 @@ editorStore.subscribe((s, prev) => {
       // 保存できなくても続けられる
     }
   }, 500);
+});
+
+editorStore.subscribe((s, prev) => {
+  if (s.projectId === prev.projectId && s.projectName === prev.projectName && s.catalogPin === prev.catalogPin) return;
+  try {
+    globalThis.localStorage?.setItem(META_KEY, JSON.stringify({ projectId: s.projectId, projectName: s.projectName, catalogPin: s.catalogPin }));
+  } catch {
+    // 保存できなくても続けられる
+  }
 });
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -354,7 +386,7 @@ export function newGame(mode: CompanyState['mode']): void {
   if (get().mode === 'operate') return;
   const layout = mode === 'career' ? createStarterAirfield() : createSampleAirport();
   const company = mode === 'career' ? createCareerCompany() : createSandboxCompany();
-  set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select' });
+  set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select', scenarios: [], projectId: null, projectName: '無題のプロジェクト', catalogPin: null });
   showToast(mode === 'career' ? `新しいゲーム: 小さな飛行場から（資金 ${formatCr(company.cash)}）` : 'サンドボックス: サンプル空港と潤沢な資金で始めます');
 }
 
@@ -474,7 +506,7 @@ export const scenarioActions = {
   /** 現在の空港と会社から作る */
   createFromCurrent(name: string): void {
     const s = get();
-    const sc = createScenario({ id: newScenarioId(), name, createdAt: nowIso(), layout: s.history.present, company: s.company, seed: `${s.company.seed}:scenario` });
+    const sc = createScenario({ id: newScenarioId(), name, createdAt: nowIso(), layout: s.history.present, company: s.company, seed: `${s.company.seed}:scenario`, pin: s.catalogPin });
     set({ scenarios: [...s.scenarios, sc] });
     showToast(`シナリオ「${name}」を作りました`);
   },

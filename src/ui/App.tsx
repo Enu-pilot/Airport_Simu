@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Viewport } from '../render/MapView';
-import { actions, editorStore, formatCr, newGame, replaceLayout, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { actions, editorStore, formatCr, newGame, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
 import { CatalogPanel } from './CatalogPanel';
@@ -9,7 +9,8 @@ import { computePreview } from '../editor/tools';
 import { constructionCost } from '../core/economy/construction';
 import { MODE_LABEL } from '../i18n/ja';
 import { onKeyDown, onKeyUp } from '../editor/input';
-import { exportLayout, importLayout } from '../core/io/serialize';
+import { projectActions } from '../editor/project';
+import { downloadText, ProjectPanel } from './ProjectPanel';
 import { setBuildState } from '../core/layout/operations';
 import { applyOp } from '../editor/store';
 import { Toolbox, toolHint } from './Toolbox';
@@ -68,7 +69,7 @@ export function App() {
   );
 }
 
-type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance' | 'access' | 'expansion' | 'catalog' | 'disruptions' | 'analytics' | 'scenarios';
+type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance' | 'access' | 'expansion' | 'catalog' | 'disruptions' | 'analytics' | 'scenarios' | 'project';
 
 function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
   return (
@@ -95,6 +96,7 @@ function BuildBottom() {
           ['expansion', '拡張計画'],
           ['catalog', '機種カタログ'],
           ['scenarios', 'シナリオ'],
+          ['project', 'プロジェクト'],
         ]}
         tab={tab}
         setTab={setTab}
@@ -112,6 +114,8 @@ function BuildBottom() {
           <CatalogPanel />
         ) : tab === 'scenarios' ? (
           <ScenarioPanel />
+        ) : tab === 'project' ? (
+          <ProjectPanel />
         ) : (
           <IssuesPanel />
         )}
@@ -138,6 +142,7 @@ function OpsBottom() {
           ['access', 'アクセス'],
           ['expansion', '拡張計画'],
           ['catalog', '機種カタログ'],
+          ['project', 'プロジェクト'],
           ['events', 'イベント'],
           ['issues', '配置チェック'],
         ]}
@@ -168,6 +173,8 @@ function OpsBottom() {
           <AnalyticsPanel />
         ) : tab === 'scenarios' ? (
           <ScenarioPanel />
+        ) : tab === 'project' ? (
+          <ProjectPanel />
         ) : tab === 'events' ? (
           <EventLog />
         ) : (
@@ -187,20 +194,13 @@ function TopBar() {
   const mode = useEditor((s) => s.mode);
   const career = useEditor((s) => s.company.mode === 'career');
 
+  // 書き出し・読み込みはプロジェクト単位（レイアウト・会社・機種データ・シナリオ）。旧形式のレイアウトファイルも読める
   const download = () => {
-    const blob = new Blob([exportLayout(layout)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${layout.name || 'airport'}.skyport.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    const { fileName, json } = projectActions.exportJson();
+    downloadText(fileName, json);
   };
   const upload = async (file: File) => {
-    try {
-      replaceLayout(importLayout(await file.text()), `${file.name} を読み込みました`);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : '読み込みに失敗しました', 'error');
-    }
+    projectActions.importJson(await file.text(), file.name);
   };
 
   return (
