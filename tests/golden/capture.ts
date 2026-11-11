@@ -3,24 +3,26 @@
  *
  * リファクタ前の現行コードの出力を固定し、以後の幾何基盤の導入が既存結果を
  * 1 ビットも変えないことを機械的に確認するためのもの。
- * 純関数のみ（ファイル入出力は tests/unit/golden.test.ts が行う）。
+ * 入力レイアウトは凍結した JSON フィクスチャ（tests/golden/fixtures、io.ts の loadFixture）から読む。
+ * 純関数のみ（ファイル入出力は tests/unit/golden*.test.ts が行う）。
  */
 import { createHash } from 'node:crypto';
+import { findPath } from '../../src/core/sim/pathfinding';
+import { createContext } from '../../src/core/sim/context';
+import { holdShortDistance, makeRoute, turnAngleAt } from '../../src/core/sim/routes';
+import { compareIds } from '../../src/core/model/ids';
 import { buildAirsideNetwork } from '../../src/core/airside/network';
 import { createSandboxCompany } from '../../src/core/economy/company';
 import { buildProject, effectiveModels, restoreSimulation, serializeProject, validateProject } from '../../src/core/io/project';
 import { exportLayout } from '../../src/core/io/serialize';
 import { footprintOf, footprintOwnerIds } from '../../src/core/layout/footprint';
-import { addTaxiwayPath, placeRunway, type OpResult } from '../../src/core/layout/operations';
 import { headingVector, runwayDesignators, runwayEnd, runwayLengthM, runwayPolygon, runwayStripPolygon } from '../../src/core/layout/runway';
 import type { AirportLayout, Heading } from '../../src/core/model/types';
 import { airportKpis } from '../../src/core/analytics/kpi';
 import { SIM_MODEL_VERSION } from '../../src/core/scenario/scenario';
-import { createSampleAirport } from '../../src/core/sample/sampleAirport';
-import { createStarterAirfield } from '../../src/core/sample/starterAirfield';
 import { createSimulation, stepSimulation } from '../../src/core/sim/simulation';
 import { analyzeLayout } from '../../src/core/validation/validate';
-import { emptyLayout, must } from '../unit/helpers';
+import { loadFixture } from './io';
 
 export const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 
@@ -29,48 +31,6 @@ export const SIM_SECONDS = 24 * 3600;
 
 const HEADINGS: Heading[] = [0, 45, 90, 135, 180, 225, 270, 315];
 
-/**
- * 8 方位すべての滑走路（長さ・幅を変える）と、滑走路を斜めに横切る誘導路を持つ専用レイアウト。
- * 重なり・交差の検証結果も含めて採取対象（エラーが出てもよい）。
- */
-export function createAllHeadingsLayout(): AirportLayout {
-  let l = emptyLayout(260, 220);
-  const step = (r: OpResult) => (l = must(r).layout);
-  const widths = [30, 45, 60] as const;
-  // 中心を 8 か所に分散して置く（始点, 方位, 長さ）
-  const specs: { start: { x: number; y: number }; h: Heading; len: number }[] = [
-    { start: { x: 20, y: 60 }, h: 0, len: 40 },
-    { start: { x: 60, y: 20 }, h: 45, len: 31 },
-    { start: { x: 80, y: 40 }, h: 90, len: 57 },
-    { start: { x: 200, y: 20 }, h: 135, len: 23 },
-    { start: { x: 150, y: 100 }, h: 180, len: 45 },
-    { start: { x: 230, y: 120 }, h: 225, len: 66 },
-    { start: { x: 140, y: 150 }, h: 270, len: 90 },
-    { start: { x: 30, y: 130 }, h: 315, len: 18 },
-    // 長さ違いの追加（最小に近い・長大）
-    { start: { x: 20, y: 200 }, h: 90, len: 30 },
-    { start: { x: 60, y: 210 }, h: 90, len: 120 },
-    { start: { x: 200, y: 200 }, h: 45, len: 1 },
-  ];
-  specs.forEach((s, i) => step(placeRunway(l, s.start, s.h, s.len, { surfaceWidthM: widths[i % 3]!, name: '' })));
-  // 滑走路を斜めに横切る誘導路・滑走路端へ接続する誘導路
-  const paths: { x: number; y: number }[][] = [
-    [{ x: 70, y: 30 }, { x: 90, y: 50 }, { x: 110, y: 70 }],
-    [{ x: 100, y: 60 }, { x: 80, y: 40 }],
-    [{ x: 10, y: 50 }, { x: 40, y: 50 }, { x: 60, y: 30 }],
-    [{ x: 150, y: 140 }, { x: 170, y: 160 }],
-    [{ x: 210, y: 110 }, { x: 180, y: 140 }, { x: 150, y: 170 }],
-    [{ x: 20, y: 130 }, { x: 40, y: 130 }],
-    [{ x: 20, y: 60 }, { x: 20, y: 90 }, { x: 50, y: 120 }],
-    [{ x: 200, y: 20 }, { x: 215, y: 35 }],
-  ];
-  for (const p of paths) {
-    const r = addTaxiwayPath(l, p, { widthClass: 'M' });
-    if (r.ok) l = r.layout;
-  }
-  return l;
-}
-
 export interface NamedLayout {
   name: string;
   layout: AirportLayout;
@@ -78,9 +38,9 @@ export interface NamedLayout {
 
 export function goldenLayouts(): NamedLayout[] {
   return [
-    { name: 'sample', layout: createSampleAirport() },
-    { name: 'starter', layout: createStarterAirfield() },
-    { name: 'all-headings', layout: createAllHeadingsLayout() },
+    { name: 'sample', layout: loadFixture('sample') },
+    { name: 'starter', layout: loadFixture('starter') },
+    { name: 'all-headings', layout: loadFixture('all-headings') },
   ];
 }
 
@@ -130,7 +90,7 @@ export function captureRunwayTable(): unknown {
 
 /** サンドボックス会社 × サンプル空港を SIM_SECONDS 進めた結果 */
 export function captureSim(seconds = SIM_SECONDS): unknown {
-  const sim = createSimulation(createSampleAirport(), { company: createSandboxCompany() });
+  const sim = createSimulation(loadFixture('sample'), { company: createSandboxCompany() });
   for (let i = 0; i < seconds; i++) stepSimulation(sim);
   const k = airportKpis(sim);
   return {
@@ -151,7 +111,7 @@ export function captureProject(): unknown {
   const p = buildProject({
     name: 'golden',
     savedAt: '2026-11-10T00:00:00Z',
-    layout: createAllHeadingsLayout(),
+    layout: loadFixture('all-headings'),
     company: createSandboxCompany(),
     pin: null,
     scenarios: [],
@@ -164,7 +124,7 @@ export function captureProject(): unknown {
 /** 途中保存・復元の運航（+3 時間で保存 → 検証 → 復元し、元と復元後をそれぞれ +2 時間進める） */
 export function captureMidRunRestore(): { saved: unknown; hashes: { original: string; restored: string }; violations: string[]; projectLength: number } {
   const company = createSandboxCompany();
-  const sim = createSimulation(createSampleAirport(), { company });
+  const sim = createSimulation(loadFixture('sample'), { company });
   const SAVE_AT = 3 * 3600;
   const MORE = 2 * 3600;
   for (let i = 0; i < SAVE_AT; i++) stepSimulation(sim);
@@ -183,4 +143,147 @@ export function captureMidRunRestore(): { saved: unknown; hashes: { original: st
     Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, canon(x)])) : v;
   const h = (s: typeof sim): string => sha256(JSON.stringify({ state: s.state, company: canon(s.company) }));
   return { saved: { seconds: SAVE_AT, then: MORE, now: sim.state.now }, hashes: { original: h(sim), restored: h(restored) }, violations, projectLength: json.length };
+}
+
+// ---------------------------------------------------------------- 版に依存しないハッシュ（R5）
+
+/**
+ * 版番号（レイアウトの schemaVersion、プロジェクトの versions.layoutSchema）を除いたレイアウトの JSON。
+ * SCHEMA_VERSION を上げても（データの中身が同じなら）変わらない。
+ */
+export function normalizedLayoutJson(layout: AirportLayout): string {
+  const { schemaVersion: _v, ...rest } = layout;
+  void _v;
+  return JSON.stringify(rest);
+}
+
+/** serializeProject の出力から、レイアウト版（versions.layoutSchema、layout.schemaVersion）を除いて再直列化する */
+export function normalizedProjectJson(json: string): string {
+  const p = JSON.parse(json) as { versions: Record<string, unknown>; layout: Record<string, unknown> };
+  delete p.versions.layoutSchema;
+  delete p.layout.schemaVersion;
+  return JSON.stringify(p);
+}
+
+/**
+ * 版に依存しないハッシュ。従来の `exportLayoutSha256`・`project.golden.json` のハッシュは schemaVersion を含むので、
+ * SCHEMA_VERSION を上げる版（Phase 12）で 1 度だけ再採取される。そのとき本ハッシュが不変であれば、版番号以外は何も変わっていない。
+ */
+export function captureNormalizedHashes(): unknown {
+  const layouts: Record<string, string> = {};
+  for (const { name, layout } of [...goldenLayouts(), { name: 'stress', layout: loadFixture('stress') }]) layouts[name] = sha256(normalizedLayoutJson(layout));
+  const project = serializeProject(
+    buildProject({ name: 'golden', savedAt: '2026-11-10T00:00:00Z', layout: loadFixture('all-headings'), company: createSandboxCompany(), pin: null, scenarios: [], sim: null }),
+  );
+  return { layouts, project: sha256(normalizedProjectJson(project)) };
+}
+
+// ---------------------------------------------------------------- 経路ゴールデン（R-G3）
+
+/**
+ * 各スポット × 滑走路 × 滑走路上ノードについて、出発（スポット → 滑走路ノード）と到着（滑走路ノード → スポット）の経路を採取する。
+ * ノード列・累積距離 `cum`・各頂点の旋回角 `turnAngleAt`・滑走路ノードの手前の停止位置（holdShortDistance）を厳密な数値で固定する。
+ * 値は 1 経路 1 行（`stringifyRoutes`）。
+ */
+export function captureRoutes(layout: AirportLayout): Record<string, unknown> {
+  const ctx = createContext(layout);
+  const out: Record<string, unknown> = {};
+  const stands = Object.values(ctx.stands).sort((a, b) => compareIds(a.id, b.id));
+  const runways = Object.values(ctx.runways).sort((a, b) => compareIds(a.id, b.id));
+  for (const st of stands) {
+    for (const rw of runways) {
+      rw.nodes.forEach((node, idx) => {
+        for (const dir of ['dep', 'arr'] as const) {
+          const path = findPath(ctx.network, {
+            sources: [{ node: dir === 'dep' ? st.node : node, cost: 0 }],
+            goals: new Map([[dir === 'dep' ? node : st.node, 0]]),
+            size: st.size,
+            speed: 10,
+            allowStands: [st.id],
+          });
+          const key = `${st.id}|${rw.id}|${idx}|${dir}`;
+          if (!path) {
+            out[key] = null;
+            continue;
+          }
+          const route = makeRoute(ctx, dir === 'dep' ? 'taxiOut' : 'taxiIn', path.nodes, path.edges);
+          const turns = path.nodes.map((_, i) => turnAngleAt(ctx, route, i));
+          const holds: [number, number][] = [];
+          path.nodes.forEach((n, i) => {
+            if (i >= 1 && ctx.network.nodes[n]!.runwayIds.length > 0) holds.push([i, holdShortDistance(route.cum[i]! - route.cum[i - 1]!)]);
+          });
+          out[key] = { nodes: path.nodes, cum: route.cum, turns, holds };
+        }
+      });
+    }
+  }
+  return out;
+}
+
+/** 経路ゴールデンの書式: レイアウトごとに、キー 1 つが 1 行 */
+export function stringifyRoutes(byLayout: Record<string, Record<string, unknown>>): string {
+  const lines: string[] = ['{'];
+  const names = Object.keys(byLayout);
+  names.forEach((n, i) => {
+    lines.push(` ${JSON.stringify(n)}: {`);
+    const keys = Object.keys(byLayout[n]!);
+    keys.forEach((k, j) => lines.push(`  ${JSON.stringify(k)}: ${JSON.stringify(byLayout[n]![k])}${j < keys.length - 1 ? ',' : ''}`));
+    lines.push(` }${i < names.length - 1 ? ',' : ''}`);
+  });
+  lines.push('}');
+  return lines.join('\n') + '\n';
+}
+
+// ---------------------------------------------------------------- ストレス運航ゴールデン（R-G2）
+
+/** ストレス運航: 2 シード × 3 時間、会社なし・高需要（1 日 120 往復） */
+export const STRESS_SEEDS = ['stress-a', 'stress-b'] as const;
+export const STRESS_SECONDS = 3 * 3600;
+export const STRESS_FLIGHTS_PER_DAY = 120;
+
+export function captureStress(): unknown {
+  const layout = loadFixture('stress');
+  const runs: Record<string, unknown> = {};
+  for (const seed of STRESS_SEEDS) {
+    const sim = createSimulation(layout, { seed, settings: { flightsPerDay: STRESS_FLIGHTS_PER_DAY } });
+    const crossed = new Set<string>();
+    let crossingHoldTicks = 0;
+    let holdShortTicks = 0;
+    for (let i = 0; i < STRESS_SECONDS; i++) {
+      stepSimulation(sim);
+      for (const ac of Object.values(sim.state.aircraft)) {
+        if (ac.crossing) crossed.add(`${ac.id}:${ac.crossing.index}`);
+        if (ac.holdReason === 'crossing') crossingHoldTicks++;
+        if (ac.state === 'holdShort') holdShortTicks++;
+      }
+    }
+    const json = JSON.stringify(sim.state);
+    runs[seed] = {
+      seconds: STRESS_SECONDS,
+      now: sim.state.now,
+      stateSha256: sha256(json),
+      stateLength: json.length,
+      stats: sim.state.stats,
+      /** 滑走路横断の許可を受けた回数（航空機 × 横断位置の重複なし） */
+      crossings: crossed.size,
+      crossingHoldTicks,
+      holdShortTicks,
+      aircraft: Object.keys(sim.state.aircraft).length,
+      kpis: JSON.parse(JSON.stringify(airportKpis(sim))),
+    };
+  }
+  return { simModelVersion: SIM_MODEL_VERSION, flightsPerDay: STRESS_FLIGHTS_PER_DAY, runs };
+}
+
+// ---------------------------------------------------------------- 運航状態入りの保存（R-G1 の補完）
+
+/** サンドボックス会社 × サンプル空港を +2 時間進めた時点の serializeProject 出力（sim を含む） */
+export function captureProjectWithSim(): { length: number; sha256: string; normalizedSha256: string; simModelVersion: string; now: number } {
+  const company = createSandboxCompany();
+  const sim = createSimulation(loadFixture('sample'), { company });
+  for (let i = 0; i < 2 * 3600; i++) stepSimulation(sim);
+  const json = serializeProject(
+    buildProject({ name: 'golden-midrun', savedAt: '2026-11-10T00:00:00Z', layout: sim.ctx.layout, company, pin: null, scenarios: [], sim }),
+  );
+  return { simModelVersion: SIM_MODEL_VERSION, now: sim.state.now, length: json.length, sha256: sha256(json), normalizedSha256: sha256(normalizedProjectJson(json)) };
 }
