@@ -142,7 +142,7 @@ export const RUNWAY_MIN_LENGTH_M: Record<SizeClass, number> = { S: 1200, M: 2000
  * 最大は従来形の最大ステップ数（operations.ts の MAX_RUNWAY_LENGTH = 200）の斜め長 200 × 25 × √2 m。
  */
 export const FREE_RUNWAY_MIN_M = 25;
-export const FREE_RUNWAY_MAX_M = 200 * 25 * Math.SQRT2;
+export const FREE_RUNWAY_MAX_M = 200 * Math.SQRT2 * 25;
 /** 滑走路の描画・占有上の半幅（タイル） */
 export const RUNWAY_HALF_WIDTH = 1.5;
 /** 滑走路保護区域（着陸帯）の半幅・端部延長（タイル）。誘導路以外は配置不可 */
