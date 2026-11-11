@@ -1,7 +1,7 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import type { Camera } from '../core/geometry/camera';
 import { worldToScreen } from '../core/geometry/camera';
-import { mToTiles, worldToMap } from '../core/geometry/frames';
+import { mToTiles, worldPolyToMap, worldToMap } from '../core/geometry/frames';
 import { distance, type Tile, type Vec2 } from '../core/geometry/vec';
 import { FACILITY_SPECS, STRIP_HALF_WIDTH } from '../core/model/catalog';
 import { isBuildable } from '../core/model/site';
@@ -178,8 +178,8 @@ export class MapRenderer {
 
     // 滑走路保護区域
     for (const r of Object.values(layout.runways)) {
-      g.poly(flat(runwayStripSurface(r).map(c))).fill({ color: COLOR.strip, alpha: 0.05 });
-      g.poly(flat(runwayStripSurface(r).map(c))).stroke({ width: this.px(1), color: COLOR.strip, alpha: 0.25 });
+      g.poly(flat(worldPolyToMap(runwayStripSurface(r)))).fill({ color: COLOR.strip, alpha: 0.05 });
+      g.poly(flat(worldPolyToMap(runwayStripSurface(r)))).stroke({ width: this.px(1), color: COLOR.strip, alpha: 0.25 });
     }
     // エリア
     for (const f of [...byLayer('apron'), ...byLayer('area')]) this.drawFacility(f);
@@ -187,7 +187,7 @@ export class MapRenderer {
     // 滑走路
     for (const r of Object.values(layout.runways)) {
       const a = BUILD_ALPHA[r.buildState];
-      const poly = flat(runwayPavementSurface(r).map(c));
+      const poly = flat(worldPolyToMap(runwayPavementSurface(r)));
       g.poly(poly).fill({ color: COLOR.runway, alpha: a });
       g.poly(poly).stroke({ width: this.px(1.5), color: COLOR.runwayMarking, alpha: 0.7 * a });
       const s0 = c(r.start);
@@ -379,9 +379,9 @@ export class MapRenderer {
     for (const r of k.runways) {
       const rw = layout.runways[r.id];
       if (!rw) continue;
-      const poly = runwayPavementSurface(rw).flatMap((p) => { const m = c(p); return [m.x, m.y]; });
+      const poly = flat(worldPolyToMap(runwayPavementSurface(rw)));
       o.poly(poly).fill({ color: heat(r.util), alpha: 0.35 });
-      if (labels) this.label(`cg:${r.id}`, `使用率 ${Math.round(r.util * 100)}%`, { x: rw.start.x + 1, y: rw.start.y - 1 }, cam, { size: 11, color: 0xffffff });
+      if (labels) this.label(`cg:${r.id}`, `使用率 ${Math.round(r.util * 100)}%`, c({ x: rw.start.x + 1, y: rw.start.y - 1 }), cam, { size: 11, color: 0xffffff });
     }
     for (const st of k.stands) {
       const stand = layout.stands[st.id];
@@ -456,7 +456,7 @@ export class MapRenderer {
       }
       case 'runway': {
         const r = layout.runways[id];
-        if (r) g.poly(flat(runwayPavementSurface(r).map(c))).stroke(style);
+        if (r) g.poly(flat(worldPolyToMap(runwayPavementSurface(r)))).stroke(style);
         return;
       }
       case 'taxiway':
@@ -671,7 +671,7 @@ export class MapRenderer {
     for (const [rid, rs] of Object.entries(sim.state.runways)) {
       const r = sim.ctx.layout.runways[rid];
       if (!r) continue;
-      const poly = flat(runwayPavementSurface(r).map(c));
+      const poly = flat(worldPolyToMap(runwayPavementSurface(r)));
       if (rs.occupant) o.poly(poly).stroke({ width: this.px(3), color: 0xff4d4f });
       else if (rs.booking) o.poly(poly).stroke({ width: this.px(3), color: 0xffd400 });
     }

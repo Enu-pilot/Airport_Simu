@@ -33,6 +33,10 @@ export const worldToScene = (p: WorldPoint, elevM = 0): ScenePoint => ({
   y: elevM,
   z: (p.y + 0.5) * TILE_M,
 });
+/** World 多角形・折れ線 → Map（2D 描画） */
+export const worldPolyToMap = (pts: readonly WorldPoint[]): MapPoint[] => pts.map(worldToMap);
+/** World 多角形・折れ線 → Scene（3D、同じ標高 elevM）。各頂点に `worldToScene` と同じ演算を適用する */
+export const worldPolyToScene = (pts: readonly WorldPoint[], elevM = 0): ScenePoint[] => pts.map((p) => worldToScene(p, elevM));
 export const tilesToM = (t: number): number => t * TILE_M;
 export const mToTiles = (m: number): number => m / TILE_M;
 /** 真方位（度、0 = 北 = -y、時計回り）→ three.js の Y 軸まわり回転（ラジアン）。「90° − h」規約 */

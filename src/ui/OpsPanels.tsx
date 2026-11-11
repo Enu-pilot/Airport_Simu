@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { worldToMap } from '../core/geometry/frames';
 import { compareIds } from '../core/model/ids';
 import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, resolveType, type AircraftTypeId } from '../core/sim/aircraftTypes';
 import { SPEED_LEVELS } from '../core/sim/clock';
@@ -499,7 +500,7 @@ export function FlightBoard() {
   const select = (acId: string) => {
     ops.selectAircraft(acId);
     const ac = state.aircraft[acId];
-    if (ac && ac.state !== 'scheduled') actions.focus({ x: ac.x + 0.5, y: ac.y + 0.5 });
+    if (ac && ac.state !== 'scheduled') actions.focus(worldToMap(ac));
   };
 
   return (

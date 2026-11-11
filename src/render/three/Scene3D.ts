@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { bearingToSceneYawRad, tilesToM, worldToMap, worldToScene } from '../../core/geometry/frames';
+import { bearingToSceneYawRad, tilesToM, worldPolyToScene, worldToScene } from '../../core/geometry/frames';
 import type { AirportLayout, Facility, FacilityKind } from '../../core/model/types';
 import { facilityDims, standDims } from '../../core/layout/footprint';
 import { roadBandSurface, runwayPavementSurface, taxiwayBandSurface } from '../../core/layout/surfaces';
@@ -158,8 +158,9 @@ export class Scene3D {
     ground.position.set(w(site.width) / 2, 0, w(site.height) / 2);
     this.staticGroup.add(ground);
 
-    const flat = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string) => {
-      const shape = new THREE.Shape(pts.map((p) => new THREE.Vector2(w(p.x), w(p.y))));
+    /** pts は Map フレーム（タイル）。metres = true のときは変換済み（m）の Scene の (x, z) */
+    const flat = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string, metres = false) => {
+      const shape = new THREE.Shape(pts.map((p) => (metres ? new THREE.Vector2(p.x, p.y) : new THREE.Vector2(w(p.x), w(p.y)))));
       const g = new THREE.ShapeGeometry(shape);
       g.rotateX(Math.PI / 2);
       const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: opacity < 1, opacity }));
@@ -168,9 +169,9 @@ export class Scene3D {
       this.staticGroup.add(m);
     };
 
-    // World フレームの形状は worldToMap 経由で描く（滑走路・誘導路・道路で同じ位置規約）
+    // World フレームの形状は frames の worldPolyToScene 経由で描く（滑走路・誘導路・道路で同じ位置規約）
     const flatWorld = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string) => {
-      if (pts.length > 0) flat(pts.map(worldToMap), y, color, opacity, entityId);
+      if (pts.length > 0) flat(worldPolyToScene(pts).map((p) => ({ x: p.x, y: p.z })), y, color, opacity, entityId, true);
     };
     for (const r of Object.values(layout.runways)) flatWorld(runwayPavementSurface(r), 0.3, 0x3a3f45, r.buildState === 'operational' ? 1 : 0.5, r.id);
 
