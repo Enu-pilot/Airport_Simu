@@ -1,7 +1,7 @@
 import type { FacilityKind, PaxZone, PropValue, SizeClass, TerminalAreaKind } from './types';
 
-/** 1タイルの実寸（m）。距離・滑走路長の換算に使う */
-export const TILE_M = 25;
+/** 1タイルの実寸（m）。距離・滑走路長の換算に使う（定義は geometry/frames.ts） */
+export { TILE_M } from '../geometry/frames';
 
 /** 占有判定のレイヤー。重なりの可否は validation の互換表で決める */
 export type FootprintLayer =
