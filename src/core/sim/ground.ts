@@ -1,6 +1,7 @@
 import { Rng } from '../rng';
 import { compareIds } from '../model/ids';
 import { TILE_M } from '../model/catalog';
+import { mapToWorld } from '../geometry/frames';
 import { resolveType } from './aircraftTypes';
 import { TASK_DEFS, TURNAROUND_TASKS, taskNeeds, taskWorkSec } from './tasks';
 import {
@@ -491,7 +492,7 @@ function stepUnload(sim: Simulation, t: GroundTask, ac: Aircraft): void {
   const remaining = bagsOf(state, arr.id, ['onAircraft']).length;
   if (remaining === 0 && arr.pax.generated && arr.pax.deplaneRemaining === 0) {
     const claimArea = arr.pax.claimAreaId ? ctx.terminal.areas[arr.pax.claimAreaId] : undefined;
-    const to = claimArea ? { x: claimArea.center.x - 0.5, y: claimArea.center.y - 0.5 } : standPos(sim, ac);
+    const to = claimArea ? mapToWorld(claimArea.center) : standPos(sim, ac);
     t.phase = 'transport';
     t.phaseUntil = state.now + travelSec(standPos(sim, ac), to);
     const u = state.units[tractor]!;

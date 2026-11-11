@@ -1,4 +1,5 @@
 import type { Vec2 } from '../geometry/vec';
+import { mapToWorld } from '../geometry/frames';
 import { AIRCRAFT_TYPES, resolveType } from './aircraftTypes';
 import type { Aircraft, SimState } from './types';
 
@@ -11,8 +12,8 @@ export function isVisible(ac: Aircraft): boolean {
 
 /** 世界座標の点に最も近い機体（機体の大きさ程度の範囲内） */
 export function aircraftAt(state: SimState, world: Vec2): string | null {
-  // 機体位置はタイル番号空間（タイル中心が整数）
-  const p = { x: world.x - 0.5, y: world.y - 0.5 };
+  // 機体位置は World フレーム（タイル中心が整数）。入力は Map フレーム
+  const p = mapToWorld(world);
   let best: { id: string; d: number } | null = null;
   for (const ac of Object.values(state.aircraft)) {
     if (!isVisible(ac)) continue;
