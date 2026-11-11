@@ -8,12 +8,14 @@ import {
 } from '../model/catalog';
 import type { Heading, Runway, SizeClass } from '../model/types';
 import { minSize } from '../model/types';
+import { GRID8_STEP } from '../geometry/angle';
+import type { WorldPoint } from '../geometry/frames';
+import { rectAlongDir } from '../geometry/stroke';
 import { length, pointOnSegmentInterior, sameTile, type Tile, type Vec2 } from '../geometry/vec';
 
-/** 方位 → 1ステップのタイル差分（0 = 北 = -y） */
+/** 方位 → 1ステップのタイル差分（0 = 北 = -y）。整数表 `GRID8_STEP` の引き当て */
 export function headingVector(h: Heading): Tile {
-  const rad = (h * Math.PI) / 180;
-  return { x: Math.round(Math.sin(rad)), y: Math.round(-Math.cos(rad)) };
+  return GRID8_STEP[h];
 }
 
 export function runwayEnd(r: Pick<Runway, 'start' | 'heading' | 'length'>): Tile {
@@ -56,22 +58,35 @@ export function runwayDesignators(heading: Heading): [string, string] {
   return [fmt(heading), fmt((heading + 180) % 360)];
 }
 
-/** 中心線方向に extend、直交方向に halfWidth だけ広げた矩形（タイル番号空間） */
+/** 中心線方向に extend、直交方向に halfWidth だけ広げた矩形（タイル番号空間）。演算順は従来と同一 */
 function runwayRect(r: Runway, halfWidth: number, extend: number): Vec2[] {
+  const { start, end, dir } = runwayAxis(r);
+  return rectAlongDir(start, end, dir, halfWidth, extend);
+}
+
+/** 滑走路中心線の幾何（World フレーム）。従来形（8 方位）のみ対応 */
+export interface RunwayAxis {
+  start: WorldPoint;
+  end: WorldPoint;
+  /** 始点 → 終点の単位方向 */
+  dir: Vec2;
+  /** 真方位（度、[0, 360)） */
+  bearingDeg: number;
+  /** 実長（m）。`runwayLengthM` と同じ */
+  lengthM: number;
+}
+
+export function runwayAxis(r: Runway): RunwayAxis {
   const v = headingVector(r.heading);
   const len = length(v);
-  const u = { x: v.x / len, y: v.y / len };
-  const n = { x: -u.y, y: u.x };
-  const s = r.start;
-  const e = runwayEnd(r);
-  const a = { x: s.x - u.x * extend, y: s.y - u.y * extend };
-  const b = { x: e.x + u.x * extend, y: e.y + u.y * extend };
-  return [
-    { x: a.x + n.x * halfWidth, y: a.y + n.y * halfWidth },
-    { x: b.x + n.x * halfWidth, y: b.y + n.y * halfWidth },
-    { x: b.x - n.x * halfWidth, y: b.y - n.y * halfWidth },
-    { x: a.x - n.x * halfWidth, y: a.y - n.y * halfWidth },
-  ];
+  const end = runwayEnd(r);
+  return {
+    start: { x: r.start.x, y: r.start.y },
+    end,
+    dir: { x: v.x / len, y: v.y / len },
+    bearingDeg: r.heading,
+    lengthM: runwayLengthM(r),
+  };
 }
 
 export function runwayPolygon(r: Runway): Vec2[] {
