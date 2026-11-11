@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { AIRCRAFT_TYPES } from '../core/sim/aircraftTypes';
+import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
-import { contractsOf, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type DailyKpi, type DailyReport } from '../core/economy/company';
+import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type DailyKpi, type DailyReport } from '../core/economy/company';
 import { analyzeDayPlan, planDay } from '../core/economy/planning';
 import { AIRLINES, airlineDef, destinationDef } from '../core/economy/registry';
 import { BALANCE } from '../core/economy/balance';
@@ -81,7 +81,21 @@ export function PlanPanel() {
                 <tr key={k.id} data-testid={`contract-${k.id}`}>
                   <td>{airlineDef(k.airlineId).name}</td>
                   <td>{destinationDef(k.destinationId).name}</td>
-                  <td className={operable.includes(k.typeId) ? '' : 'ng-text'}>{AIRCRAFT_TYPES[k.typeId].label}</td>
+                  <td className={operable.includes(k.typeId) ? '' : 'ng-text'}>
+                    <select
+                      value={k.typeId}
+                      onChange={(e) => companyActions.changeContractAircraft(k.id, e.target.value)}
+                      title="機材変更（航空会社の保有機材から選ぶ。旅客定員・地上作業・適合性が変わる）"
+                      data-testid={`contract-type-${k.id}`}
+                    >
+                      {[...new Set([k.typeId, ...(c.fleets?.[k.airlineId] ?? []).map((e) => e.typeId)])].map((id) => (
+                        <option key={id} value={id}>
+                          {resolveType(AIRCRAFT_TYPES, id).label}（{seatsFor(c, k.airlineId, id)}席）
+                        </option>
+                      ))}
+                    </select>
+                    {operable.includes(k.typeId) ? '' : ' 運航不可'}
+                  </td>
                   <td>{k.perDay}</td>
                   <td>{WINDOW_LABEL[k.window]}</td>
                   <td>{Math.round(k.feeDiscount * 100)}%</td>
@@ -112,7 +126,7 @@ export function PlanPanel() {
                     <td>{airlineDef(k.airlineId).name}</td>
                     <td>{destinationDef(k.destinationId).name}</td>
                     <td className={ok ? '' : 'ng-text'}>
-                      {AIRCRAFT_TYPES[k.typeId].label}
+                      {resolveType(AIRCRAFT_TYPES, k.typeId).label}
                       {ok ? '' : '（未対応）'}
                     </td>
                     <td>{k.perDay}便/日</td>
@@ -256,7 +270,7 @@ export function PlanPanel() {
                       {f.arrNumber}/{f.depNumber}
                     </td>
                     <td>{destinationDef(f.destinationId).name}</td>
-                    <td>{AIRCRAFT_TYPES[f.typeId].size}</td>
+                    <td>{resolveType(AIRCRAFT_TYPES, f.typeId).shortLabel}</td>
                     <td>
                       {f.arrPax}/{f.depPax}
                     </td>

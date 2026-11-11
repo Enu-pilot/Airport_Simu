@@ -50,6 +50,8 @@ export interface AirsideEdge {
   lengthM: number;
   /** 通行可能な最大機体区分。null は通行不可（短すぎる滑走路など） */
   maxSize: SizeClass | null;
+  /** コード F（翼幅 65〜80 m）の機体が通行できるか（ゲームの適合ルール: 誘導路・スポットは指定、滑走路は幅 60 m） */
+  codeF: boolean;
   operational: boolean;
   runwayId?: string;
   /**
@@ -106,6 +108,7 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
       bidirectional: !e.oneWay,
       lengthM: Math.round(distance(a.pos, b.pos) * TILE_M),
       maxSize: e.widthClass,
+      codeF: e.widthClass === 'L' && !!e.codeF,
       operational: e.buildState === 'operational',
     };
   }
@@ -148,6 +151,7 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
         bidirectional: true,
         lengthM: Math.round(distance(nodes[from]!.pos, nodes[to]!.pos) * TILE_M),
         maxSize,
+        codeF: maxSize === 'L' && r.surfaceWidthM >= 60,
         operational,
         runwayId: r.id,
       };
@@ -194,6 +198,7 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
       bidirectional: true,
       lengthM: Math.round(distance(nodes[entryNode]!.pos, nodes[pid]!.pos) * TILE_M),
       maxSize: s.size,
+      codeF: s.size === 'L' && !!s.codeF,
       operational: s.buildState === 'operational',
     };
   }
@@ -222,11 +227,14 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
 export interface UseOptions {
   /** 運用中（完成済み）のエッジのみを使う */
   operationalOnly?: boolean;
+  /** コード F 対応のエッジのみを使う（翼幅 65 m 以上の機体） */
+  codeF?: boolean;
 }
 
 /** 指定区分の航空機がこのエッジを通行できるか */
 export function canAircraftUse(edge: AirsideEdge, size: SizeClass, opts: UseOptions = {}): boolean {
   if (edge.maxSize === null || !sizeAtLeast(edge.maxSize, size)) return false;
+  if (opts.codeF && !edge.codeF) return false;
   if (opts.operationalOnly && !edge.operational) return false;
   return true;
 }

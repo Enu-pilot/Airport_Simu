@@ -12,11 +12,23 @@ import { analyzeLayout, type LayoutAnalysis } from '../core/validation/validate'
 import { exportLayout, importLayout } from '../core/io/serialize';
 import { OP_FAILURE_LABEL } from '../i18n/ja';
 import type { Simulation } from '../core/sim/simulation';
+import type { CatalogPin } from '../core/io/project';
 import { createCareerCompany, createSandboxCompany, importCompany, post, type CompanyState } from '../core/economy/company';
 import { constructionCost } from '../core/economy/construction';
 import { applyCompletedProjects, prepareCareerEdit, startClosure, syncProjects } from '../core/economy/expansion';
 import { createStarterAirfield } from '../core/sample/starterAirfield';
 import { CURRENCY } from '../core/economy/balance';
+import {
+  changeScenarioAircraft,
+  changeScenarioFrequency,
+  createScenario,
+  duplicateScenario,
+  finishScenarioRun,
+  replaceScenarioLayout,
+  startScenarioRun,
+  stepScenarioRun,
+  type Scenario,
+} from '../core/scenario/scenario';
 import type { SimClock } from '../core/sim/clock';
 
 export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | 'land' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
@@ -47,6 +59,8 @@ export interface Overlays {
   network: boolean;
   issues: boolean;
   labels: boolean;
+  /** 混雑マップ（運航中: 滑走路・スポット・誘導路ノード・処理施設の混雑） */
+  congestion: boolean;
 }
 
 export interface Toast {
@@ -78,6 +92,17 @@ export interface EditorState {
    * null は「金額不明」（運航をはさんだ編集）で、元に戻すときは通常の建設費・払い戻しの規則で精算する。
    */
   charges: { past: (number | null)[]; future: (number | null)[] };
+  /** シナリオ（比較用の空港と運航条件の複製。プロジェクトに保存する） */
+  scenarios: Scenario[];
+  /** 実行中のシナリオ（ID と進捗 0〜1） */
+  scenarioRun: { id: string; progress: number } | null;
+  /** 表示: 2D マップ / 3D ビュー（切り替えてもシミュレーションは止めない） */
+  viewMode: '2d' | '3d';
+  /** 開いているプロジェクト（保存スロットの ID。未保存なら null）と名前 */
+  projectId: string | null;
+  projectName: string;
+  /** 保存時の機種データ（プロジェクトを開いたときに固定。null なら現在のカタログ） */
+  catalogPin: CatalogPin | null;
 }
 
 /**
@@ -95,6 +120,22 @@ export interface OpsState {
 }
 
 const STORAGE_KEY = 'skyport.layout.v2';
+const META_KEY = 'skyport.projectMeta.v1';
+
+type ProjectMeta = Pick<EditorState, 'projectId' | 'projectName' | 'catalogPin'>;
+
+function loadInitialMeta(): ProjectMeta {
+  try {
+    const saved = globalThis.localStorage?.getItem(META_KEY);
+    if (saved) {
+      const m = JSON.parse(saved) as ProjectMeta;
+      if (typeof m.projectName === 'string') return { projectId: m.projectId ?? null, projectName: m.projectName, catalogPin: m.catalogPin ?? null };
+    }
+  } catch {
+    // 破損時は未保存のプロジェクトとして始める
+  }
+  return { projectId: null, projectName: '無題のプロジェクト', catalogPin: null };
+}
 const COMPANY_KEY = 'skyport.company.v1';
 
 function loadInitialCompany(): CompanyState {
@@ -135,13 +176,17 @@ export const editorStore = createStore<EditorState>(() => ({
   viewSize: { w: 800, h: 600 },
   hover: null,
   draft: null,
-  overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true },
+  overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true, congestion: false },
   interiorLevel: 1,
   toast: null,
   mode: 'build',
   ops: null,
   company: loadInitialCompany(),
   charges: { past: [], future: [] },
+  scenarios: [],
+  scenarioRun: null,
+  viewMode: '2d',
+  ...loadInitialMeta(),
 }));
 
 export function useEditor<T>(selector: (s: EditorState) => T): T {
@@ -184,6 +229,15 @@ editorStore.subscribe((s, prev) => {
       // 保存できなくても続けられる
     }
   }, 500);
+});
+
+editorStore.subscribe((s, prev) => {
+  if (s.projectId === prev.projectId && s.projectName === prev.projectName && s.catalogPin === prev.catalogPin) return;
+  try {
+    globalThis.localStorage?.setItem(META_KEY, JSON.stringify({ projectId: s.projectId, projectName: s.projectName, catalogPin: s.catalogPin }));
+  } catch {
+    // 保存できなくても続けられる
+  }
 });
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -332,7 +386,7 @@ export function newGame(mode: CompanyState['mode']): void {
   if (get().mode === 'operate') return;
   const layout = mode === 'career' ? createStarterAirfield() : createSampleAirport();
   const company = mode === 'career' ? createCareerCompany() : createSandboxCompany();
-  set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select' });
+  set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select', scenarios: [], projectId: null, projectName: '無題のプロジェクト', catalogPin: null });
   showToast(mode === 'career' ? `新しいゲーム: 小さな飛行場から（資金 ${formatCr(company.cash)}）` : 'サンドボックス: サンプル空港と潤沢な資金で始めます');
 }
 
@@ -408,6 +462,9 @@ export const actions = {
   setInteriorLevel(level: number): void {
     set((s) => ({ interiorLevel: level, overlays: { ...s.overlays, interior: true } }));
   },
+  setViewMode(viewMode: '2d' | '3d'): void {
+    set({ viewMode });
+  },
   toggleOverlay(key: keyof Overlays): void {
     set((s) => ({ overlays: { ...s.overlays, [key]: !s.overlays[key] } }));
   },
@@ -420,5 +477,88 @@ export const actions = {
   },
   loadSample(): void {
     replaceLayout(createSampleAirport(), 'サンプル空港を生成しました（元に戻す で復元できます）');
+  },
+};
+
+// ---------------------------------------------------------------- シナリオ
+
+let scenarioSeq = 0;
+const nowIso = () => new Date().toISOString();
+const newScenarioId = () => {
+  const used = new Set(get().scenarios.map((x) => x.id));
+  let id = `sc_${++scenarioSeq}`;
+  while (used.has(id)) id = `sc_${++scenarioSeq}`;
+  return id;
+};
+
+function updateScenario(id: string, fn: (s: Scenario) => void): void {
+  set((st) => ({
+    scenarios: st.scenarios.map((x) => {
+      if (x.id !== id) return x;
+      const c = structuredClone(x);
+      fn(c);
+      return c;
+    }),
+  }));
+}
+
+export const scenarioActions = {
+  /** 現在の空港と会社から作る */
+  createFromCurrent(name: string): void {
+    const s = get();
+    const sc = createScenario({ id: newScenarioId(), name, createdAt: nowIso(), layout: s.history.present, company: s.company, seed: `${s.company.seed}:scenario`, pin: s.catalogPin });
+    set({ scenarios: [...s.scenarios, sc] });
+    showToast(`シナリオ「${name}」を作りました`);
+  },
+  duplicate(id: string): void {
+    const src = get().scenarios.find((x) => x.id === id);
+    if (!src) return;
+    set((st) => ({ scenarios: [...st.scenarios, duplicateScenario(src, newScenarioId(), `${src.name}（複製）`, nowIso())] }));
+  },
+  remove(id: string): void {
+    set((st) => ({ scenarios: st.scenarios.filter((x) => x.id !== id) }));
+  },
+  rename(id: string, name: string): void {
+    updateScenario(id, (s) => (s.name = name));
+  },
+  changeAircraft(id: string, contractId: string, typeId: string): void {
+    updateScenario(id, (s) => void changeScenarioAircraft(s, contractId, typeId));
+  },
+  changeFrequency(id: string, contractId: string, perDay: number): void {
+    updateScenario(id, (s) => void changeScenarioFrequency(s, contractId, perDay));
+  },
+  /** 現在編集中の空港の配置をシナリオに取り込む（施設の変更を比較する） */
+  useCurrentLayout(id: string): void {
+    const layout = get().history.present;
+    updateScenario(id, (s) => replaceScenarioLayout(s, layout, '編集中の配置を取り込み'));
+  },
+  setDuration(id: string, hours: number): void {
+    updateScenario(id, (s) => {
+      s.durationHours = Math.max(1, Math.min(48, Math.round(hours)));
+      s.results = [];
+    });
+  },
+  /** 少しずつ進めて実行する（画面を止めない）。useCurrentCatalog = 最新カタログで再実行（旧結果と区別） */
+  run(id: string, useCurrentCatalog = false): void {
+    if (get().scenarioRun) return;
+    const sc = get().scenarios.find((x) => x.id === id);
+    if (!sc) return;
+    const work = structuredClone(sc);
+    const run = startScenarioRun(work, { useCurrentCatalog });
+    const total = run.endAt - run.sim.state.now;
+    set({ scenarioRun: { id, progress: 0 } });
+    const tick = () => {
+      const done = stepScenarioRun(run, 1800);
+      if (!done) {
+        set({ scenarioRun: { id, progress: 1 - (run.endAt - run.sim.state.now) / total } });
+        setTimeout(tick, 0);
+        return;
+      }
+      const result = finishScenarioRun(work, run, nowIso());
+      updateScenario(id, (s) => s.results.push(result));
+      set({ scenarioRun: null });
+      showToast(`シナリオ「${sc.name}」の実行が終わりました`);
+    };
+    setTimeout(tick, 0);
   },
 };

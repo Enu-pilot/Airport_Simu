@@ -18,6 +18,8 @@ export interface PathQuery {
   /** 終点ノードと到着時に加えるコスト（秒） */
   goals: Map<string, number>;
   size: SizeClass;
+  /** コード F 対応のエッジのみ通る */
+  codeF?: boolean;
   speed: number;
   /** 使ってよいスポット接続エッジのスポットID */
   allowStands?: readonly string[];
@@ -104,7 +106,7 @@ export function findPath(net: AirsideNetwork, q: PathQuery): PathResult | null {
       const e = net.edges[eid]!;
       if (e.kind === 'runway') continue;
       if (e.kind === 'standLink' && !allow.has(e.sourceId)) continue;
-      if (!canAircraftUse(e, q.size, { operationalOnly: true })) continue;
+      if (!canAircraftUse(e, q.size, { operationalOnly: true, codeF: !!q.codeF })) continue;
       if (q.blockedEdge?.(eid)) continue;
       const next = otherEnd(e, node);
       if (q.blockedNode?.(next)) continue;

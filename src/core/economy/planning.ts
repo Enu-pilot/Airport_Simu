@@ -1,10 +1,11 @@
 import { Rng } from '../rng';
 import { compareIds } from '../model/ids';
-import { sizeAtLeast, type SizeClass } from '../model/types';
-import { AIRCRAFT_TYPES, type AircraftTypeId } from '../sim/aircraftTypes';
+import type { SizeClass } from '../model/types';
+import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
+import { checkStand } from '../aircraft/compat';
 import { operableTypes, type SimContext } from '../sim/context';
 import { BALANCE } from './balance';
-import { activeContractsOn, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
+import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
 import { airlineDef, destinationDef } from './registry';
 
 /**
@@ -46,6 +47,8 @@ export interface PlannedFlight {
   departureAt: number;
   arrPax: number;
   depPax: number;
+  /** 座席数（航空会社の座席構成） */
+  seats: number;
   inboundDelaySec: number;
 }
 
@@ -57,9 +60,9 @@ export interface DayPlan {
 }
 
 /** 契約の時間帯と運用時間から、到着できる時間の範囲（日内の分）。出発が閉場時刻を越えない */
-export function arrivalRange(window: TimeWindow, typeId: AircraftTypeId, hours: OperatingHours): [number, number] | null {
+export function arrivalRange(window: TimeWindow, typeId: AircraftTypeId, hours: OperatingHours, types: TypeTable = AIRCRAFT_TYPES): [number, number] | null {
   const [wf, wt] = window === 'any' ? [hours.openMin, hours.closeMin] : WINDOWS[window];
-  const turnMin = (AIRCRAFT_TYPES[typeId].turnaroundSec + PLAN_TURN_BUFFER_SEC) / 60;
+  const turnMin = (resolveType(types, typeId).turnaroundSec + PLAN_TURN_BUFFER_SEC) / 60;
   const from = Math.max(wf, hours.openMin);
   const to = Math.min(wt, hours.closeMin - turnMin);
   return from <= to ? [from, to] : null;
@@ -81,13 +84,17 @@ export function loadFactor(c: CompanyState, k: Pick<Contract, 'airlineId' | 'des
   return Math.min(1, Math.max(0.15, base * destinationDef(k.destinationId).demand * fee * rating * access * noise));
 }
 
-/** access = アクセス係数（運航では analyzeAccess の値を渡す。プレビューも同じ値を渡せば実際の運航と一致する） */
-export function planDay(c: CompanyState, day: number, access = 1): DayPlan {
+/**
+ * access = アクセス係数（運航では analyzeAccess の値を渡す。プレビューも同じ値を渡せば実際の運航と一致する）
+ * types = 機種テーブル（保存時のスナップショットで再現するときはそれを渡す）
+ * 座席数は航空会社の座席構成（company.fleets）、なければ機種の既定値。
+ */
+export function planDay(c: CompanyState, day: number, access = 1, types: TypeTable = AIRCRAFT_TYPES): DayPlan {
   const flights: PlannedFlight[] = [];
   const dropped: string[] = [];
   for (const k of activeContractsOn(c, day)) {
-    const range = arrivalRange(k.window, k.typeId, c.hours);
-    const seats = AIRCRAFT_TYPES[k.typeId].seats;
+    const range = arrivalRange(k.window, k.typeId, c.hours, types);
+    const seats = seatsFor(c, k.airlineId, k.typeId, types);
     const code = airlineDef(k.airlineId).code;
     for (let i = 0; i < k.perDay; i++) {
       if (!range) {
@@ -99,7 +106,7 @@ export function planDay(c: CompanyState, day: number, access = 1): DayPlan {
       const pos = (i + 0.5 + (rng.next() - 0.5) * 0.6) / k.perDay;
       const arrMin = Math.round((from + (to - from) * pos) / 5) * 5;
       const arrivalAt = Math.min(to, Math.max(from, arrMin)) * 60;
-      const departureAt = arrivalAt + AIRCRAFT_TYPES[k.typeId].turnaroundSec + PLAN_TURN_BUFFER_SEC;
+      const departureAt = arrivalAt + resolveType(types, k.typeId).turnaroundSec + PLAN_TURN_BUFFER_SEC;
       const arrPax = Math.round(seats * loadFactor(c, k, rng.next(), access));
       const depPax = Math.round(seats * loadFactor(c, k, rng.next(), access));
       const D = BALANCE.demand;
@@ -117,6 +124,7 @@ export function planDay(c: CompanyState, day: number, access = 1): DayPlan {
         departureAt,
         arrPax,
         depPax,
+        seats,
         inboundDelaySec,
       });
     }
@@ -206,8 +214,9 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
       add('SIZE_UNSUPPORTED', 'error', f.key);
       continue;
     }
-    const size = AIRCRAFT_TYPES[f.typeId].size;
-    const s = stands.find((x) => sizeAtLeast(x.size, size) && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt);
+    // スポットの適合性は aircraft/compat.ts の判定を使う（区分・コード F）
+    const type = resolveType(ctx.types, f.typeId);
+    const s = stands.find((x) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt);
     if (!s) {
       assignments[f.key] = { standId: null, gateId: null };
       add('STAND_CONFLICT', 'error', f.key);

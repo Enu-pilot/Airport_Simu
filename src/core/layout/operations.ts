@@ -601,7 +601,7 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
       err = apply(netNodes(d, netOfNode(id)!)[id], { name: str, holdShort: bool });
       break;
     case 'taxiway':
-      err = apply(d.taxiways[id], { name: str, widthClass: size, oneWay: bool, buildState: isBuildState });
+      err = apply(d.taxiways[id], { name: str, widthClass: size, oneWay: bool, buildState: isBuildState, codeF: bool });
       break;
     case 'road':
       err = apply(d.roads[id], {
@@ -621,7 +621,7 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
         if (Object.keys(rest).length === 0) return ok(finalize(d));
         return updateEntity(d, id, rest);
       }
-      err = apply<Stand>(s, { name: str, size, buildState: isBuildState });
+      err = apply<Stand>(s, { name: str, size, buildState: isBuildState, codeF: bool });
       break;
     }
     case 'terminalArea': {

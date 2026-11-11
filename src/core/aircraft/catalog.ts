@@ -1,0 +1,913 @@
+import type { SizeClass } from '../model/types';
+import type { TaskKind, UnitKind } from '../sim/types';
+
+/**
+ * 航空機の機種カタログ（docs/16_aircraft_catalog.md）。
+ *
+ * - 機種は安定した ID（例: "B777-300", "B777-300ER"）で管理する。名前が似ていても派生型は別の機種として扱う。
+ * - 寸法・重量・座席などの実機データには、値ごとに状態（status）と出典（source）を付ける:
+ *     official = メーカーの公開資料で確認した値（出典 URL・参照日・値の定義つき）
+ *     game     = ゲーム用の設定値（実機の値ではない。性能・地上作業時間・費用など）
+ *     unset    = 公開資料で確認できなかったため未設定（実機の値を推定しない）
+ * - カタログの版（CATALOG_VERSION）と保存形式の版は別物。収録データを直したら CATALOG_VERSION を上げる。
+ * - ゲーム内の性能・適合性は簡略化モデルであり、実際の航空機の運用・空港の設計に使える値ではない。
+ */
+
+export const CATALOG_VERSION = '2026.11.0';
+
+export type DataStatus = 'official' | 'game' | 'unset';
+
+export interface Sourced<T> {
+  value: T | null;
+  status: DataStatus;
+  /** DATA_SOURCES のキー */
+  source?: string;
+  /** 値の定義・注記（どの表のどの値か、範囲のうちどれを採ったか） */
+  note?: string;
+}
+
+export interface DataSource {
+  id: string;
+  publisher: string;
+  title: string;
+  url: string;
+  /** 参照日（このカタログを作成したときに資料を取得・照合した日） */
+  accessed: string;
+}
+
+/** 参照した公開資料（2026.10.1 の収録分は 2026-10-27、2026.11.0 の追加分は 2026-11-10 に取得して値を照合した） */
+export const DATA_SOURCES: Record<string, DataSource> = {
+  'boeing-737ng-acaps': {
+    id: 'boeing-737ng-acaps',
+    publisher: 'Boeing Commercial Airplanes',
+    title: '737 Airplane Characteristics for Airport Planning, D6-58325-7 Rev C (October 2025) §2.1.3, §2.2.5, §2.2.6',
+    url: 'https://www.boeing.com/content/dam/boeing/v2/airports/acaps/737NG_REV_C.pdf',
+    accessed: '2026-10-27',
+  },
+  'boeing-777-acaps': {
+    id: 'boeing-777-acaps',
+    publisher: 'Boeing Commercial Airplanes',
+    title: '777-200/200ER/300 Airplane Characteristics for Airport Planning, D6-58329 Rev E (December 2024) §2.1.4–2.1.6, §2.2.2, §2.3.2',
+    url: 'https://www.boeing.com/content/dam/boeing/v2/airports/acaps/777-200-200ER-300_Rev_E.pdf',
+    accessed: '2026-10-27',
+  },
+  'boeing-777er-acaps': {
+    id: 'boeing-777er-acaps',
+    publisher: 'Boeing Commercial Airplanes',
+    title: '777-200LR/-300ER/-Freighter Airplane Characteristics for Airport Planning, D6-58329-2 Rev G (December 2024) §2.1.1, §2.2.2, §2.3.2',
+    url: 'https://www.boeing.com/content/dam/boeing/v2/airports/acaps/777-200LR-300ER-F_Rev_G.pdf',
+    accessed: '2026-10-27',
+  },
+  'boeing-787-web': {
+    id: 'boeing-787-web',
+    publisher: 'Boeing',
+    title: 'Boeing 787 Dreamliner（製品ページの 787-9 技術仕様）',
+    url: 'https://www.boeing.com/commercial/787',
+    accessed: '2026-10-27',
+  },
+  'airbus-a320ceo-web': {
+    id: 'airbus-a320ceo-web',
+    publisher: 'Airbus',
+    title: 'A320ceo（製品ページの主要諸元）',
+    url: 'https://aircraft.airbus.com/en/aircraft/a320-family/a320ceo',
+    accessed: '2026-10-27',
+  },
+  'airbus-a320neo-web': {
+    id: 'airbus-a320neo-web',
+    publisher: 'Airbus',
+    title: 'A320neo（製品ページの主要諸元）',
+    url: 'https://aircraft.airbus.com/en/aircraft/a320-family/a320neo',
+    accessed: '2026-10-27',
+  },
+  'airbus-a350-ff': {
+    id: 'airbus-a350-ff',
+    publisher: 'Airbus',
+    title: 'A350 Family Facts and Figures, October 2024（A350 Technical Data 表）',
+    url: 'https://www.airbus.com/sites/g/files/jlcbta136/files/2024-10/Airbus-A350-Family-Facts-and-Figures-October-2024.pdf',
+    accessed: '2026-10-27',
+  },
+  'airbus-a380-ff': {
+    id: 'airbus-a380-ff',
+    publisher: 'Airbus',
+    title: 'A380 Facts and Figures, February 2022（Dimensions / Operating data 表）',
+    url: 'https://www.airbus.com/sites/g/files/jlcbta136/files/2022-02/Airbus-A380-Facts-and-Figures-February-2022.pdf',
+    accessed: '2026-10-27',
+  },
+  'boeing-737max-acaps': {
+    id: 'boeing-737max-acaps',
+    publisher: 'Boeing Commercial Airplanes',
+    title: '737 MAX Airplane Characteristics for Airport Planning, D6-38A004 Rev B (June 2018) §2.1.2, §2.2.2, §2.3.2',
+    url: 'https://www.boeing.com/content/dam/boeing/v2/airports/acaps/737MAX.pdf',
+    accessed: '2026-11-10',
+  },
+  'boeing-767-acaps': {
+    id: 'boeing-767-acaps',
+    publisher: 'Boeing Commercial Airplanes',
+    title: '767 Airplane Characteristics for Airport Planning, D6-58328 Rev I (July 2021) §2.1.3–2.1.4, §2.2.2, §2.3.2',
+    url: 'https://www.boeing.com/content/dam/boeing/v2/airports/acaps/767.pdf',
+    accessed: '2026-11-10',
+  },
+  'boeing-787-acaps': {
+    id: 'boeing-787-acaps',
+    publisher: 'Boeing Commercial Airplanes',
+    title: '787 Airplane Characteristics for Airport Planning, D6-58333 Rev O (February 2023) §2.1.1–2.1.3, §2.2.1–2.2.3, §2.3.1–2.3.3',
+    url: 'https://www.boeing.com/content/dam/boeing/v2/airports/acaps/787.pdf',
+    accessed: '2026-11-10',
+  },
+  'boeing-777-acaps-2': {
+    id: 'boeing-777-acaps-2',
+    publisher: 'Boeing Commercial Airplanes',
+    title: '777-200/200ER/300 Airplane Characteristics for Airport Planning, D6-58329 Rev E (December 2024) §2.1.2, §2.2.1, §2.3.1',
+    url: 'https://www.boeing.com/content/dam/boeing/v2/airports/acaps/777-200-200ER-300_Rev_E.pdf',
+    accessed: '2026-11-10',
+  },
+  'airbus-a321ceo-web': {
+    id: 'airbus-a321ceo-web',
+    publisher: 'Airbus',
+    title: 'A321ceo（製品ページの主要諸元）',
+    url: 'https://aircraft.airbus.com/en/aircraft/a320-family/a321ceo',
+    accessed: '2026-11-10',
+  },
+  'airbus-a321neo-web': {
+    id: 'airbus-a321neo-web',
+    publisher: 'Airbus',
+    title: 'A321neo（製品ページの主要諸元）',
+    url: 'https://aircraft.airbus.com/en/aircraft/a320-family/a321neo',
+    accessed: '2026-11-10',
+  },
+  'airbus-a350-ff-2': {
+    id: 'airbus-a350-ff-2',
+    publisher: 'Airbus',
+    title: 'A350 Family Facts and Figures, October 2024（A350 Technical Data 表の A350-1000 列）',
+    url: 'https://www.airbus.com/sites/g/files/jlcbta136/files/2024-10/Airbus-A350-Family-Facts-and-Figures-October-2024.pdf',
+    accessed: '2026-11-10',
+  },
+  'embraer-e175-apm': {
+    id: 'embraer-e175-apm',
+    publisher: 'Embraer（米国 NTSB の公開調査資料 DCA20IA014 Attachment 2 に収録された写し）',
+    title: 'Embraer 175 Airport Planning Manual, APM-2259 Revision 16 (22 May 2020) Table 2.1, §2.2.1',
+    url: 'https://data.ntsb.gov/Docket/Document/docBLOB?ID=13691419&FileExtension=pdf&FileName=DCA20IA014+Attachment+2+-+Embraer+175+Airport+Planning+Manual-Rel.pdf',
+    accessed: '2026-11-10',
+  },
+  'embraer-e175-web': {
+    id: 'embraer-e175-web',
+    publisher: 'Embraer',
+    title: 'E175（製品ページの諸元）',
+    url: 'https://embraer.com/e-jets/e175/en/',
+    accessed: '2026-11-10',
+  },
+  'embraer-e190-apm': {
+    id: 'embraer-e190-apm',
+    publisher: 'Embraer',
+    title: 'Embraer 190 Airport Planning Manual, APM-1901 Revision 24 (29 November 2024) Table 2.1, §2.2.1',
+    url: 'https://embraer.com/media/jwsj1u1u/e190apm_apm_190-1.pdf',
+    accessed: '2026-11-10',
+  },
+  'atr-42-600-web': {
+    id: 'atr-42-600-web',
+    publisher: 'ATR',
+    title: 'ATR 42-600（製品ページの Weight & payload / Dimensions / Typical layouts）',
+    url: 'https://www.atr-aircraft.com/regional-mobility/regional-aircraft/atr-42-600/',
+    accessed: '2026-11-10',
+  },
+  'atr-72-600-web': {
+    id: 'atr-72-600-web',
+    publisher: 'ATR',
+    title: 'ATR 72-600（製品ページの Weight & payload / Dimensions / Typical layouts）',
+    url: 'https://www.atr-aircraft.com/our-aircraft/atr-72-600/',
+    accessed: '2026-11-10',
+  },
+};
+
+/**
+ * ゲーム内の性能・地上作業のプロファイル（すべて status = game）。
+ * 実機の性能ではなく、運航シミュレーションの挙動を決める設定値。
+ */
+export interface GameProfile {
+  /** 誘導路の最高速度・進入速度（m/s）、着陸後の必要減速距離（m）、離陸の加速度（m/s²）と浮揚速度（m/s） */
+  taxiSpeed: number;
+  approachSpeed: number;
+  landingRollM: number;
+  takeoffAccel: number;
+  rotateSpeed: number;
+  /** 最小折り返し時間（秒）。計画のスケジュールに使う */
+  turnaroundSec: number;
+  /** 作業時間の上書き（秒）と、必要な作業員・車両の上書き */
+  taskSec?: Partial<Record<TaskKind, number>>;
+  unitNeeds?: Partial<Record<TaskKind, Partial<Record<UnitKind, number>>>>;
+  /** 貨物室に積める手荷物の個数 */
+  holdBags: number;
+  /** 航空会社の運航費（1ブロック時間あたり、cr）。分析で使う参考値 */
+  costPerBlockHour: number;
+  /** 着陸料などに使う重量（t）。実機の最大離陸重量があればそれを使う */
+  mtowT: number;
+}
+
+export interface AircraftModel {
+  id: string;
+  /** 旧形式の汎用機材（実在の機種ではない） */
+  generic: boolean;
+  manufacturer: string;
+  family: string;
+  /** 派生型（例: "-300ER"） */
+  variant: string;
+  /** 正式な機種名・派生型名 */
+  name: string;
+  /** ICAO の機種コード（汎用機材は null） */
+  icao: string | null;
+  lengthM: Sourced<number>;
+  wingspanM: Sourced<number>;
+  heightM: Sourced<number>;
+  mtowKg: Sourced<number>;
+  /** 最大旅客定員（認定・資料上の最大座席数） */
+  maxPax: Sourced<number>;
+  /** メーカー資料の標準座席数（記載のとおりの文字列） */
+  typicalSeats: Sourced<string>;
+  cargoM3: Sourced<number>;
+  fuelL: Sourced<number>;
+  /** 航空会社が座席数を指定しないときのゲーム内の座席数（ゲームの設定値） */
+  defaultSeats: number;
+  engines: number;
+  doubleDeck: boolean;
+  profile: GameProfile;
+  /** 3D 表示のアセット（render3d/assets.ts） */
+  assetId: string;
+  /** このカタログでの最終更新日 */
+  updated: string;
+}
+
+const off = <T>(value: T, source: string, note?: string): Sourced<T> => ({ value, status: 'official', source, ...(note ? { note } : {}) });
+const game = <T>(value: T, note?: string): Sourced<T> => ({ value, status: 'game', ...(note ? { note } : {}) });
+const unset = (note: string): Sourced<never> => ({ value: null, status: 'unset', note });
+
+// ---------------------------------------------------------------- ゲーム用の性能テンプレート
+
+const NARROW = { taxiSpeed: 8, approachSpeed: 70, landingRollM: 1300, takeoffAccel: 2.2, rotateSpeed: 72 };
+const WIDE = { taxiSpeed: 7, approachSpeed: 75, landingRollM: 1800, takeoffAccel: 1.8, rotateSpeed: 80 };
+/** リージョナルジェット・ターボプロップ機（ゲーム値） */
+const REGIONAL_JET = { taxiSpeed: 8, approachSpeed: 66, landingRollM: 1100, takeoffAccel: 2.4, rotateSpeed: 66 };
+const TURBOPROP = { taxiSpeed: 7, approachSpeed: 58, landingRollM: 900, takeoffAccel: 2.4, rotateSpeed: 55 };
+const VERY_LARGE = { taxiSpeed: 6.5, approachSpeed: 72, landingRollM: 1900, takeoffAccel: 1.7, rotateSpeed: 80 };
+
+/** 双通路機の地上作業: 荷下ろし・積み込みはベルトローダー・牽引車各2、給油車2、清掃は作業員6 */
+const WIDE_NEEDS: GameProfile['unitNeeds'] = {
+  unload: { beltLoader: 2, baggageTractor: 2, staff: 4 },
+  load: { beltLoader: 2, baggageTractor: 2, staff: 4 },
+  fuel: { fuelTruck: 2, staff: 2 },
+  clean: { cleaningVan: 1, staff: 6 },
+  cater: { cateringTruck: 2, staff: 2 },
+};
+
+const D = '2026-10-27';
+/** 2026.11.0 で追加・更新した機種の更新日 */
+const D2 = '2026-11-10';
+
+export const AIRCRAFT_MODELS: AircraftModel[] = [
+  // ------------------------------------------------------------ 旧形式の汎用機材（Phase 2〜6 の機材区分。値はすべてゲーム用）
+  {
+    id: 'regional70',
+    generic: true,
+    manufacturer: '汎用',
+    family: '汎用リージョナル機',
+    variant: '',
+    name: '汎用 リージョナル機（70席）',
+    icao: null,
+    lengthM: game(27),
+    wingspanM: game(26),
+    heightM: unset('汎用機材のため未設定'),
+    mtowKg: game(38_000),
+    maxPax: unset('汎用機材のため未設定'),
+    typicalSeats: game('70'),
+    cargoM3: unset('汎用機材のため未設定'),
+    fuelL: unset('汎用機材のため未設定'),
+    defaultSeats: 70,
+    engines: 2,
+    doubleDeck: false,
+    profile: { taxiSpeed: 8, approachSpeed: 65, landingRollM: 900, takeoffAccel: 2.5, rotateSpeed: 60, turnaroundSec: 30 * 60, holdBags: 200, costPerBlockHour: 180_000, mtowT: 38 },
+    assetId: 'generic-regional',
+    updated: D,
+  },
+  {
+    id: 'narrow180',
+    generic: true,
+    manufacturer: '汎用',
+    family: '汎用ナローボディ機',
+    variant: '',
+    name: '汎用 ナローボディ機（180席）',
+    icao: null,
+    lengthM: game(38),
+    wingspanM: game(36),
+    heightM: unset('汎用機材のため未設定'),
+    mtowKg: game(78_000),
+    maxPax: unset('汎用機材のため未設定'),
+    typicalSeats: game('180'),
+    cargoM3: unset('汎用機材のため未設定'),
+    fuelL: unset('汎用機材のため未設定'),
+    defaultSeats: 180,
+    engines: 2,
+    doubleDeck: false,
+    profile: { taxiSpeed: 8, approachSpeed: 70, landingRollM: 1300, takeoffAccel: 2.2, rotateSpeed: 72, turnaroundSec: 45 * 60, holdBags: 400, costPerBlockHour: 300_000, mtowT: 78 },
+    assetId: 'generic-narrow',
+    updated: D,
+  },
+  {
+    id: 'wide300',
+    generic: true,
+    manufacturer: '汎用',
+    family: '汎用ワイドボディ機',
+    variant: '',
+    name: '汎用 ワイドボディ機（300席）',
+    icao: null,
+    lengthM: game(64),
+    wingspanM: game(61),
+    heightM: unset('汎用機材のため未設定'),
+    mtowKg: game(250_000),
+    maxPax: unset('汎用機材のため未設定'),
+    typicalSeats: game('300'),
+    cargoM3: unset('汎用機材のため未設定'),
+    fuelL: unset('汎用機材のため未設定'),
+    defaultSeats: 300,
+    engines: 2,
+    doubleDeck: false,
+    profile: { taxiSpeed: 7, approachSpeed: 75, landingRollM: 1800, takeoffAccel: 1.8, rotateSpeed: 80, turnaroundSec: 90 * 60, holdBags: 900, costPerBlockHour: 700_000, mtowT: 250 },
+    assetId: 'generic-wide',
+    updated: D,
+  },
+
+  // ------------------------------------------------------------ Boeing
+  {
+    id: 'B737-800',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '737 Next-Generation',
+    variant: '-800',
+    name: 'Boeing 737-800',
+    icao: 'B738',
+    lengthM: off(39.47, 'boeing-737ng-acaps', '全長（§2.2.5 図）'),
+    wingspanM: off(34.32, 'boeing-737ng-acaps', 'ウィングレットなしの翼幅（§2.2.5 図）'),
+    heightM: off(12.55, 'boeing-737ng-acaps', '垂直尾翼上端までの高さ（§2.2.5 図）'),
+    mtowKg: off(79_015, 'boeing-737ng-acaps', '最大設計離陸重量（§2.1.3 の最大のオプション。70,533〜79,015 kg）'),
+    maxPax: unset('資料の表に最大座席数（出口制限）の記載がないため未設定'),
+    typicalSeats: off('160（2クラス）/ 184（全席エコノミー）', 'boeing-737ng-acaps', '§2.1.3 SEATING CAPACITY'),
+    cargoM3: off(45.1, 'boeing-737ng-acaps', '下部貨物室の最大容積（§2.1.3）'),
+    fuelL: off(26_024, 'boeing-737ng-acaps', '使用可能燃料（§2.1.3）'),
+    defaultSeats: 160,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...NARROW, turnaroundSec: 45 * 60, holdBags: 280, costPerBlockHour: 320_000, mtowT: 79 },
+    assetId: 'proc-narrow-boeing',
+    updated: D,
+  },
+  {
+    id: 'B737-800W',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '737 Next-Generation',
+    variant: '-800 (Blended Winglets)',
+    name: 'Boeing 737-800（ウィングレット付き, 737-800W）',
+    icao: 'B738',
+    lengthM: off(39.47, 'boeing-737ng-acaps', '全長（§2.2.6 図）'),
+    wingspanM: off(35.79, 'boeing-737ng-acaps', 'ブレンデッド・ウィングレット付きの翼幅（§2.2.6 図）'),
+    heightM: off(12.55, 'boeing-737ng-acaps', '垂直尾翼上端までの高さ（§2.2.6 図）'),
+    mtowKg: off(79_015, 'boeing-737ng-acaps', '最大設計離陸重量（§2.1.3 の 737-800/-800W の最大値）'),
+    maxPax: unset('資料の表に最大座席数（出口制限）の記載がないため未設定'),
+    typicalSeats: off('160（2クラス）/ 184（全席エコノミー）', 'boeing-737ng-acaps', '§2.1.3 SEATING CAPACITY'),
+    cargoM3: off(45.1, 'boeing-737ng-acaps', '下部貨物室の最大容積（§2.1.3）'),
+    fuelL: off(26_024, 'boeing-737ng-acaps', '使用可能燃料（§2.1.3）'),
+    defaultSeats: 160,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...NARROW, turnaroundSec: 45 * 60, holdBags: 280, costPerBlockHour: 315_000, mtowT: 79 },
+    assetId: 'proc-narrow-boeing',
+    updated: D,
+  },
+  {
+    id: 'B777-300',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '777',
+    variant: '-300',
+    name: 'Boeing 777-300',
+    icao: 'B773',
+    lengthM: off(73.86, 'boeing-777-acaps', '全長（§2.2.2 図）'),
+    wingspanM: off(60.93, 'boeing-777-acaps', '翼幅（§2.2.2 図）'),
+    heightM: off(18.76, 'boeing-777-acaps', '§2.3.2 地上高の表の K（垂直尾翼上端）の最大値'),
+    mtowKg: off(299_370, 'boeing-777-acaps', '最大設計離陸重量（§2.1.5 の最大のオプション。263,083〜299,370 kg）'),
+    maxPax: unset('資料の表に最大座席数（出口制限）の記載がないため未設定'),
+    typicalSeats: off('451（2クラス）/ 368（3クラス）', 'boeing-777-acaps', '§2.1.5 SEATING CAPACITY'),
+    cargoM3: off(213.9, 'boeing-777-acaps', '下部貨物室の最大容積（§2.1.5）'),
+    fuelL: off(169_207, 'boeing-777-acaps', '使用可能燃料（§2.1.5）'),
+    defaultSeats: 368,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 90 * 60, unitNeeds: WIDE_NEEDS, holdBags: 1_200, costPerBlockHour: 820_000, mtowT: 299 },
+    assetId: 'proc-wide-777',
+    updated: D,
+  },
+  {
+    id: 'B777-300ER',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '777',
+    variant: '-300ER',
+    name: 'Boeing 777-300ER',
+    icao: 'B77W',
+    lengthM: off(73.86, 'boeing-777er-acaps', '全長（§2.2.2 図）'),
+    wingspanM: off(64.8, 'boeing-777er-acaps', '翼幅（§2.2.2 図）'),
+    heightM: off(18.85, 'boeing-777er-acaps', '§2.3.2 地上高の表の K（垂直尾翼上端）の最大値'),
+    mtowKg: off(351_534, 'boeing-777er-acaps', '最大設計離陸重量（§2.1.1）'),
+    maxPax: unset('資料の表に最大座席数（出口制限）の記載がないため未設定'),
+    typicalSeats: off('339（2クラス）/ 370（3クラス）', 'boeing-777er-acaps', '§2.1.1 TYPICAL SEATING CAPACITY'),
+    cargoM3: off(213.8, 'boeing-777er-acaps', '下部貨物室の最大容積（§2.1.1）'),
+    fuelL: off(181_283, 'boeing-777er-acaps', '使用可能燃料（§2.1.1）'),
+    defaultSeats: 370,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 95 * 60, unitNeeds: WIDE_NEEDS, holdBags: 1_200, costPerBlockHour: 860_000, mtowT: 352 },
+    assetId: 'proc-wide-777',
+    updated: D,
+  },
+  {
+    id: 'B787-9',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '787 Dreamliner',
+    variant: '-9',
+    name: 'Boeing 787-9',
+    icao: 'B789',
+    lengthM: off(62.8, 'boeing-787-web', 'Length'),
+    wingspanM: off(60.1, 'boeing-787-web', 'Wingspan'),
+    heightM: off(17.0, 'boeing-787-web', 'Height'),
+    mtowKg: off(259_220, 'boeing-787-web', 'Maximum takeoff weight'),
+    maxPax: off(420, 'boeing-787-acaps', '§2.1.2 FAA EXIT LIMIT（出口による上限）'),
+    typicalSeats: off('250–325（2クラス）', 'boeing-787-web', 'Seats (two-class)'),
+    cargoM3: off(172.4, 'boeing-787-acaps', '下部貨物室の最大容積（§2.1.2）'),
+    fuelL: off(126_429, 'boeing-787-acaps', '使用可能燃料（§2.1.2）'),
+    defaultSeats: 290,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 75 * 60, unitNeeds: WIDE_NEEDS, holdBags: 900, costPerBlockHour: 640_000, mtowT: 259 },
+    assetId: 'proc-wide-787',
+    updated: D2,
+  },
+
+  // ------------------------------------------------------------ Airbus
+  {
+    id: 'A320-200',
+    generic: false,
+    manufacturer: 'Airbus',
+    family: 'A320 Family',
+    variant: '-200 (A320ceo)',
+    name: 'Airbus A320-200（A320ceo）',
+    icao: 'A320',
+    lengthM: off(37.57, 'airbus-a320ceo-web', 'Overall length'),
+    wingspanM: off(35.8, 'airbus-a320ceo-web', 'Wing span（シャークレット付き）'),
+    heightM: off(11.76, 'airbus-a320ceo-web', 'Height'),
+    mtowKg: off(78_000, 'airbus-a320ceo-web', 'Max take-off weight 78.00 t'),
+    maxPax: off(180, 'airbus-a320ceo-web', 'Max seating'),
+    typicalSeats: off('140–170（2クラス）', 'airbus-a320ceo-web', 'Typical seating'),
+    cargoM3: unset('ページの記載は LD3-45W コンテナ7台で、容積（m³）の記載がないため未設定'),
+    fuelL: off(27_200, 'airbus-a320ceo-web', 'Max fuel capacity'),
+    defaultSeats: 150,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...NARROW, turnaroundSec: 45 * 60, holdBags: 260, costPerBlockHour: 310_000, mtowT: 78 },
+    assetId: 'proc-narrow-airbus',
+    updated: D,
+  },
+  {
+    id: 'A320neo',
+    generic: false,
+    manufacturer: 'Airbus',
+    family: 'A320 Family',
+    variant: 'neo',
+    name: 'Airbus A320neo',
+    icao: 'A20N',
+    lengthM: off(37.57, 'airbus-a320neo-web', 'Overall length'),
+    wingspanM: off(35.8, 'airbus-a320neo-web', 'Wing span (geometric)'),
+    heightM: off(11.76, 'airbus-a320neo-web', 'Height'),
+    mtowKg: off(79_000, 'airbus-a320neo-web', 'MTOW 79.00 t'),
+    maxPax: off(194, 'airbus-a320neo-web', 'Max seating'),
+    typicalSeats: off('150–180（2クラス）', 'airbus-a320neo-web', 'Typical seating'),
+    cargoM3: unset('ページの記載は LD3-45W コンテナ7台で、容積（m³）の記載がないため未設定'),
+    fuelL: off(26_730, 'airbus-a320neo-web', 'Max fuel capacity'),
+    defaultSeats: 165,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...NARROW, turnaroundSec: 45 * 60, holdBags: 260, costPerBlockHour: 290_000, mtowT: 79 },
+    assetId: 'proc-narrow-airbus',
+    updated: D,
+  },
+  {
+    id: 'A350-900',
+    generic: false,
+    manufacturer: 'Airbus',
+    family: 'A350',
+    variant: '-900',
+    name: 'Airbus A350-900',
+    icao: 'A359',
+    lengthM: off(66.8, 'airbus-a350-ff', 'Length'),
+    wingspanM: off(64.75, 'airbus-a350-ff', 'Wing span'),
+    heightM: off(17.05, 'airbus-a350-ff', 'Height'),
+    mtowKg: off(283_000, 'airbus-a350-ff', 'Max. Take-Off Weight 283 t'),
+    maxPax: off(440, 'airbus-a350-ff', 'Max seating capability'),
+    typicalSeats: off('300–350（3クラス）', 'airbus-a350-ff', 'Typical 3-class seating'),
+    cargoM3: off(172.4, 'airbus-a350-ff', 'Usable cargo volume'),
+    fuelL: off(141_000, 'airbus-a350-ff', 'Max fuel capacity'),
+    defaultSeats: 325,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 80 * 60, unitNeeds: WIDE_NEEDS, holdBags: 1_000, costPerBlockHour: 700_000, mtowT: 283 },
+    assetId: 'proc-wide-a350',
+    updated: D,
+  },
+  {
+    id: 'A380-800',
+    generic: false,
+    manufacturer: 'Airbus',
+    family: 'A380',
+    variant: '-800',
+    name: 'Airbus A380-800',
+    icao: 'A388',
+    lengthM: off(72.7, 'airbus-a380-ff', 'Overall length'),
+    wingspanM: off(79.8, 'airbus-a380-ff', 'Wingspan (geometric)'),
+    heightM: off(24.1, 'airbus-a380-ff', 'Height'),
+    mtowKg: off(575_000, 'airbus-a380-ff', 'Maximum takeoff weight 560 t / 575 t のうち大きい方'),
+    maxPax: off(853, 'airbus-a380-ff', 'max seating capacity'),
+    typicalSeats: off('545（4クラス）', 'airbus-a380-ff', 'Typical passenger seating'),
+    cargoM3: unset('資料の 1,570 m³ は客室を含む3層の容積のため、貨物室容積としては未設定'),
+    fuelL: off(320_000, 'airbus-a380-ff', 'Maximum fuel capacity'),
+    defaultSeats: 545,
+    engines: 4,
+    doubleDeck: true,
+    profile: {
+      ...VERY_LARGE,
+      // 資料の "Standard turn-around-time: 90min" を参考にしたゲーム値
+      turnaroundSec: 90 * 60,
+      unitNeeds: { ...WIDE_NEEDS, fuel: { fuelTruck: 3, staff: 3 }, clean: { cleaningVan: 2, staff: 8 }, cater: { cateringTruck: 3, staff: 3 } },
+      holdBags: 1_400,
+      costPerBlockHour: 1_300_000,
+      mtowT: 575,
+    },
+    assetId: 'proc-a380',
+    updated: D,
+  },
+  // ------------------------------------------------------------ 2026.11.0 で追加（日本で運航されている・運航された主な機種）
+  {
+    id: 'B737-8',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '737 MAX',
+    variant: '-8',
+    name: 'Boeing 737-8（737 MAX 8）',
+    icao: 'B38M',
+    lengthM: off(39.47, 'boeing-737max-acaps', '全長（§2.2.2 図）'),
+    wingspanM: off(35.92, 'boeing-737max-acaps', '翼幅（§2.2.2 図）'),
+    heightM: off(12.45, 'boeing-737max-acaps', '§2.3.2 地上高の表の P（垂直尾翼）の最大値'),
+    mtowKg: off(82_190, 'boeing-737max-acaps', '最大設計離陸重量（§2.1.2）'),
+    maxPax: unset('資料の表に出口制限の最大座席数の記載がないため未設定（-8-200 の1クラス 200 席は別の派生型）'),
+    typicalSeats: off('178（2クラス）/ 189（1クラス）', 'boeing-737max-acaps', '§2.1.2 SEATING CAPACITY'),
+    cargoM3: off(43.7, 'boeing-737max-acaps', '下部貨物室の最大容積（§2.1.2）'),
+    fuelL: off(25_817, 'boeing-737max-acaps', '使用可能燃料（§2.1.2）'),
+    defaultSeats: 178,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...NARROW, turnaroundSec: 45 * 60, holdBags: 260, costPerBlockHour: 290_000, mtowT: 82 },
+    assetId: 'proc-narrow-boeing',
+    updated: D2,
+  },
+  {
+    id: 'B767-300',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '767',
+    variant: '-300',
+    name: 'Boeing 767-300',
+    icao: 'B763',
+    lengthM: off(54.94, 'boeing-767-acaps', '全長（§2.2.2 図、-300/-300ER 共通）'),
+    wingspanM: off(47.57, 'boeing-767-acaps', '翼幅（§2.2.2 図）'),
+    heightM: off(16.03, 'boeing-767-acaps', '§2.3.2 地上高の表の J（垂直尾翼上端）の最大値'),
+    mtowKg: off(158_758, 'boeing-767-acaps', '最大設計離陸重量（§2.1.3 の2つの構成のうち大きい方）'),
+    maxPax: off(290, 'boeing-767-acaps', '§2.1.3 FAA EXIT LIMIT（客室中央に Type A ドアがある場合は 299）'),
+    typicalSeats: off('261（2クラス）', 'boeing-767-acaps', '§2.1.3 MIXED CLASS'),
+    cargoM3: off(114.1, 'boeing-767-acaps', '下部貨物室の最大容積（§2.1.3）'),
+    fuelL: off(63_216, 'boeing-767-acaps', '使用可能燃料（§2.1.3）'),
+    defaultSeats: 261,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 70 * 60, unitNeeds: WIDE_NEEDS, holdBags: 650, costPerBlockHour: 540_000, mtowT: 159 },
+    assetId: 'proc-wide-767',
+    updated: D2,
+  },
+  {
+    id: 'B767-300ER',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '767',
+    variant: '-300ER',
+    name: 'Boeing 767-300ER',
+    icao: 'B763',
+    lengthM: off(54.94, 'boeing-767-acaps', '全長（§2.2.2 図、-300/-300ER 共通）'),
+    wingspanM: off(47.57, 'boeing-767-acaps', '翼幅（§2.2.2 図）'),
+    heightM: off(16.03, 'boeing-767-acaps', '§2.3.2 地上高の表の J（垂直尾翼上端）の最大値'),
+    mtowKg: off(186_880, 'boeing-767-acaps', '最大設計離陸重量（§2.1.4 の最大のオプション。172,365〜186,880 kg）'),
+    maxPax: off(290, 'boeing-767-acaps', '§2.1.4 FAA EXIT LIMIT（翼上の非常口を追加した場合は 299）'),
+    typicalSeats: off('261（2クラス）', 'boeing-767-acaps', '§2.1.4 MIXED CLASS'),
+    cargoM3: off(114.1, 'boeing-767-acaps', '下部貨物室の最大容積（§2.1.4）'),
+    fuelL: off(91_380, 'boeing-767-acaps', '使用可能燃料（§2.1.4）'),
+    defaultSeats: 261,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 70 * 60, unitNeeds: WIDE_NEEDS, holdBags: 650, costPerBlockHour: 570_000, mtowT: 187 },
+    assetId: 'proc-wide-767',
+    updated: D2,
+  },
+  {
+    id: 'B777-200',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '777',
+    variant: '-200',
+    name: 'Boeing 777-200',
+    icao: 'B772',
+    lengthM: off(63.73, 'boeing-777-acaps-2', '全長（§2.2.1 図）'),
+    wingspanM: off(60.93, 'boeing-777-acaps-2', '翼幅（§2.2.1 図）'),
+    heightM: off(18.76, 'boeing-777-acaps-2', '§2.3.1 地上高の表の K（垂直尾翼上端）の最大値'),
+    mtowKg: off(242_671, 'boeing-777-acaps-2', '最大設計離陸重量（§2.1.2 Pratt & Whitney 機の BASELINE AIRPLANE の最大）'),
+    maxPax: unset('資料の表に出口制限の最大座席数の記載がないため未設定'),
+    typicalSeats: off('375（2クラス）/ 305（3クラス）', 'boeing-777-acaps-2', '§2.1.2 SEATING CAPACITY'),
+    cargoM3: off(160.3, 'boeing-777-acaps-2', '下部貨物室の最大容積（§2.1.2）'),
+    fuelL: off(117_347, 'boeing-777-acaps-2', '使用可能燃料（§2.1.2 BASELINE AIRPLANE）'),
+    defaultSeats: 305,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 85 * 60, unitNeeds: WIDE_NEEDS, holdBags: 950, costPerBlockHour: 740_000, mtowT: 243 },
+    assetId: 'proc-wide-777',
+    updated: D2,
+  },
+  {
+    id: 'B777-200ER',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '777',
+    variant: '-200ER',
+    name: 'Boeing 777-200ER',
+    icao: 'B772',
+    lengthM: off(63.73, 'boeing-777-acaps-2', '全長（§2.2.1 図、-200 と共通）'),
+    wingspanM: off(60.93, 'boeing-777-acaps-2', '翼幅（§2.2.1 図）'),
+    heightM: off(18.76, 'boeing-777-acaps-2', '§2.3.1 地上高の表の K（垂直尾翼上端）の最大値'),
+    mtowKg: off(286_897, 'boeing-777-acaps-2', '最大設計離陸重量（§2.1.2 Pratt & Whitney 機の HIGH GROSS WEIGHT OPTION（-200ER）の最大）'),
+    maxPax: unset('資料の表に出口制限の最大座席数の記載がないため未設定'),
+    typicalSeats: off('375（2クラス）/ 305（3クラス）', 'boeing-777-acaps-2', '§2.1.2 SEATING CAPACITY'),
+    cargoM3: off(160.3, 'boeing-777-acaps-2', '下部貨物室の最大容積（§2.1.2）'),
+    fuelL: off(171_176, 'boeing-777-acaps-2', '使用可能燃料（§2.1.2 HIGH GROSS WEIGHT OPTION）'),
+    defaultSeats: 305,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 85 * 60, unitNeeds: WIDE_NEEDS, holdBags: 950, costPerBlockHour: 770_000, mtowT: 287 },
+    assetId: 'proc-wide-777',
+    updated: D2,
+  },
+  {
+    id: 'B787-8',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '787 Dreamliner',
+    variant: '-8',
+    name: 'Boeing 787-8',
+    icao: 'B788',
+    lengthM: off(56.72, 'boeing-787-acaps', '全長（§2.2.1 図）'),
+    wingspanM: off(60.12, 'boeing-787-acaps', '翼幅（§2.2.1 図）'),
+    heightM: off(17.09, 'boeing-787-acaps', '§2.3.1 地上高の表の N（垂直尾翼上端）の最大値'),
+    mtowKg: off(227_930, 'boeing-787-acaps', '最大設計離陸重量（§2.1.1）'),
+    maxPax: off(381, 'boeing-787-acaps', '§2.1.1 FAA EXIT LIMIT（出口による上限）'),
+    typicalSeats: off('242（2クラス）/ 359（1クラス）', 'boeing-787-acaps', '§2.1.1 SEATING CAPACITY'),
+    cargoM3: off(136.7, 'boeing-787-acaps', '下部貨物室の最大容積（§2.1.1）'),
+    fuelL: off(126_206, 'boeing-787-acaps', '使用可能燃料（§2.1.1）'),
+    defaultSeats: 242,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 70 * 60, unitNeeds: WIDE_NEEDS, holdBags: 750, costPerBlockHour: 590_000, mtowT: 228 },
+    assetId: 'proc-wide-787',
+    updated: D2,
+  },
+  {
+    id: 'B787-10',
+    generic: false,
+    manufacturer: 'Boeing',
+    family: '787 Dreamliner',
+    variant: '-10',
+    name: 'Boeing 787-10',
+    icao: 'B78X',
+    lengthM: off(68.3, 'boeing-787-acaps', '全長（§2.2.3 図）'),
+    wingspanM: off(60.12, 'boeing-787-acaps', '翼幅（§2.2.3 図）'),
+    heightM: off(17.02, 'boeing-787-acaps', '§2.3.3 地上高の表の N（垂直尾翼上端）の最大値'),
+    mtowKg: off(254_011, 'boeing-787-acaps', '最大設計離陸重量（§2.1.3）'),
+    maxPax: off(440, 'boeing-787-acaps', '§2.1.3 FAA EXIT LIMIT（出口による上限）'),
+    typicalSeats: off('330（2クラス）/ 440（1クラス）', 'boeing-787-acaps', '§2.1.3 SEATING CAPACITY'),
+    cargoM3: off(190.3, 'boeing-787-acaps', '下部貨物室の最大容積（§2.1.3）'),
+    fuelL: off(126_429, 'boeing-787-acaps', '使用可能燃料（§2.1.3）'),
+    defaultSeats: 330,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 80 * 60, unitNeeds: WIDE_NEEDS, holdBags: 1_050, costPerBlockHour: 680_000, mtowT: 254 },
+    assetId: 'proc-wide-787',
+    updated: D2,
+  },
+  {
+    id: 'A321-200',
+    generic: false,
+    manufacturer: 'Airbus',
+    family: 'A320 Family',
+    variant: '-200 (A321ceo)',
+    name: 'Airbus A321-200（A321ceo）',
+    icao: 'A321',
+    lengthM: off(44.51, 'airbus-a321ceo-web', 'Overall length'),
+    wingspanM: off(35.8, 'airbus-a321ceo-web', 'Wing span (geometric)（シャークレット付き）'),
+    heightM: off(11.76, 'airbus-a321ceo-web', 'Height'),
+    mtowKg: off(93_500, 'airbus-a321ceo-web', 'Max take-off weight 93.50 t'),
+    maxPax: off(220, 'airbus-a321ceo-web', 'Max seating'),
+    typicalSeats: off('170–210', 'airbus-a321ceo-web', 'Typical seating'),
+    cargoM3: unset('ページの記載は LD3-45W コンテナ10台で、容積（m³）の記載がないため未設定'),
+    fuelL: off(30_030, 'airbus-a321ceo-web', 'Max fuel capacity'),
+    defaultSeats: 194,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...NARROW, turnaroundSec: 50 * 60, holdBags: 340, costPerBlockHour: 350_000, mtowT: 94 },
+    assetId: 'proc-narrow-airbus',
+    updated: D2,
+  },
+  {
+    id: 'A321neo',
+    generic: false,
+    manufacturer: 'Airbus',
+    family: 'A320 Family',
+    variant: 'neo',
+    name: 'Airbus A321neo',
+    icao: 'A21N',
+    lengthM: off(44.51, 'airbus-a321neo-web', 'Overall length'),
+    wingspanM: off(35.8, 'airbus-a321neo-web', 'Wing span (geometric)'),
+    heightM: off(11.76, 'airbus-a321neo-web', 'Height'),
+    mtowKg: off(97_000, 'airbus-a321neo-web', 'Max take-off weight 97.00 t（ページ記載の値。長距離型 A321LR を含む最大の重量オプション）'),
+    maxPax: off(244, 'airbus-a321neo-web', 'Max seating'),
+    typicalSeats: off('180–220（2クラス）', 'airbus-a321neo-web', 'Typical seating 2-class'),
+    cargoM3: unset('ページの記載は LD3-45W コンテナ10台で、容積（m³）の記載がないため未設定'),
+    fuelL: off(32_940, 'airbus-a321neo-web', 'Max fuel capacity（ページ記載の値。追加燃料タンク付きの構成を含む）'),
+    defaultSeats: 200,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...NARROW, turnaroundSec: 50 * 60, holdBags: 340, costPerBlockHour: 330_000, mtowT: 97 },
+    assetId: 'proc-narrow-airbus',
+    updated: D2,
+  },
+  {
+    id: 'A350-1000',
+    generic: false,
+    manufacturer: 'Airbus',
+    family: 'A350',
+    variant: '-1000',
+    name: 'Airbus A350-1000',
+    icao: 'A35K',
+    lengthM: off(73.78, 'airbus-a350-ff-2', 'Length'),
+    wingspanM: off(64.75, 'airbus-a350-ff-2', 'Wing span'),
+    heightM: off(17.08, 'airbus-a350-ff-2', 'Height'),
+    mtowKg: off(322_000, 'airbus-a350-ff-2', 'Max. Take-Off Weight 322 t'),
+    maxPax: off(480, 'airbus-a350-ff-2', 'Max seating capability'),
+    typicalSeats: off('350–410（3クラス）', 'airbus-a350-ff-2', 'Typical 3-class seating'),
+    cargoM3: off(208.2, 'airbus-a350-ff-2', 'Usable cargo volume'),
+    fuelL: off(159_000, 'airbus-a350-ff-2', 'Max fuel capacity'),
+    defaultSeats: 380,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 85 * 60, unitNeeds: WIDE_NEEDS, holdBags: 1_150, costPerBlockHour: 780_000, mtowT: 322 },
+    assetId: 'proc-wide-a350',
+    updated: D2,
+  },
+  {
+    id: 'E175',
+    generic: false,
+    manufacturer: 'Embraer',
+    family: 'E-Jets',
+    variant: '175',
+    name: 'Embraer 175',
+    icao: 'E175',
+    lengthM: off(31.68, 'embraer-e175-apm', 'Overall length（§2.2.1）'),
+    wingspanM: off(26.0, 'embraer-e175-apm', 'Span over winglets（§2.2.1 ウイングレット装備機。翼端延長の改修後は 28.65 m）'),
+    heightM: off(9.86, 'embraer-e175-apm', 'Height (maximum)（§2.2.1）'),
+    mtowKg: off(40_370, 'embraer-e175-apm', 'MTOW（Table 2.1 の AR 型。STD 型は 37,500 kg）'),
+    maxPax: unset('資料により最大座席数の記載が異なる（APM 表2.1 は型により 70〜86、製品ページは高密度 88 席）ため未設定'),
+    typicalSeats: off('76（2クラス）/ 78（1クラス）/ 88（高密度）', 'embraer-e175-web', 'Typical seating'),
+    cargoM3: off(17.12, 'embraer-e175-apm', 'Maximum Cargo Volume（Table 2.1）'),
+    fuelL: off(11_625, 'embraer-e175-apm', 'Usable Fuel（Table 2.1）'),
+    defaultSeats: 78,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...REGIONAL_JET, turnaroundSec: 35 * 60, holdBags: 150, costPerBlockHour: 200_000, mtowT: 40 },
+    assetId: 'proc-regional-jet',
+    updated: D2,
+  },
+  {
+    id: 'E190',
+    generic: false,
+    manufacturer: 'Embraer',
+    family: 'E-Jets',
+    variant: '190',
+    name: 'Embraer 190',
+    icao: 'E190',
+    lengthM: off(36.24, 'embraer-e190-apm', 'Overall length（§2.2.1）'),
+    wingspanM: off(28.72, 'embraer-e190-apm', 'Span over winglets（§2.2.1）'),
+    heightM: off(10.55, 'embraer-e190-apm', 'Height (maximum)（§2.2.1）'),
+    mtowKg: off(51_800, 'embraer-e190-apm', 'MTOW（Table 2.1 の AR 型。STD 型は 47,790 kg）'),
+    maxPax: off(106, 'embraer-e190-apm', 'Maximum Seating Capacity（Table 2.1）'),
+    typicalSeats: off('98（1クラス・32インチ間隔の標準構成）', 'embraer-e190-apm', '§2.4 の標準客室構成'),
+    cargoM3: off(22.63, 'embraer-e190-apm', 'Maximum Cargo Volume（Table 2.1）'),
+    fuelL: off(16_029, 'embraer-e190-apm', 'Usable Fuel（Table 2.1）'),
+    defaultSeats: 95,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...REGIONAL_JET, turnaroundSec: 40 * 60, holdBags: 190, costPerBlockHour: 230_000, mtowT: 52 },
+    assetId: 'proc-regional-jet',
+    updated: D2,
+  },
+  {
+    id: 'ATR42-600',
+    generic: false,
+    manufacturer: 'ATR',
+    family: 'ATR 42/72',
+    variant: '42-600',
+    name: 'ATR 42-600',
+    icao: 'AT46',
+    lengthM: off(22.67, 'atr-42-600-web', 'Overall Length'),
+    wingspanM: off(24.57, 'atr-42-600-web', 'Wingspan'),
+    heightM: unset('製品ページに全高の記載がないため未設定（3D 表示は全長からの仮の値）'),
+    mtowKg: off(18_600, 'atr-42-600-web', 'Maximum Take-off Weight'),
+    maxPax: unset('製品ページに認定上の最大座席数の記載がないため未設定'),
+    typicalSeats: off('30（34インチ間隔）/ 48（30インチ間隔）', 'atr-42-600-web', 'Typical layouts'),
+    cargoM3: unset('製品ページに貨物室容積の記載がないため未設定'),
+    fuelL: unset('製品ページの燃料搭載量は重量（kg）の記載で、容積（L）の記載がないため未設定'),
+    defaultSeats: 48,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...TURBOPROP, turnaroundSec: 25 * 60, holdBags: 90, costPerBlockHour: 120_000, mtowT: 19 },
+    assetId: 'proc-turboprop',
+    updated: D2,
+  },
+  {
+    id: 'ATR72-600',
+    generic: false,
+    manufacturer: 'ATR',
+    family: 'ATR 42/72',
+    variant: '72-600',
+    name: 'ATR 72-600',
+    icao: 'AT76',
+    lengthM: off(27.17, 'atr-72-600-web', 'Overall Length'),
+    wingspanM: off(27.05, 'atr-72-600-web', 'Wingspan'),
+    heightM: unset('製品ページに全高の記載がないため未設定（3D 表示は全長からの仮の値）'),
+    mtowKg: off(23_000, 'atr-72-600-web', 'Maximum Take-off Weight'),
+    maxPax: off(78, 'atr-72-600-web', '"seating up to 78 passengers"（28インチ間隔の 78 席）'),
+    typicalSeats: off('72（29インチ間隔）/ 78（28インチ間隔）', 'atr-72-600-web', 'Typical layouts'),
+    cargoM3: unset('製品ページに貨物室容積の記載がないため未設定'),
+    fuelL: unset('製品ページの燃料搭載量は重量（kg）の記載で、容積（L）の記載がないため未設定'),
+    defaultSeats: 70,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...TURBOPROP, turnaroundSec: 30 * 60, holdBags: 130, costPerBlockHour: 150_000, mtowT: 23 },
+    assetId: 'proc-turboprop',
+    updated: D2,
+  },
+];
+
+export const CATALOG: Record<string, AircraftModel> = Object.fromEntries(AIRCRAFT_MODELS.map((m) => [m.id, m]));
+
+// ---------------------------------------------------------------- ゲームの区分ルール
+
+/** ICAO の飛行場基準コード文字（翼幅の区分）。ゲームの適合性判定に使う */
+export type CodeLetter = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
+
+/** 翼幅（m）→ コード文字（ICAO Annex 14 の翼幅の区分を参考にした、ゲーム内の区分） */
+export function codeLetterOf(wingspanM: number): CodeLetter | null {
+  if (!Number.isFinite(wingspanM) || wingspanM <= 0) return null;
+  if (wingspanM < 15) return 'A';
+  if (wingspanM < 24) return 'B';
+  if (wingspanM < 36) return 'C';
+  if (wingspanM < 52) return 'D';
+  if (wingspanM < 65) return 'E';
+  if (wingspanM < 80) return 'F';
+  return null;
+}
+
+/**
+ * ゲームのサイズ区分（S/M/L）: コード C 以下 = M、D・E = L、F = L（＋コード F 対応施設が必要）。
+ * 旧形式の汎用機材は Phase 2 以来の区分（regional70 = S, narrow180 = M, wide300 = L）をそのまま使う。
+ */
+export function sizeClassOf(m: AircraftModel): { size: SizeClass; codeF: boolean } {
+  if (m.generic) return { size: m.id === 'regional70' ? 'S' : m.id === 'narrow180' ? 'M' : 'L', codeF: false };
+  const code = codeLetterOf(m.wingspanM.value ?? NaN);
+  return { size: code === 'A' || code === 'B' || code === 'C' ? 'M' : 'L', codeF: code === 'F' || code === null };
+}
+
+export function modelOf(id: string): AircraftModel | undefined {
+  return CATALOG[id];
+}
+
+export const MANUFACTURERS = [...new Set(AIRCRAFT_MODELS.map((m) => m.manufacturer))];

@@ -1,8 +1,8 @@
 import { Rng, type RngState } from '../rng';
 import { compareIds } from '../model/ids';
-import { AIRCRAFT_TYPES, type AircraftTypeId } from '../sim/aircraftTypes';
+import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
-import { AIRLINES, DESTINATIONS, airlineDef } from './registry';
+import { AIRLINES, DESTINATIONS, airlineDef, type FleetEntry } from './registry';
 import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
 
 /**
@@ -20,7 +20,8 @@ export type CostCategory =
   | 'accessOps'
   | 'staffCommute'
   | 'groundOps'
-  | 'compensation';
+  | 'compensation'
+  | 'disruption';
 export type LedgerCategory = RevenueCategory | CostCategory | 'construction';
 
 export const REVENUE_CATEGORIES: readonly RevenueCategory[] = [
@@ -45,6 +46,7 @@ export const COST_CATEGORIES: readonly CostCategory[] = [
   'staffCommute',
   'groundOps',
   'compensation',
+  'disruption',
 ];
 
 export type TimeWindow = 'morning' | 'daytime' | 'evening' | 'any';
@@ -166,6 +168,8 @@ export interface CompanyState {
   parkedCars: number[];
   /** 工事（キャリアモード）: エンティティID → 工事の内容と残り日数（economy/expansion.ts） */
   projects: Record<string, Project>;
+  /** 航空会社の保有機材と座席構成（機種ID で参照。Phase 7） */
+  fleets: Record<string, FleetEntry[]>;
 }
 
 /** 工事: 新設・改修（移設・拡張）は建設中、一時閉鎖は運用を止めるだけ。残り日数は運航した日で進む */
@@ -202,7 +206,64 @@ export function createCompany(mode: CompanyState['mode'] = 'career', seed = 'com
     accessFeedback: { ...NO_FEEDBACK, waitMin: {} },
     parkedCars: [],
     projects: {},
+    fleets: defaultFleets(),
   };
+}
+
+export function defaultFleets(): Record<string, FleetEntry[]> {
+  return Object.fromEntries(AIRLINES.map((a) => [a.id, a.fleet.map((e) => ({ ...e }))]));
+}
+
+/** 便の座席数: 航空会社の座席構成にあればその値、なければ機種の既定値 */
+export function seatsFor(c: CompanyState, airlineId: string, typeId: AircraftTypeId, types: TypeTable = AIRCRAFT_TYPES): number {
+  return c.fleets?.[airlineId]?.find((e) => e.typeId === typeId)?.seats ?? resolveType(types, typeId).seats;
+}
+
+export type FleetResult = { ok: true } | { ok: false; reason: 'UNKNOWN_TYPE' | 'SEATS_INVALID' | 'OVER_MAX_PAX' | 'NOT_IN_FLEET' | 'IN_USE' | 'NOT_FOUND' };
+
+/**
+ * 座席数の上限: 最大旅客定員（公式値）があればそれ、なければゲーム上の上限（既定座席数 × 1.25）。
+ * 実機の認定定員が確認できない機種は上限を推定値で扱う（docs/16 §3）。
+ */
+export function maxSeatsOf(typeId: AircraftTypeId, types: TypeTable = AIRCRAFT_TYPES): { max: number; official: boolean } {
+  const t = resolveType(types, typeId);
+  return t.maxPax !== null ? { max: t.maxPax, official: true } : { max: Math.round(t.seats * 1.25), official: false };
+}
+
+/** 保有機材の追加・座席数の変更 */
+export function setFleetEntry(c: CompanyState, airlineId: string, typeId: AircraftTypeId, seats: number, types: TypeTable = AIRCRAFT_TYPES): FleetResult {
+  if (!c.airlines[airlineId]) return { ok: false, reason: 'NOT_FOUND' };
+  if (!types[typeId]) return { ok: false, reason: 'UNKNOWN_TYPE' };
+  if (!Number.isInteger(seats) || seats < 1) return { ok: false, reason: 'SEATS_INVALID' };
+  if (seats > maxSeatsOf(typeId, types).max) return { ok: false, reason: 'OVER_MAX_PAX' };
+  const fleet = (c.fleets[airlineId] ??= []);
+  const e = fleet.find((x) => x.typeId === typeId);
+  if (e) e.seats = seats;
+  else fleet.push({ typeId, seats });
+  return { ok: true };
+}
+
+/** 保有機材から外す（契約で使っている機種は外せない） */
+export function removeFleetEntry(c: CompanyState, airlineId: string, typeId: AircraftTypeId): FleetResult {
+  const fleet = c.fleets[airlineId];
+  if (!fleet?.some((e) => e.typeId === typeId)) return { ok: false, reason: 'NOT_FOUND' };
+  if (contractsOf(c).some((k) => k.airlineId === airlineId && k.typeId === typeId && (k.status === 'active' || k.status === 'offered'))) {
+    return { ok: false, reason: 'IN_USE' };
+  }
+  c.fleets[airlineId] = fleet.filter((e) => e.typeId !== typeId);
+  return { ok: true };
+}
+
+/**
+ * 契約の機材変更（便への機材割り当て）: 航空会社の保有機材の機種に変える。
+ * 機種を変えると旅客定員・地上作業・施設の適合性・着陸料が変わる（翌日の運航計画から）。
+ */
+export function changeContractAircraft(c: CompanyState, contractId: string, typeId: AircraftTypeId): FleetResult {
+  const k = c.contracts[contractId];
+  if (!k) return { ok: false, reason: 'NOT_FOUND' };
+  if (!c.fleets[k.airlineId]?.some((e) => e.typeId === typeId)) return { ok: false, reason: 'NOT_IN_FLEET' };
+  k.typeId = typeId;
+  return { ok: true };
 }
 
 function nextId(c: CompanyState, prefix: string): string {
@@ -321,8 +382,10 @@ export function generateOffers(c: CompanyState, operable: readonly AircraftTypeI
       if (dests.length === 0) continue;
       const dest = dests[rng.int(0, dests.length - 1)]!;
       // 運航できる機種を優先しつつ、評価が高いと大型機の提案も来る
-      const fleet = a.fleet.filter((t) => operable.includes(t) || (AIRCRAFT_TYPES[t].size === 'L' && c.rating >= 60) || rng.next() < 0.25);
-      const typeId = (fleet.length > 0 ? fleet : a.fleet)[rng.int(0, (fleet.length > 0 ? fleet : a.fleet).length - 1)]!;
+      const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId);
+      if (own.length === 0) continue;
+      const fleet = own.filter((t) => operable.includes(t) || (resolveType(AIRCRAFT_TYPES, t).size === 'L' && c.rating >= 60) || rng.next() < 0.25);
+      const typeId = (fleet.length > 0 ? fleet : own)[rng.int(0, (fleet.length > 0 ? fleet : own).length - 1)]!;
       const maxPerDay = c.rating >= 70 ? 4 : c.rating >= 50 ? 3 : 2;
       const windows: TimeWindow[] = ['morning', 'daytime', 'evening', 'any'];
       const discount =
@@ -406,13 +469,13 @@ export function updateContracts(c: CompanyState, results: Record<string, Airline
 }
 
 /**
- * キャリアモードの開始状態: 小さな飛行場向けの初期契約（リージョナル機2便・ナローボディ機1便）つき。
+ * キャリアモードの開始状態: 小さな飛行場向けの初期契約（汎用リージョナル機2便・Boeing 737-800 1便）つき。
  */
 export function createCareerCompany(seed = 'career'): CompanyState {
   const c = createCompany('career', seed);
   const base = { feeDiscount: 0.1, startDay: 0, endDay: BALANCE.offers.contractDays - 1, status: 'active' as const, offerExpiresDay: 0 };
   addContract(c, { ...base, airlineId: 'RJ', destinationId: 'KTA', typeId: 'regional70', perDay: 2, window: 'any' });
-  addContract(c, { ...base, airlineId: 'HB', destinationId: 'MSK', typeId: 'narrow180', perDay: 1, window: 'daytime' });
+  addContract(c, { ...base, airlineId: 'HB', destinationId: 'MSK', typeId: 'B737-800', perDay: 1, window: 'daytime' });
   return c;
 }
 
@@ -423,12 +486,12 @@ export function createSandboxCompany(seed = 'sandbox'): CompanyState {
   const c = createCompany('sandbox', seed);
   const base = { feeDiscount: 0.1, startDay: 0, endDay: 9999, status: 'active' as const, offerExpiresDay: 0 };
   const list: [string, string, AircraftTypeId, number, TimeWindow][] = [
-    ['SK', 'TWN', 'narrow180', 3, 'any'],
-    ['SK', 'HSM', 'wide300', 1, 'daytime'],
-    ['NP', 'YKH', 'narrow180', 3, 'any'],
-    ['NP', 'AOS', 'wide300', 1, 'evening'],
+    ['SK', 'TWN', 'B737-800W', 3, 'any'],
+    ['SK', 'HSM', 'B777-300ER', 1, 'daytime'],
+    ['NP', 'YKH', 'A320neo', 3, 'any'],
+    ['NP', 'AOS', 'A350-900', 1, 'evening'],
     ['RJ', 'KTA', 'regional70', 4, 'any'],
-    ['AQ', 'MSK', 'narrow180', 4, 'any'],
+    ['AQ', 'MSK', 'A320-200', 4, 'any'],
     ['HB', 'NSH', 'regional70', 3, 'any'],
   ];
   for (const [airlineId, destinationId, typeId, perDay, window] of list) addContract(c, { ...base, airlineId, destinationId, typeId, perDay, window });
@@ -445,6 +508,15 @@ export function importCompany(json: string): CompanyState | null {
     c.accessFeedback ??= { ...NO_FEEDBACK, waitMin: {} };
     c.parkedCars ??= [];
     c.projects ??= {};
+    // Phase 6 以前の保存データ: 保有機材の設定がないので初期設定を入れ、契約で使っている機種（旧形式の汎用機材を含む）は
+    // そのまま保有機材に加える（汎用機材を実在の機種に置き換えない）
+    if (!c.fleets) {
+      c.fleets = defaultFleets();
+      for (const k of Object.values(c.contracts)) {
+        const f = (c.fleets[k.airlineId] ??= []);
+        if (!f.some((e) => e.typeId === k.typeId)) f.push({ typeId: k.typeId, seats: resolveType(AIRCRAFT_TYPES, k.typeId).seats });
+      }
+    }
     return c;
   } catch {
     return null;

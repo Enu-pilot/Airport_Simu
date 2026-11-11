@@ -1,7 +1,8 @@
 import { Rng } from '../rng';
 import { compareIds } from '../model/ids';
 import { TILE_M } from '../model/catalog';
-import { AIRCRAFT_TYPES } from './aircraftTypes';
+import { resolveType } from './aircraftTypes';
+import { TASK_DEFS, TURNAROUND_TASKS, taskNeeds, taskWorkSec } from './tasks';
 import {
   BAG_CUTOFF_AFTER_BOARDING_SEC,
   HANDLE_SEC_PER_BAG,
@@ -14,7 +15,7 @@ import {
   setEquipmentBroken,
 } from './baggage';
 import type { Simulation } from './simulation';
-import { onTaskDone } from '../economy/ops';
+import { onBagLeftBehind, onTaskDone } from '../economy/ops';
 import {
   EVENT_LOG_LIMIT,
   type Aircraft,
@@ -34,19 +35,7 @@ import {
  * - 航空機は、プッシュバック以外の全作業が完了するまで出発準備完了にならない。
  */
 
-/** 作業の定義: 依存する作業、必要なユニット、作業時間（S/M/L、秒） */
-export const TASK_DEFS: Record<TaskKind, { deps: TaskKind[]; needs: Partial<Record<UnitKind, number>>; sec: [number, number, number] }> = {
-  deplane: { deps: [], needs: {}, sec: [0, 0, 0] },
-  unload: { deps: [], needs: { beltLoader: 1, baggageTractor: 1, staff: 2 }, sec: [0, 0, 0] },
-  fuel: { deps: [], needs: { fuelTruck: 1, staff: 1 }, sec: [600, 900, 1800] },
-  clean: { deps: ['deplane'], needs: { cleaningVan: 1, staff: 3 }, sec: [600, 900, 1500] },
-  cater: { deps: ['deplane'], needs: { cateringTruck: 1, staff: 1 }, sec: [480, 720, 1200] },
-  inspect: { deps: [], needs: { engineer: 1 }, sec: [600, 900, 1200] },
-  board: { deps: ['deplane', 'clean', 'cater', 'fuel', 'inspect'], needs: {}, sec: [0, 0, 0] },
-  load: { deps: ['unload'], needs: { beltLoader: 1, baggageTractor: 1, staff: 2 }, sec: [0, 0, 0] },
-  pushback: { deps: [], needs: { tug: 1, staff: 1 }, sec: [0, 0, 0] },
-};
-export const TURNAROUND_TASKS: readonly TaskKind[] = ['deplane', 'unload', 'fuel', 'clean', 'cater', 'inspect', 'board', 'load'];
+export { TASK_DEFS, TURNAROUND_TASKS } from './tasks';
 /** 点検で不具合が見つかる確率と、追加の整備時間 */
 export const DEFECT_PROB = 0.1;
 export const DEFECT_EXTRA_SEC = 30 * 60;
@@ -57,8 +46,6 @@ export const PUSHBACK_DISPATCH_LEAD_SEC = 10 * 60;
 export const UNIT_REPAIR_SEC = 45 * 60;
 /** ランダム故障の平均故障間隔（時間） */
 export const RANDOM_MTBF_HOURS = { unit: 80, sorter: 150, belt: 150 };
-
-const SIZE_INDEX = { S: 0, M: 1, L: 2 } as const;
 
 function log(state: SimState, e: SimState['events'][number]): void {
   state.events.push(e);
@@ -173,17 +160,41 @@ export function setUnitBroken(sim: Simulation, unitId: string, broken: boolean, 
 export function createTurnaroundTasks(sim: Simulation, ac: Aircraft): void {
   const { state } = sim;
   if ((state.aircraftTasks[ac.id] ?? []).length > 0) return;
-  const size = AIRCRAFT_TYPES[ac.typeId].size;
+  const type = resolveType(sim.ctx.types, ac.typeId);
   const defect = withRng(state, (rng) => rng.next() < DEFECT_PROB);
+  const totals = unitTotals(sim);
   for (const kind of TURNAROUND_TASKS) {
-    const def = TASK_DEFS[kind];
     const task = newTask(state, ac, kind);
-    task.workSec = def.sec[SIZE_INDEX[size]];
+    // 機種ごとの作業時間・必要なユニット。空港に必要数より少なければ、ある台数で時間をかけて行う（docs/16 §4）
+    task.needs = taskNeeds(type, kind);
+    task.workSec = taskWorkSec(type, kind);
+    // 機種固有の追加分だけを減らせる。作業の基本の必要数（TASK_DEFS）を下回ってそろわない場合は従来どおり停止して待つ
+    let slow = 1;
+    const base = TASK_DEFS[kind].needs;
+    for (const [k, n] of Object.entries(task.needs) as [UnitKind, number][]) {
+      const total = totals[k] ?? 0;
+      const reduced = Math.max(base[k] ?? 0, Math.min(n, total));
+      if (reduced < n) {
+        slow = Math.max(slow, n / reduced);
+        task.needs[k] = reduced;
+      }
+    }
+    if (slow > 1) {
+      task.workSec = Math.round(task.workSec * slow);
+      task.note = `必要な車両・作業員が足りないため時間がかかる（×${slow.toFixed(1)}）`;
+    }
     if (kind === 'inspect' && defect) {
       task.workSec += DEFECT_EXTRA_SEC;
       task.note = '不具合あり（追加整備）';
     }
   }
+}
+
+/** 空港にある作業員・車両の種類ごとの数 */
+export function unitTotals(sim: Simulation): Partial<Record<UnitKind, number>> {
+  const out: Partial<Record<UnitKind, number>> = {};
+  for (const b of sim.ctx.bases) for (const [k, n] of Object.entries(b.units) as [UnitKind, number][]) out[k] = (out[k] ?? 0) + n;
+  return out;
 }
 
 export function createPushbackTask(sim: Simulation, ac: Aircraft): GroundTask {
@@ -257,8 +268,9 @@ export function stepGround(sim: Simulation): void {
 
   // 処理順: 出発予定の早い機体の作業から（同時刻は作業ID順）
   const active = state.activeTasks.map((id) => state.tasks[id]!).filter((t) => t.state !== 'done' && t.state !== 'cancelled');
-  const depTime = (t: GroundTask) => state.flights[state.aircraft[t.aircraftId]!.departureFlightId]!.estimated;
-  active.sort((a, b) => depTime(a) - depTime(b) || compareIds(a.id, b.id));
+  // プレイヤーが優先にした便（便の順序変更）は先に割り当てる
+  const depOf = (t: GroundTask) => state.flights[state.aircraft[t.aircraftId]!.departureFlightId]!;
+  active.sort((a, b) => Number(!!depOf(b).priority) - Number(!!depOf(a).priority) || depOf(a).estimated - depOf(b).estimated || compareIds(a.id, b.id));
   // 優先度の高い作業がそろわずに待っているユニットの種類は、後の作業が先に取らない（飢餓防止）
   const starved = new Set<UnitKind>();
   for (const t of active) stepTask(sim, t, starved);
@@ -416,6 +428,12 @@ function stepTask(sim: Simulation, t: GroundTask, starved: Set<UnitKind>): void 
   }
 }
 
+/** 手荷物1個の積み下ろし時間（ベルトローダーの台数で割る） */
+function handleSec(state: SimState, t: GroundTask): number {
+  const loaders = t.units.filter((id) => state.units[id]!.kind === 'beltLoader').length;
+  return Math.max(1, Math.round(HANDLE_SEC_PER_BAG / Math.max(1, loaders)));
+}
+
 const starvedReason = (k: UnitKind): BlockReason => (k === 'staff' ? 'noStaff' : k === 'engineer' ? 'noEngineer' : 'noVehicle');
 
 /** 積み込める（仕分け済み・旅客が乗り遅れていない）手荷物 */
@@ -463,7 +481,7 @@ function stepUnload(sim: Simulation, t: GroundTask, ac: Aircraft): void {
     return;
   }
   t.doneSec++;
-  if (t.doneSec >= HANDLE_SEC_PER_BAG) {
+  if (t.doneSec >= handleSec(state, t)) {
     const next = bagsOf(state, arr.id, ['onAircraft'])[0];
     if (next) {
       moveBag(state, next, 'onCart', `cart:${tractor}`);
@@ -503,15 +521,21 @@ function stepLoad(sim: Simulation, t: GroundTask, ac: Aircraft): void {
   }
   if (t.phase === 'working') {
     t.doneSec++;
-    if (t.doneSec >= HANDLE_SEC_PER_BAG) {
+    if (t.doneSec >= handleSec(state, t)) {
       t.doneSec = 0;
       const b = bagsOf(state, dep.id, ['onCart'])[0];
       if (b) {
-        // 自便の機体にだけ、1回だけ積む
+        // 自便の機体にだけ、1回だけ積む。貨物室の容量（機種のゲーム値）を超える分は積み残し
         if (b.loadedOn === null) {
-          b.loadedOn = ac.id;
-          moveBag(state, b, 'loaded', `aircraft:${ac.id}`);
-          state.groundStats.bagsLoaded++;
+          if (bagsOf(state, dep.id, ['loaded']).length >= resolveType(sim.ctx.types, ac.typeId).holdBags) {
+            moveBag(state, b, 'leftBehind', `hold-full:${ac.id}`);
+            state.groundStats.bagsLeftBehind++;
+            onBagLeftBehind(sim);
+          } else {
+            b.loadedOn = ac.id;
+            moveBag(state, b, 'loaded', `aircraft:${ac.id}`);
+            state.groundStats.bagsLoaded++;
+          }
         }
       }
       if (bagsOf(state, dep.id, ['onCart']).length === 0) t.phase = 'idle';

@@ -15,6 +15,23 @@ export function exportLayout(layout: AirportLayout): string {
 
 const RECORD_KEYS = ['counters', 'runways', 'taxiNodes', 'taxiways', 'roadNodes', 'roads', 'stands', 'facilities', 'terminalAreas'] as const;
 
+/** レイアウトの必須項目・型の検証。問題をすべて返す（空なら妥当） */
+export function validateLayoutData(l: unknown): string[] {
+  if (!l || typeof l !== 'object' || Array.isArray(l)) return ['レイアウトがありません'];
+  const layout = l as Partial<AirportLayout>;
+  const errors: string[] = [];
+  if (typeof layout.name !== 'string') errors.push('項目 name が不正です');
+  for (const k of RECORD_KEYS) {
+    const v = layout[k];
+    if (typeof v !== 'object' || v === null || Array.isArray(v)) errors.push(`項目 ${k} が不正です`);
+  }
+  const site = layout.site;
+  if (!site || typeof site.width !== 'number' || typeof site.height !== 'number' || !Array.isArray(site.terrain) || site.terrain.length !== site.width * site.height) {
+    errors.push('敷地データが不正です');
+  }
+  return errors;
+}
+
 /** JSON から読み込む。形式が不正な場合は例外 */
 export function importLayout(json: string): AirportLayout {
   const data = JSON.parse(json) as Partial<LayoutFile>;
@@ -29,12 +46,7 @@ export function importLayout(json: string): AirportLayout {
     l.terminalAreas = {};
     l.schemaVersion = 2;
   }
-  for (const k of RECORD_KEYS) {
-    if (typeof l[k] !== 'object' || l[k] === null) throw new Error(`項目 ${k} が不正です`);
-  }
-  const site = l.site;
-  if (!site || !Array.isArray(site.terrain) || site.terrain.length !== site.width * site.height) {
-    throw new Error('敷地データが不正です');
-  }
+  const errors = validateLayoutData(l);
+  if (errors.length) throw new Error(errors[0]);
   return l;
 }

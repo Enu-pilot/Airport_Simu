@@ -1,13 +1,16 @@
 import { useEffect, useRef } from 'react';
-import { MapView } from '../render/MapView';
-import { actions, editorStore, formatCr, newGame, replaceLayout, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { Viewport } from '../render/MapView';
+import { actions, editorStore, formatCr, newGame, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
+import { CatalogPanel } from './CatalogPanel';
+import { AnalyticsPanel, ScenarioPanel } from './AnalysisPanels';
 import { computePreview } from '../editor/tools';
 import { constructionCost } from '../core/economy/construction';
 import { MODE_LABEL } from '../i18n/ja';
 import { onKeyDown, onKeyUp } from '../editor/input';
-import { exportLayout, importLayout } from '../core/io/serialize';
+import { projectActions } from '../editor/project';
+import { downloadText, ProjectPanel } from './ProjectPanel';
 import { setBuildState } from '../core/layout/operations';
 import { applyOp } from '../editor/store';
 import { Toolbox, toolHint } from './Toolbox';
@@ -16,7 +19,7 @@ import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
 import type { Overlays } from '../editor/store';
 import { ops } from '../editor/simRunner';
-import { AircraftPanel, BaggageBoard, EventLog, FlightBoard, GroundBoard, OpsControls, TerminalBoard } from './OpsPanels';
+import { AircraftPanel, BaggageBoard, DisruptionBoard, EventLog, FlightBoard, GroundBoard, OpsControls, TerminalBoard } from './OpsPanels';
 import { useState } from 'react';
 
 const OVERLAY_LABEL: Record<keyof Overlays, string> = {
@@ -26,6 +29,7 @@ const OVERLAY_LABEL: Record<keyof Overlays, string> = {
   network: '論理ネットワーク・予約',
   issues: 'エラー表示',
   labels: 'ラベル',
+  congestion: '混雑マップ',
 };
 
 export function App() {
@@ -55,7 +59,7 @@ export function App() {
         <FacilityList />
       </aside>
       <main className="center">
-        <MapView />
+        <Viewport />
         <StatusBar />
         <Toast />
       </main>
@@ -65,7 +69,7 @@ export function App() {
   );
 }
 
-type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance' | 'access' | 'expansion';
+type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance' | 'access' | 'expansion' | 'catalog' | 'disruptions' | 'analytics' | 'scenarios' | 'project';
 
 function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
   return (
@@ -90,6 +94,9 @@ function BuildBottom() {
           ['finance', '経営'],
           ['access', 'アクセス'],
           ['expansion', '拡張計画'],
+          ['catalog', '機種カタログ'],
+          ['scenarios', 'シナリオ'],
+          ['project', 'プロジェクト'],
         ]}
         tab={tab}
         setTab={setTab}
@@ -103,6 +110,12 @@ function BuildBottom() {
           <AccessPanel />
         ) : tab === 'expansion' ? (
           <ExpansionPanel />
+        ) : tab === 'catalog' ? (
+          <CatalogPanel />
+        ) : tab === 'scenarios' ? (
+          <ScenarioPanel />
+        ) : tab === 'project' ? (
+          <ProjectPanel />
         ) : (
           <IssuesPanel />
         )}
@@ -123,8 +136,13 @@ function OpsBottom() {
           ['baggage', '手荷物'],
           ['plan', '運航計画'],
           ['finance', '経営'],
+          ['disruptions', '天候・障害'],
+          ['analytics', '分析'],
+          ['scenarios', 'シナリオ'],
           ['access', 'アクセス'],
           ['expansion', '拡張計画'],
+          ['catalog', '機種カタログ'],
+          ['project', 'プロジェクト'],
           ['events', 'イベント'],
           ['issues', '配置チェック'],
         ]}
@@ -147,6 +165,16 @@ function OpsBottom() {
           <AccessPanel />
         ) : tab === 'expansion' ? (
           <ExpansionPanel />
+        ) : tab === 'catalog' ? (
+          <CatalogPanel />
+        ) : tab === 'disruptions' ? (
+          <DisruptionBoard />
+        ) : tab === 'analytics' ? (
+          <AnalyticsPanel />
+        ) : tab === 'scenarios' ? (
+          <ScenarioPanel />
+        ) : tab === 'project' ? (
+          <ProjectPanel />
         ) : tab === 'events' ? (
           <EventLog />
         ) : (
@@ -160,25 +188,19 @@ function TopBar() {
   const canUndo = useEditor((s) => s.history.past.length > 0);
   const canRedo = useEditor((s) => s.history.future.length > 0);
   const overlays = useEditor((s) => s.overlays);
+  const viewMode = useEditor((s) => s.viewMode);
   const layout = useLayout();
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = useEditor((s) => s.mode);
   const career = useEditor((s) => s.company.mode === 'career');
 
+  // 書き出し・読み込みはプロジェクト単位（レイアウト・会社・機種データ・シナリオ）。旧形式のレイアウトファイルも読める
   const download = () => {
-    const blob = new Blob([exportLayout(layout)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${layout.name || 'airport'}.skyport.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    const { fileName, json } = projectActions.exportJson();
+    downloadText(fileName, json);
   };
   const upload = async (file: File) => {
-    try {
-      replaceLayout(importLayout(await file.text()), `${file.name} を読み込みました`);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : '読み込みに失敗しました', 'error');
-    }
+    projectActions.importJson(await file.text(), file.name);
   };
 
   return (
@@ -255,6 +277,11 @@ function TopBar() {
         </div>
         </>
       )}
+      <div className="top-group">
+        <button data-testid="view-toggle" className={viewMode === '3d' ? 'active' : ''} onClick={() => actions.setViewMode(viewMode === '3d' ? '2d' : '3d')} title="2D マップと 3D ビューを切り替えます（運航は止まりません）">
+          {viewMode === '3d' ? '2D表示へ' : '3D表示へ'}
+        </button>
+      </div>
       <div className="top-group overlays">
         {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
           <label key={k}>

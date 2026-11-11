@@ -2,7 +2,8 @@ import { Rng } from '../rng';
 import { compareIds } from '../model/ids';
 import { WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
 import { findPaxRoute, linkBetween } from '../terminal/route';
-import { AIRCRAFT_TYPES } from './aircraftTypes';
+import { resolveType } from './aircraftTypes';
+import { demandFactorAt } from './disruptions';
 import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt } from './baggage';
 import { boardingAllowed } from './ground';
 import { BALANCE } from '../economy/balance';
@@ -103,7 +104,8 @@ const isClosed = (state: SimState, areaId: string) => state.closedAreas.includes
 
 /** 施設の窓口数（閉鎖中は 0） */
 export function serversOf(sim: Simulation, key: string): number {
-  if (key.startsWith('gate:')) return 1;
+  // 故障・閉鎖中のゲートでは搭乗の処理をしない（sim/disruptions.ts）
+  if (key.startsWith('gate:')) return sim.state.closures.gates.includes(key.slice('gate:'.length)) ? 0 : 1;
   const a = sim.ctx.layout.terminalAreas[key];
   if (!a || isClosed(sim.state, key)) return 0;
   return Math.max(0, Number(a.props.counters ?? a.props.lanes ?? a.props.fixtures ?? a.props.capacity ?? 0));
@@ -137,7 +139,7 @@ const STEP_KIND: Partial<Record<PaxStep, AreaNode['kind']>> = {
 
 function boardingLeadSec(sim: Simulation, f: Flight): number {
   const ac = sim.state.aircraft[f.aircraftId]!;
-  return BOARDING_LEAD_MIN[AIRCRAFT_TYPES[ac.typeId].size] * 60;
+  return BOARDING_LEAD_MIN[resolveType(sim.ctx.types, ac.typeId).size] * 60;
 }
 
 function hasBridge(sim: Simulation, gateId: string | null): boolean {
@@ -200,7 +202,10 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
   if (p.boarding === 'open') {
     p.deadline = Math.max(f.estimated - DEADLINE_BEFORE_SEC, p.boardingOpenedAt! + MIN_BOARDING_WINDOW_SEC);
     const groups = groupsOf(state, f.id);
-    const gateBusy = p.gateId ? (state.facilities[`gate:${p.gateId}`]?.queue.length ?? 0) + (state.facilities[`gate:${p.gateId}`]?.inService.length ?? 0) > 0 : false;
+    // 搭乗処理中は締め切らない（ただし故障中のゲートは処理が進まないので締め切る）
+    const gateClosed = !!p.gateId && state.closures.gates.includes(p.gateId);
+    const gateBusy =
+      p.gateId && !gateClosed ? (state.facilities[`gate:${p.gateId}`]?.queue.length ?? 0) + (state.facilities[`gate:${p.gateId}`]?.inService.length ?? 0) > 0 : false;
     const allResolved = p.generated && groups.every((g) => PAX_FINAL_STATES.includes(g.state));
     if ((state.now >= p.deadline && !gateBusy) || allResolved) closeBoarding(sim, f, null);
   }
@@ -249,9 +254,12 @@ function generateDeparturePax(sim: Simulation, f: Flight): void {
   p.generated = true;
   const terminal = ctx.paxTerminal;
   if (!terminal) return; // ターミナル（入口）が無い空港では旅客なし
-  const seats = AIRCRAFT_TYPES[state.aircraft[f.aircraftId]!.typeId].seats;
+  const seats = f.seats ?? resolveType(sim.ctx.types, state.aircraft[f.aircraftId]!.typeId).seats;
+  // 需要の急増（障害）で予約が増える。座席数が上限
+  const surge = demandFactorAt(state);
   withRng(state, (rng) => {
     let remaining = f.plannedPax ?? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min)));
+    if (surge !== 1) remaining = Math.min(seats, Math.round(remaining * surge));
     p.booked = remaining;
     while (remaining > 0) {
       const count = Math.min(remaining, rng.int(1, MAX_GROUP_SIZE));
@@ -330,7 +338,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
   const gateId = ac.standId ? (ctx.standGate[ac.standId] ?? null) : null;
   if (!p.generated) {
     p.generated = true;
-    const seats = AIRCRAFT_TYPES[ac.typeId].seats;
+    const seats = f.seats ?? resolveType(ctx.types, ac.typeId).seats;
     const access = gateId ? ctx.terminal.gates[gateId] : undefined;
     withRng(state, (rng) => {
       p.booked = ctx.paxTerminal || access?.terminalId ? (f.plannedPax ?? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min)))) : 0;

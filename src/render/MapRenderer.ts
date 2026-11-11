@@ -13,13 +13,14 @@ import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
 import { computePreview, facilityKindOf, nextPathPoint, rectFromDrag } from '../editor/tools';
 import { getAnalysis, type EditorState, type OpsState } from '../editor/store';
-import { AIRCRAFT_TYPES } from '../core/sim/aircraftTypes';
+import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../core/sim/aircraftTypes';
 import { isVisible } from '../core/sim/query';
 import { edgeIndexAt, pointAt } from '../core/sim/routes';
 import type { Aircraft, UnitKind } from '../core/sim/types';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { linkBetween } from '../core/terminal/route';
 import { AREA_KIND_LABEL } from '../i18n/ja';
+import { airportKpis, type AirportKpis } from '../core/analytics/kpi';
 
 /**
  * PixiJS による空港マップ描画。シミュレーション・編集の状態は一切変更せず、
@@ -45,7 +46,11 @@ export class MapRenderer {
   private textPool = new Map<string, Text>();
   private usedTexts = new Set<string>();
   private terrainSite: Site | null = null;
+  /** 運航中の機種テーブル（保存時の機種データを使う運航ではそのスナップショット） */
+  private typeTable: TypeTable | null = null;
   private zoom = 1;
+  /** 混雑マップの集計（毎フレーム集計しないよう、シミュレーション時刻が変わったときだけ更新） */
+  private kpiCache: { now: number; sim: unknown; k: AirportKpis } | null = null;
   private interiorShown = false;
 
   async init(host: HTMLElement): Promise<void> {
@@ -103,6 +108,7 @@ export class MapRenderer {
     }
     this.drawDraft(s);
     if (s.overlays.labels) this.drawLabels(layout, analysis, cam);
+    if (s.ops && s.overlays.congestion) this.drawCongestion(layout, s.ops, cam, s.overlays.labels);
     if (s.ops) this.drawOps(s.ops, cam, s.overlays.network);
     for (const [k, t] of this.textPool) t.visible = this.usedTexts.has(k);
   }
@@ -351,6 +357,48 @@ export class MapRenderer {
   }
 
   // ------------------------------------------------------------ オーバーレイ
+
+  // ------------------------------------------------------------ 混雑マップ
+
+  /**
+   * 運航実績（analytics）から、滑走路・スポットの使用率、地上で止まった時間の多いノード、
+   * 処理施設の平均待ち時間を色で示す。緑 → 黄 → 赤 の順に混雑。
+   */
+  private drawCongestion(layout: AirportLayout, ops: OpsState, cam: Camera, labels: boolean): void {
+    const sim = ops.sim;
+    if (!this.kpiCache || this.kpiCache.sim !== sim || Math.abs(this.kpiCache.now - sim.state.now) >= 30) {
+      this.kpiCache = { now: sim.state.now, sim, k: airportKpis(sim) };
+    }
+    const k = this.kpiCache.k;
+    const o = this.overlay;
+    const heat = (v: number) => (v < 0.4 ? 0x3ccf6e : v < 0.7 ? 0xffc23d : 0xff4d4f);
+    for (const r of k.runways) {
+      const rw = layout.runways[r.id];
+      if (!rw) continue;
+      const poly = runwayPolygon(rw).flatMap((p) => [p.x, p.y]);
+      o.poly(poly).fill({ color: heat(r.util), alpha: 0.35 });
+      if (labels) this.label(`cg:${r.id}`, `使用率 ${Math.round(r.util * 100)}%`, { x: rw.start.x + 1, y: rw.start.y - 1 }, cam, { size: 11, color: 0xffffff });
+    }
+    for (const st of k.stands) {
+      const stand = layout.stands[st.id];
+      if (!stand) continue;
+      const d = standDims(stand);
+      o.rect(stand.origin.x, stand.origin.y, d.w, d.h).fill({ color: heat(st.util), alpha: 0.35 });
+    }
+    const maxWait = Math.max(1, ...k.hotspots.map((h) => h.waitMin));
+    for (const h of k.hotspots) {
+      const n = sim.ctx.network.nodes[h.node];
+      if (!n || h.waitMin <= 0) continue;
+      const p = c(n.pos);
+      o.circle(p.x, p.y, 1 + 3 * (h.waitMin / maxWait)).fill({ color: heat(h.waitMin / 30), alpha: 0.45 });
+      if (labels) this.label(`cgn:${h.node}`, `停止 ${h.waitMin}分`, { x: p.x + 1, y: p.y - 1 }, cam, { size: 10, color: 0xffe08a });
+    }
+    for (const f of k.facilities) {
+      const a = layout.terminalAreas[f.id];
+      if (!a || f.avgWaitMin === null) continue;
+      o.rect(a.origin.x, a.origin.y, a.w, a.h).stroke({ width: this.px(3), color: heat(f.avgWaitMin / 15), alpha: 0.9 });
+    }
+  }
 
   private drawNetwork(analysis: LayoutAnalysis): void {
     const o = this.overlay;
@@ -609,6 +657,7 @@ export class MapRenderer {
   // ------------------------------------------------------------ 運航
 
   private drawOps(ops: OpsState, cam: Camera, showReservations: boolean): void {
+    this.typeTable = ops.sim.ctx.types;
     const o = this.overlay;
     const { sim } = ops;
     const net = sim.ctx.network;
@@ -689,7 +738,7 @@ export class MapRenderer {
 
   private drawAircraft(ac: Aircraft, x: number, y: number, heading: number, selected: boolean): void {
     const g = this.overlay;
-    const t = AIRCRAFT_TYPES[ac.typeId];
+    const t = resolveType(this.typeTable ?? AIRCRAFT_TYPES, ac.typeId);
     const half = Math.max(0.5, t.lengthM / 25 / 2);
     const span = Math.max(0.5, t.wingspanM / 25 / 2);
     const rad = (heading * Math.PI) / 180;

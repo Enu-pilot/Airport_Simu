@@ -211,6 +211,7 @@ describe('運航計画', () => {
       departureAt: 10 * 3600 + i * 60,
       arrPax: 60,
       depPax: 60,
+      seats: 70,
       inboundDelaySec: 0,
     }));
     const plan: DayPlan = { day: 0, flights, dropped: [] };
