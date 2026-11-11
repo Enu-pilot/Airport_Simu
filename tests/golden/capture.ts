@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { buildAirsideNetwork } from '../../src/core/airside/network';
 import { createSandboxCompany } from '../../src/core/economy/company';
-import { buildProject, serializeProject } from '../../src/core/io/project';
+import { buildProject, effectiveModels, restoreSimulation, serializeProject, validateProject } from '../../src/core/io/project';
 import { exportLayout } from '../../src/core/io/serialize';
 import { footprintOf, footprintOwnerIds } from '../../src/core/layout/footprint';
 import { addTaxiwayPath, placeRunway, type OpResult } from '../../src/core/layout/operations';
@@ -159,4 +159,28 @@ export function captureProject(): unknown {
   });
   const json = serializeProject(p);
   return { length: json.length, sha256: sha256(json) };
+}
+
+/** 途中保存・復元の運航（+3 時間で保存 → 検証 → 復元し、元と復元後をそれぞれ +2 時間進める） */
+export function captureMidRunRestore(): { saved: unknown; hashes: { original: string; restored: string }; violations: string[]; projectLength: number } {
+  const company = createSandboxCompany();
+  const sim = createSimulation(createSampleAirport(), { company });
+  const SAVE_AT = 3 * 3600;
+  const MORE = 2 * 3600;
+  for (let i = 0; i < SAVE_AT; i++) stepSimulation(sim);
+  const json = serializeProject(
+    buildProject({ name: 'midrun', savedAt: '2026-11-10T00:00:00Z', layout: sim.ctx.layout, company, pin: null, scenarios: [], sim }),
+  );
+  const report = validateProject(json, { fallbackCompany: createSandboxCompany() });
+  if (!report.ok || !report.project?.sim) throw new Error(`検証に失敗: ${report.errors.join(' / ')}`);
+  const { sim: restored, violations } = restoreSimulation(report.project.layout, report.project.sim, effectiveModels(report.project.catalog));
+  for (let i = 0; i < MORE; i++) {
+    stepSimulation(sim);
+    stepSimulation(restored);
+  }
+  // state は挿入順も含めて完全一致。company は importCompany が項目順を正規化するため、キーを整列して比較する
+  const canon = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, canon(x)])) : v;
+  const h = (s: typeof sim): string => sha256(JSON.stringify({ state: s.state, company: canon(s.company) }));
+  return { saved: { seconds: SAVE_AT, then: MORE, now: sim.state.now }, hashes: { original: h(sim), restored: h(restored) }, violations, projectLength: json.length };
 }
