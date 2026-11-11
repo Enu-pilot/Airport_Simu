@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { TILE_M } from '../../core/model/catalog';
+import { bearingToSceneYawRad, tilesToM, worldToMap, worldToScene } from '../../core/geometry/frames';
 import type { AirportLayout, Facility, FacilityKind } from '../../core/model/types';
 import { facilityDims, standDims } from '../../core/layout/footprint';
-import { runwayPolygon } from '../../core/layout/runway';
+import { roadBandSurface, runwayPavementSurface, taxiwayBandSurface } from '../../core/layout/surfaces';
 import { resolveType, type AircraftType } from '../../core/sim/aircraftTypes';
 import { isVisible } from '../../core/sim/query';
 import type { Aircraft, UnitKind } from '../../core/sim/types';
@@ -18,15 +18,15 @@ import { aircraftObject, geometryCacheSize } from './aircraftMesh';
  * 3D 表示（Phase 9）。レイアウト（論理データ）から施設を組み立て、機体・車両の位置はシミュレーションの状態を
  * そのまま読む（3D 側で動きを計算しない）。2D と同じ EditorState を受け取り、状態は変更しない。
  *
- * 座標: 1 単位 = 1 m。タイル (x, y) の中心 → (x + 0.5) × 25, 高さ 0, (y + 0.5) × 25。
+ * 座標: 1 単位 = 1 m。World 座標の点は frames.ts の worldToScene で変換する（タイル (x, y) の中心 → (x + 0.5) × 25）。
  * 機首方位 h（0 = 北 = 画面上）→ Y 軸まわりに 90° − h。
  *
  * 高度は表示専用の簡略式（進入中は滑走路までの距離 × tan 3°、離陸後は経過時間 × 10 m/s）で、
  * シミュレーションには高度の概念がない。
  */
 
-const M = TILE_M;
-const w = (t: number) => t * M;
+/** Map フレームのタイル座標 → m（位置は World → Map を frames.ts で変換してから使う） */
+const w = tilesToM;
 
 /** 施設の高さ（m、ゲームの表示用の値） */
 const FACILITY_HEIGHT: Partial<Record<FacilityKind, number>> = {
@@ -168,33 +168,22 @@ export class Scene3D {
       this.staticGroup.add(m);
     };
 
-    for (const r of Object.values(layout.runways)) flat(runwayPolygon(r), 0.3, 0x3a3f45, r.buildState === 'operational' ? 1 : 0.5, r.id);
-
-    // 誘導路・道路（ノード間の帯）
-    const band = (a: { x: number; y: number }, b: { x: number; y: number }, widthM: number, y: number, color: number, opacity: number) => {
-      const ax = w(a.x + 0.5);
-      const az = w(a.y + 0.5);
-      const bx = w(b.x + 0.5);
-      const bz = w(b.y + 0.5);
-      const len = Math.hypot(bx - ax, bz - az);
-      if (len < 0.01) return;
-      const g = new THREE.PlaneGeometry(len + widthM, widthM);
-      g.rotateX(-Math.PI / 2);
-      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity }));
-      m.position.set((ax + bx) / 2, y, (az + bz) / 2);
-      m.rotation.y = -Math.atan2(bz - az, bx - ax);
-      this.staticGroup.add(m);
+    // World フレームの形状は worldToMap 経由で描く（滑走路・誘導路・道路で同じ位置規約）
+    const flatWorld = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string) => {
+      if (pts.length > 0) flat(pts.map(worldToMap), y, color, opacity, entityId);
     };
-    const TW_WIDTH = { S: 15, M: 23, L: 30 } as const;
+    for (const r of Object.values(layout.runways)) flatWorld(runwayPavementSurface(r), 0.3, 0x3a3f45, r.buildState === 'operational' ? 1 : 0.5, r.id);
+
+    // 誘導路・道路（ノード間の帯。形状は core の surfaces、幅は m の表）
     for (const e of Object.values(layout.taxiways)) {
       const a = layout.taxiNodes[e.from];
       const b = layout.taxiNodes[e.to];
-      if (a && b) band(a.pos, b.pos, e.codeF ? 38 : TW_WIDTH[e.widthClass], 0.2, 0x55595f, e.buildState === 'operational' ? 1 : 0.5);
+      if (a && b) flatWorld(taxiwayBandSurface(a.pos, b.pos, e), 0.2, 0x55595f, e.buildState === 'operational' ? 1 : 0.5);
     }
     for (const e of Object.values(layout.roads)) {
       const a = layout.roadNodes[e.from];
       const b = layout.roadNodes[e.to];
-      if (a && b) band(a.pos, b.pos, e.roadClass === 'rail' ? 8 : 12, 0.15, e.roadClass === 'rail' ? 0x6b4f3a : 0x777777, 1);
+      if (a && b) flatWorld(roadBandSurface(a.pos, b.pos, e), 0.15, e.roadClass === 'rail' ? 0x6b4f3a : 0x777777, 1);
     }
     for (const st of Object.values(layout.stands)) {
       const d = standDims(st);
@@ -238,7 +227,7 @@ export class Scene3D {
     if (AIRBORNE_STATES.includes(ac.state)) {
       const rw = ac.runwayId ? this.layout?.runways[ac.runwayId] : undefined;
       if (!rw) return 600;
-      const dist = Math.hypot(ac.x - rw.start.x, ac.y - rw.start.y) * M;
+      const dist = tilesToM(Math.hypot(ac.x - rw.start.x, ac.y - rw.start.y));
       return Math.min(900, Math.max(15, dist * Math.tan((3 * Math.PI) / 180)));
     }
     if (ac.state === 'takeoff') return Math.max(0, (ac.speed - t.rotateSpeed) * 4);
@@ -267,17 +256,16 @@ export class Scene3D {
         rec = { obj, key };
         this.aircraftObjs.set(ac.id, rec);
       }
-      const x = ac.px + (ac.x - ac.px) * alpha + 0.5;
-      const y = ac.py + (ac.y - ac.py) * alpha + 0.5;
+      const sp = worldToScene({ x: ac.px + (ac.x - ac.px) * alpha, y: ac.py + (ac.y - ac.py) * alpha });
       const dh = ((ac.heading - ac.pheading + 540) % 360) - 180;
       const heading = ac.pheading + dh * alpha;
-      rec.obj.position.set(w(x), this.altitudeM(ops, ac, t), w(y));
-      rec.obj.rotation.y = ((90 - heading) * Math.PI) / 180;
+      rec.obj.position.set(sp.x, this.altitudeM(ops, ac, t), sp.z);
+      rec.obj.rotation.y = bearingToSceneYawRad(heading);
       if (ac.id === ops.selectedAircraft) {
         this.selRing.visible = true;
         const s = t.wingspanM * 0.6;
         this.selRing.scale.set(s, s, s);
-        this.selRing.position.set(w(x), 0.6, w(y));
+        this.selRing.position.set(sp.x, 0.6, sp.z);
       }
     }
     for (const [id, rec] of this.aircraftObjs) {
@@ -305,7 +293,8 @@ export class Scene3D {
     const m = new THREE.Matrix4();
     const col = new THREE.Color();
     units.forEach((u, i) => {
-      m.makeTranslation(w(u.x + 0.5), 1.5, w(u.y + 0.5));
+      const up = worldToScene(u);
+      m.makeTranslation(up.x, 1.5, up.z);
       this.units!.setMatrixAt(i, m);
       this.units!.setColorAt(i, col.setHex(u.status === 'broken' ? 0xff3030 : UNIT_COLOR3D[u.kind]));
     });
