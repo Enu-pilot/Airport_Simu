@@ -52,6 +52,7 @@ export const NODE_KIND_LABEL: Record<AirsideNodeKind, string> = {
   endpoint: '端点',
   runwayEntry: '滑走路入口',
   runwayThreshold: '滑走路端',
+  runwayIntersection: '滑走路の交差点',
   stand: 'スポット',
 };
 

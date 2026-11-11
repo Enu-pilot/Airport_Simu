@@ -1,11 +1,13 @@
 import { TILE_M } from '../model/catalog';
-import { sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
+import { isFreeRunway, sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
 import { distance, type Tile, type Vec2 } from '../geometry/vec';
+import { POS_EPS_T } from '../geometry/tolerance';
+import { classifySegmentIntersection } from '../geometry/segment';
 import { mapToWorld } from '../geometry/frames';
 import { rectCenter, standDims, standEntry } from '../layout/footprint';
 import { edgesOfNode, findNodeAt } from '../layout/network';
 import { compareIds, sortedValues } from '../model/ids';
-import { positionOnRunway, runwayEnd, runwayMaxSize } from '../layout/runway';
+import { positionOnRunway, runwayAxis, runwayEnd, runwayMaxSize } from '../layout/runway';
 
 /**
  * 論理エアサイドネットワーク（派生データ）。
@@ -17,12 +19,20 @@ import { positionOnRunway, runwayEnd, runwayMaxSize } from '../layout/runway';
  * ID 規則:
  * - 誘導路ノード: レイアウトのノードIDそのまま（tn_*）
  * - 滑走路端: `${runwayId}:T0`（始点側）/ `${runwayId}:T1`（終点側）。端に誘導路ノードがあればそれを使う
+ * - 滑走路の交差点（自由形が関与する組だけ）: `${a}:X:${b}`（a < b）。その位置に誘導路ノードがあればそれを使う
  * - スポット: `${standId}:P`、スポット接続エッジ: `${standId}:L`
  * - 滑走路区間: `${runwayId}:${nodeA}~${nodeB}`
  * - 誘導路エッジ: レイアウトのエッジIDそのまま（twy_*）
  */
 
-export type AirsideNodeKind = 'taxiway' | 'intersection' | 'endpoint' | 'runwayEntry' | 'runwayThreshold' | 'stand';
+export type AirsideNodeKind =
+  | 'taxiway'
+  | 'intersection'
+  | 'endpoint'
+  | 'runwayEntry'
+  | 'runwayThreshold'
+  | 'runwayIntersection'
+  | 'stand';
 
 export interface AirsideNode {
   id: string;
@@ -62,6 +72,19 @@ export interface AirsideEdge {
   holdShortAt?: { nodeId: string; runwayId: string };
 }
 
+/** 滑走路どうしの交差点（自由形が関与する組だけ） */
+export interface RunwayCrossingPoint {
+  /** `${a}:X:${b}`（a < b）。組の ID */
+  id: string;
+  a: string;
+  b: string;
+  /** 交差点のネットワークノード（新規の runwayIntersection、または同じ位置の誘導路ノード） */
+  nodeId: string;
+  /** 各滑走路の始点から交差点までの位置（0..1） */
+  tA: number;
+  tB: number;
+}
+
 export interface AirsideNetwork {
   nodes: Record<string, AirsideNode>;
   edges: Record<string, AirsideEdge>;
@@ -73,6 +96,65 @@ export interface AirsideNetwork {
   runwayNodes: Record<string, string[]>;
   /** スポットID → 接続先の誘導路ノード（未接続なら無し） */
   standLinks: Record<string, string>;
+  /** 滑走路どうしの交差点。自由形が関与する交差があるときだけ存在する（従来形だけなら欠落） */
+  crossings?: RunwayCrossingPoint[];
+}
+
+/** nodes の中で p から POS_EPS_T 以内の最も近いノード（同距離は ID 順） */
+function nodeNear(nodes: Record<string, AirsideNode>, p: Tile): string | undefined {
+  let best: string | undefined;
+  let bestD = Infinity;
+  for (const n of Object.values(nodes)) {
+    const dist = Math.hypot(n.pos.x - p.x, n.pos.y - p.y);
+    if (dist > POS_EPS_T) continue;
+    if (dist < bestD || (dist === bestD && best !== undefined && compareIds(n.id, best) < 0)) {
+      best = n.id;
+      bestD = dist;
+    }
+  }
+  return best;
+}
+
+/**
+ * 滑走路どうしの交差点ノードを作る（少なくとも一方が自由形の組だけ。従来形どうしは対象外）。
+ * 中心線が 1 点で交わる（端点での T 字を含む）組に、`${a}:X:${b}` のノードを作る。
+ * 共線で重なる組（overlap）は作らない（検証でエラー）。
+ */
+function addRunwayIntersections(
+  layout: AirportLayout,
+  nodes: Record<string, AirsideNode>,
+): { extra: Record<string, { t: number; id: string }[]>; crossings: RunwayCrossingPoint[] } {
+  const extra: Record<string, { t: number; id: string }[]> = {};
+  const crossings: RunwayCrossingPoint[] = [];
+  const rs = sortedValues(layout.runways);
+  for (let i = 0; i < rs.length; i++) {
+    for (let j = i + 1; j < rs.length; j++) {
+      const ra = rs[i]!;
+      const rb = rs[j]!;
+      if (!isFreeRunway(ra) && !isFreeRunway(rb)) continue;
+      const [a, b] = compareIds(ra.id, rb.id) < 0 ? [ra, rb] : [rb, ra];
+      const xa = runwayAxis(a);
+      const xb = runwayAxis(b);
+      const c = classifySegmentIntersection(xa.start, xa.end, xb.start, xb.end);
+      if (c.kind !== 'point') continue;
+      const tA = c.atEndA ? (c.t < 0.5 ? 0 : 1) : c.t;
+      const tB = c.atEndB ? (c.u < 0.5 ? 0 : 1) : c.u;
+      const id = `${a.id}:X:${b.id}`;
+      let nodeId = nodeNear(nodes, c.p);
+      if (nodeId === undefined) {
+        nodeId = id;
+        nodes[id] = { id, pos: { x: c.p.x, y: c.p.y }, kind: 'runwayIntersection', runwayIds: [a.id, b.id], standIds: [], holdShort: false, operational: false };
+      } else {
+        // 誘導路ノードの runwayIds は下の滑走路のループが付ける。既に作った交差点ノードの再利用だけここで足す
+        const n = nodes[nodeId]!;
+        if (n.kind === 'runwayIntersection') for (const rid of [a.id, b.id]) if (!n.runwayIds.includes(rid)) n.runwayIds.push(rid);
+      }
+      (extra[a.id] ??= []).push({ t: tA, id: nodeId });
+      (extra[b.id] ??= []).push({ t: tB, id: nodeId });
+      crossings.push({ id, a: a.id, b: b.id, nodeId, tA, tB });
+    }
+  }
+  return { extra, crossings };
 }
 
 export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
@@ -114,6 +196,10 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
     };
   }
 
+  // 滑走路どうしの交差点（自由形が関与する組だけ。従来形だけなら何もしない）
+  const hasFree = Object.values(layout.runways).some(isFreeRunway);
+  const { extra, crossings } = hasFree ? addRunwayIntersections(layout, nodes) : { extra: {}, crossings: [] };
+
   // 滑走路: 中心線上のノード（端 + 入口）を順に結ぶ
   for (const r of sortedValues(layout.runways)) {
     const maxSize = runwayMaxSize(r);
@@ -128,12 +214,22 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
       node.runwayIds.push(r.id);
       node.holdShort = n.holdShort;
     }
+    // 交差点ノード（同じノードが既に中心線上にあれば重複させない）
+    const crossHere = extra[r.id] ?? [];
+    for (const x of crossHere) {
+      if (onLine.some((o) => o.id === x.id)) continue;
+      onLine.push(x);
+      const node = nodes[x.id]!;
+      if (node.kind !== 'runwayIntersection' && !node.runwayIds.includes(r.id)) node.runwayIds.push(r.id);
+    }
     const ends: [number, Tile, string][] = [
       [0, r.start, `${r.id}:T0`],
       [1, runwayEnd(r), `${r.id}:T1`],
     ];
     for (const [t, pos, id] of ends) {
-      if (findNodeAt(layout.taxiNodes, pos)) continue;
+      // 自由形（と交差点を持つ滑走路）は中心線上の位置 t で判定する（終点が実数のため。従来形は従来の厳密一致）
+      const covered = isFreeRunway(r) || crossHere.length > 0 ? onLine.some((o) => o.t === t) : !!findNodeAt(layout.taxiNodes, pos);
+      if (covered) continue;
       nodes[id] = { id, pos, kind: 'runwayThreshold', runwayIds: [r.id], standIds: [], holdShort: false, operational: false };
       onLine.push({ t, id });
     }
@@ -222,7 +318,9 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
       nodes[e.to]!.operational = true;
     }
   }
-  return { nodes, edges, outgoing, incoming, runwayNodes, standLinks };
+  const net: AirsideNetwork = { nodes, edges, outgoing, incoming, runwayNodes, standLinks };
+  if (crossings.length > 0) net.crossings = crossings;
+  return net;
 }
 
 export interface UseOptions {

@@ -38,6 +38,7 @@ export const NODE_COLOR: Record<AirsideNodeKind, number> = {
   endpoint: 0xffa726,
   runwayEntry: 0xff5252,
   runwayThreshold: 0xffffff,
+  runwayIntersection: 0xff9800,
   stand: 0x80deea,
 };
 
