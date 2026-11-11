@@ -22,8 +22,8 @@ import {
 } from './bezier';
 import { integrateAdaptive } from './integrate';
 import { closestPointOnSegment } from './segment';
-import { LENGTH_REL_TOL, MAX_SUBDIV_DEPTH } from './tolerance';
-import type { Vec2 } from './vec';
+import { FLATTEN_TOL_RENDER_T, LENGTH_REL_TOL, MAX_SUBDIV_DEPTH } from './tolerance';
+import { rasterizeSegment, tileKey, type Tile, type Vec2 } from './vec';
 import type { WorldPoint } from './frames';
 
 export interface LineCurve {
@@ -341,4 +341,21 @@ export function pointAtLength(c: Curve, s: number, tbl?: ArcLengthTable): CurveP
   const sc = Math.max(0, Math.min(table.total, s));
   const t = tableTAtLength(table, sc);
   return { p: evaluate(c, t), t, s: sc };
+}
+
+/** 曲線が通過するタイル（折れ線化して rasterizeSegment を連結、重複除去、順序は曲線に沿う）。Phase 13 用 */
+export function rasterizeCurve(c: Curve, tol: number = FLATTEN_TOL_RENDER_T): Tile[] {
+  const pts = flatten(c, tol);
+  const seen = new Set<string>();
+  const out: Tile[] = [];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    for (const t of rasterizeSegment(pts[i]!.p, pts[i + 1]!.p)) {
+      const k = tileKey(t.x, t.y);
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(t);
+      }
+    }
+  }
+  return out;
 }
