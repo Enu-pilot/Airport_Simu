@@ -236,7 +236,12 @@ export interface TerminalArea {
   props: Record<string, PropValue>;
 }
 
-export const SCHEMA_VERSION = 2;
+/**
+ * レイアウトの保存形式の版。
+ * 3（Phase 12）: 自由形の滑走路・磁気偏角・ルール切替・TaxiwayEdge.geometry（Phase 13）など、任意項目の追加のみ。
+ * v2 のデータはそのまま妥当な v3 なので、移行は何も書き換えない（`layout.schemaVersion` も 2 のまま。docs/21）。
+ */
+export const SCHEMA_VERSION = 3;
 
 export interface AirportLayout {
   schemaVersion: number;
