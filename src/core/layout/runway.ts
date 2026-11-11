@@ -71,8 +71,10 @@ export interface RunwayAxis {
   /** 始点 → 終点の単位方向 */
   dir: Vec2;
   /** 真方位（度、[0, 360)） */
-  bearingDeg: number;
-  /** 実長（m）。`runwayLengthM` と同じ */
+  trueHeadingDeg: number;
+  /** 長さ（タイル）。丸めなし（端点間の距離。斜めは √2 倍） */
+  lengthT: number;
+  /** 実長（m、四捨五入）。`runwayLengthM` と同じ */
   lengthM: number;
 }
 
@@ -84,7 +86,8 @@ export function runwayAxis(r: Runway): RunwayAxis {
     start: { x: r.start.x, y: r.start.y },
     end,
     dir: { x: v.x / len, y: v.y / len },
-    bearingDeg: r.heading,
+    trueHeadingDeg: r.heading,
+    lengthT: r.length * len,
     lengthM: runwayLengthM(r),
   };
 }

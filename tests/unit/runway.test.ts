@@ -71,8 +71,12 @@ describe('runwayAxis', () => {
       const ax = runwayAxis(r);
       expect(ax.start).toEqual({ x: 3, y: -4 });
       expect(ax.end).toEqual(runwayEnd(r));
-      expect(ax.bearingDeg).toBe(h);
+      expect(ax.trueHeadingDeg).toBe(h);
       expect(ax.lengthM).toBe(runwayLengthM(r));
+      // lengthT は丸めなしのタイル長（端点間距離）。斜めは √2 倍
+      expect(ax.lengthT).toBeCloseTo(Math.hypot(ax.end.x - ax.start.x, ax.end.y - ax.start.y), 12);
+      expect(ax.lengthT).toBe(h % 90 === 0 ? 37 : 37 * Math.SQRT2);
+      expect(Math.round(ax.lengthT * 25)).toBe(ax.lengthM);
       expect(Math.hypot(ax.dir.x, ax.dir.y)).toBeCloseTo(1, 15);
     }
   });

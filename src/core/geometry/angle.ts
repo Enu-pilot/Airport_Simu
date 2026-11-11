@@ -59,17 +59,23 @@ export function signedAngleDiffDeg(a: number, b: number): number {
   return d > 180 ? d - 360 : d;
 }
 
-/** 8 方位 → 1 ステップのタイル差分（0 = 北 = -y） */
-export const GRID8_STEP: Record<Heading, Tile> = {
-  0: { x: 0, y: -1 },
-  45: { x: 1, y: -1 },
-  90: { x: 1, y: 0 },
-  135: { x: 1, y: 1 },
-  180: { x: 0, y: 1 },
-  225: { x: -1, y: 1 },
-  270: { x: -1, y: 0 },
-  315: { x: -1, y: -1 },
-};
+const step = (x: number, y: number): Readonly<Tile> => Object.freeze({ x, y });
+
+/**
+ * 8 方位 → 1 ステップのタイル差分（0 = 北 = -y）。
+ * 表と各エントリは凍結済み（`headingVector` が共有オブジェクトを返すため、書き換えを防ぐ）。
+ * -0 の成分は持たない（+0 のみ）。
+ */
+export const GRID8_STEP: Readonly<Record<Heading, Readonly<Tile>>> = Object.freeze({
+  0: step(0, -1),
+  45: step(1, -1),
+  90: step(1, 0),
+  135: step(1, 1),
+  180: step(0, 1),
+  225: step(-1, 1),
+  270: step(-1, 0),
+  315: step(-1, -1),
+});
 
 export function isGrid8Heading(n: number): n is Heading {
   return Number.isInteger(n) && n >= 0 && n < 360 && n % 45 === 0;

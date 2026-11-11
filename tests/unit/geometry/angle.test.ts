@@ -44,6 +44,18 @@ describe('angle: 旧式とのオラクル比較', () => {
     }
   });
 
+  it('GRID8_STEP は表も各エントリも凍結され、-0 を含まない', () => {
+    expect(Object.isFrozen(GRID8_STEP)).toBe(true);
+    for (const h of H8) {
+      expect(Object.isFrozen(GRID8_STEP[h])).toBe(true);
+      expect(Object.is(GRID8_STEP[h].x, -0)).toBe(false);
+      expect(Object.is(GRID8_STEP[h].y, -0)).toBe(false);
+    }
+    expect(() => {
+      (GRID8_STEP[90] as { x: number }).x = 5;
+    }).toThrow();
+  });
+
   it('dirToBearing は headingOf と === 一致する（8 方位・(0,0)・乱数 10,000 方向）', () => {
     expect(dirToBearing(0, 0)).toBe(0);
     for (const h of H8) {
