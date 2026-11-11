@@ -40,8 +40,11 @@ function pointVsSegment(pt: Vec2, a: Vec2, b: Vec2, swap: boolean): SegmentInter
  * - 長さで正規化した外積が ANGLE_EPS_RAD 以下なら平行（共線かは cd 端点と直線 ab の距離 ≤ POS_EPS_T で判定）
  * - 端点判定はパラメータ許容 POS_EPS_T / 線分長
  * - 長さ ≤ POS_EPS_T の線分は点として扱う
+ * - 非有限の座標を含む入力は none
  */
 export function classifySegmentIntersection(a: Vec2, b: Vec2, c: Vec2, d: Vec2): SegmentIntersection {
+  // 非有限（NaN / ±Infinity）の座標を含む入力は交差なし
+  for (const v of [a, b, c, d]) if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return { kind: 'none' };
   const r = sub(b, a);
   const s = sub(d, c);
   const lr = Math.hypot(r.x, r.y);

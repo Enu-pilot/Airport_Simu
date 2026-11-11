@@ -4,7 +4,7 @@
  */
 import { bearingToDir } from './angle';
 import { evaluate, derivative, flatten, tangentBearingDeg, type Curve } from './curve';
-import { FLATTEN_TOL_RENDER_T, POS_EPS_T } from './tolerance';
+import { arcSegmentCount, arcStepRad, FLATTEN_TOL_RENDER_T, POS_EPS_T } from './tolerance';
 import type { Vec2 } from './vec';
 
 /**
@@ -54,9 +54,7 @@ const unit = (dx: number, dy: number): Vec2 => {
 
 /** 中心 c から角度 a0 → a1（ラジアン、a1 − a0 の符号に従う）の円弧上の点列（端点を除く内側のみ） */
 function arcPoints(c: Vec2, r: number, a0: number, a1: number, tol: number): Vec2[] {
-  const ratio = 1 - Math.max(tol, 1e-12) / r;
-  const step = ratio <= -1 ? Math.PI : 2 * Math.acos(Math.max(-1, ratio));
-  const n = Math.max(1, Math.ceil(Math.abs(a1 - a0) / step - 1e-12));
+  const n = arcSegmentCount(a1 - a0, arcStepRad(r, tol));
   const out: Vec2[] = [];
   for (let i = 1; i < n; i++) {
     const a = a0 + ((a1 - a0) * i) / n;

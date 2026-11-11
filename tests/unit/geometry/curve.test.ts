@@ -289,32 +289,41 @@ describe('長さ・分割・反転（性質テスト、シード付き乱数）'
     }
   });
 
-  it('bbox は密サンプリングの点を含み、ほぼ一致する', () => {
+  it('bbox は密サンプリングの点を含み、サンプリング誤差の理論上限内でほぼ一致する', () => {
     const rng = new Rng('bbox');
+    const N = 64;
+    // |B''| の上限（極値のサンプリング誤差 ≤ A · (1/N)² / 8）
+    const accel = (c: Curve): number => {
+      const dd = (a: ReturnType<typeof P>, b: ReturnType<typeof P>, d: ReturnType<typeof P>) => Math.hypot(a.x - 2 * b.x + d.x, a.y - 2 * b.y + d.y);
+      if (c.kind === 'line') return 0;
+      if (c.kind === 'arc') return c.r * c.sweep * c.sweep;
+      if (c.kind === 'quad') return 2 * dd(c.p0, c.p1, c.p2);
+      return 6 * Math.max(dd(c.p0, c.p1, c.p2), dd(c.p1, c.p2, c.p3));
+    };
     for (const k of KINDS) {
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 300; i++) {
         const c = randCurve(rng, k);
         const b = bbox(c);
         let mnx = Infinity;
         let mxx = -Infinity;
         let mny = Infinity;
         let mxy = -Infinity;
-        for (let j = 0; j <= 400; j++) {
-          const p = evaluate(c, j / 400);
+        for (let j = 0; j <= N; j++) {
+          const p = evaluate(c, j / N);
           mnx = Math.min(mnx, p.x);
           mxx = Math.max(mxx, p.x);
           mny = Math.min(mny, p.y);
           mxy = Math.max(mxy, p.y);
-          expect(p.x).toBeGreaterThanOrEqual(b.minX - 1e-9);
-          expect(p.x).toBeLessThanOrEqual(b.maxX + 1e-9);
-          expect(p.y).toBeGreaterThanOrEqual(b.minY - 1e-9);
-          expect(p.y).toBeLessThanOrEqual(b.maxY + 1e-9);
         }
+        const slack = (accel(c) / (N * N)) / 8 + 1e-6;
         expect(b.minX).toBeLessThanOrEqual(mnx + 1e-9);
-        expect(mnx - b.minX).toBeLessThan(0.2 + 1e-9 + (k === 'line' ? 0 : 1));
-        expect(b.maxX - mxx).toBeLessThan(1.2);
-        expect(mny - b.minY).toBeLessThan(1.2);
-        expect(b.maxY - mxy).toBeLessThan(1.2);
+        expect(b.minY).toBeLessThanOrEqual(mny + 1e-9);
+        expect(b.maxX).toBeGreaterThanOrEqual(mxx - 1e-9);
+        expect(b.maxY).toBeGreaterThanOrEqual(mxy - 1e-9);
+        expect(mnx - b.minX).toBeLessThan(slack);
+        expect(b.maxX - mxx).toBeLessThan(slack);
+        expect(mny - b.minY).toBeLessThan(slack);
+        expect(b.maxY - mxy).toBeLessThan(slack);
       }
     }
     // 半円の bbox は軸方向の極値を含む

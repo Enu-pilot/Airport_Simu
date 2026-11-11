@@ -85,10 +85,10 @@ export function arcFromThreePoints(p0: Vec2, pm: Vec2, p1: Vec2): ArcCurve | nul
 
 /**
  * 始点・始点での進行方位（度）・半径・掃引角（ラジアン、正 = 右旋回 = 時計回り）から円弧を作る。
- * radius ≤ 0 または sweep = 0 は null。
+ * radius ≤ 0・sweep = 0・|sweep| ≥ 2π・非有限の sweep は null（ArcCurve の不変条件 |sweep| < 2π）。
  */
 export function arcFromTangent(start: Vec2, bearingDeg: number, radius: number, sweep: number): ArcCurve | null {
-  if (!(radius > 0) || sweep === 0) return null;
+  if (!(radius > 0) || !(Math.abs(sweep) > 0) || !(Math.abs(sweep) < TWO_PI)) return null;
   const d = bearingToDir(bearingDeg);
   const n = perp(d); // 右（時計回り側）の法線
   const sg = sweep < 0 ? -1 : 1;

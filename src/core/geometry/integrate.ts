@@ -18,6 +18,7 @@ export function gauss5(f: (t: number) => number, a: number, b: number): number {
  * 適応積分。区間を二分し、1 区間の結果と 2 分割の和の差が許容内なら採用する。
  * 許容は 全体の概算 × relTol（+ absTol）を深さごとに半分ずつ配分する。
  * 先頭で 4 等分してから適応を始める（局所的な特徴の見落とし防止）。
+ * 区間端・被積分値が非有限（NaN / ±Infinity）なら、有限時間で NaN を返す（深さ上限まで再帰しない）。
  */
 export function integrateAdaptive(
   f: (t: number) => number,
@@ -27,6 +28,7 @@ export function integrateAdaptive(
   maxDepth = 24,
   absTol = 1e-15,
 ): number {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return NaN;
   if (a === b) return 0;
   const N0 = 4;
   const parts: [number, number, number][] = [];
@@ -38,15 +40,17 @@ export function integrateAdaptive(
     parts.push([lo, hi, v]);
     total += Math.abs(v);
   }
+  if (!Number.isFinite(total)) return NaN;
   const eps = (relTol * total + absTol) / N0;
   const rec = (lo: number, hi: number, whole: number, e: number, depth: number): number => {
     const m = (lo + hi) / 2;
     const l = gauss5(f, lo, m);
     const r = gauss5(f, m, hi);
+    if (!Number.isFinite(l + r)) return NaN;
     if (depth >= maxDepth || Math.abs(l + r - whole) <= e) return l + r;
     return rec(lo, m, l, e / 2, depth + 1) + rec(m, hi, r, e / 2, depth + 1);
   };
   let sum = 0;
   for (const [lo, hi, v] of parts) sum += rec(lo, hi, v, eps, 0);
-  return sum;
+  return sum; // 途中で NaN があれば NaN が伝播する
 }

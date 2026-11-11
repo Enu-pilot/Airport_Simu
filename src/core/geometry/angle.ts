@@ -86,9 +86,10 @@ export function magneticFromTrue(trueDeg: number, variationEastDeg: number): num
 /**
  * 滑走路番号（1〜36）。10° 単位に四捨五入（.5 は切り上げ、0 は 36）。
  * 浮動小数点の 22.4999999 型の揺れを避けるため 1e-6 度に丸めてから判定する
- * （整数入力では恒等）。
+ * （整数入力では恒等）。非有限の入力は RangeError（NaN の番号を黙って返さない）。
  */
 export function designatorNumber(magDeg: number): number {
+  if (!Number.isFinite(magDeg)) throw new RangeError(`designatorNumber: 有限でない方位です (${String(magDeg)})`);
   const r = normalizeDeg(Math.round(magDeg * 1e6) / 1e6);
   const n = Math.round(r / 10) % 36;
   return n === 0 ? 36 : n;

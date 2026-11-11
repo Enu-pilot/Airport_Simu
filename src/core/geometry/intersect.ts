@@ -7,6 +7,10 @@
  * - 接触（重根）は 1 点で `tangent: true`。端点での接触も `point` として返す（呼び出し側が意味を決める）。
  * - 共線の線分・同一円上の円弧の重なりは `overlap`。一般の Bezier の部分的な重なりは検出せず、
  *   制御点が完全に一致（または逆順一致）する場合のみ overlap [0, 1] を返す。
+ * - 共線の線分と Bezier（制御点が直線上、s 方向に単調）は、重なり区間を `overlap` で返す。
+ *   2 次を 3 次に次数上げした一致も overlap [0, 1]。それ以外の部分的な重なりは検出しない。
+ * - 細分の予算（候補数・ノード数）を超えたら、それ以上は分割せず粗い候補をそのまま Newton に渡す
+ *   （交点を捨てない）。その場合 `intersectCurvesDetailed` の `truncated` が true になる。
  * - 決定的: ループ順・再帰順は固定で、乱数・時刻を使わない。
  */
 import { type Curve, type ArcCurve, bbox, derivative, evaluate, split, closestPoint } from './curve';
@@ -152,10 +156,68 @@ function sameCircleOverlap(a: ArcCurve, b: ArcCurve): CurveIntersection[] {
 // ---------------------------------------------------------------- 一般（細分 + Newton）
 
 const SPLIT_SIZE_T = 0.01;
-const MAX_CANDIDATES = 256;
+const MAX_CANDIDATES = 4096;
+const MAX_NODES = 100_000;
+
+export interface IntersectResult {
+  intersections: CurveIntersection[];
+  /** 細分の予算を使い切り、一部の候補を粗いまま扱った（交点の取りこぼし・分離不足がありうる） */
+  truncated: boolean;
+}
+
+type CtrlCurve = Curve & { kind: 'quad' | 'cubic' };
+const ctrlOf = (c: Curve): Vec2[] | null => (c.kind === 'quad' ? [c.p0, c.p1, c.p2] : c.kind === 'cubic' ? [c.p0, c.p1, c.p2, c.p3] : null);
+
+/** 2 次 → 3 次の次数上げ */
+function elevate(c: Curve & { kind: 'quad' }): Vec2[] {
+  const l = (a: Vec2, b: Vec2, t: number): Vec2 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  return [c.p0, l(c.p0, c.p1, 2 / 3), l(c.p1, c.p2, 1 / 3), c.p2];
+}
+
+/** 線分と、制御点がすべてその直線上にある単調な Bezier の重なり（なければ null = 一般経路へ） */
+function collinearLineBezier(l: Curve & { kind: 'line' }, b: CtrlCurve, lineIsFirst: boolean): CurveIntersection[] | null {
+  const dx = l.p1.x - l.p0.x;
+  const dy = l.p1.y - l.p0.y;
+  const len = Math.hypot(dx, dy);
+  if (!(len > POS_EPS_T)) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+  const pts = ctrlOf(b)!;
+  const s = pts.map((q) => (q.x - l.p0.x) * ux + (q.y - l.p0.y) * uy);
+  for (const q of pts) if (Math.abs((q.x - l.p0.x) * -uy + (q.y - l.p0.y) * ux) > POS_EPS_T) return null;
+  const inc = s.every((v, i) => i === 0 || v >= s[i - 1]!);
+  const dec = s.every((v, i) => i === 0 || v <= s[i - 1]!);
+  if (!inc && !dec) return null;
+  const sAt = (t: number): number => {
+    const q = evaluate(b, t);
+    return (q.x - l.p0.x) * ux + (q.y - l.p0.y) * uy;
+  };
+  const lo = Math.max(0, Math.min(s[0]!, s[s.length - 1]!));
+  const hi = Math.min(len, Math.max(s[0]!, s[s.length - 1]!));
+  if (hi - lo <= POS_EPS_T) return null;
+  const tOf = (target: number): number => {
+    let a = 0;
+    let c = 1;
+    for (let i = 0; i < 60; i++) {
+      const m = (a + c) / 2;
+      if ((sAt(m) < target) === inc) a = m;
+      else c = m;
+    }
+    return (a + c) / 2;
+  };
+  const tLo = lo <= Math.min(s[0]!, s[s.length - 1]!) ? (inc ? 0 : 1) : tOf(lo);
+  const tHi = hi >= Math.max(s[0]!, s[s.length - 1]!) ? (inc ? 1 : 0) : tOf(hi);
+  const lineA = lo / len;
+  const lineB = hi / len;
+  if (lineIsFirst) return [{ kind: 'overlap', t1a: lineA, t1b: lineB, t2a: tLo, t2b: tHi }];
+  // b が第 1 引数: t1a < t1b になるよう並べる
+  return tLo <= tHi
+    ? [{ kind: 'overlap', t1a: tLo, t1b: tHi, t2a: lineA, t2b: lineB }]
+    : [{ kind: 'overlap', t1a: tHi, t1b: tLo, t2a: lineB, t2b: lineA }];
+}
 
 function sameControlPoints(c1: Curve, c2: Curve): 'same' | 'reversed' | null {
-  const pts = (c: Curve): Vec2[] | null => (c.kind === 'quad' ? [c.p0, c.p1, c.p2] : c.kind === 'cubic' ? [c.p0, c.p1, c.p2, c.p3] : c.kind === 'line' ? [c.p0, c.p1] : null);
+  const pts = (c: Curve): Vec2[] | null => (c.kind === 'quad' ? elevate(c) : c.kind === 'cubic' ? [c.p0, c.p1, c.p2, c.p3] : c.kind === 'line' ? [c.p0, c.p1] : null);
   const a = pts(c1);
   const b = pts(c2);
   if (!a || !b || a.length !== b.length) return null;
@@ -165,24 +227,35 @@ function sameControlPoints(c1: Curve, c2: Curve): 'same' | 'reversed' | null {
   return null;
 }
 
-function intersectGeneral(c1: Curve, c2: Curve, tol: number): CurveIntersection[] {
+function intersectGeneral(c1: Curve, c2: Curve, tol: number, flag: { truncated: boolean }): CurveIntersection[] {
   const same = sameControlPoints(c1, c2);
   if (same === 'same') return [{ kind: 'overlap', t1a: 0, t1b: 1, t2a: 0, t2b: 1 }];
   if (same === 'reversed') return [{ kind: 'overlap', t1a: 0, t1b: 1, t2a: 1, t2b: 0 }];
 
+  if (c1.kind === 'line' && (c2.kind === 'quad' || c2.kind === 'cubic')) {
+    const o = collinearLineBezier(c1, c2, true);
+    if (o) return o;
+  } else if (c2.kind === 'line' && (c1.kind === 'quad' || c1.kind === 'cubic')) {
+    const o = collinearLineBezier(c2, c1, false);
+    if (o) return o;
+  }
+
   const cands: [number, number][] = [];
+  let nodes = 0;
   const sizeOf = (c: Curve): number => {
     const b = bbox(c);
     return Math.max(b.maxX - b.minX, b.maxY - b.minY);
   };
   const rec = (a: Curve, ta0: number, ta1: number, b: Curve, tb0: number, tb1: number, depth: number): void => {
-    if (cands.length >= MAX_CANDIDATES) return;
+    nodes++;
     const ba = bboxExpand(bbox(a), tol);
     const bb = bboxExpand(bbox(b), tol);
     if (!bboxIntersects(ba, bb)) return;
     const sa = sizeOf(a);
     const sb = sizeOf(b);
-    if ((sa <= SPLIT_SIZE_T && sb <= SPLIT_SIZE_T) || depth >= MAX_SUBDIV_DEPTH) {
+    const overBudget = cands.length >= MAX_CANDIDATES || nodes >= MAX_NODES;
+    if ((sa <= SPLIT_SIZE_T && sb <= SPLIT_SIZE_T) || depth >= MAX_SUBDIV_DEPTH || overBudget) {
+      if (overBudget && !(sa <= SPLIT_SIZE_T && sb <= SPLIT_SIZE_T)) flag.truncated = true;
       cands.push([(ta0 + ta1) / 2, (tb0 + tb1) / 2]);
       return;
     }
@@ -255,13 +328,19 @@ function intersectGeneral(c1: Curve, c2: Curve, tol: number): CurveIntersection[
 
 /** 2 曲線の交差。tol は点の一致・収束判定（タイル、既定 POS_EPS_T） */
 export function intersectCurves(c1: Curve, c2: Curve, tol: number = POS_EPS_T): CurveIntersection[] {
+  return intersectCurvesDetailed(c1, c2, tol).intersections;
+}
+
+/** intersectCurves と同じ結果に、細分の予算超過（truncated）の有無を添えて返す */
+export function intersectCurvesDetailed(c1: Curve, c2: Curve, tol: number = POS_EPS_T): IntersectResult {
+  const flag = { truncated: false };
   let res: CurveIntersection[];
   if (c1.kind === 'line' && c2.kind === 'line') res = lineLine(c1, c2);
   else if (c1.kind === 'line' && c2.kind === 'arc') res = lineArc(c1, c2, true);
   else if (c1.kind === 'arc' && c2.kind === 'line') res = lineArc(c2, c1, false);
   else if (c1.kind === 'arc' && c2.kind === 'arc') res = arcArc(c1, c2);
-  else res = intersectGeneral(c1, c2, tol);
-  return dedupeSorted(res, tol);
+  else res = intersectGeneral(c1, c2, tol, flag);
+  return { intersections: dedupeSorted(res, tol), truncated: flag.truncated };
 }
 
 const keyT1 = (r: CurveIntersection): number => (r.kind === 'point' ? r.t1 : r.t1a);

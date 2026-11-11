@@ -11,7 +11,7 @@ import {
 } from './arc';
 import { dirToBearing } from './angle';
 import { buildArcLengthTable, tAtLength as tableTAtLength, type ArcLengthTable } from './arclength';
-import { bboxOf, type Bbox } from './bbox';
+import { bboxOf, NAN_BBOX, type Bbox } from './bbox';
 import {
   bezierBbox,
   bezierCurvature,
@@ -22,7 +22,7 @@ import {
 } from './bezier';
 import { integrateAdaptive } from './integrate';
 import { closestPointOnSegment } from './segment';
-import { FLATTEN_TOL_RENDER_T, LENGTH_REL_TOL, MAX_SUBDIV_DEPTH } from './tolerance';
+import { arcSegmentCount, arcStepRad, FLATTEN_TOL_RENDER_T, LENGTH_REL_TOL, MAX_FLATTEN_POINTS, MAX_SUBDIV_DEPTH } from './tolerance';
 import { rasterizeSegment, tileKey, type Tile, type Vec2 } from './vec';
 import type { WorldPoint } from './frames';
 
@@ -165,7 +165,7 @@ export function split(c: Curve, t: number): [Curve, Curve] {
 export function bbox(c: Curve): Bbox {
   switch (c.kind) {
     case 'line':
-      return bboxOf([c.p0, c.p1])!;
+      return bboxOf([c.p0, c.p1]) ?? NAN_BBOX;
     case 'arc': {
       const cand: Vec2[] = [arcPoint(c, 0), arcPoint(c, 1)];
       const lo = Math.min(c.theta0, c.theta0 + c.sweep);
@@ -174,7 +174,7 @@ export function bbox(c: Curve): Bbox {
         const th = k * (Math.PI / 2);
         cand.push({ x: c.c.x + c.r * Math.cos(th), y: c.c.y + c.r * Math.sin(th) });
       }
-      return bboxOf(cand)!;
+      return bboxOf(cand) ?? NAN_BBOX;
     }
     default:
       return bezierBbox(ctrl(c));
@@ -184,6 +184,8 @@ export function bbox(c: Curve): Bbox {
 /**
  * 折れ線化。弦高誤差（曲線上の任意の点から折れ線までの距離）≤ tol を保証する。端点を必ず含む。
  * 円弧は角度刻みを解析的に決め、Bezier は制御点の弦までの距離で再帰細分する。
+ * 区間数は MAX_FLATTEN_POINTS（Bezier は進行中の再帰分を加えた MAX + 2·MAX_SUBDIV_DEPTH）で打ち切る（超える巨大・微小 tol では誤差保証を捨てるが、端点を含む有効な折れ線を返す）。
+ * 非有限の入力は有限回で終わり、NaN を含む点列を返す。
  */
 export function flatten(c: Curve, tol: number): CurvePoint[] {
   const e = Math.max(tol, 1e-12);
@@ -191,10 +193,8 @@ export function flatten(c: Curve, tol: number): CurvePoint[] {
     case 'line':
       return [{ p: c.p0, t: 0 }, { p: c.p1, t: 1 }];
     case 'arc': {
-      // 弦高 r(1 − cos(dθ/2)) ≤ tol
-      const ratio = 1 - e / c.r;
-      const dth = ratio <= -1 ? 2 * Math.PI : 2 * Math.acos(Math.max(-1, ratio));
-      const n = Math.max(1, Math.ceil(Math.abs(c.sweep) / dth - 1e-12));
+      // 弦高 r(1 − cos(dθ/2)) ≤ tol（巨大半径でも桁落ちしない式。区間数は MAX_FLATTEN_POINTS で打ち切り）
+      const n = arcSegmentCount(c.sweep, arcStepRad(c.r, e));
       const out: CurvePoint[] = [];
       for (let i = 0; i <= n; i++) {
         const t = i / n;
@@ -214,7 +214,7 @@ export function flatten(c: Curve, tol: number): CurvePoint[] {
             break;
           }
         }
-        if (flat || depth >= MAX_SUBDIV_DEPTH) {
+        if (flat || depth >= MAX_SUBDIV_DEPTH || out.length >= MAX_FLATTEN_POINTS) {
           out.push({ p: b, t: t1 });
           return;
         }

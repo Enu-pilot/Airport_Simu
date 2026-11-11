@@ -8,9 +8,13 @@ export interface Bbox {
   maxY: number;
 }
 
-/** 点列の境界ボックス。空なら null */
+/** 非有限の入力に対する境界ボックス（どの bbox とも交差・包含しない） */
+export const NAN_BBOX: Bbox = { minX: NaN, minY: NaN, maxX: NaN, maxY: NaN };
+
+/** 点列の境界ボックス。空、または非有限（NaN / ±Infinity）の座標を含むなら null（反転した箱を返さない） */
 export function bboxOf(points: readonly Vec2[]): Bbox | null {
   if (points.length === 0) return null;
+  for (const p of points) if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;

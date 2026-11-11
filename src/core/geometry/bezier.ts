@@ -1,6 +1,6 @@
 /** 2 次・3 次 Bezier（制御点配列 3 点 / 4 点）。純関数 */
 import { dirToBearing } from './angle';
-import { bboxOf, type Bbox } from './bbox';
+import { bboxOf, NAN_BBOX, type Bbox } from './bbox';
 import type { Vec2 } from './vec';
 
 export type BezierPts = readonly Vec2[];
@@ -114,8 +114,9 @@ function axisExtremaT(v: readonly number[]): number[] {
 
 /** 厳密な境界ボックス（端点 + 導関数の根での点） */
 export function bezierBbox(pts: BezierPts): Bbox {
+  if (!pts.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) return NAN_BBOX;
   const cand: Vec2[] = [pts[0]!, pts[pts.length - 1]!];
   for (const t of axisExtremaT(pts.map((p) => p.x))) cand.push(bezierPoint(pts, t));
   for (const t of axisExtremaT(pts.map((p) => p.y))) cand.push(bezierPoint(pts, t));
-  return bboxOf(cand)!;
+  return bboxOf(cand) ?? NAN_BBOX;
 }

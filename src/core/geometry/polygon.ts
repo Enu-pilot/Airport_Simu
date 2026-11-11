@@ -134,14 +134,16 @@ function boundaryInsideOther(A: readonly Vec2[], B: readonly Vec2[], inwardSign:
  */
 export function polygonsOverlap(A: readonly Vec2[], B: readonly Vec2[]): boolean {
   if (A.length < 3 || B.length < 3) return false;
-  const ba = bboxOf(A)!;
-  const bb = bboxOf(B)!;
-  if (!bboxIntersects(ba, bb)) return false;
+  const ba = bboxOf(A);
+  const bb = bboxOf(B);
+  if (!ba || !bb || !bboxIntersects(ba, bb)) return false;
   const sa = signedArea(A) >= 0 ? 1 : -1;
   const sb = signedArea(B) >= 0 ? 1 : -1;
   // 左法線 (-dy, dx) が内側になるのは面積が正のとき
   return boundaryInsideOther(A, B, sa) || boundaryInsideOther(B, A, sb);
 }
+
+const isFinitePoint = (p: Vec2): boolean => Number.isFinite(p.x) && Number.isFinite(p.y);
 
 function segSegDist(a: Vec2, b: Vec2, c: Vec2, d: Vec2): number {
   const r = classifySegmentIntersection(a, b, c, d);
@@ -154,9 +156,10 @@ function segSegDist(a: Vec2, b: Vec2, c: Vec2, d: Vec2): number {
   );
 }
 
-/** 2 多角形の最小距離（重なる・接する・包含は 0）。クリアランス用 */
+/** 2 多角形の最小距離（重なる・接する・包含は 0）。クリアランス用。非有限の頂点を含むなら NaN */
 export function polygonMinDistance(A: readonly Vec2[], B: readonly Vec2[]): number {
   if (A.length === 0 || B.length === 0) return Infinity;
+  if (!A.every(isFinitePoint) || !B.every(isFinitePoint)) return NaN;
   if (polygonContains(B, A[0]!, true) || polygonContains(A, B[0]!, true)) return 0;
   let best = Infinity;
   for (let i = 0; i < A.length; i++) {
