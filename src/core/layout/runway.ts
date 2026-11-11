@@ -65,16 +65,6 @@ export function runwayDesignators(heading: Heading): [string, string] {
   return [fmt(heading), fmt((heading + 180) % 360)];
 }
 
-/** 滑走路番号の文字列対（表示用）。従来形は `runwayDesignators`、自由形は真方位から（磁気偏差・接尾辞は S2 の `designatorsOf` で扱う） */
-export function runwayDesignatorText(r: Runway): [string, string] {
-  if (!isFreeRunway(r)) return runwayDesignators(r.heading);
-  const fmt = (deg: number) => {
-    const n = Math.round(deg / 10) % 36;
-    return String(n === 0 ? 36 : n).padStart(2, '0');
-  };
-  return [fmt(r.headingDeg), fmt((r.headingDeg + 180) % 360)];
-}
-
 /** 中心線方向に extend、直交方向に halfWidth だけ広げた矩形（タイル番号空間）。演算順は従来と同一 */
 function runwayRect(r: Runway, halfWidth: number, extend: number): Vec2[] {
   const { start, end, dir } = runwayAxis(r);

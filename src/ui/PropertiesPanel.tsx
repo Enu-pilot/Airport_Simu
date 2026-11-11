@@ -20,7 +20,8 @@ import {
   rotateEntity,
   updateEntity,
 } from '../core/layout/operations';
-import { runwayDesignatorText, runwayDesignators, runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
+import { designatorsOf } from '../core/layout/designators';
+import { runwayDesignators, runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
 import { applyOp, closeTemporarily, editorStore, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { ops } from '../editor/simRunner';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
@@ -195,7 +196,7 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
 
   if (type === 'runway') {
     const r = layout.runways[id]!;
-    const [d0, d1] = runwayDesignatorText(r);
+    const [d0, d1] = designatorsOf(r, layout).text;
     const entries = (net.runwayNodes[id] ?? []).filter((n) => layout.taxiNodes[n]);
     if (isFreeRunway(r)) {
       // 自由形の編集欄は Phase 12 の UI ステップで追加する。ここでは読み取り専用の表示

@@ -9,7 +9,8 @@ import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Site, Stand
 import { entityTypeOf } from '../core/model/types';
 import { facilityDims, standDims, standEntry } from '../core/layout/footprint';
 import { offsiteTilesIn } from '../core/layout/operations';
-import { runwayAxis, runwayDesignatorText, runwayEnd } from '../core/layout/runway';
+import { designatorsOf } from '../core/layout/designators';
+import { runwayAxis, runwayEnd } from '../core/layout/runway';
 import { roadDrawWidthM, runwayPavementSurface, runwayStripSurface, taxiwayBandSurface, taxiwayDrawWidthM } from '../core/layout/surfaces';
 import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
@@ -535,7 +536,7 @@ export class MapRenderer {
 
   private drawLabels(layout: AirportLayout, analysis: LayoutAnalysis, cam: Camera): void {
     for (const r of Object.values(layout.runways)) {
-      const [d0, d1] = runwayDesignatorText(r);
+      const [d0, d1] = designatorsOf(r, layout).text;
       const u = runwayAxis(r).dir;
       const s0 = c(r.start);
       const e0 = c(runwayEnd(r));
