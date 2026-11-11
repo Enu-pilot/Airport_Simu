@@ -10,7 +10,8 @@ import { SIM_START_SEC } from '../core/sim/rules';
 import type { Simulation } from '../core/sim/simulation';
 import { areaOccupancy, facilityLoad, serversOf } from '../core/sim/passengers';
 import type { BagState, BlockReason, DisruptionKind, Flight, RunwayMode, SimState, WeatherKind } from '../core/sim/types';
-import { runwayDesignators } from '../core/layout/runway';
+import { runwayDesignatorText } from '../core/layout/runway';
+import type { Runway } from '../core/model/types';
 import { editorStore, useEditor, type OpsState } from '../editor/store';
 import { disruptionActions, ops } from '../editor/simRunner';
 import { checkStand } from '../core/aircraft/compat';
@@ -155,10 +156,10 @@ export function OpsControls() {
   );
 }
 
-function RunwayRow({ state, rid, layoutRunway }: { state: SimState; rid: string; layoutRunway: { heading: 0 | 45 | 90 | 135 | 180 | 225 | 270 | 315; name: string } }) {
+function RunwayRow({ state, rid, layoutRunway }: { state: SimState; rid: string; layoutRunway: Runway }) {
   const rs = state.runways[rid]!;
   const cfg = state.runwayConfig[rid]!;
-  const [d0, d1] = runwayDesignators(layoutRunway.heading);
+  const [d0, d1] = runwayDesignatorText(layoutRunway);
   const occ = rs.occupant ? state.aircraft[rs.occupant.aircraftId] : null;
   const booking = rs.booking ? state.aircraft[rs.booking.aircraftId] : null;
   const arrQ = Object.values(state.aircraft).filter((a) => a.runwayId === rid && (a.state === 'holding' || a.state === 'inbound')).length;
@@ -549,7 +550,7 @@ export function FlightBoard() {
                   <td>{formatClock(f.scheduled)}</td>
                   <td>{f.actual !== null ? formatClock(f.actual) : f.status === 'scheduled' || f.status === 'active' ? formatClock(f.estimated) : '—'}</td>
                   <td className={delay && delay >= 15 ? 'ng-text' : ''}>{delay ? `${delay}分` : ''}</td>
-                  <td>{rw ? runwayDesignators(rw.heading).join('/') : ''}</td>
+                  <td>{rw ? runwayDesignatorText(rw).join('/') : ''}</td>
                   <td>{f.standId ? displayName(o.sim.ctx.layout, f.standId).replace('スポット ', '') : ''}</td>
                   <td data-testid={`pax-${f.number}`}>{paxCell(f)}</td>
                   <td>{FLIGHT_STATUS_LABEL[f.status]}</td>

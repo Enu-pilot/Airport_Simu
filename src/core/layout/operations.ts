@@ -5,6 +5,7 @@ import {
   HEADINGS,
   SCHEMA_VERSION,
   entityTypeOf,
+  isFreeRunway,
   type AirportLayout,
   type BuildState,
   type Facility,
@@ -13,7 +14,7 @@ import {
   type PropValue,
   type RoadClass,
   type Rotation,
-  type Runway,
+  type RunwayGrid8,
   type SizeClass,
   type Site,
   type Stand,
@@ -23,6 +24,7 @@ import {
   Terrain,
 } from '../model/types';
 import { add, sameTile, type Tile } from '../geometry/vec';
+import { bearingToDir } from '../geometry/angle';
 import { sortedValues } from '../model/ids';
 import { facilityDims, originAfterRotation, standDims, standEntry } from './footprint';
 import {
@@ -430,6 +432,8 @@ export function rotateEntity(layout: AirportLayout, id: string): OpResult {
   } else if (type === 'runway') {
     const r = d.runways[id];
     if (!r) return fail('NOT_FOUND');
+    // 自由形の回転（中点まわり・任意角）は S4 で追加する。それまでは未対応
+    if (isFreeRunway(r)) return fail('NOT_SUPPORTED');
     setRunwayHeadingAroundMid(r, ((r.heading + 45) % 360) as Heading);
   } else {
     return fail(layout.taxiNodes[id] || layout.roadNodes[id] || layout.taxiways[id] || layout.roads[id] ? 'NOT_SUPPORTED' : 'NOT_FOUND');
@@ -437,7 +441,7 @@ export function rotateEntity(layout: AirportLayout, id: string): OpResult {
   return ok(finalize(d));
 }
 
-function setRunwayHeadingAroundMid(r: Runway, heading: Heading): void {
+function setRunwayHeadingAroundMid(r: RunwayGrid8, heading: Heading): void {
   const mid = runwayMidpoint(r);
   const v = headingVector(heading);
   r.heading = heading;
@@ -454,6 +458,11 @@ export function defaultDuplicateOffset(layout: AirportLayout, id: string): Tile 
   if (s) return { x: standDims(s).w + 1, y: 0 };
   const r = layout.runways[id];
   if (r) {
+    if (isFreeRunway(r)) {
+      // 進行方向に直交（右手）へ 12 タイル。整数に丸める
+      const d = bearingToDir(r.headingDeg + 90);
+      return { x: Math.round(d.x * 12), y: Math.round(d.y * 12) };
+    }
     const v = headingVector(r.heading);
     return { x: -v.y * 12, y: v.x * 12 };
   }
@@ -582,6 +591,11 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
     case 'runway': {
       const r = d.runways[id];
       // 方位変更は中点を保つ
+      if (r && isFreeRunway(r)) {
+        // 自由形: 幾何の編集は S4 の `setFreeRunwayGeometry` で追加する。ここでは共通項目のみ
+        err = apply(r, { name: str, surfaceWidthM: (v) => RUNWAY_WIDTHS.includes(v as 30 | 45 | 60), buildState: isBuildState });
+        break;
+      }
       if (r && 'heading' in patch && HEADINGS.includes(patch.heading as Heading)) {
         const { heading, ...rest } = patch;
         setRunwayHeadingAroundMid(r, heading as Heading);

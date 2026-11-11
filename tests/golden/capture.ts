@@ -17,7 +17,7 @@ import { buildProject, effectiveModels, restoreSimulation, serializeProject, val
 import { exportLayout } from '../../src/core/io/serialize';
 import { footprintOf, footprintOwnerIds } from '../../src/core/layout/footprint';
 import { headingVector, runwayDesignators, runwayEnd, runwayLengthM, runwayPolygon, runwayStripPolygon } from '../../src/core/layout/runway';
-import type { AirportLayout, Heading } from '../../src/core/model/types';
+import type { AirportLayout, Heading, RunwayGrid8 } from '../../src/core/model/types';
 import { airportKpis } from '../../src/core/analytics/kpi';
 import { SIM_MODEL_VERSION } from '../../src/core/scenario/scenario';
 import { createSimulation, stepSimulation } from '../../src/core/sim/simulation';
@@ -51,7 +51,7 @@ export function captureGeometry(layout: AirportLayout): unknown {
   const footprints: Record<string, unknown> = {};
   for (const id of footprintOwnerIds(layout)) footprints[id] = footprintOf(layout, id);
   const runways: Record<string, unknown> = {};
-  for (const [id, r] of Object.entries(layout.runways)) {
+  for (const [id, r] of Object.entries(layout.runways) as [string, RunwayGrid8][]) {
     runways[id] = {
       heading: r.heading,
       length: r.length,

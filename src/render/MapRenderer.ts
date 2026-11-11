@@ -9,7 +9,7 @@ import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Site, Stand
 import { entityTypeOf } from '../core/model/types';
 import { facilityDims, standDims, standEntry } from '../core/layout/footprint';
 import { offsiteTilesIn } from '../core/layout/operations';
-import { runwayDesignators, runwayEnd, headingVector } from '../core/layout/runway';
+import { runwayAxis, runwayDesignatorText, runwayEnd } from '../core/layout/runway';
 import { roadDrawWidthM, runwayPavementSurface, runwayStripSurface, taxiwayBandSurface, taxiwayDrawWidthM } from '../core/layout/surfaces';
 import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
@@ -192,9 +192,7 @@ export class MapRenderer {
       g.poly(poly).stroke({ width: this.px(1.5), color: COLOR.runwayMarking, alpha: 0.7 * a });
       const s0 = c(r.start);
       const e0 = c(runwayEnd(r));
-      const v = headingVector(r.heading);
-      const len = Math.hypot(v.x, v.y);
-      const u = { x: v.x / len, y: v.y / len };
+      const u = runwayAxis(r).dir;
       const n = { x: -u.y, y: u.x };
       this.dashed(g, add(s0, scale(u, 3)), add(e0, scale(u, -3)), 1.5, 1.2, { width: this.px(2), color: COLOR.runwayMarking, alpha: a });
       // 進入端の標識
@@ -537,13 +535,12 @@ export class MapRenderer {
 
   private drawLabels(layout: AirportLayout, analysis: LayoutAnalysis, cam: Camera): void {
     for (const r of Object.values(layout.runways)) {
-      const [d0, d1] = runwayDesignators(r.heading);
-      const v = headingVector(r.heading);
-      const len = Math.hypot(v.x, v.y);
+      const [d0, d1] = runwayDesignatorText(r);
+      const u = runwayAxis(r).dir;
       const s0 = c(r.start);
       const e0 = c(runwayEnd(r));
-      this.label(`rwy0:${r.id}`, d0, { x: s0.x + (v.x / len) * 3, y: s0.y + (v.y / len) * 3 }, cam, { size: 13 });
-      this.label(`rwy1:${r.id}`, d1, { x: e0.x - (v.x / len) * 3, y: e0.y - (v.y / len) * 3 }, cam, { size: 13 });
+      this.label(`rwy0:${r.id}`, d0, { x: s0.x + u.x * 3, y: s0.y + u.y * 3 }, cam, { size: 13 });
+      this.label(`rwy1:${r.id}`, d1, { x: e0.x - u.x * 3, y: e0.y - u.y * 3 }, cam, { size: 13 });
     }
     if (cam.zoom >= 5) {
       // 誘導路名は同名区間のうち最長の区間に1つだけ

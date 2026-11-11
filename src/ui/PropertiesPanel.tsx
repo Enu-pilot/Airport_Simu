@@ -5,6 +5,7 @@ import {
   BUILD_STATES,
   HEADINGS,
   entityTypeOf,
+  isFreeRunway,
   type AirportLayout,
   type BuildState,
   type Rotation,
@@ -19,7 +20,7 @@ import {
   rotateEntity,
   updateEntity,
 } from '../core/layout/operations';
-import { runwayDesignators, runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
+import { runwayDesignatorText, runwayDesignators, runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
 import { applyOp, closeTemporarily, editorStore, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { ops } from '../editor/simRunner';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
@@ -194,8 +195,25 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
 
   if (type === 'runway') {
     const r = layout.runways[id]!;
-    const [d0, d1] = runwayDesignators(r.heading);
+    const [d0, d1] = runwayDesignatorText(r);
     const entries = (net.runwayNodes[id] ?? []).filter((n) => layout.taxiNodes[n]);
+    if (isFreeRunway(r)) {
+      // 自由形の編集欄は Phase 12 の UI ステップで追加する。ここでは読み取り専用の表示
+      return (
+        <>
+          <NameField layout={layout} id={id} value={r.name} />
+          <Info label="向き（真方位）">{`${r.headingDeg}°`}</Info>
+          <Info label="長さ（m）">{`${r.lengthM.toLocaleString()} m`}</Info>
+          <Info label="舗装幅">{`${r.surfaceWidthM} m`}</Info>
+          <Info label="滑走路番号">{`${d0}/${d1}`}</Info>
+          <Info label="使用可能な機体" testid="prop-maxSize">{runwayMaxSize(r) ? `${runwayMaxSize(r)}級まで` : '使用不可'}</Info>
+          <Info label="始点 / 終点">{`(${r.start.x}, ${r.start.y}) → (${runwayEnd(r).x}, ${runwayEnd(r).y})`}</Info>
+          <Info label="滑走路入口">
+            {entries.length === 0 ? 'なし' : entries.map((n) => <EntityLink key={n} layout={layout} id={n} />)}
+          </Info>
+        </>
+      );
+    }
     return (
       <>
         <NameField layout={layout} id={id} value={r.name} />

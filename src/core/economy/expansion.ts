@@ -1,5 +1,5 @@
 import { sortedValues } from '../model/ids';
-import { entityTypeOf, type AirportLayout, type BuildState, type FacilityKind } from '../model/types';
+import { entityTypeOf, isFreeRunway, type AirportLayout, type BuildState, type FacilityKind } from '../model/types';
 import { cloneLayout } from '../layout/operations';
 import type { CompanyState, Project } from './company';
 
@@ -58,7 +58,10 @@ export function buildDays(layout: AirportLayout, id: string): number {
 /** 形状（位置・寸法・向き・階数）。変わると改修工事になる */
 function geometry(layout: AirportLayout, id: string): string {
   const r = layout.runways[id];
-  if (r) return JSON.stringify([r.start, r.heading, r.length, r.surfaceWidthM]);
+  if (r) {
+    if (isFreeRunway(r)) return JSON.stringify(['free', r.start, r.headingDeg, r.lengthM, r.surfaceWidthM, r.dims?.shoulderWidthM ?? null]);
+    return JSON.stringify([r.start, r.heading, r.length, r.surfaceWidthM]);
+  }
   const tw = layout.taxiways[id];
   if (tw) return JSON.stringify([layout.taxiNodes[tw.from]?.pos, layout.taxiNodes[tw.to]?.pos, tw.widthClass]);
   const rd = layout.roads[id];
