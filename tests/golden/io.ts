@@ -5,6 +5,7 @@
  *
  * 運航ゴールデン（`sim: true`）には SIM_MODEL_VERSION の保護がある（設計 D10）:
  * 内容が変わるのに SIM_MODEL_VERSION が採取時（tests/golden/sim-versions.json）と同じなら、再採取を拒否して例外にする。
+ * 例外: 変わったのが版に敏感なキー（VERSION_SENSITIVE_KEYS）だけで `normalizedSha256` が同一のとき（`isVersionOnlyChange`）。
  * 運航結果を意図して変えるときは、先に SIM_MODEL_VERSION を上げる（保存済みの運航状態が復元されなくなるため）。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -17,6 +18,44 @@ export const GOLDEN_UPDATE = process.env.GOLDEN_UPDATE === '1';
 export const goldenDir = resolve(__dirname);
 
 const LEDGER = 'sim-versions.json';
+
+/** 版（SCHEMA_VERSION など）が変わると変わりうるキー。`normalizedSha256`（版を除いたハッシュ）は含めない */
+export const VERSION_SENSITIVE_KEYS: readonly string[] = ['sha256', 'length', 'exportLayoutSha256'];
+
+/**
+ * 旧・新の運航ゴールデンの差が「版に敏感なキーの値だけ」で、かつ両方に `normalizedSha256` があり同一か。
+ * 版の更新（Phase 12 の SCHEMA_VERSION 3）だけで運航ゴールデンの再採取が拒否されないための例外（B.4）。
+ * 構造（キー集合・配列長）が違う、版に敏感でないキーが違う、`normalizedSha256` が無い／違うときは false。
+ */
+export function isVersionOnlyChange(oldText: string, newText: string): boolean {
+  let a: unknown;
+  let b: unknown;
+  try {
+    a = JSON.parse(oldText);
+    b = JSON.parse(newText);
+  } catch {
+    return false;
+  }
+  const norm = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+  if (!norm(a) || !norm(b)) return false;
+  if (typeof a.normalizedSha256 !== 'string' || a.normalizedSha256 !== b.normalizedSha256) return false;
+  const same = (x: unknown, y: unknown, key: string | null): boolean => {
+    if (Array.isArray(x) || Array.isArray(y)) {
+      if (!Array.isArray(x) || !Array.isArray(y) || x.length !== y.length) return false;
+      return x.every((e, i) => same(e, y[i], key));
+    }
+    if (norm(x) || norm(y)) {
+      if (!norm(x) || !norm(y)) return false;
+      const kx = Object.keys(x);
+      const ky = Object.keys(y);
+      if (kx.length !== ky.length || !kx.every((k) => k in y)) return false;
+      return kx.every((k) => same(x[k], y[k], k));
+    }
+    if (x === y) return true;
+    return key !== null && VERSION_SENSITIVE_KEYS.includes(key);
+  };
+  return same(a, b, null);
+}
 
 function readLedger(): Record<string, string> {
   const p = resolve(goldenDir, LEDGER);
@@ -40,8 +79,9 @@ export function checkGolden(file: string, text: string, opts: { sim?: boolean } 
   if (GOLDEN_UPDATE) {
     if (opts.sim) {
       const ledger = readLedger();
-      const changed = existsSync(path) && readFileSync(path, 'utf8') !== text;
-      if (changed && ledger[file] === SIM_MODEL_VERSION) {
+      const before = existsSync(path) ? readFileSync(path, 'utf8') : null;
+      const changed = before !== null && before !== text;
+      if (changed && ledger[file] === SIM_MODEL_VERSION && !isVersionOnlyChange(before, text)) {
         throw new Error(
           `${file}: 運航結果が変わりましたが SIM_MODEL_VERSION（${SIM_MODEL_VERSION}）が採取時と同じです。` +
             '既存レイアウトの運航結果を変えるなら、先に SIM_MODEL_VERSION を上げてください（docs/22 §ゴールデン）。再採取は拒否しました。',
