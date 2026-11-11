@@ -83,6 +83,32 @@
 └─ README.md
 ```
 
+### 3.1 実装後の構成（Phase 11 時点）
+
+上の図は Phase 0 の計画で、実在しないディレクトリ（`view/`・`platform/`・`data/`・`tests/regression/`・`tests/fixtures/`・`tools/`）を含む。実際の構成は次のとおり。
+
+```
+src/
+├─ app/ editor/ i18n/ render/ ui/        （editor = 表示モデル・ツール・入力。render/ui → editor → core の向きを ESLint で強制）
+└─ core/
+   ├─ geometry/   幾何の土台（Phase 11、外部依存なし）
+   │   frames.ts     座標フレーム Tile / World / Map / Scene と変換（位置の ±0.5 はここだけ）
+   │   angle.ts      角度規約（真方位）、GRID8_STEP、磁方位、滑走路番号
+   │   tolerance.ts  許容誤差・限界値（POS_EPS_T、MAX_FLATTEN_POINTS ほか）
+   │   vec.ts        Vec2 / Tile と既存の述語（変更しない）
+   │   bbox.ts segment.ts polygon.ts stroke.ts raster.ts
+   │   curve.ts arc.ts bezier.ts integrate.ts arclength.ts intersect.ts   曲線（直線・円弧・2 次/3 次 Bezier）
+   │   camera.ts     画面 ↔ Map（既存）   index.ts  公開 API
+   ├─ layout/     編集操作、フットプリント、ネットワーク編集、ピック、runway.ts（runwayAxis）、surfaces.ts（描画用の面。World フレーム）
+   ├─ model/ io/ （io/migrate.ts = レイアウト版の移行）  airside/ sim/ validation/ economy/ access/ aircraft/ analytics/ assets/ scenario/ terminal/ editor/ sample/ rng.ts
+tests/
+├─ unit/ integration/ e2e/               unit/geometry/ が幾何ライブラリのテスト
+└─ golden/                               ゴールデン基準値・入力フィクスチャ・採取関数（docs/22 §5）
+```
+
+依存の向き: `core/geometry` は何にも依存しない（`model/types` の型 `Heading` を `import type` で参照するのみ）。`layout`・`sim`・`airside` は geometry を使い、逆は禁止。
+2D・3D の描画は、位置を `frames.ts`、形を `layout/surfaces.ts` から得る（詳細は [22](22_geometry_architecture.md)）。
+
 ## 4. シミュレーションループ
 
 ### 4.1 固定ティックと描画の分離
