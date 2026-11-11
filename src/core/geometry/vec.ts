@@ -152,3 +152,26 @@ export function chebyshevDistance(a: readonly Tile[], b: readonly Tile[]): numbe
   }
   return best;
 }
+
+// ---------------------------------------------------------------- Phase 11 追加（既存関数は変更しない）
+
+export const lerp = (a: Vec2, b: Vec2, t: number): Vec2 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+
+/** 単位ベクトル。零ベクトルは (0, 0) */
+export function normalize(a: Vec2): Vec2 {
+  const l = Math.hypot(a.x, a.y);
+  return l === 0 ? { x: 0, y: 0 } : { x: a.x / l, y: a.y / l };
+}
+
+/** 左 90° 回転した直交ベクトル `(-y, x)`（World フレームでは画面上で時計回りに 90°） */
+export const perp = (a: Vec2): Vec2 => ({ x: -a.y, y: a.x });
+
+/** 原点まわりに rad だけ回転（数学角。y 下向きの World では画面上で時計回り） */
+export function rotate(a: Vec2, rad: number): Vec2 {
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  return { x: a.x * c - a.y * s, y: a.x * s + a.y * c };
+}
+
+/** 2 点が許容誤差内で一致するか（既定 1e-6 タイル） */
+export const nearlyEqualPoint = (a: Vec2, b: Vec2, eps = 1e-6): boolean => Math.abs(a.x - b.x) <= eps && Math.abs(a.y - b.y) <= eps;
