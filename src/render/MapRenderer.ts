@@ -10,7 +10,7 @@ import { entityTypeOf } from '../core/model/types';
 import { facilityDims, standDims, standEntry } from '../core/layout/footprint';
 import { offsiteTilesIn } from '../core/layout/operations';
 import { runwayDesignators, runwayEnd, headingVector } from '../core/layout/runway';
-import { runwayPavementSurface, runwayStripSurface, taxiwayDrawWidthM } from '../core/layout/surfaces';
+import { roadDrawWidthM, runwayPavementSurface, runwayStripSurface, taxiwayBandSurface, taxiwayDrawWidthM } from '../core/layout/surfaces';
 import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
 import { computePreview, facilityKindOf, nextPathPoint, rectFromDrag } from '../editor/tools';
@@ -216,13 +216,13 @@ export class MapRenderer {
       const alpha = BUILD_ALPHA[e.buildState];
       if (e.roadClass === 'rail') {
         // 鉄道: 細い道床と枕木
-        g.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ width: 0.5, color: COLOR.rail, alpha, cap: 'round' });
+        g.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ width: mToTiles(roadDrawWidthM(e)), color: COLOR.rail, alpha, cap: 'round' });
         this.dashed(g, c(a.pos), c(b.pos), 0.15, 0.35, { width: 0.8, color: COLOR.rail, alpha: 0.8 * alpha });
         if (e.buildState !== 'operational') this.edgeStateMarks(g, c(a.pos), c(b.pos), e.buildState);
         continue;
       }
       const color = e.roadClass === 'public' ? COLOR.roadPublic : COLOR.roadService;
-      g.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ width: 0.9, color, alpha, cap: 'round' });
+      g.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ width: mToTiles(roadDrawWidthM(e)), color, alpha, cap: 'round' });
       if (e.roadClass === 'public') {
         this.dashed(g, c(a.pos), c(b.pos), 0.6, 0.6, { width: this.px(1), color: COLOR.roadMarking, alpha: 0.6 * alpha });
       }
@@ -230,18 +230,25 @@ export class MapRenderer {
       if (e.buildState !== 'operational') this.edgeStateMarks(g, c(a.pos), c(b.pos), e.buildState);
     }
 
-    // 誘導路
-    for (const e of Object.values(layout.taxiways)) {
+    // 誘導路: 3D と同じ帯の形状（core の surfaces）。節点の外側にできる隙間は節点の円で埋める。
+    // 縁取り → 塗り → 中心線の順に、全エッジを通して描く（エッジ同士の縁取りが互いの塗りを横切らない）
+    const taxiEdges = Object.values(layout.taxiways).flatMap((e) => {
       const a = layout.taxiNodes[e.from];
       const b = layout.taxiNodes[e.to];
-      if (!a || !b) continue;
+      return a && b ? [{ e, p: c(a.pos), q: c(b.pos), band: worldPolyToMap(taxiwayBandSurface(a.pos, b.pos, e)), half: mToTiles(taxiwayDrawWidthM(e)) / 2 }] : [];
+    });
+    for (const t of taxiEdges) {
+      const alpha = BUILD_ALPHA[t.e.buildState];
+      if (t.band.length > 0) g.poly(flat(t.band)).fill({ color: COLOR.taxiwayEdge, alpha }).stroke({ width: this.px(2), color: COLOR.taxiwayEdge, alpha });
+      for (const n of [t.p, t.q]) g.circle(n.x, n.y, t.half + this.px(1)).fill({ color: COLOR.taxiwayEdge, alpha });
+    }
+    for (const t of taxiEdges) {
+      const alpha = BUILD_ALPHA[t.e.buildState];
+      if (t.band.length > 0) g.poly(flat(t.band)).fill({ color: COLOR.taxiway, alpha });
+      for (const n of [t.p, t.q]) g.circle(n.x, n.y, t.half).fill({ color: COLOR.taxiway, alpha });
+    }
+    for (const { e, p, q } of taxiEdges) {
       const alpha = BUILD_ALPHA[e.buildState];
-      const p = c(a.pos);
-      const q = c(b.pos);
-      // 幅は 3D と共通の m の表（codeF 反映）
-      const widthT = mToTiles(taxiwayDrawWidthM(e));
-      g.moveTo(p.x, p.y).lineTo(q.x, q.y).stroke({ width: widthT + this.px(2), color: COLOR.taxiwayEdge, alpha, cap: 'round' });
-      g.moveTo(p.x, p.y).lineTo(q.x, q.y).stroke({ width: widthT, color: COLOR.taxiway, alpha, cap: 'round' });
       g.moveTo(p.x, p.y).lineTo(q.x, q.y).stroke({ width: this.px(1.5), color: COLOR.taxiCenter, alpha: 0.9 * alpha });
       if (e.oneWay) this.arrow(g, p, q, COLOR.taxiCenter, alpha);
       if (e.buildState !== 'operational') this.edgeStateMarks(g, p, q, e.buildState);
