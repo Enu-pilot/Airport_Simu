@@ -151,9 +151,15 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   UNBUILDABLE_TERRAIN: (n, p) => `${n[0]} が建設できない土地（水域・岩場・未取得地）にかかっています（${p.tiles}タイル）`,
   OVERLAP: (n) => `${n[0]} と ${n[1]} が重なっています`,
   IN_RUNWAY_STRIP: (n) => `${n[0]} が ${n[1]} の保護区域（着陸帯）内にあります`,
+  IN_RUNWAY_RESA: (n) => `${n[0]} が ${n[1]} の RESA（滑走路端安全区域）内にあります`,
   STAND_NOT_ON_APRON: (n) => `${n[0]} がエプロンの上にありません`,
   RUNWAY_TOO_SHORT: (n) => `${n[0]} が短すぎて、どの機体も使用できません（1,200m 以上必要）`,
   RUNWAY_NO_TAXIWAY: (n) => `${n[0]} に接続する誘導路がありません`,
+  RUNWAY_PARALLEL_TOO_CLOSE: (n, p) =>
+    `${n[0]} と ${n[1]} の平行滑走路の間隔が近すぎます（${p.distanceM}m。参考値 ${p.refM}m 以上。ゲームの判定）`,
+  RUNWAY_PARALLEL_DEPENDENT: (n, p) =>
+    `${n[0]} と ${n[1]} の平行滑走路の間隔（${p.distanceM}m）は、独立した計器運用の参考値（${p.refM}m）未満です（情報。ゲームの判定）`,
+  RUNWAY_DESIGNATOR_CONFLICT: (n, p) => `滑走路番号 ${p.designator} が重複しています（${n.join(', ')}）。番号の接尾辞を設定してください`,
   TAXIWAY_ON_RUNWAY: (n) => `${n[0]} が ${n[1]} の上を走っています`,
   TAXIWAY_CROSSES_RUNWAY_NO_ENTRY: (n) => `${n[0]} が ${n[1]} を入口ノードなしで横切っています`,
   TAXIWAY_CROSSING_NO_JUNCTION: (n) => `${n[0]} と ${n[1]} が交差点なしで交差しています`,

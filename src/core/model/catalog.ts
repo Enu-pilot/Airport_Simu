@@ -16,6 +16,7 @@ export const ROAD_DRAW_WIDTH_M = { road: 12, rail: 8 } as const;
 export type FootprintLayer =
   | 'runway'
   | 'strip'
+  | 'resa'
   | 'taxiway'
   | 'apron'
   | 'stand'
