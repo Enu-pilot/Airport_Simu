@@ -1,4 +1,5 @@
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
+import { migrateLayout } from './migrate';
 
 export const SAVE_FORMAT = 'skyport-layout';
 
@@ -41,11 +42,7 @@ export function importLayout(json: string): AirportLayout {
   }
   const l = data.layout;
   if (!l || typeof l !== 'object') throw new Error('レイアウトがありません');
-  // v1 → v2: ターミナル内部のエリアを追加
-  if (data.schemaVersion < 2) {
-    l.terminalAreas = {};
-    l.schemaVersion = 2;
-  }
+  migrateLayout(l, data.schemaVersion);
   const errors = validateLayoutData(l);
   if (errors.length) throw new Error(errors[0]);
   return l;
