@@ -105,6 +105,7 @@ export const OPERABILITY_LABEL: Record<OperabilityReason, string> = {
 export const OP_FAILURE_LABEL: Record<OpFailure, string> = {
   NOT_FOUND: '対象が見つかりません',
   NOT_SUPPORTED: 'この対象にはその操作はできません',
+  TOO_LONG_FOR_GRID: '長すぎてグリッド（従来形）に合わせられません（従来形の最大の長さを超えています）',
   INVALID_VALUE: '値が不正です',
   NODE_EXISTS: '移動先に別のノードがあります',
   EMPTY_PATH: '2点以上を指定してください',

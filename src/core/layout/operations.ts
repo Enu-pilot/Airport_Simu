@@ -1,3 +1,4 @@
+import { runwayDimsProblem } from '../model/runwayReference';
 import { DEFAULT_PROPS, FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M } from '../model/catalog';
 import { baseTerrainAt, createSite, inSite, terrainAt } from '../model/site';
 import {
@@ -57,7 +58,9 @@ export type OpFailure =
   | 'NODE_EXISTS'
   | 'EMPTY_PATH'
   | 'NO_CHANGE'
-  | 'LAND_NOT_ADJACENT';
+  | 'LAND_NOT_ADJACENT'
+  /** 自由形をグリッドに合わせたとき、長さが従来形の最大（MAX_RUNWAY_LENGTH ステップ）を超える */
+  | 'TOO_LONG_FOR_GRID';
 
 export type OpResult =
   | { ok: true; layout: AirportLayout; created: string[] }
@@ -324,7 +327,10 @@ export function snapRunwayToGrid(layout: AirportLayout, id: string): OpResult {
   if (!isFreeRunway(r)) return fail('NO_CHANGE');
   const heading = ((Math.round(r.headingDeg / 45) * 45) % 360) as Heading;
   const stepT = heading % 90 === 0 ? 1 : Math.SQRT2;
-  const length = Math.min(MAX_RUNWAY_LENGTH, Math.max(1, Math.round(r.lengthM / TILE_M / stepT)));
+  const steps = Math.round(r.lengthM / TILE_M / stepT);
+  // 従来形の最大を超える長さは黙って短くしない（自由形のまま）
+  if (steps > MAX_RUNWAY_LENGTH) return fail('TOO_LONG_FOR_GRID');
+  const length = Math.max(1, steps);
   const g: RunwayGrid8 = {
     id: r.id,
     name: r.name,
@@ -365,7 +371,7 @@ export function updateLayoutSettings(
     else d.ruleSet = s.ruleSet;
   }
   if (!changed) return fail('NO_CHANGE');
-  return ok(d);
+  return ok(finalize(d));
 }
 
 export interface PlaceAreaOptions {
@@ -739,27 +745,13 @@ const isInt = (v: unknown, min: number, max: number): v is number =>
 const isBuildState = (v: unknown): v is BuildState => BUILD_STATES.includes(v as BuildState);
 
 const isSuffix = (v: unknown): boolean => v === 'L' || v === 'C' || v === 'R' || v === 'none';
-const DIM_KEYS: readonly (keyof RunwayDims)[] = [
-  'shoulderWidthM',
-  'stripHalfWidthM',
-  'stripEndM',
-  'resaLengthM',
-  'resaWidthM',
-  'holdingPositionM',
-  'elevationStartM',
-  'elevationEndM',
-];
 
-/** dims の検証。既知のキーの有限な数（標高以外は ≥ 0）だけを残す。不正なら null（undefined の値は捨てる） */
+/** dims の検証（runwayDimsProblem）。既知のキーの有限な数だけを残す。不正なら null（undefined の値は捨てる） */
 function sanitizeDims(v: unknown): RunwayDims | null {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+  if (runwayDimsProblem(v) !== null) return null;
   const out: RunwayDims = {};
-  for (const [k, x] of Object.entries(v)) {
-    if (x === undefined) continue;
-    if (!DIM_KEYS.includes(k as keyof RunwayDims)) return null;
-    const elevation = k === 'elevationStartM' || k === 'elevationEndM';
-    if (typeof x !== 'number' || !Number.isFinite(x) || (!elevation && x < 0)) return null;
-    out[k as keyof RunwayDims] = x;
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (x !== undefined) out[k as keyof RunwayDims] = x as number;
   }
   return out;
 }

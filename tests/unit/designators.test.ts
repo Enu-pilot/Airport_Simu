@@ -167,11 +167,11 @@ describe('滑走路番号 designatorsOf（S2）', () => {
     expect(dz(c, layoutOf([c])).text).toEqual(['09L', '27R']);
   });
 
-  it('従来形と自由形が平行なら、自由形にだけ接尾辞が付く（左右の判定には従来形も数える）', () => {
+  it('従来形と自由形が平行なら、接尾辞は付かない（自動の接尾辞の数え上げは自由形どうしだけ。監査修正で変更。同じ番号は検証が警告する）', () => {
     const g = grid('rwy_1', 90, 0, 0); // 北側
     const f = free('rwy_2', 90, 0, 10); // 南側 = 右
     const l = layoutOf([g, f]);
     expect(dz(g, l).text).toEqual(['09', '27']);
-    expect(dz(f, l).text).toEqual(['09R', '27L']);
+    expect(dz(f, l).text).toEqual(['09', '27']);
   });
 });

@@ -42,7 +42,8 @@ export function runwayAreas(r: RunwayFree): RunwayAreas {
   const paved = rectAlongDir(start, end, dir, t(r.surfaceWidthM / 2 + d.shoulderWidthM), 0);
   const strip = rectAlongDir(start, end, dir, t(d.stripHalfWidthM), t(d.stripEndM));
   const resa: WorldPoint[][] = [];
-  if (d.resaLengthM > 0) {
+  // RESA の長さ 0 = RESA なし（多角形を作らない）。幅は dims の検査（runwayDimsProblem）で > 0 に限る
+  if (d.resaLengthM > 0 && d.resaWidthM > 0) {
     const hw = t(d.resaWidthM / 2);
     const s0 = { x: start.x - dir.x * t(d.stripEndM), y: start.y - dir.y * t(d.stripEndM) };
     const s1 = { x: s0.x - dir.x * t(d.resaLengthM), y: s0.y - dir.y * t(d.resaLengthM) };

@@ -1,7 +1,6 @@
 import { CATALOG, CATALOG_VERSION, type AircraftModel } from '../aircraft/catalog';
 import { AIRCRAFT_ASSETS, ASSET_VERSION } from '../assets/registry';
 import { importCompany, type CompanyState } from '../economy/company';
-import { FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M } from '../model/catalog';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
 import { SIM_MODEL_VERSION, modelsUsed, type Scenario } from '../scenario/scenario';
 import { buildTypeTable } from '../sim/aircraftTypes';
@@ -9,7 +8,7 @@ import { createContext } from '../sim/context';
 import { checkInvariants } from '../sim/invariants';
 import type { Simulation } from '../sim/simulation';
 import type { SimState } from '../sim/types';
-import { SAVE_FORMAT, validateLayoutData } from './serialize';
+import { SAVE_FORMAT, checkRunwayFields, validateLayoutData } from './serialize';
 import { migrateLayout } from './migrate';
 
 /**
@@ -148,43 +147,6 @@ export function checkLayout(l: unknown, where = 'レイアウト'): string[] {
     if (layout.facilities[a.terminalId]?.kind !== 'terminal') errors.push(`${where}: ターミナル内エリア ${a.id} の建物 ${a.terminalId} が見つかりません`);
   }
   errors.push(...checkRunwayFields(layout, where));
-  return errors;
-}
-
-const SUFFIXES = ['L', 'C', 'R', 'none'];
-const RUNWAY_WIDTHS_M = [30, 45, 60];
-const isFin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-
-/**
- * Phase 12 の新しい項目だけの検査（従来形の滑走路には新しい検査を足さない。今まで読めたファイルを読めなくしないため）。
- * 対象: alignment・自由形の項目・designatorSuffix・dims・magneticVariationDeg・ruleSet。
- */
-function checkRunwayFields(layout: AirportLayout, where: string): string[] {
-  const errors: string[] = [];
-  for (const [key, raw] of Object.entries(layout.runways)) {
-    if (!isObj(raw)) continue; // 形そのものの不正は呼び出し側で報告済み
-    const r = raw as Record<string, unknown>;
-    const at = `${where}: 滑走路 ${key}`;
-    if (r.designatorSuffix !== undefined && !SUFFIXES.includes(r.designatorSuffix as string)) errors.push(`${at} の designatorSuffix が不正です`);
-    if (r.alignment === undefined) continue;
-    if (r.alignment !== 'free') {
-      errors.push(`${at} は未対応の形式です（新しいバージョンで作成された可能性）`);
-      continue;
-    }
-    const s = r.start;
-    if (!isObj(s) || !isFin(s.x) || !isFin(s.y)) errors.push(`${at} の始点が不正です`);
-    if (!isFin(r.headingDeg) || r.headingDeg < 0 || r.headingDeg >= 360) errors.push(`${at} の方位（headingDeg）が不正です`);
-    if (!isFin(r.lengthM) || r.lengthM < FREE_RUNWAY_MIN_M || r.lengthM > FREE_RUNWAY_MAX_M) errors.push(`${at} の長さ（lengthM）が不正です`);
-    if (!RUNWAY_WIDTHS_M.includes(r.surfaceWidthM as number)) errors.push(`${at} の舗装幅が不正です`);
-    if (r.dims !== undefined) {
-      if (!isObj(r.dims)) errors.push(`${at} の dims が不正です`);
-      else for (const [dk, dv] of Object.entries(r.dims)) if (!isFin(dv) || dv < 0) errors.push(`${at} の dims.${dk} が不正です`);
-    }
-  }
-  const mv = (layout as { magneticVariationDeg?: unknown }).magneticVariationDeg;
-  if (mv !== undefined && (!isFin(mv) || mv < -180 || mv > 180)) errors.push(`${where}: 磁気偏角が不正です`);
-  const rs = (layout as { ruleSet?: unknown }).ruleSet;
-  if (rs !== undefined && rs !== 'classic' && rs !== 'realistic') errors.push(`${where}: ruleSet が不正です`);
   return errors;
 }
 

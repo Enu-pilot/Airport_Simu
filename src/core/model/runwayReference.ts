@@ -115,3 +115,35 @@ export const FREE_RUNWAY_DEFAULT_BASIS: Record<DefaultKey, DefaultBasis> = {
 
 /** 勾配・標高の参考値は資料に無い（NOT FOUND）ので、Phase 12 は勾配の警告を作らず、表示（標高差 / 長さ）だけにする */
 export const RUNWAY_SLOPE_REFERENCE = 'NOT FOUND' as const;
+
+/** dims の既知のキー（標高を含む） */
+export const RUNWAY_DIM_KEYS: readonly (keyof RunwayDims)[] = [
+  'shoulderWidthM',
+  'stripHalfWidthM',
+  'stripEndM',
+  'resaLengthM',
+  'resaWidthM',
+  'holdingPositionM',
+  'elevationStartM',
+  'elevationEndM',
+];
+
+/**
+ * dims の検査（保存・読込・編集で共通）。問題のあるキー名を返す（問題なしは null）。
+ * - 未知のキー・有限でない値は不正
+ * - 標高（elevationStartM / EndM）は負も可（海面下）。それ以外は ≥ 0
+ * - 幅は 0 だと多角形が退化するので > 0（stripHalfWidthM・resaWidthM）。
+ *   resaLengthM = 0 は「RESA なし」（多角形を作らない）。stripEndM・shoulderWidthM・holdingPositionM は 0 可
+ */
+export function runwayDimsProblem(v: unknown): string | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return '(dims)';
+  for (const [k, x] of Object.entries(v)) {
+    if (x === undefined) continue;
+    if (!RUNWAY_DIM_KEYS.includes(k as keyof RunwayDims)) return k;
+    if (typeof x !== 'number' || !Number.isFinite(x)) return k;
+    const elevation = k === 'elevationStartM' || k === 'elevationEndM';
+    if (!elevation && x < 0) return k;
+    if ((k === 'stripHalfWidthM' || k === 'resaWidthM') && !(x > 0)) return k;
+  }
+  return null;
+}

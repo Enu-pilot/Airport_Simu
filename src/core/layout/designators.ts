@@ -11,7 +11,8 @@
  * - 逆向きの番号は「(n + 17) % 36 + 1」で、必ず 18 差（定義からの算術。出典の引用ではない）。
  * - 4 本以上の平行滑走路には自動で接尾辞を付けない（出典には番号をずらす規則があるが、ゲームでは手動の designatorSuffix で対応）。
  * - 従来形（8 方位）の滑走路には接尾辞を自動で付けない（表示・データとも従来どおり。PM 判断 K / Q-A）。
- *   自動の接尾辞は自由形にだけ付く。ただし左右の順序と本数の数え上げには従来形の滑走路も含める。
+ *   自動の接尾辞は自由形にだけ付き、左右の順序と本数の数え上げも自由形どうしだけで行う（従来形は含めない）。
+ *   結果として同じ番号（接尾辞を含む）になった滑走路は RUNWAY_DESIGNATOR_CONFLICT（validate.ts）が警告し、手動の designatorSuffix を促す。
  *   従来形に付くのは、明示的に設定した designatorSuffix だけ。
  */
 import { designatorNumber, formatDesignator, magneticFromTrue, normalizeDeg } from '../geometry/angle';
@@ -64,7 +65,8 @@ function autoSuffix(r: Runway, layout: AirportLayout, variation: number): Design
   const me = basic(r, variation);
   const group: Runway[] = [r];
   for (const o of Object.values(layout.runways)) {
-    if (o.id !== r.id && key(basic(o, variation)) === key(me)) group.push(o);
+    // 従来形は自動の接尾辞の数え上げ・並べ替えに含めない（従来形には自動で付けないため。同じ番号になれば検証が警告する）
+    if (o.id !== r.id && isFreeRunway(o) && key(basic(o, variation)) === key(me)) group.push(o);
   }
   if (group.length < 2 || group.length > 3) return '';
   group.sort((a, b) => compareIds(a.id, b.id));
