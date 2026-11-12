@@ -83,13 +83,13 @@
 └─ README.md
 ```
 
-### 3.1 実装後の構成（Phase 11 時点）
+### 3.1 実装後の構成（Phase 12 時点）
 
 上の図は Phase 0 の計画で、実在しないディレクトリ（`view/`・`platform/`・`data/`・`tests/regression/`・`tests/fixtures/`・`tools/`）を含む。実際の構成は次のとおり。
 
 ```
 src/
-├─ app/ editor/ i18n/ render/ ui/        （editor = 表示モデル・ツール・入力。render/ui → editor → core の向きを ESLint で強制）
+├─ app/ editor/ i18n/ render/ ui/        （editor = 表示モデル・ツール・入力（自由形の吸着・ハンドル）。滑走路の編集 UI は ui/RunwayPanels.tsx。render/ui → editor → core の向きを ESLint で強制）
 └─ core/
    ├─ geometry/   幾何の土台（Phase 11、外部依存なし）
    │   frames.ts     座標フレーム Tile / World / Map / Scene と変換（位置の ±0.5 はここだけ）
@@ -99,8 +99,8 @@ src/
    │   bbox.ts segment.ts polygon.ts stroke.ts raster.ts
    │   curve.ts arc.ts bezier.ts integrate.ts arclength.ts intersect.ts   曲線（直線・円弧・2 次/3 次 Bezier）
    │   camera.ts     画面 ↔ Map（既存）   index.ts  公開 API
-   ├─ layout/     編集操作、フットプリント、ネットワーク編集、ピック、runway.ts（runwayAxis）、surfaces.ts（描画用の面。World フレーム）
-   ├─ model/ io/ （io/migrate.ts = レイアウト版の移行）  airside/ sim/ validation/ economy/ access/ aircraft/ analytics/ assets/ scenario/ terminal/ editor/ sample/ rng.ts
+   ├─ layout/     編集操作、フットプリント、ネットワーク編集、ピック、runway.ts（runwayAxis。従来形・自由形）、designators.ts（滑走路番号）、runwayAreas.ts（自由形の実寸の領域）、surfaces.ts（描画用の面 `runwaySurfaces`。World フレーム）
+   ├─ model/ （runwayReference.ts = 滑走路の参考値とゲーム既定値） io/ （io/migrate.ts = レイアウト版の移行）  airside/ sim/ validation/ economy/ access/ aircraft/ analytics/ assets/ scenario/ terminal/ editor/ sample/ rng.ts
 tests/
 ├─ unit/ integration/ e2e/               unit/geometry/ が幾何ライブラリのテスト
 └─ golden/                               ゴールデン基準値・入力フィクスチャ・採取関数（docs/22 §5）

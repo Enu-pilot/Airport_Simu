@@ -9,6 +9,11 @@ PCブラウザで動作する空港デザイン・運営シミュレーション
 
 ## 現在の状態
 
+**Phase 12** — 滑走路を任意の真方位・実長（m）で置ける「自由形」を追加（滑走路ツールのオプション。既定は従来の 8 方向）。実寸の舗装・肩・着陸帯・RESA による判定、
+磁気偏角つきの滑走路番号（L/C/R）、平行間隔の警告、交差する滑走路（従属運用）、2D/3D の描画。従来形の舗装は実寸の幅で表示。
+設計・参考値は [docs/23](docs/23_runway_design.md)、検証は [docs/26](docs/26_validation_rules.md)、移行・互換性は [docs/27](docs/27_migration_and_compatibility.md)。
+参考値はゲーム内の判定であり、実際の安全基準への適合を保証しない。未実装・既知の制限は [docs/10](docs/10_open_issues.md) の M。
+
 **Phase 7〜10** — 具体的な機種・派生型（777-300 と 777-300ER など、メーカー資料で照合した値と出典つき）を航空会社の保有機材・便に割り当て、
 機種ごとに座席・手荷物・地上作業・必要な滑走路長・スポットの適合性が変わる。天候・障害（滑走路閉鎖・ゲート故障・車両故障・欠勤・需要急増など）と対応操作。
 機種別・航空会社別などの運営分析、ボトルネックの根拠、混雑マップ、シナリオ比較。2D/3D 表示の切り替え（3D の機体は手続き生成）。
@@ -86,6 +91,9 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 19 | [docs/19_disruptions.md](docs/19_disruptions.md) | 天候・障害・運航トラブルと対応 |
 | 20 | [docs/20_3d_view.md](docs/20_3d_view.md) | 3D 表示、3D アセットの対応一覧と利用条件、性能計測 |
 | 21 | [docs/21_save_format.md](docs/21_save_format.md) | 保存形式・バージョン管理・移行・保存先とバックアップ |
+| 23 | [docs/23_runway_design.md](docs/23_runway_design.md) | 滑走路の設計（自由方位・実寸・番号・交差の運航・参考値と出典・エディタの使い方、Phase 12） |
+| 26 | [docs/26_validation_rules.md](docs/26_validation_rules.md) | 滑走路に関する検証コードと適用条件（従来 / 実寸、classic / realistic） |
+| 27 | [docs/27_migration_and_compatibility.md](docs/27_migration_and_compatibility.md) | スキーマ v1→v2→v3、版の方針、互換性、ゴールデンの戦略 |
 | 22 | [docs/22_geometry_architecture.md](docs/22_geometry_architecture.md) | 幾何基盤（座標フレーム・角度規約・許容誤差・ゴールデン基準値）とデータモデルの計画（Phase 11） |
 
 ## 技術構成

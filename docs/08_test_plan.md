@@ -246,3 +246,37 @@ E2E: `tests/e2e/access.spec.ts`（アクセスの画面とタクシー乗り場�
 | ゴールデン | S0 で採取した 7 ファイル（`geometry-*` ×3、`runway-table`、`project`、`sim`、`sim-midrun`）は、レビュー対応の前後で 1 バイトも変更なし。追加: `stress-sim` / `routes` / `project-sim` / `normalized-hashes` と入力フィクスチャ 4 件 |
 
 ゴールデン（`tests/unit/golden*.test.ts`、17 件）の実行時間は合計で約 13 秒（ストレス運航 約 10 秒を含む）。
+
+## 18. Phase 12 で追加したテスト（自由方位・実寸・交差滑走路）
+
+設計は [23](23_runway_design.md)。完了条件: 既存テストの期待値の変更なし（Phase 12 で追加したテストを除く）、既存ゴールデンは S1 の 1 回だけの再採取以外は不変、型・lint・単体・統合・E2E が緑。
+
+| ファイル | 件数 | 内容 |
+|---|---|---|
+| `tests/unit/runway.free.test.ts` | 5 | `runwayAxis` の自由形（0〜359° の整数と 0.25° 刻みで終点と長さ）、`positionOnRunway` |
+| `tests/unit/designators.test.ts` | 13 | 番号: 0〜359° 全方位、境界（0・4.999999・5・354.999999・355・359.999999・360・-0）、逆向きが常に 18 差、真方位と磁方位（真 090・10°E → 08/26、10°W → 10/28）、平行 2/3/4 本の接尾辞、上書き、従来形の全 8 方位が `runwayDesignators` と一致 |
+| `tests/unit/runwayAreas.test.ts` | 13 | 参考値の表の出典キー、ゲーム既定値、幅 30/45/60 × 任意の角度の舗装・肩・着陸帯・RESA の寸法、`tilesOverlappingPolygon` |
+| `tests/unit/operations.free.test.ts` | 21 | 配置（始点・方位・長さ、両端）、中点まわりの回転（360 × 1° で元に戻る）、任意の角度の長さ（相対誤差 1e-12）、従来形からの変換（8 方位 × 長さで入口ノードが滑走路上に残る）、グリッドへの変換、設定、Undo |
+| `tests/unit/network.free.test.ts` | 12 | 斜めの自由形 × 8 方向の誘導路で実数の入口、再度引いても重複しない、交差 30°/60°/90°/T 字/同一直線（ノードなし）、端ノードの再利用 |
+| `tests/unit/validation.free.test.ts` | 15 | 着陸帯 → `IN_RUNWAY_STRIP`、RESA → `IN_RUNWAY_RESA`、平行（150 m → warning、300 m → info は realistic のみ）、交差する自由形はエラーなし、従来形どうしの交差は `OVERLAP`、混在、誘導路が接する舗装 |
+| `tests/unit/sim/crossing.test.ts` | 13 | 交差する 2 本（60°・90°）・高需要・2 シードの運航（毎ティックの不変条件 0、競合 0、交差点の横断と `intersection` の待ちが > 0）、停止位置（垂直距離 90 m を角度ごとに）、保存 → 復元の一致 |
+| `tests/unit/economy.free.test.ts` | 7 | 自由形の建設費（等価な従来形と一致）、同一性キー、変換で工事が発生しない |
+| `tests/unit/migrate.v3.test.ts` / `golden.io.test.ts` | 11 / 5 | v2 → v3 は恒等、v3 の往復、未知の `alignment`・不正な値の拒否、ゴールデンの再採取保護の例外（正規化が同じなら許可、違えば拒否） |
+| `tests/unit/audit.s0s4.test.ts` | 8 | 独立監査の指摘の回帰（負の標高の再読込、混在の番号、`dims` の検査、`importLayout`、グリッド変換の長さ超過） |
+| `tests/unit/editor.free.test.ts` | 20 | 自由形ツール: 格子・方位・長さの吸着、ドラッグ・数値からの配置、ハンドルによる回転（中点・長さを保つ、Shift で反対の端を固定）、誘導路の中心線への吸着、ストア経由の入力（ドラッグで置く・数値入力・2 クリック・ハンドルのドラッグと Undo・R キー）、接尾辞の上書き解除 |
+| `tests/unit/surfaces.free.test.ts` | 9 | `runwaySurfaces`: 寸法（幅 30/45/60 × 任意の角度）、進入端の縦じま、中心線の破線、番号の位置・向き・偏角、従来形の実寸の舗装と footprint、全方位で有限、2D/3D の frames 一致、両レンダラーが `runwaySurfaces` を使うこと |
+| `tests/unit/golden.free.test.ts` | 4 | 自由形のゴールデン（幾何・検証・番号、運航 2 レイアウト × 2 シード）と入力フィクスチャの妥当性 |
+| `tests/e2e/runway.spec.ts` | 7 | 自由形を数値入力で置く → 番号 → 偏角で番号が変わる（Undo で戻る）、ドラッグで置く・ハンドル・R キー、従来形の変換と Undo・グリッドへの変換、従来形の向きの選択肢（磁方位の番号）、交差する 2 本が重なりエラーにならず交差が認識される、自由形入りの空港で運航を開始（ページエラーなし）、2D/3D の描画 |
+
+既存のテストの変更は、Phase 12 の各ステップで **新しい期待を追加する形** に限った（`operations.test.ts` / `project.test.ts` / `runway.test.ts` / `surfaces.frames.test.ts` の追加分、S1 の再採取）。
+既存の e2e（`editor` / `operations` ほか 28 件）は変更なし。
+
+### 実行結果（Phase 12 完了時、このリポジトリのコンテナ環境）
+
+| 検証 | 結果 |
+|---|---|
+| 型チェック `tsc --noEmit` | エラー 0 |
+| Lint `eslint src tests --max-warnings=0` | エラー・警告 0（frames lint を含む） |
+| 単体・統合 `vitest run` | 52 ファイル / 551 件すべて合格（Phase 11 完了時は 38 ファイル / 395 件）。負荷の高い環境で 1 件のタイムアウトが再現しない形で 2 度出たが、再実行は常に全件合格 |
+| E2E `playwright test --trace off` | 35 件すべて合格（既存 28 + 新規 `runway.spec.ts` 7） |
+| ゴールデン | 既存のゴールデンは S1 の 1 回だけの再採取（版に敏感なキーのみ。[27](27_migration_and_compatibility.md) §5）以外は 1 バイトも変更なし。追加: `free-runways` / `crossing-sim` と入力フィクスチャ 2 件。台帳 `sim-versions.json` に 1 行追加 |
