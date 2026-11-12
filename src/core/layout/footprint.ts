@@ -1,7 +1,11 @@
 import { STAND_DIMS, FACILITY_SPECS, type FootprintLayer } from '../model/catalog';
 import type { AirportLayout, Facility, NetNode, Rotation, Stand } from '../model/types';
 import { rasterizePolygon, rasterizeSegment, type Tile, type Vec2 } from '../geometry/vec';
+import { tilesOverlappingPolygon } from '../geometry/raster';
+import type { WorldPoint } from '../geometry/frames';
+import { isFreeRunway } from '../model/types';
 import { runwayPolygon, runwayStripPolygon } from './runway';
+import { runwayAreas } from './runwayAreas';
 
 /** 回転後の幅・高さ */
 export function rotatedDims(w: number, h: number, rotation: Rotation): { w: number; h: number } {
@@ -87,12 +91,19 @@ export interface FootprintPart {
   ownerId: string;
   layer: FootprintLayer;
   tiles: Tile[];
+  /** 実寸の多角形（自由形の滑走路だけ。World フレーム、凸）。ある部分は重なり判定を多角形で行う（`tiles` は重なるタイル） */
+  poly?: WorldPoint[];
 }
 
 /** エンティティ1つの占有部分（滑走路は本体と保護区域の2つ） */
 export function footprintOf(layout: AirportLayout, id: string): FootprintPart[] {
   const r = layout.runways[id];
   if (r) {
+    if (isFreeRunway(r)) {
+      const a = runwayAreas(r);
+      const part = (layer: FootprintPart['layer'], poly: WorldPoint[]): FootprintPart => ({ ownerId: id, layer, tiles: tilesOverlappingPolygon(poly), poly });
+      return [part('runway', a.paved), part('strip', a.strip), ...a.resa.map((p) => part('resa', p))];
+    }
     return [
       { ownerId: id, layer: 'runway', tiles: rasterizePolygon(runwayPolygon(r)) },
       { ownerId: id, layer: 'strip', tiles: rasterizePolygon(runwayStripPolygon(r)) },
@@ -138,6 +149,6 @@ export function entityTiles(layout: AirportLayout, id: string): Tile[] {
   const area = layout.terminalAreas?.[id];
   if (area) return rectTiles(area.origin, area.w, area.h);
   return footprintOf(layout, id)
-    .filter((p) => p.layer !== 'strip')
+    .filter((p) => p.layer !== 'strip' && p.layer !== 'resa')
     .flatMap((p) => p.tiles);
 }

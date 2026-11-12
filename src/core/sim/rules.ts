@@ -44,6 +44,9 @@ export const HOLD_SHORT_M = 87.5;
 /** 停止位置は接続エッジの長さのこの割合を超えない */
 export const HOLD_SHORT_MAX_RATIO = 0.6;
 
+/** 自由形の停止位置の角度補正で使う sinθ の下限（ゲーム値。sin 15°。浅い角度で停止位置が遠くなりすぎるのを防ぐ） */
+export const SIN_MIN_HOLD = Math.sin((15 * Math.PI) / 180);
+
 /** 同種運用（到着→到着、出発→出発）の最小間隔（秒）[先行機][後続機] */
 export const SEPARATION_SEC: Record<SizeClass, Record<SizeClass, number>> = {
   S: { S: 60, M: 60, L: 60 },

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SCHEMA_VERSION } from '../../src/core/model/types';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 import { createSandboxCompany, createCareerCompany } from '../../src/core/economy/company';
 import { exportLayout } from '../../src/core/io/serialize';
@@ -27,7 +28,7 @@ function baseProject(extra: Partial<Parameters<typeof buildProject>[0]> = {}): P
 describe('プロジェクトの保存形式', () => {
   it('保存 → 読み込みで同じ内容に戻り、4 つの版（保存形式・カタログ・アセット・シミュレーション）を別々に持つ', () => {
     const p = baseProject({ scenarios: [createScenario({ id: 'sc_1', name: '基準', createdAt: NOW, layout: createSampleAirport(), company: createSandboxCompany(), seed: 's', durationHours: 2 })] });
-    expect(p.versions).toEqual({ format: PROJECT_FORMAT_VERSION, layoutSchema: 2, catalog: CATALOG_VERSION, assets: expect.any(String), simModel: SIM_MODEL_VERSION });
+    expect(p.versions).toEqual({ format: PROJECT_FORMAT_VERSION, layoutSchema: SCHEMA_VERSION, catalog: CATALOG_VERSION, assets: expect.any(String), simModel: SIM_MODEL_VERSION });
     // 使っている機種だけを保存時の値で持つ
     expect(Object.keys(p.catalog.models)).toContain('B777-300ER');
     expect(p.assets.refs['B777-300ER']).toBe('proc-wide-777');

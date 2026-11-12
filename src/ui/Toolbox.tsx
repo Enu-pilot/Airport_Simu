@@ -3,6 +3,7 @@ import type { BuildState, FacilityKind, RoadClass, SizeClass } from '../core/mod
 import { BUILD_STATES } from '../core/model/types';
 import { actions, useEditor, type ToolId } from '../editor/store';
 import { facilityKindOf } from '../editor/tools';
+import { RunwayToolOptions } from './RunwayPanels';
 import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, ROAD_CLASS_LABEL } from '../i18n/ja';
 
 interface ToolDef {
@@ -22,7 +23,7 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
   {
     title: '滑走路・誘導路',
     tools: [
-      { id: 'runway', label: '滑走路', hint: '始点→終点をクリック（またはドラッグ）。8方向' },
+      { id: 'runway', label: '滑走路', hint: '始点→終点をクリック（またはドラッグ）。既定は8方向（オプションで自由形: 任意の方位・実寸）' },
       { id: 'taxiway', label: '誘導路', hint: 'クリックで頂点を追加、ダブルクリック/Enter/右クリックで確定' },
     ],
   },
@@ -125,6 +126,7 @@ export function Toolbox() {
             ))}
           </select>
         </label>
+        {tool === 'runway' && <RunwayToolOptions />}
         {tool === 'runway' && (
           <label>
             舗装幅

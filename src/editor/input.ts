@@ -1,5 +1,6 @@
 import { panBy, screenToTile, screenToWorld, zoomAt } from '../core/geometry/camera';
-import { worldToMap } from '../core/geometry/frames';
+import { mapToWorld, worldToMap, type WorldPoint } from '../core/geometry/frames';
+import { normalizeDeg } from '../core/geometry/angle';
 import { sameTile, type Tile, type Vec2 } from '../core/geometry/vec';
 import { FACILITY_SPECS } from '../core/model/catalog';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
@@ -14,7 +15,7 @@ import {
 } from '../core/layout/operations';
 import { pickAt } from '../core/layout/pick';
 import { actions, applyOp, editorStore, type EditorState } from './store';
-import { areaKindOf, computePreview, facilityKindOf, nextPathPoint } from './tools';
+import { areaKindOf, computePreview, facilityKindOf, handleAt, nextPathPoint, nextTaxiPoint, snapPointW } from './tools';
 import { pickTerminalArea } from '../core/layout/pick';
 import { aircraftAt } from '../core/sim/query';
 import { SPEED_LEVELS } from '../core/sim/clock';
@@ -29,15 +30,40 @@ const get = editorStore.getState;
 
 let pan: { last: Vec2; moved: boolean; button: number } | null = null;
 let spaceHeld = false;
+/** 自由形のドラッグを始めた画面位置（クリックとドラッグの区別） */
+let downScreen: Vec2 | null = null;
+
+/** ハンドルをつかめる距離（画面のピクセル） */
+const HANDLE_PX = 10;
+/** これ以上動かして離したら「ドラッグ」とみなす（ピクセル） */
+const DRAG_PX = 6;
 
 function tileAt(s: EditorState, screen: Vec2): Tile {
   return screenToTile(s.camera, screen);
 }
 
-/** 現在のプレビュー（カーソル位置を tile として）を確定する */
-function commitPreview(tile: Tile, opts: { select?: boolean } = {}): boolean {
+/** カーソルの World 座標（丸めない） */
+function worldAt(s: EditorState, screen: Vec2): WorldPoint {
+  return mapToWorld(screenToWorld(s.camera, screen));
+}
+
+/** カーソルの World 座標を精密に持つ必要があるか（自由形の配置・ハンドル操作中・自由形の選択中） */
+function needsPrecise(s: EditorState): boolean {
+  if (s.draft?.kind === 'rwyHandle' || s.draft?.kind === 'freeRunway') return true;
+  if (s.tool === 'runway' && s.options.runwayAlignment === 'free') return true;
+  return false;
+}
+
+/** カーソル移動を状態に反映する */
+function updateHover(s: EditorState, screen: Vec2): void {
+  const tile = tileAt(s, screen);
+  actions.setHover(tile, needsPrecise(s) ? worldAt(s, screen) : undefined);
+}
+
+/** 現在のプレビュー（カーソル位置を tile・World 座標として）を確定する */
+function commitPreview(tile: Tile, world: WorldPoint, opts: { select?: boolean } = {}): boolean {
   const s = get();
-  const preview = computePreview({ ...s, hover: tile });
+  const preview = computePreview({ ...s, hover: tile, hoverW: world });
   if (!preview) return false;
   return applyOp(preview.result, opts);
 }
@@ -59,7 +85,7 @@ export function finishPath(): void {
   actions.setDraft(null);
 }
 
-export function onPointerDown(screen: Vec2, button: number): void {
+export function onPointerDown(screen: Vec2, button: number, mods: { shift?: boolean } = {}): void {
   const s = get();
   if (button === 1 || button === 2 || spaceHeld) {
     pan = { last: screen, moved: false, button };
@@ -67,7 +93,8 @@ export function onPointerDown(screen: Vec2, button: number): void {
   }
   if (button !== 0) return;
   const tile = tileAt(s, screen);
-  actions.setHover(tile);
+  const wp = worldAt(s, screen);
+  actions.setHover(tile, needsPrecise(s) || (s.tool === 'select' && !!s.selection) ? wp : undefined);
 
   // 運航モード: 機体を優先して選択（レイアウトは表示のみ）
   if (s.mode === 'operate' && s.ops) {
@@ -81,6 +108,13 @@ export function onPointerDown(screen: Vec2, button: number): void {
   switch (s.tool) {
     case 'select': {
       const world = screenToWorld(s.camera, screen);
+      // 選択中の自由形の端のハンドル: 端をつかんで回転（Shift = 反対の端を固定）
+      const handle = handleAt(s.history.present, s.selection, wp, HANDLE_PX / s.camera.zoom);
+      if (handle && s.selection) {
+        actions.setHover(tile, wp);
+        actions.setDraft({ kind: 'rwyHandle', id: s.selection, which: handle, fixOpposite: !!mods.shift });
+        return;
+      }
       // 内部表示中は、表示している階のエリアを優先して選ぶ
       const id = (s.overlays.interior ? pickTerminalArea(s.history.present, world, s.interiorLevel) : null) ?? pickAt(s.history.present, world);
       actions.select(id);
@@ -88,8 +122,19 @@ export function onPointerDown(screen: Vec2, button: number): void {
       return;
     }
     case 'runway':
+      if (s.options.runwayAlignment === 'free') {
+        if (s.options.freeInput === 'numeric') {
+          commitPreview(tile, wp, { select: true });
+        } else if (s.draft?.kind === 'freeRunway') {
+          if (commitPreview(tile, wp, { select: true })) actions.setDraft(null);
+        } else {
+          downScreen = screen;
+          actions.setDraft({ kind: 'freeRunway', start: snapPointW(wp, s.options.gridSnap) });
+        }
+        return;
+      }
       if (s.draft?.kind === 'runway') {
-        if (commitPreview(tile, { select: true })) actions.setDraft(null);
+        if (commitPreview(tile, wp, { select: true })) actions.setDraft(null);
       } else {
         actions.setDraft({ kind: 'runway', start: tile });
       }
@@ -97,7 +142,7 @@ export function onPointerDown(screen: Vec2, button: number): void {
     case 'taxiway':
     case 'road': {
       const points = s.draft?.kind === 'path' ? s.draft.points : [];
-      const next = nextPathPoint(points, tile);
+      const next = s.tool === 'taxiway' ? nextTaxiPoint(s.history.present, points, tile) : nextPathPoint(points, tile);
       if (points.length > 0 && sameTile(points[points.length - 1]!, next)) {
         finishPath();
       } else {
@@ -115,7 +160,7 @@ export function onPointerDown(screen: Vec2, button: number): void {
       } else if (kind && FACILITY_SPECS[kind].dragPlace) {
         actions.setDraft({ kind: 'rect', start: tile });
       } else {
-        commitPreview(tile);
+        commitPreview(tile, wp);
       }
     }
   }
@@ -133,7 +178,7 @@ export function onPointerMove(screen: Vec2): void {
     }
     return;
   }
-  actions.setHover(tileAt(s, screen));
+  updateHover(s, screen);
 }
 
 export function onPointerUp(screen: Vec2, button: number): void {
@@ -151,17 +196,27 @@ export function onPointerUp(screen: Vec2, button: number): void {
   }
   if (button !== 0) return;
   const tile = tileAt(s, screen);
+  const wp = worldAt(s, screen);
   const d = s.draft;
-  if (d?.kind === 'move') {
+  if (d?.kind === 'rwyHandle') {
+    // 離した位置のプレビューを確定する（ハンドルを動かさなければ何もしない）
+    const preview = computePreview({ ...s, hover: tile, hoverW: wp });
+    if (preview) applyOp(preview.result, { quietNoChange: true });
+    actions.setDraft(null);
+  } else if (d?.kind === 'freeRunway') {
+    // ドラッグで引いた場合はその場で確定（クリックの場合は2点目のクリックを待つ）
+    const dragged = downScreen !== null && Math.hypot(screen.x - downScreen.x, screen.y - downScreen.y) >= DRAG_PX;
+    if (dragged && commitPreview(tile, wp, { select: true })) actions.setDraft(null);
+  } else if (d?.kind === 'move') {
     if (!sameTile(tile, d.start)) {
       applyOp(moveEntity(s.history.present, d.id, { x: tile.x - d.start.x, y: tile.y - d.start.y }), { quietNoChange: true });
     }
     actions.setDraft(null);
   } else if (d?.kind === 'runway') {
     // ドラッグで引いた場合はその場で確定（クリックの場合は2点目のクリックを待つ）
-    if (!sameTile(tile, d.start) && commitPreview(tile, { select: true })) actions.setDraft(null);
+    if (!sameTile(tile, d.start) && commitPreview(tile, wp, { select: true })) actions.setDraft(null);
   } else if (d?.kind === 'rect') {
-    commitPreview(tile, { select: true });
+    commitPreview(tile, wp, { select: true });
     actions.setDraft(null);
   }
 }
@@ -223,10 +278,14 @@ export function onKeyDown(k: KeyInfo): boolean {
     case 'backspace':
       if (s.selection) applyOp(deleteEntity(layout, s.selection));
       return true;
-    case 'r':
-      if (s.tool === 'select' && s.selection) applyOp(rotateEntity(layout, s.selection));
+    case 'r': {
+      // 自由形は angleSnapDeg（0 = 吸着なしのときは 15°）ずつ回す。従来形の滑走路は 45°、そのほかは 90°
+      const step = s.options.angleSnapDeg > 0 ? s.options.angleSnapDeg : 15;
+      if (s.tool === 'select' && s.selection) applyOp(rotateEntity(layout, s.selection, step));
+      else if (s.tool === 'runway' && s.options.runwayAlignment === 'free') actions.setOption('freeHeadingDeg', normalizeDeg(s.options.freeHeadingDeg + step));
       else actions.rotateTool();
       return true;
+    }
     case 'v':
       actions.setTool('select');
       return true;

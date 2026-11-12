@@ -1,0 +1,2384 @@
+{
+ "free-crossing": {
+  "network": {
+   "nodes": {
+    "tn_1": {
+     "id": "tn_1",
+     "pos": {
+      "x": 10,
+      "y": 38
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_2": {
+     "id": "tn_2",
+     "pos": {
+      "x": 100,
+      "y": 38
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_3": {
+     "id": "tn_3",
+     "pos": {
+      "x": 72,
+      "y": 38
+     },
+     "kind": "runwayEntry",
+     "runwayIds": [
+      "rwy_2"
+     ],
+     "standIds": [],
+     "holdShort": true,
+     "operational": true
+    },
+    "tn_4": {
+     "id": "tn_4",
+     "pos": {
+      "x": 10,
+      "y": 30
+     },
+     "kind": "runwayEntry",
+     "runwayIds": [
+      "rwy_1"
+     ],
+     "standIds": [],
+     "holdShort": true,
+     "operational": true
+    },
+    "tn_5": {
+     "id": "tn_5",
+     "pos": {
+      "x": 100,
+      "y": 30
+     },
+     "kind": "runwayEntry",
+     "runwayIds": [
+      "rwy_1"
+     ],
+     "standIds": [],
+     "holdShort": true,
+     "operational": true
+    },
+    "tn_6": {
+     "id": "tn_6",
+     "pos": {
+      "x": 58,
+      "y": 38
+     },
+     "kind": "intersection",
+     "runwayIds": [],
+     "standIds": [],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_7": {
+     "id": "tn_7",
+     "pos": {
+      "x": 58,
+      "y": 52
+     },
+     "kind": "runwayEntry",
+     "runwayIds": [
+      "rwy_2"
+     ],
+     "standIds": [],
+     "holdShort": true,
+     "operational": true
+    },
+    "tn_8": {
+     "id": "tn_8",
+     "pos": {
+      "x": 45,
+      "y": 23
+     },
+     "kind": "endpoint",
+     "runwayIds": [],
+     "standIds": [],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_9": {
+     "id": "tn_9",
+     "pos": {
+      "x": 80,
+      "y": 23
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_10": {
+     "id": "tn_10",
+     "pos": {
+      "x": 80,
+      "y": 38
+     },
+     "kind": "intersection",
+     "runwayIds": [],
+     "standIds": [],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_11": {
+     "id": "tn_11",
+     "pos": {
+      "x": 80,
+      "y": 30
+     },
+     "kind": "runwayEntry",
+     "runwayIds": [
+      "rwy_1",
+      "rwy_2"
+     ],
+     "standIds": [],
+     "holdShort": true,
+     "operational": true
+    },
+    "tn_12": {
+     "id": "tn_12",
+     "pos": {
+      "x": 48,
+      "y": 23
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [
+      "std_1"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_13": {
+     "id": "tn_13",
+     "pos": {
+      "x": 53,
+      "y": 23
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [
+      "std_2"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_14": {
+     "id": "tn_14",
+     "pos": {
+      "x": 59,
+      "y": 23
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [
+      "std_3"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_15": {
+     "id": "tn_15",
+     "pos": {
+      "x": 64,
+      "y": 23
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [
+      "std_4"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "rwy_2:T1": {
+     "id": "rwy_2:T1",
+     "pos": {
+      "x": 102,
+      "y": 7.999999999999993
+     },
+     "kind": "runwayThreshold",
+     "runwayIds": [
+      "rwy_2"
+     ],
+     "standIds": [],
+     "holdShort": false,
+     "operational": true
+    },
+    "std_1:P": {
+     "id": "std_1:P",
+     "pos": {
+      "x": 48,
+      "y": 20.5
+     },
+     "kind": "stand",
+     "runwayIds": [],
+     "standIds": [
+      "std_1"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "std_2:P": {
+     "id": "std_2:P",
+     "pos": {
+      "x": 53,
+      "y": 20.5
+     },
+     "kind": "stand",
+     "runwayIds": [],
+     "standIds": [
+      "std_2"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "std_3:P": {
+     "id": "std_3:P",
+     "pos": {
+      "x": 59,
+      "y": 20.5
+     },
+     "kind": "stand",
+     "runwayIds": [],
+     "standIds": [
+      "std_3"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "std_4:P": {
+     "id": "std_4:P",
+     "pos": {
+      "x": 64,
+      "y": 20.5
+     },
+     "kind": "stand",
+     "runwayIds": [],
+     "standIds": [
+      "std_4"
+     ],
+     "holdShort": false,
+     "operational": true
+    }
+   },
+   "edges": {
+    "twy_1": {
+     "id": "twy_1",
+     "kind": "taxiway",
+     "sourceId": "twy_1",
+     "from": "tn_1",
+     "to": "tn_6",
+     "bidirectional": true,
+     "lengthM": 1200,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_2": {
+     "id": "twy_2",
+     "kind": "taxiway",
+     "sourceId": "twy_2",
+     "from": "tn_3",
+     "to": "tn_10",
+     "bidirectional": true,
+     "lengthM": 200,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_3",
+      "runwayId": "rwy_2"
+     }
+    },
+    "twy_3": {
+     "id": "twy_3",
+     "kind": "taxiway",
+     "sourceId": "twy_3",
+     "from": "tn_4",
+     "to": "tn_1",
+     "bidirectional": true,
+     "lengthM": 200,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_4",
+      "runwayId": "rwy_1"
+     }
+    },
+    "twy_4": {
+     "id": "twy_4",
+     "kind": "taxiway",
+     "sourceId": "twy_4",
+     "from": "tn_5",
+     "to": "tn_2",
+     "bidirectional": true,
+     "lengthM": 200,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_5",
+      "runwayId": "rwy_1"
+     }
+    },
+    "twy_5": {
+     "id": "twy_5",
+     "kind": "taxiway",
+     "sourceId": "twy_5",
+     "from": "tn_6",
+     "to": "tn_3",
+     "bidirectional": true,
+     "lengthM": 350,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_3",
+      "runwayId": "rwy_2"
+     }
+    },
+    "twy_6": {
+     "id": "twy_6",
+     "kind": "taxiway",
+     "sourceId": "twy_6",
+     "from": "tn_6",
+     "to": "tn_7",
+     "bidirectional": true,
+     "lengthM": 350,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_7",
+      "runwayId": "rwy_2"
+     }
+    },
+    "twy_7": {
+     "id": "twy_7",
+     "kind": "taxiway",
+     "sourceId": "twy_7",
+     "from": "tn_10",
+     "to": "tn_2",
+     "bidirectional": true,
+     "lengthM": 500,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_8": {
+     "id": "twy_8",
+     "kind": "taxiway",
+     "sourceId": "twy_8",
+     "from": "tn_8",
+     "to": "tn_12",
+     "bidirectional": true,
+     "lengthM": 75,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_9": {
+     "id": "twy_9",
+     "kind": "taxiway",
+     "sourceId": "twy_9",
+     "from": "tn_9",
+     "to": "tn_11",
+     "bidirectional": true,
+     "lengthM": 175,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_11",
+      "runwayId": "rwy_1"
+     }
+    },
+    "twy_10": {
+     "id": "twy_10",
+     "kind": "taxiway",
+     "sourceId": "twy_10",
+     "from": "tn_11",
+     "to": "tn_10",
+     "bidirectional": true,
+     "lengthM": 200,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_11",
+      "runwayId": "rwy_1"
+     }
+    },
+    "twy_11": {
+     "id": "twy_11",
+     "kind": "taxiway",
+     "sourceId": "twy_11",
+     "from": "tn_12",
+     "to": "tn_13",
+     "bidirectional": true,
+     "lengthM": 125,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_12": {
+     "id": "twy_12",
+     "kind": "taxiway",
+     "sourceId": "twy_12",
+     "from": "tn_13",
+     "to": "tn_14",
+     "bidirectional": true,
+     "lengthM": 150,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_13": {
+     "id": "twy_13",
+     "kind": "taxiway",
+     "sourceId": "twy_13",
+     "from": "tn_14",
+     "to": "tn_15",
+     "bidirectional": true,
+     "lengthM": 125,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_14": {
+     "id": "twy_14",
+     "kind": "taxiway",
+     "sourceId": "twy_14",
+     "from": "tn_15",
+     "to": "tn_9",
+     "bidirectional": true,
+     "lengthM": 400,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "rwy_1:tn_4~tn_11": {
+     "id": "rwy_1:tn_4~tn_11",
+     "kind": "runway",
+     "sourceId": "rwy_1",
+     "from": "tn_4",
+     "to": "tn_11",
+     "bidirectional": true,
+     "lengthM": 1750,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "runwayId": "rwy_1"
+    },
+    "rwy_1:tn_11~tn_5": {
+     "id": "rwy_1:tn_11~tn_5",
+     "kind": "runway",
+     "sourceId": "rwy_1",
+     "from": "tn_11",
+     "to": "tn_5",
+     "bidirectional": true,
+     "lengthM": 500,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "runwayId": "rwy_1"
+    },
+    "rwy_2:tn_7~tn_3": {
+     "id": "rwy_2:tn_7~tn_3",
+     "kind": "runway",
+     "sourceId": "rwy_2",
+     "from": "tn_7",
+     "to": "tn_3",
+     "bidirectional": true,
+     "lengthM": 495,
+     "maxSize": "S",
+     "codeF": false,
+     "operational": true,
+     "runwayId": "rwy_2"
+    },
+    "rwy_2:tn_3~tn_11": {
+     "id": "rwy_2:tn_3~tn_11",
+     "kind": "runway",
+     "sourceId": "rwy_2",
+     "from": "tn_3",
+     "to": "tn_11",
+     "bidirectional": true,
+     "lengthM": 283,
+     "maxSize": "S",
+     "codeF": false,
+     "operational": true,
+     "runwayId": "rwy_2"
+    },
+    "rwy_2:tn_11~rwy_2:T1": {
+     "id": "rwy_2:tn_11~rwy_2:T1",
+     "kind": "runway",
+     "sourceId": "rwy_2",
+     "from": "tn_11",
+     "to": "rwy_2:T1",
+     "bidirectional": true,
+     "lengthM": 778,
+     "maxSize": "S",
+     "codeF": false,
+     "operational": true,
+     "runwayId": "rwy_2"
+    },
+    "std_1:L": {
+     "id": "std_1:L",
+     "kind": "standLink",
+     "sourceId": "std_1",
+     "from": "tn_12",
+     "to": "std_1:P",
+     "bidirectional": true,
+     "lengthM": 63,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "std_2:L": {
+     "id": "std_2:L",
+     "kind": "standLink",
+     "sourceId": "std_2",
+     "from": "tn_13",
+     "to": "std_2:P",
+     "bidirectional": true,
+     "lengthM": 63,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "std_3:L": {
+     "id": "std_3:L",
+     "kind": "standLink",
+     "sourceId": "std_3",
+     "from": "tn_14",
+     "to": "std_3:P",
+     "bidirectional": true,
+     "lengthM": 63,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "std_4:L": {
+     "id": "std_4:L",
+     "kind": "standLink",
+     "sourceId": "std_4",
+     "from": "tn_15",
+     "to": "std_4:P",
+     "bidirectional": true,
+     "lengthM": 63,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    }
+   },
+   "outgoing": {
+    "tn_1": [
+     "twy_1",
+     "twy_3"
+    ],
+    "tn_2": [
+     "twy_4",
+     "twy_7"
+    ],
+    "tn_3": [
+     "twy_2",
+     "twy_5",
+     "rwy_2:tn_7~tn_3",
+     "rwy_2:tn_3~tn_11"
+    ],
+    "tn_4": [
+     "twy_3",
+     "rwy_1:tn_4~tn_11"
+    ],
+    "tn_5": [
+     "twy_4",
+     "rwy_1:tn_11~tn_5"
+    ],
+    "tn_6": [
+     "twy_1",
+     "twy_5",
+     "twy_6"
+    ],
+    "tn_7": [
+     "twy_6",
+     "rwy_2:tn_7~tn_3"
+    ],
+    "tn_8": [
+     "twy_8"
+    ],
+    "tn_9": [
+     "twy_9",
+     "twy_14"
+    ],
+    "tn_10": [
+     "twy_2",
+     "twy_7",
+     "twy_10"
+    ],
+    "tn_11": [
+     "twy_9",
+     "twy_10",
+     "rwy_1:tn_4~tn_11",
+     "rwy_1:tn_11~tn_5",
+     "rwy_2:tn_3~tn_11",
+     "rwy_2:tn_11~rwy_2:T1"
+    ],
+    "tn_12": [
+     "twy_8",
+     "twy_11",
+     "std_1:L"
+    ],
+    "tn_13": [
+     "twy_11",
+     "twy_12",
+     "std_2:L"
+    ],
+    "tn_14": [
+     "twy_12",
+     "twy_13",
+     "std_3:L"
+    ],
+    "tn_15": [
+     "twy_13",
+     "twy_14",
+     "std_4:L"
+    ],
+    "rwy_2:T1": [
+     "rwy_2:tn_11~rwy_2:T1"
+    ],
+    "std_1:P": [
+     "std_1:L"
+    ],
+    "std_2:P": [
+     "std_2:L"
+    ],
+    "std_3:P": [
+     "std_3:L"
+    ],
+    "std_4:P": [
+     "std_4:L"
+    ]
+   },
+   "incoming": {
+    "tn_1": [
+     "twy_1",
+     "twy_3"
+    ],
+    "tn_2": [
+     "twy_4",
+     "twy_7"
+    ],
+    "tn_3": [
+     "twy_2",
+     "twy_5",
+     "rwy_2:tn_7~tn_3",
+     "rwy_2:tn_3~tn_11"
+    ],
+    "tn_4": [
+     "twy_3",
+     "rwy_1:tn_4~tn_11"
+    ],
+    "tn_5": [
+     "twy_4",
+     "rwy_1:tn_11~tn_5"
+    ],
+    "tn_6": [
+     "twy_1",
+     "twy_5",
+     "twy_6"
+    ],
+    "tn_7": [
+     "twy_6",
+     "rwy_2:tn_7~tn_3"
+    ],
+    "tn_8": [
+     "twy_8"
+    ],
+    "tn_9": [
+     "twy_9",
+     "twy_14"
+    ],
+    "tn_10": [
+     "twy_2",
+     "twy_7",
+     "twy_10"
+    ],
+    "tn_11": [
+     "twy_9",
+     "twy_10",
+     "rwy_1:tn_4~tn_11",
+     "rwy_1:tn_11~tn_5",
+     "rwy_2:tn_3~tn_11",
+     "rwy_2:tn_11~rwy_2:T1"
+    ],
+    "tn_12": [
+     "twy_8",
+     "twy_11",
+     "std_1:L"
+    ],
+    "tn_13": [
+     "twy_11",
+     "twy_12",
+     "std_2:L"
+    ],
+    "tn_14": [
+     "twy_12",
+     "twy_13",
+     "std_3:L"
+    ],
+    "tn_15": [
+     "twy_13",
+     "twy_14",
+     "std_4:L"
+    ],
+    "rwy_2:T1": [
+     "rwy_2:tn_11~rwy_2:T1"
+    ],
+    "std_1:P": [
+     "std_1:L"
+    ],
+    "std_2:P": [
+     "std_2:L"
+    ],
+    "std_3:P": [
+     "std_3:L"
+    ],
+    "std_4:P": [
+     "std_4:L"
+    ]
+   },
+   "runwayNodes": {
+    "rwy_1": [
+     "tn_4",
+     "tn_11",
+     "tn_5"
+    ],
+    "rwy_2": [
+     "tn_7",
+     "tn_3",
+     "tn_11",
+     "rwy_2:T1"
+    ]
+   },
+   "standLinks": {
+    "std_1": "tn_12",
+    "std_2": "tn_13",
+    "std_3": "tn_14",
+    "std_4": "tn_15"
+   },
+   "crossings": [
+    {
+     "id": "rwy_1:X:rwy_2",
+     "a": "rwy_1",
+     "b": "rwy_2",
+     "nodeId": "tn_11",
+     "tA": 0.7777777777777778,
+     "tB": 0.49999999999999994
+    }
+   ]
+  },
+  "crossings": [
+   {
+    "id": "rwy_1:X:rwy_2",
+    "a": "rwy_1",
+    "b": "rwy_2",
+    "nodeId": "tn_11",
+    "tA": 0.7777777777777778,
+    "tB": 0.49999999999999994
+   }
+  ],
+  "issues": [
+   {
+    "key": "NO_TOWER|||",
+    "code": "NO_TOWER",
+    "severity": "warning",
+    "targets": [],
+    "related": [],
+    "params": {}
+   },
+   {
+    "key": "TAXIWAY_DEAD_END|tn_8||",
+    "code": "TAXIWAY_DEAD_END",
+    "severity": "info",
+    "targets": [
+     "tn_8"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 45,
+     "y": 23
+    }
+   },
+   {
+    "key": "NO_AIRSIDE_ACCESS|fac_2||",
+    "code": "NO_AIRSIDE_ACCESS",
+    "severity": "warning",
+    "targets": [
+     "fac_2"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 69,
+     "y": 18
+    }
+   },
+   {
+    "key": "NO_AIRSIDE_ACCESS|fac_3||",
+    "code": "NO_AIRSIDE_ACCESS",
+    "severity": "warning",
+    "targets": [
+     "fac_3"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 69,
+     "y": 12
+    }
+   },
+   {
+    "key": "STAND_REMOTE|std_1||",
+    "code": "STAND_REMOTE",
+    "severity": "info",
+    "targets": [
+     "std_1"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 47,
+     "y": 19
+    }
+   },
+   {
+    "key": "STAND_REMOTE|std_2||",
+    "code": "STAND_REMOTE",
+    "severity": "info",
+    "targets": [
+     "std_2"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 52,
+     "y": 19
+    }
+   },
+   {
+    "key": "STAND_REMOTE|std_3||",
+    "code": "STAND_REMOTE",
+    "severity": "info",
+    "targets": [
+     "std_3"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 58,
+     "y": 19
+    }
+   },
+   {
+    "key": "STAND_REMOTE|std_4||",
+    "code": "STAND_REMOTE",
+    "severity": "info",
+    "targets": [
+     "std_4"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 63,
+     "y": 19
+    }
+   }
+  ],
+  "counts": {
+   "error": 0,
+   "warning": 3,
+   "info": 5
+  },
+  "operability": {
+   "rwy_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "rwy_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_3": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_4": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_5": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_6": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_7": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_8": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_9": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_10": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_11": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_12": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_13": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_14": {
+    "operable": true,
+    "reasons": []
+   },
+   "std_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "std_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "std_3": {
+    "operable": true,
+    "reasons": []
+   },
+   "std_4": {
+    "operable": true,
+    "reasons": []
+   },
+   "fac_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "fac_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "fac_3": {
+    "operable": true,
+    "reasons": []
+   },
+   "fac_4": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_3": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_4": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_5": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_6": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_7": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_8": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_9": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_10": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_11": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_12": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_13": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_14": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_15": {
+    "operable": true,
+    "reasons": []
+   }
+  },
+  "runways": {
+   "rwy_1": {
+    "axis": {
+     "start": {
+      "x": 10,
+      "y": 30
+     },
+     "end": {
+      "x": 100,
+      "y": 30
+     },
+     "trueHeadingDeg": 90,
+     "lengthM": 2250
+    },
+    "designators": {
+     "trueDeg": [
+      90,
+      270
+     ],
+     "magDeg": [
+      90,
+      270
+     ],
+     "numbers": [
+      9,
+      27
+     ],
+     "suffix": [
+      "",
+      ""
+     ],
+     "text": [
+      "09",
+      "27"
+     ]
+    },
+    "areas": {
+     "pavement": [
+      {
+       "x": 10,
+       "y": 30.9
+      },
+      {
+       "x": 100,
+       "y": 30.9
+      },
+      {
+       "x": 100,
+       "y": 29.1
+      },
+      {
+       "x": 10,
+       "y": 29.1
+      }
+     ],
+     "paved": [
+      {
+       "x": 10,
+       "y": 31.2
+      },
+      {
+       "x": 100,
+       "y": 31.2
+      },
+      {
+       "x": 100,
+       "y": 28.8
+      },
+      {
+       "x": 10,
+       "y": 28.8
+      }
+     ],
+     "strip": [
+      {
+       "x": 7.6,
+       "y": 35.6
+      },
+      {
+       "x": 102.4,
+       "y": 35.6
+      },
+      {
+       "x": 102.4,
+       "y": 24.4
+      },
+      {
+       "x": 7.6,
+       "y": 24.4
+      }
+     ],
+     "resa": [
+      [
+       {
+        "x": 3.9999999999999996,
+        "y": 31.8
+       },
+       {
+        "x": 7.6,
+        "y": 31.8
+       },
+       {
+        "x": 7.6,
+        "y": 28.2
+       },
+       {
+        "x": 3.9999999999999996,
+        "y": 28.2
+       }
+      ],
+      [
+       {
+        "x": 102.4,
+        "y": 31.8
+       },
+       {
+        "x": 106,
+        "y": 31.8
+       },
+       {
+        "x": 106,
+        "y": 28.2
+       },
+       {
+        "x": 102.4,
+        "y": 28.2
+       }
+      ]
+     ]
+    }
+   },
+   "rwy_2": {
+    "axis": {
+     "start": {
+      "x": 58,
+      "y": 52
+     },
+     "end": {
+      "x": 102,
+      "y": 7.999999999999993
+     },
+     "trueHeadingDeg": 45,
+     "lengthM": 1556
+    },
+    "designators": {
+     "trueDeg": [
+      45,
+      225
+     ],
+     "magDeg": [
+      45,
+      225
+     ],
+     "numbers": [
+      5,
+      23
+     ],
+     "suffix": [
+      "",
+      ""
+     ],
+     "text": [
+      "05",
+      "23"
+     ]
+    },
+    "areas": {
+     "pavement": [
+      {
+       "x": 58.636396103067895,
+       "y": 52.636396103067895
+      },
+      {
+       "x": 102.6363961030679,
+       "y": 8.636396103067886
+      },
+      {
+       "x": 101.3636038969321,
+       "y": 7.3636038969321
+      },
+      {
+       "x": 57.363603896932105,
+       "y": 51.363603896932105
+      }
+     ],
+     "paved": [
+      {
+       "x": 58.848528137423855,
+       "y": 52.848528137423855
+      },
+      {
+       "x": 102.84852813742386,
+       "y": 8.84852813742385
+      },
+      {
+       "x": 101.15147186257614,
+       "y": 7.151471862576136
+      },
+      {
+       "x": 57.151471862576145,
+       "y": 51.151471862576145
+      }
+     ],
+     "strip": [
+      {
+       "x": 60.262741699796955,
+       "y": 57.656854249492376
+      },
+      {
+       "x": 107.65685424949238,
+       "y": 10.262741699796944
+      },
+      {
+       "x": 99.73725830020304,
+       "y": 2.3431457505076123
+      },
+      {
+       "x": 52.343145750507624,
+       "y": 49.737258300203045
+      }
+     ],
+     "resa": [
+      [
+       {
+        "x": 55.0301515190165,
+        "y": 57.51543289325507
+       },
+       {
+        "x": 57.57573593128807,
+        "y": 54.969848480983494
+       },
+       {
+        "x": 55.030151519016506,
+        "y": 52.42426406871193
+       },
+       {
+        "x": 52.48456710674493,
+        "y": 54.9698484809835
+       }
+      ],
+      [
+       {
+        "x": 104.9698484809835,
+        "y": 7.575735931288064
+       },
+       {
+        "x": 107.51543289325507,
+        "y": 5.030151519016493
+       },
+       {
+        "x": 104.96984848098349,
+        "y": 2.4845671067449215
+       },
+       {
+        "x": 102.42426406871192,
+        "y": 5.030151519016493
+       }
+      ]
+     ]
+    }
+   }
+  },
+  "designatorsEast10": {
+   "rwy_1": [
+    "08",
+    "26"
+   ],
+   "rwy_2": [
+    "04",
+    "22"
+   ]
+  }
+ },
+ "free-parallel": {
+  "network": {
+   "nodes": {
+    "tn_1": {
+     "id": "tn_1",
+     "pos": {
+      "x": 10,
+      "y": 45
+     },
+     "kind": "intersection",
+     "runwayIds": [],
+     "standIds": [],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_2": {
+     "id": "tn_2",
+     "pos": {
+      "x": 100,
+      "y": 45
+     },
+     "kind": "intersection",
+     "runwayIds": [],
+     "standIds": [],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_3": {
+     "id": "tn_3",
+     "pos": {
+      "x": 10,
+      "y": 30
+     },
+     "kind": "runwayEntry",
+     "runwayIds": [
+      "rwy_1"
+     ],
+     "standIds": [],
+     "holdShort": true,
+     "operational": true
+    },
+    "tn_4": {
+     "id": "tn_4",
+     "pos": {
+      "x": 10,
+      "y": 60
+     },
+     "kind": "runwayEntry",
+     "runwayIds": [
+      "rwy_2"
+     ],
+     "standIds": [],
+     "holdShort": true,
+     "operational": true
+    },
+    "tn_5": {
+     "id": "tn_5",
+     "pos": {
+      "x": 100,
+      "y": 30
+     },
+     "kind": "runwayEntry",
+     "runwayIds": [
+      "rwy_1"
+     ],
+     "standIds": [],
+     "holdShort": true,
+     "operational": true
+    },
+    "tn_6": {
+     "id": "tn_6",
+     "pos": {
+      "x": 100,
+      "y": 60
+     },
+     "kind": "runwayEntry",
+     "runwayIds": [
+      "rwy_2"
+     ],
+     "standIds": [],
+     "holdShort": true,
+     "operational": true
+    },
+    "tn_7": {
+     "id": "tn_7",
+     "pos": {
+      "x": 48,
+      "y": 45
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [
+      "std_1"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_8": {
+     "id": "tn_8",
+     "pos": {
+      "x": 53,
+      "y": 45
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [
+      "std_2"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_9": {
+     "id": "tn_9",
+     "pos": {
+      "x": 59,
+      "y": 45
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [
+      "std_3"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "tn_10": {
+     "id": "tn_10",
+     "pos": {
+      "x": 64,
+      "y": 45
+     },
+     "kind": "taxiway",
+     "runwayIds": [],
+     "standIds": [
+      "std_4"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "std_1:P": {
+     "id": "std_1:P",
+     "pos": {
+      "x": 48,
+      "y": 42.5
+     },
+     "kind": "stand",
+     "runwayIds": [],
+     "standIds": [
+      "std_1"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "std_2:P": {
+     "id": "std_2:P",
+     "pos": {
+      "x": 53,
+      "y": 42.5
+     },
+     "kind": "stand",
+     "runwayIds": [],
+     "standIds": [
+      "std_2"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "std_3:P": {
+     "id": "std_3:P",
+     "pos": {
+      "x": 59,
+      "y": 42.5
+     },
+     "kind": "stand",
+     "runwayIds": [],
+     "standIds": [
+      "std_3"
+     ],
+     "holdShort": false,
+     "operational": true
+    },
+    "std_4:P": {
+     "id": "std_4:P",
+     "pos": {
+      "x": 64,
+      "y": 42.5
+     },
+     "kind": "stand",
+     "runwayIds": [],
+     "standIds": [
+      "std_4"
+     ],
+     "holdShort": false,
+     "operational": true
+    }
+   },
+   "edges": {
+    "twy_1": {
+     "id": "twy_1",
+     "kind": "taxiway",
+     "sourceId": "twy_1",
+     "from": "tn_1",
+     "to": "tn_7",
+     "bidirectional": true,
+     "lengthM": 950,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_2": {
+     "id": "twy_2",
+     "kind": "taxiway",
+     "sourceId": "twy_2",
+     "from": "tn_3",
+     "to": "tn_1",
+     "bidirectional": true,
+     "lengthM": 375,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_3",
+      "runwayId": "rwy_1"
+     }
+    },
+    "twy_3": {
+     "id": "twy_3",
+     "kind": "taxiway",
+     "sourceId": "twy_3",
+     "from": "tn_1",
+     "to": "tn_4",
+     "bidirectional": true,
+     "lengthM": 375,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_4",
+      "runwayId": "rwy_2"
+     }
+    },
+    "twy_4": {
+     "id": "twy_4",
+     "kind": "taxiway",
+     "sourceId": "twy_4",
+     "from": "tn_5",
+     "to": "tn_2",
+     "bidirectional": true,
+     "lengthM": 375,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_5",
+      "runwayId": "rwy_1"
+     }
+    },
+    "twy_5": {
+     "id": "twy_5",
+     "kind": "taxiway",
+     "sourceId": "twy_5",
+     "from": "tn_2",
+     "to": "tn_6",
+     "bidirectional": true,
+     "lengthM": 375,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "holdShortAt": {
+      "nodeId": "tn_6",
+      "runwayId": "rwy_2"
+     }
+    },
+    "twy_6": {
+     "id": "twy_6",
+     "kind": "taxiway",
+     "sourceId": "twy_6",
+     "from": "tn_7",
+     "to": "tn_8",
+     "bidirectional": true,
+     "lengthM": 125,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_7": {
+     "id": "twy_7",
+     "kind": "taxiway",
+     "sourceId": "twy_7",
+     "from": "tn_8",
+     "to": "tn_9",
+     "bidirectional": true,
+     "lengthM": 150,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_8": {
+     "id": "twy_8",
+     "kind": "taxiway",
+     "sourceId": "twy_8",
+     "from": "tn_9",
+     "to": "tn_10",
+     "bidirectional": true,
+     "lengthM": 125,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "twy_9": {
+     "id": "twy_9",
+     "kind": "taxiway",
+     "sourceId": "twy_9",
+     "from": "tn_10",
+     "to": "tn_2",
+     "bidirectional": true,
+     "lengthM": 900,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "rwy_1:tn_3~tn_5": {
+     "id": "rwy_1:tn_3~tn_5",
+     "kind": "runway",
+     "sourceId": "rwy_1",
+     "from": "tn_3",
+     "to": "tn_5",
+     "bidirectional": true,
+     "lengthM": 2250,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "runwayId": "rwy_1"
+    },
+    "rwy_2:tn_4~tn_6": {
+     "id": "rwy_2:tn_4~tn_6",
+     "kind": "runway",
+     "sourceId": "rwy_2",
+     "from": "tn_4",
+     "to": "tn_6",
+     "bidirectional": true,
+     "lengthM": 2250,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true,
+     "runwayId": "rwy_2"
+    },
+    "std_1:L": {
+     "id": "std_1:L",
+     "kind": "standLink",
+     "sourceId": "std_1",
+     "from": "tn_7",
+     "to": "std_1:P",
+     "bidirectional": true,
+     "lengthM": 63,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "std_2:L": {
+     "id": "std_2:L",
+     "kind": "standLink",
+     "sourceId": "std_2",
+     "from": "tn_8",
+     "to": "std_2:P",
+     "bidirectional": true,
+     "lengthM": 63,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "std_3:L": {
+     "id": "std_3:L",
+     "kind": "standLink",
+     "sourceId": "std_3",
+     "from": "tn_9",
+     "to": "std_3:P",
+     "bidirectional": true,
+     "lengthM": 63,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    },
+    "std_4:L": {
+     "id": "std_4:L",
+     "kind": "standLink",
+     "sourceId": "std_4",
+     "from": "tn_10",
+     "to": "std_4:P",
+     "bidirectional": true,
+     "lengthM": 63,
+     "maxSize": "M",
+     "codeF": false,
+     "operational": true
+    }
+   },
+   "outgoing": {
+    "tn_1": [
+     "twy_1",
+     "twy_2",
+     "twy_3"
+    ],
+    "tn_2": [
+     "twy_4",
+     "twy_5",
+     "twy_9"
+    ],
+    "tn_3": [
+     "twy_2",
+     "rwy_1:tn_3~tn_5"
+    ],
+    "tn_4": [
+     "twy_3",
+     "rwy_2:tn_4~tn_6"
+    ],
+    "tn_5": [
+     "twy_4",
+     "rwy_1:tn_3~tn_5"
+    ],
+    "tn_6": [
+     "twy_5",
+     "rwy_2:tn_4~tn_6"
+    ],
+    "tn_7": [
+     "twy_1",
+     "twy_6",
+     "std_1:L"
+    ],
+    "tn_8": [
+     "twy_6",
+     "twy_7",
+     "std_2:L"
+    ],
+    "tn_9": [
+     "twy_7",
+     "twy_8",
+     "std_3:L"
+    ],
+    "tn_10": [
+     "twy_8",
+     "twy_9",
+     "std_4:L"
+    ],
+    "std_1:P": [
+     "std_1:L"
+    ],
+    "std_2:P": [
+     "std_2:L"
+    ],
+    "std_3:P": [
+     "std_3:L"
+    ],
+    "std_4:P": [
+     "std_4:L"
+    ]
+   },
+   "incoming": {
+    "tn_1": [
+     "twy_1",
+     "twy_2",
+     "twy_3"
+    ],
+    "tn_2": [
+     "twy_4",
+     "twy_5",
+     "twy_9"
+    ],
+    "tn_3": [
+     "twy_2",
+     "rwy_1:tn_3~tn_5"
+    ],
+    "tn_4": [
+     "twy_3",
+     "rwy_2:tn_4~tn_6"
+    ],
+    "tn_5": [
+     "twy_4",
+     "rwy_1:tn_3~tn_5"
+    ],
+    "tn_6": [
+     "twy_5",
+     "rwy_2:tn_4~tn_6"
+    ],
+    "tn_7": [
+     "twy_1",
+     "twy_6",
+     "std_1:L"
+    ],
+    "tn_8": [
+     "twy_6",
+     "twy_7",
+     "std_2:L"
+    ],
+    "tn_9": [
+     "twy_7",
+     "twy_8",
+     "std_3:L"
+    ],
+    "tn_10": [
+     "twy_8",
+     "twy_9",
+     "std_4:L"
+    ],
+    "std_1:P": [
+     "std_1:L"
+    ],
+    "std_2:P": [
+     "std_2:L"
+    ],
+    "std_3:P": [
+     "std_3:L"
+    ],
+    "std_4:P": [
+     "std_4:L"
+    ]
+   },
+   "runwayNodes": {
+    "rwy_1": [
+     "tn_3",
+     "tn_5"
+    ],
+    "rwy_2": [
+     "tn_4",
+     "tn_6"
+    ]
+   },
+   "standLinks": {
+    "std_1": "tn_7",
+    "std_2": "tn_8",
+    "std_3": "tn_9",
+    "std_4": "tn_10"
+   }
+  },
+  "crossings": [],
+  "issues": [
+   {
+    "key": "NO_TOWER|||",
+    "code": "NO_TOWER",
+    "severity": "warning",
+    "targets": [],
+    "related": [],
+    "params": {}
+   },
+   {
+    "key": "NO_AIRSIDE_ACCESS|fac_2||",
+    "code": "NO_AIRSIDE_ACCESS",
+    "severity": "warning",
+    "targets": [
+     "fac_2"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 69,
+     "y": 40
+    }
+   },
+   {
+    "key": "NO_AIRSIDE_ACCESS|fac_3||",
+    "code": "NO_AIRSIDE_ACCESS",
+    "severity": "warning",
+    "targets": [
+     "fac_3"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 75,
+     "y": 40
+    }
+   },
+   {
+    "key": "NO_AIRSIDE_ACCESS|fac_4||",
+    "code": "NO_AIRSIDE_ACCESS",
+    "severity": "warning",
+    "targets": [
+     "fac_4"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 36,
+     "y": 40
+    }
+   },
+   {
+    "key": "STAND_REMOTE|std_1||",
+    "code": "STAND_REMOTE",
+    "severity": "info",
+    "targets": [
+     "std_1"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 47,
+     "y": 41
+    }
+   },
+   {
+    "key": "STAND_REMOTE|std_2||",
+    "code": "STAND_REMOTE",
+    "severity": "info",
+    "targets": [
+     "std_2"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 52,
+     "y": 41
+    }
+   },
+   {
+    "key": "STAND_REMOTE|std_3||",
+    "code": "STAND_REMOTE",
+    "severity": "info",
+    "targets": [
+     "std_3"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 58,
+     "y": 41
+    }
+   },
+   {
+    "key": "STAND_REMOTE|std_4||",
+    "code": "STAND_REMOTE",
+    "severity": "info",
+    "targets": [
+     "std_4"
+    ],
+    "related": [],
+    "params": {},
+    "at": {
+     "x": 63,
+     "y": 41
+    }
+   }
+  ],
+  "counts": {
+   "error": 0,
+   "warning": 4,
+   "info": 4
+  },
+  "operability": {
+   "rwy_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "rwy_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_3": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_4": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_5": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_6": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_7": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_8": {
+    "operable": true,
+    "reasons": []
+   },
+   "twy_9": {
+    "operable": true,
+    "reasons": []
+   },
+   "std_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "std_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "std_3": {
+    "operable": true,
+    "reasons": []
+   },
+   "std_4": {
+    "operable": true,
+    "reasons": []
+   },
+   "fac_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "fac_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "fac_3": {
+    "operable": true,
+    "reasons": []
+   },
+   "fac_4": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_1": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_2": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_3": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_4": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_5": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_6": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_7": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_8": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_9": {
+    "operable": true,
+    "reasons": []
+   },
+   "tn_10": {
+    "operable": true,
+    "reasons": []
+   }
+  },
+  "runways": {
+   "rwy_1": {
+    "axis": {
+     "start": {
+      "x": 10,
+      "y": 30
+     },
+     "end": {
+      "x": 100,
+      "y": 30
+     },
+     "trueHeadingDeg": 90,
+     "lengthM": 2250
+    },
+    "designators": {
+     "trueDeg": [
+      90,
+      270
+     ],
+     "magDeg": [
+      90,
+      270
+     ],
+     "numbers": [
+      9,
+      27
+     ],
+     "suffix": [
+      "L",
+      "R"
+     ],
+     "text": [
+      "09L",
+      "27R"
+     ]
+    },
+    "areas": {
+     "pavement": [
+      {
+       "x": 10,
+       "y": 30.9
+      },
+      {
+       "x": 100,
+       "y": 30.9
+      },
+      {
+       "x": 100,
+       "y": 29.1
+      },
+      {
+       "x": 10,
+       "y": 29.1
+      }
+     ],
+     "paved": [
+      {
+       "x": 10,
+       "y": 31.2
+      },
+      {
+       "x": 100,
+       "y": 31.2
+      },
+      {
+       "x": 100,
+       "y": 28.8
+      },
+      {
+       "x": 10,
+       "y": 28.8
+      }
+     ],
+     "strip": [
+      {
+       "x": 7.6,
+       "y": 35.6
+      },
+      {
+       "x": 102.4,
+       "y": 35.6
+      },
+      {
+       "x": 102.4,
+       "y": 24.4
+      },
+      {
+       "x": 7.6,
+       "y": 24.4
+      }
+     ],
+     "resa": [
+      [
+       {
+        "x": 3.9999999999999996,
+        "y": 31.8
+       },
+       {
+        "x": 7.6,
+        "y": 31.8
+       },
+       {
+        "x": 7.6,
+        "y": 28.2
+       },
+       {
+        "x": 3.9999999999999996,
+        "y": 28.2
+       }
+      ],
+      [
+       {
+        "x": 102.4,
+        "y": 31.8
+       },
+       {
+        "x": 106,
+        "y": 31.8
+       },
+       {
+        "x": 106,
+        "y": 28.2
+       },
+       {
+        "x": 102.4,
+        "y": 28.2
+       }
+      ]
+     ]
+    }
+   },
+   "rwy_2": {
+    "axis": {
+     "start": {
+      "x": 10,
+      "y": 60
+     },
+     "end": {
+      "x": 100,
+      "y": 60
+     },
+     "trueHeadingDeg": 90,
+     "lengthM": 2250
+    },
+    "designators": {
+     "trueDeg": [
+      90,
+      270
+     ],
+     "magDeg": [
+      90,
+      270
+     ],
+     "numbers": [
+      9,
+      27
+     ],
+     "suffix": [
+      "R",
+      "L"
+     ],
+     "text": [
+      "09R",
+      "27L"
+     ]
+    },
+    "areas": {
+     "pavement": [
+      {
+       "x": 10,
+       "y": 60.9
+      },
+      {
+       "x": 100,
+       "y": 60.9
+      },
+      {
+       "x": 100,
+       "y": 59.1
+      },
+      {
+       "x": 10,
+       "y": 59.1
+      }
+     ],
+     "paved": [
+      {
+       "x": 10,
+       "y": 61.2
+      },
+      {
+       "x": 100,
+       "y": 61.2
+      },
+      {
+       "x": 100,
+       "y": 58.8
+      },
+      {
+       "x": 10,
+       "y": 58.8
+      }
+     ],
+     "strip": [
+      {
+       "x": 7.6,
+       "y": 65.6
+      },
+      {
+       "x": 102.4,
+       "y": 65.6
+      },
+      {
+       "x": 102.4,
+       "y": 54.4
+      },
+      {
+       "x": 7.6,
+       "y": 54.4
+      }
+     ],
+     "resa": [
+      [
+       {
+        "x": 3.9999999999999996,
+        "y": 61.8
+       },
+       {
+        "x": 7.6,
+        "y": 61.8
+       },
+       {
+        "x": 7.6,
+        "y": 58.2
+       },
+       {
+        "x": 3.9999999999999996,
+        "y": 58.2
+       }
+      ],
+      [
+       {
+        "x": 102.4,
+        "y": 61.8
+       },
+       {
+        "x": 106,
+        "y": 61.8
+       },
+       {
+        "x": 106,
+        "y": 58.2
+       },
+       {
+        "x": 102.4,
+        "y": 58.2
+       }
+      ]
+     ]
+    }
+   }
+  },
+  "designatorsEast10": {
+   "rwy_1": [
+    "08L",
+    "26R"
+   ],
+   "rwy_2": [
+    "08R",
+    "26L"
+   ]
+  }
+ }
+}

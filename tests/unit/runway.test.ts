@@ -10,10 +10,10 @@ import {
 } from '../../src/core/layout/runway';
 import { rasterizePolygon } from '../../src/core/geometry/vec';
 import { placeRunway, updateEntity } from '../../src/core/layout/operations';
-import type { Runway } from '../../src/core/model/types';
+import type { RunwayGrid8 } from '../../src/core/model/types';
 import { emptyLayout, must } from './helpers';
 
-const rwy = (p: Partial<Runway>): Runway => ({
+const rwy = (p: Partial<RunwayGrid8>): RunwayGrid8 => ({
   id: 'rwy_1',
   name: '',
   start: { x: 0, y: 0 },
@@ -56,7 +56,7 @@ describe('滑走路の属性', () => {
     const r1 = must(updateEntity(layout, 'rwy_1', { length: 60, surfaceWidthM: 60 })).layout.runways.rwy_1!;
     expect(r1).toMatchObject({ length: 60, surfaceWidthM: 60 });
     const r2 = must(updateEntity(layout, 'rwy_1', { heading: 180 })).layout.runways.rwy_1!;
-    expect(r2.heading).toBe(180);
+    expect((r2 as RunwayGrid8).heading).toBe(180);
     expect(r2.start).toEqual({ x: 30, y: 10 });
     expect(updateEntity(layout, 'rwy_1', { length: 0 })).toEqual({ ok: false, reason: 'INVALID_VALUE' });
     expect(updateEntity(layout, 'rwy_1', { surfaceWidthM: 50 })).toEqual({ ok: false, reason: 'INVALID_VALUE' });

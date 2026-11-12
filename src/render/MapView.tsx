@@ -75,7 +75,7 @@ export function MapView() {
       data-testid="map"
       onPointerDown={(e) => {
         (e.target as Element).setPointerCapture?.(e.pointerId);
-        onPointerDown(local(e), e.button);
+        onPointerDown(local(e), e.button, { shift: e.shiftKey });
       }}
       onPointerMove={(e) => onPointerMove(local(e))}
       onPointerUp={(e) => onPointerUp(local(e), e.button)}

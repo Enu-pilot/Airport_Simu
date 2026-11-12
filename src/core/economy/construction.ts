@@ -1,5 +1,6 @@
 import { distance } from '../geometry/vec';
-import type { AirportLayout, Facility, TerminalArea } from '../model/types';
+import { TILE_M } from '../model/catalog';
+import { isFreeRunway, type AirportLayout, type Facility, type TerminalArea } from '../model/types';
 import type { UnitKind } from '../sim/types';
 import { BALANCE } from './balance';
 import { post, type CompanyState } from './company';
@@ -51,6 +52,11 @@ export function layoutItems(layout: AirportLayout): Record<string, number> {
   const out: Record<string, number> = {};
   for (const r of Object.values(layout.runways)) {
     if (r.buildState === 'planned') continue;
+    if (isFreeRunway(r)) {
+      // 自由形: 実長（m）→ タイル。肩の費用は加えない（ゲームの単純化）
+      out[r.id] = Math.round((r.lengthM / TILE_M) * C.runwayPerTile * (r.surfaceWidthM / 30));
+      continue;
+    }
     const tiles = r.length * (r.heading % 90 === 0 ? 1 : Math.SQRT2);
     out[r.id] = Math.round(tiles * C.runwayPerTile * (r.surfaceWidthM / 30));
   }

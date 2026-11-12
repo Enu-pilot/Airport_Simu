@@ -5,15 +5,18 @@ import { mToTiles, worldPolyToMap, worldToMap } from '../core/geometry/frames';
 import { distance, type Tile, type Vec2 } from '../core/geometry/vec';
 import { FACILITY_SPECS, STRIP_HALF_WIDTH } from '../core/model/catalog';
 import { isBuildable } from '../core/model/site';
-import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Site, Stand, TerminalAreaKind } from '../core/model/types';
-import { entityTypeOf } from '../core/model/types';
+import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Runway, RunwayFree, Site, Stand, TerminalAreaKind } from '../core/model/types';
+import { entityTypeOf, isFreeRunway } from '../core/model/types';
 import { facilityDims, standDims, standEntry } from '../core/layout/footprint';
 import { offsiteTilesIn } from '../core/layout/operations';
-import { runwayDesignators, runwayEnd, headingVector } from '../core/layout/runway';
-import { roadDrawWidthM, runwayPavementSurface, runwayStripSurface, taxiwayBandSurface, taxiwayDrawWidthM } from '../core/layout/surfaces';
+import { designatorsOf } from '../core/layout/designators';
+import { runwayAxis } from '../core/layout/runway';
+import { roadDrawWidthM, runwayStripSurface, runwaySurfaces, taxiwayBandSurface, taxiwayDrawWidthM } from '../core/layout/surfaces';
+import { resolveRunwayDims } from '../core/layout/runwayAreas';
+import { HOLD_SHORT_MAX_RATIO, SIN_MIN_HOLD } from '../core/sim/rules';
 import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
-import { computePreview, facilityKindOf, nextPathPoint, rectFromDrag } from '../editor/tools';
+import { computePreview, facilityKindOf, nextPathPoint, nextTaxiPoint, rectFromDrag } from '../editor/tools';
 import { getAnalysis, type EditorState, type OpsState } from '../editor/store';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../core/sim/aircraftTypes';
 import { isVisible } from '../core/sim/query';
@@ -34,6 +37,8 @@ import { airportKpis, type AirportKpis } from '../core/analytics/kpi';
 
 /** World フレーム（ノード・滑走路端など）→ Map フレーム（描画）。変換は frames.ts のみで行う */
 const c = (t: Tile): Vec2 => worldToMap(t);
+
+const fmtDeg = (d: number): string => (Math.round(d * 10) / 10).toFixed(1);
 
 const BUILD_ALPHA: Record<BuildState, number> = { operational: 1, underConstruction: 0.8, planned: 0.45 };
 
@@ -109,6 +114,15 @@ export class MapRenderer {
       this.outline(o, layout, id, bad ? COLOR.ghostBad : COLOR.ghostOk, 3);
     }
     this.drawDraft(s);
+    // 配置・回転のプレビュー中の滑走路: 番号・真方位・磁方位・長さを表示
+    for (const id of ghostIds) {
+      const gr = layout.runways[id];
+      if (!gr || !isFreeRunway(gr)) continue;
+      const ds = designatorsOf(gr, layout);
+      const mid = c({ x: (runwayAxis(gr).start.x + runwayAxis(gr).end.x) / 2, y: (runwayAxis(gr).start.y + runwayAxis(gr).end.y) / 2 });
+      const text = `${ds.text.join('/')}  真 ${fmtDeg(ds.trueDeg[0])}° / 磁 ${fmtDeg(ds.magDeg[0])}°  ${Math.round(gr.lengthM)} m`;
+      this.label(`ghostinfo:${id}`, text, { x: mid.x, y: mid.y - 2 }, cam, { size: 12, color: 0xb9f6ca });
+    }
     if (s.overlays.labels) this.drawLabels(layout, analysis, cam);
     if (s.ops && s.overlays.congestion) this.drawCongestion(layout, s.ops, cam, s.overlays.labels);
     if (s.ops) this.drawOps(s.ops, cam, s.overlays.network);
@@ -178,35 +192,22 @@ export class MapRenderer {
 
     // 滑走路保護区域
     for (const r of Object.values(layout.runways)) {
+      if (isFreeRunway(r)) {
+        // 自由形: 着陸帯（薄い面と輪郭）→ RESA（斜線）。形は 3D と共有の runwaySurfaces
+        const sf = runwaySurfaces(r, layout);
+        g.poly(flat(worldPolyToMap(sf.strip))).fill({ color: COLOR.strip, alpha: 0.06 });
+        g.poly(flat(worldPolyToMap(sf.strip))).stroke({ width: this.px(1), color: COLOR.strip, alpha: 0.3 });
+        for (const p of sf.resa) this.hatch(g, worldPolyToMap(p), COLOR.resa);
+        continue;
+      }
       g.poly(flat(worldPolyToMap(runwayStripSurface(r)))).fill({ color: COLOR.strip, alpha: 0.05 });
       g.poly(flat(worldPolyToMap(runwayStripSurface(r)))).stroke({ width: this.px(1), color: COLOR.strip, alpha: 0.25 });
     }
     // エリア
     for (const f of [...byLayer('apron'), ...byLayer('area')]) this.drawFacility(f);
 
-    // 滑走路
-    for (const r of Object.values(layout.runways)) {
-      const a = BUILD_ALPHA[r.buildState];
-      const poly = flat(worldPolyToMap(runwayPavementSurface(r)));
-      g.poly(poly).fill({ color: COLOR.runway, alpha: a });
-      g.poly(poly).stroke({ width: this.px(1.5), color: COLOR.runwayMarking, alpha: 0.7 * a });
-      const s0 = c(r.start);
-      const e0 = c(runwayEnd(r));
-      const v = headingVector(r.heading);
-      const len = Math.hypot(v.x, v.y);
-      const u = { x: v.x / len, y: v.y / len };
-      const n = { x: -u.y, y: u.x };
-      this.dashed(g, add(s0, scale(u, 3)), add(e0, scale(u, -3)), 1.5, 1.2, { width: this.px(2), color: COLOR.runwayMarking, alpha: a });
-      // 進入端の標識
-      for (const [p, dir] of [[s0, 1], [e0, -1]] as const) {
-        for (let k = -1; k <= 1; k += 0.5) {
-          const q = add(p, scale(n, k));
-          g.moveTo(q.x, q.y).lineTo(q.x + u.x * dir * 1.4, q.y + u.y * dir * 1.4);
-        }
-        g.stroke({ width: this.px(2), color: COLOR.runwayMarking, alpha: a });
-      }
-      this.buildStateOutline(g, poly, r.buildState);
-    }
+    // 滑走路（従来形も自由形も同じ runwaySurfaces から描く。従来形の舗装は実寸の幅で、判定の範囲は薄い輪郭で示す）
+    for (const r of Object.values(layout.runways)) this.drawRunway(r, layout);
 
     // 道路
     for (const e of Object.values(layout.roads)) {
@@ -261,7 +262,21 @@ export class MapRenderer {
       const p = c(rwyNode.pos);
       const q = c(other.pos);
       const d = distance(p, q);
-      const t = Math.min(STRIP_HALF_WIDTH, d * 0.8) / d;
+      // 自由形のノードは、中心線からの垂直距離 H（実寸の停止位置）をエッジに沿った距離に直す（sim/routes.ts holdShortDistanceAt と同じ式）
+      const free = rwyNode.runwayIds.map((id) => layout.runways[id]).filter((rw): rw is RunwayFree => !!rw && isFreeRunway(rw));
+      let along = Math.min(STRIP_HALF_WIDTH, d * 0.8);
+      if (free.length > 0) {
+        const eAx = other.pos.x - rwyNode.pos.x;
+        const eAy = other.pos.y - rwyNode.pos.y;
+        let dm = 0;
+        for (const rw of free) {
+          const u = runwayAxis(rw).dir;
+          const sin = d > 0 ? Math.abs(eAx * u.y - eAy * u.x) / d : 1;
+          dm = Math.max(dm, resolveRunwayDims(rw).holdingPositionM / Math.max(sin, SIN_MIN_HOLD));
+        }
+        along = Math.min(mToTiles(dm), d * HOLD_SHORT_MAX_RATIO);
+      }
+      const t = along / d;
       const m = { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t };
       const n = { x: -(q.y - p.y) / d, y: (q.x - p.x) / d };
       g.moveTo(m.x - n.x * 0.6, m.y - n.y * 0.6).lineTo(m.x + n.x * 0.6, m.y + n.y * 0.6);
@@ -285,6 +300,51 @@ export class MapRenderer {
         g.circle(c(n.pos).x, c(n.pos).y, 0.14).fill({ color: 0xd7ccc8 }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.6 });
       }
     }
+  }
+
+  /**
+   * 滑走路: 肩 → 舗装 → 中心線の破線 → 進入端の縦じま（番号は drawLabels）。形は 3D と共有の runwaySurfaces。
+   * 従来形は肩・RESA なし。舗装は実寸の幅（30/45/60 m）で描き、判定に使う占有の多角形（footprint）は薄い破線で示す。
+   */
+  private drawRunway(r: Runway, layout: AirportLayout): void {
+    const g = this.g;
+    const a = BUILD_ALPHA[r.buildState];
+    const sf = runwaySurfaces(r, layout);
+    const paved = flat(worldPolyToMap(sf.paved));
+    const pavement = flat(worldPolyToMap(sf.pavement));
+    if (sf.footprint) this.dashedPoly(g, worldPolyToMap(sf.footprint), COLOR.runwayMarking, 0.35);
+    if (sf.paved !== sf.pavement) g.poly(paved).fill({ color: COLOR.runwayShoulder, alpha: a });
+    g.poly(pavement).fill({ color: COLOR.runway, alpha: a });
+    g.poly(pavement).stroke({ width: this.px(1.5), color: COLOR.runwayMarking, alpha: 0.7 * a });
+    for (const [p, q] of sf.centrelineDashes) {
+      const m0 = worldToMap(p);
+      const m1 = worldToMap(q);
+      g.moveTo(m0.x, m0.y).lineTo(m1.x, m1.y);
+    }
+    g.stroke({ width: this.px(2), color: COLOR.runwayMarking, alpha: a });
+    for (const bar of sf.thresholdBars) g.poly(flat(worldPolyToMap(bar))).fill({ color: COLOR.runwayMarking, alpha: a });
+    this.buildStateOutline(g, pavement, r.buildState);
+  }
+
+  /** 多角形の辺を薄い破線で描く（従来形の判定範囲・実寸との対比） */
+  private dashedPoly(g: Graphics, poly: Vec2[], color: number, alpha: number): void {
+    for (let i = 0; i < poly.length; i++) this.dashed(g, poly[i]!, poly[(i + 1) % poly.length]!, 0.4, 0.4, { width: this.px(1), color, alpha });
+  }
+
+  /** 斜線の面（RESA）: 多角形の塗りと、辺に平行でない斜めの線 */
+  private hatch(g: Graphics, poly: Vec2[], color: number): void {
+    g.poly(flat(poly)).fill({ color, alpha: 0.1 });
+    g.poly(flat(poly)).stroke({ width: this.px(1), color, alpha: 0.6 });
+    // 対角線方向の線（凸の 4 角形。頂点 0-1 の方向と 1-2 の方向で斜線を引く）
+    const [p0, p1, p2, p3] = poly as [Vec2, Vec2, Vec2, Vec2];
+    const steps = 6;
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const a = { x: p0.x + (p1.x - p0.x) * t, y: p0.y + (p1.y - p0.y) * t };
+      const b = { x: p3.x + (p2.x - p3.x) * Math.min(1, t + 1 / steps), y: p3.y + (p2.y - p3.y) * Math.min(1, t + 1 / steps) };
+      g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+    }
+    g.stroke({ width: this.px(1), color, alpha: 0.35 });
   }
 
   private drawFacility(f: Facility): void {
@@ -386,7 +446,7 @@ export class MapRenderer {
     for (const r of k.runways) {
       const rw = layout.runways[r.id];
       if (!rw) continue;
-      const poly = flat(worldPolyToMap(runwayPavementSurface(rw)));
+      const poly = flat(worldPolyToMap(runwaySurfaces(rw, layout).pavement));
       o.poly(poly).fill({ color: heat(r.util), alpha: 0.35 });
       if (labels) this.label(`cg:${r.id}`, `使用率 ${Math.round(r.util * 100)}%`, c({ x: rw.start.x + 1, y: rw.start.y - 1 }), cam, { size: 11, color: 0xffffff });
     }
@@ -463,7 +523,18 @@ export class MapRenderer {
       }
       case 'runway': {
         const r = layout.runways[id];
-        if (r) g.poly(flat(worldPolyToMap(runwayPavementSurface(r)))).stroke(style);
+        if (!r) return;
+        // 舗装の外形に加えて、判定の基準を見せる: 自由形は着陸帯と RESA の実寸の輪郭、従来形はゲームの占有範囲（破線）
+        const sf = runwaySurfaces(r, layout);
+        g.poly(flat(worldPolyToMap(sf.pavement))).stroke(style);
+        const thin = { width: this.px(1.5), color, alpha: 0.7 };
+        if (sf.footprint) {
+          this.dashedPoly(g, worldPolyToMap(sf.footprint), color, 0.9);
+          this.dashedPoly(g, worldPolyToMap(sf.strip), color, 0.9);
+          return;
+        }
+        g.poly(flat(worldPolyToMap(sf.strip))).stroke(thin);
+        for (const p of sf.resa) g.poly(flat(worldPolyToMap(p))).stroke({ ...thin, color: COLOR.resa });
         return;
       }
       case 'taxiway':
@@ -497,11 +568,21 @@ export class MapRenderer {
     if (d?.kind === 'path') {
       for (const p of d.points) o.circle(c(p).x, c(p).y, 0.3).fill({ color: COLOR.ghostOk });
       if (s.hover && d.points.length > 0) {
-        const next = c(nextPathPoint(d.points, s.hover));
+        const next = c(s.tool === 'taxiway' ? nextTaxiPoint(s.history.present, d.points, s.hover) : nextPathPoint(d.points, s.hover));
         o.circle(next.x, next.y, 0.25).stroke({ width: this.px(2), color: COLOR.ghostOk });
       }
     }
     if (d?.kind === 'runway') o.circle(c(d.start).x, c(d.start).y, 0.4).fill({ color: COLOR.ghostOk });
+    if (d?.kind === 'freeRunway') o.circle(c(d.start).x, c(d.start).y, 0.4).fill({ color: COLOR.ghostOk });
+    // 選択中の自由形の端のハンドル（端 = 回転、Shift + 端 = 反対の端を固定）
+    const sel = s.selection ? s.history.present.runways[s.selection] : undefined;
+    if (sel && isFreeRunway(sel) && s.mode === 'build' && s.tool === 'select') {
+      const ax = runwayAxis(sel);
+      for (const p of [ax.start, ax.end]) {
+        const q = c(p);
+        o.circle(q.x, q.y, this.px(6)).fill({ color: 0xffffff, alpha: 0.95 }).stroke({ width: this.px(2), color: COLOR.selection });
+      }
+    }
     if (d?.kind === 'rect' && s.hover) {
       const r = rectFromDrag(d.start, s.hover);
       if (s.tool === 'land') {
@@ -537,13 +618,10 @@ export class MapRenderer {
 
   private drawLabels(layout: AirportLayout, analysis: LayoutAnalysis, cam: Camera): void {
     for (const r of Object.values(layout.runways)) {
-      const [d0, d1] = runwayDesignators(r.heading);
-      const v = headingVector(r.heading);
-      const len = Math.hypot(v.x, v.y);
-      const s0 = c(r.start);
-      const e0 = c(runwayEnd(r));
-      this.label(`rwy0:${r.id}`, d0, { x: s0.x + (v.x / len) * 3, y: s0.y + (v.y / len) * 3 }, cam, { size: 13 });
-      this.label(`rwy1:${r.id}`, d1, { x: e0.x - (v.x / len) * 3, y: e0.y - (v.y / len) * 3 }, cam, { size: 13 });
+      // 番号は端から内側へ min(0.1 × 長さ, 150 m)（3D と共有の runwaySurfaces）
+      const [m0, m1] = runwaySurfaces(r, layout).designators;
+      this.label(`rwy0:${r.id}`, m0!.text, c(m0!.pos), cam, { size: 13 });
+      this.label(`rwy1:${r.id}`, m1!.text, c(m1!.pos), cam, { size: 13 });
     }
     if (cam.zoom >= 5) {
       // 誘導路名は同名区間のうち最長の区間に1つだけ
@@ -678,7 +756,7 @@ export class MapRenderer {
     for (const [rid, rs] of Object.entries(sim.state.runways)) {
       const r = sim.ctx.layout.runways[rid];
       if (!r) continue;
-      const poly = flat(worldPolyToMap(runwayPavementSurface(r)));
+      const poly = flat(worldPolyToMap(runwaySurfaces(r, sim.ctx.layout).pavement));
       if (rs.occupant) o.poly(poly).stroke({ width: this.px(3), color: 0xff4d4f });
       else if (rs.booking) o.poly(poly).stroke({ width: this.px(3), color: 0xffd400 });
     }
@@ -859,5 +937,3 @@ function aircraftColor(id: string): number {
   const palette = [0xff8a65, 0x4db6ac, 0xba68c8, 0xffd54f, 0x64b5f6, 0xaed581, 0xf06292, 0x90a4ae];
   return palette[n % palette.length]!;
 }
-const add = (a: Vec2, b: Vec2): Vec2 => ({ x: a.x + b.x, y: a.y + b.y });
-const scale = (a: Vec2, k: number): Vec2 => ({ x: a.x * k, y: a.y * k });

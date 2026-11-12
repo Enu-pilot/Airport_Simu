@@ -1,10 +1,13 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
+import { Field, Info, NumberInput, Section, TextInput } from './fields';
+import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
 import { FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M } from '../core/model/catalog';
 import { sortedValues } from '../core/model/ids';
 import {
   BUILD_STATES,
   HEADINGS,
   entityTypeOf,
+  isFreeRunway,
   type AirportLayout,
   type BuildState,
   type Rotation,
@@ -19,7 +22,8 @@ import {
   rotateEntity,
   updateEntity,
 } from '../core/layout/operations';
-import { runwayDesignators, runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
+import { designatorsOf } from '../core/layout/designators';
+import { runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
 import { applyOp, closeTemporarily, editorStore, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { ops } from '../editor/simRunner';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
@@ -39,6 +43,7 @@ import {
   AREA_KIND_LABEL,
   AREA_PROP_LABEL,
   ZONE_LABEL,
+  RUNWAY_UI,
 } from '../i18n/ja';
 
 export function PropertiesPanel() {
@@ -72,6 +77,7 @@ export function PropertiesPanel() {
           <li>Ctrl+Z: 元に戻す / Ctrl+Shift+Z・Ctrl+Y: やり直し</li>
           <li>矢印: 1タイル移動（Shift で10）/ Esc: 解除</li>
         </ul>
+        <AirportSettings />
       </div>
     );
   }
@@ -131,6 +137,12 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
         <div className="prop-title" data-testid="prop-title">{displayName(layout, id)}</div>
         <div className="prop-sub">
           {typeLabel} · <code>{id}</code>
+          {type === 'runway' && layout.runways[id] && (
+            <>
+              {' '}
+              <CriterionBadge free={isFreeRunway(layout.runways[id]!)} testid={isFreeRunway(layout.runways[id]!) ? 'badge-free' : 'badge-legacy'} />
+            </>
+          )}
         </div>
       </div>
 
@@ -179,6 +191,7 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
           {issues.map((iss) => (
             <div key={iss.key} className={`issue ${iss.severity}`}>
               {issueText(layout, iss)}
+              {iss.params.criterion === 'real' && <span className="badge free-badge">{RUNWAY_UI.tagReal}</span>}
             </div>
           ))}
         </Section>
@@ -194,8 +207,25 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
 
   if (type === 'runway') {
     const r = layout.runways[id]!;
-    const [d0, d1] = runwayDesignators(r.heading);
+    const [d0, d1] = designatorsOf(r, layout).text;
     const entries = (net.runwayNodes[id] ?? []).filter((n) => layout.taxiNodes[n]);
+    const crossing = (net.crossings ?? []).filter((x) => x.a === id || x.b === id);
+    const crossingInfo =
+      crossing.length === 0 ? null : (
+        <Info label="交差する滑走路" testid="prop-crossings" title="交差点はネットワークの論理ノード。運航では従属運用（2 本の離着陸を同時に使いません）">
+          {crossing.map((x) => {
+            const other = x.a === id ? x.b : x.a;
+            return <EntityLink key={x.id} layout={layout} id={other} />;
+          })}
+        </Info>
+      );
+    if (isFreeRunway(r))
+      return (
+        <>
+          <FreeRunwayFields layout={layout} id={id} r={r} entries={entries} />
+          {crossingInfo}
+        </>
+      );
     return (
       <>
         <NameField layout={layout} id={id} value={r.name} />
@@ -203,7 +233,7 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
           <select value={r.heading} onChange={(e) => update(layout, id, { heading: Number(e.target.value) })} data-testid="prop-heading">
             {HEADINGS.map((h) => (
               <option key={h} value={h}>
-                {h}°（{runwayDesignators(h).join('/')}）
+                {legacyHeadingLabel(layout, r, h)}
               </option>
             ))}
           </select>
@@ -226,6 +256,11 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
         <Info label="滑走路入口">
           {entries.length === 0 ? 'なし' : entries.map((n) => <EntityLink key={n} layout={layout} id={n} />)}
         </Info>
+        {(layout.magneticVariationDeg ?? 0) !== 0 && (
+          <Info label="磁方位（真方位 − 偏角）" testid="prop-magHeading">{`${designatorsOf(r, layout).magDeg[0]}°`}</Info>
+        )}
+        {crossingInfo}
+        <LegacyRunwayExtras layout={layout} id={id} />
       </>
     );
   }
@@ -478,35 +513,6 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
 
 // ---------------------------------------------------------------- 部品
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="prop-section">
-      <div className="prop-section-title">{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="prop-field">
-      <span className="prop-label">{label}</span>
-      <span className="prop-value">{children}</span>
-    </label>
-  );
-}
-
-function Info({ label, children, testid }: { label: string; children: ReactNode; testid?: string }) {
-  return (
-    <div className="prop-field">
-      <span className="prop-label">{label}</span>
-      <span className="prop-value info" data-testid={testid}>
-        {children}
-      </span>
-    </div>
-  );
-}
-
 function EntityLink({ layout, id }: { layout: AirportLayout; id: string }) {
   return (
     <button className="link" onClick={() => focusEntity(id)}>
@@ -535,60 +541,6 @@ function RotationField({ value, onChange, label }: { value: Rotation; onChange: 
         ))}
       </select>
     </Field>
-  );
-}
-
-/** Enter またはフォーカスアウトで確定するテキスト入力（1回の確定 = 1回の履歴） */
-function TextInput({ value, onCommit, testid }: { value: string; onCommit: (v: string) => void; testid?: string }) {
-  const [draft, setDraft] = useState(value);
-  // 外部（Undo など）で値が変わったら入力中の値を置き換える
-  const [prev, setPrev] = useState(value);
-  if (prev !== value) {
-    setPrev(value);
-    setDraft(value);
-  }
-  const commit = () => {
-    if (draft !== value) onCommit(draft);
-  };
-  return (
-    <input
-      type="text"
-      value={draft}
-      maxLength={40}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === 'Enter' && commit()}
-      data-testid={testid}
-    />
-  );
-}
-
-function NumberInput({ value, min, max, onCommit, testid }: { value: number; min: number; max: number; onCommit: (v: number) => void; testid?: string }) {
-  const [draft, setDraft] = useState(String(value));
-  const [prev, setPrev] = useState(value);
-  if (prev !== value) {
-    setPrev(value);
-    setDraft(String(value));
-  }
-  const commit = () => {
-    const v = Number(draft);
-    if (!Number.isInteger(v) || v < min || v > max) {
-      setDraft(String(value));
-      return;
-    }
-    if (v !== value) onCommit(v);
-  };
-  return (
-    <input
-      type="number"
-      value={draft}
-      min={min}
-      max={max}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === 'Enter' && commit()}
-      data-testid={testid}
-    />
   );
 }
 

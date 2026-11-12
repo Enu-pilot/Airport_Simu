@@ -51,18 +51,62 @@ export interface Site {
   purchased?: number;
 }
 
-export interface Runway {
+/** 滑走路番号の接尾辞。'none' = 明示的に付けない（欠落 = 自動） */
+export type RunwaySuffix = 'L' | 'C' | 'R' | 'none';
+
+interface RunwayBase {
   id: string;
   name: string;
+  /** 舗装幅（m）。対応機種区分を決める */
+  surfaceWidthM: 30 | 45 | 60;
+  buildState: BuildState;
+  /** 始点側の番号の接尾辞の上書き（表示のみ。終点側は L↔R を入れ替える）。欠落 = 自動 */
+  designatorSuffix?: RunwaySuffix;
+}
+
+/** 従来形（v1/v2 のデータはすべてこれ）。データも意味も永久に不変 */
+export interface RunwayGrid8 extends RunwayBase {
+  alignment?: undefined;
   /** 始点側の滑走路端（タイル中心） */
   start: Tile;
   heading: Heading;
   /** 中心線のタイルステップ数（斜めの場合は1ステップ = √2 タイル） */
   length: number;
-  /** 舗装幅（m）。対応機種区分を決める */
-  surfaceWidthM: 30 | 45 | 60;
-  buildState: BuildState;
 }
+
+/** 自由形の実寸（すべて m。欠落 = ゲーム既定値） */
+export interface RunwayDims {
+  /** 片側の肩の幅 */
+  shoulderWidthM?: number;
+  /** 着陸帯の半幅（中心線から） */
+  stripHalfWidthM?: number;
+  /** 着陸帯の端部延長（滑走路端から） */
+  stripEndM?: number;
+  /** RESA の長さ（着陸帯の端から外側へ。0 = なし） */
+  resaLengthM?: number;
+  /** RESA の全幅 */
+  resaWidthM?: number;
+  /** 停止位置（中心線からの垂直距離） */
+  holdingPositionM?: number;
+  /** 始点・終点の標高（表示・勾配の計算のみ） */
+  elevationStartM?: number;
+  elevationEndM?: number;
+}
+
+/** 自由方位・実寸（Phase 12〜） */
+export interface RunwayFree extends RunwayBase {
+  alignment: 'free';
+  /** 始点（World フレーム、タイル単位。実数可） */
+  start: Tile;
+  /** 真方位（度、[0, 360)） */
+  headingDeg: number;
+  /** 実長（m）。正の有限の実数。丸めない */
+  lengthM: number;
+  dims?: RunwayDims;
+}
+
+export type Runway = RunwayGrid8 | RunwayFree;
+export const isFreeRunway = (r: Runway): r is RunwayFree => r.alignment === 'free';
 
 /** 誘導路・道路ネットワークのノード（交差点・滑走路入口・端点） */
 export interface NetNode {
@@ -192,7 +236,12 @@ export interface TerminalArea {
   props: Record<string, PropValue>;
 }
 
-export const SCHEMA_VERSION = 2;
+/**
+ * レイアウトの保存形式の版。
+ * 3（Phase 12）: 自由形の滑走路・磁気偏角・ルール切替・TaxiwayEdge.geometry（Phase 13）など、任意項目の追加のみ。
+ * v2 のデータはそのまま妥当な v3 なので、移行は何も書き換えない（`layout.schemaVersion` も 2 のまま。docs/21）。
+ */
+export const SCHEMA_VERSION = 3;
 
 export interface AirportLayout {
   schemaVersion: number;
@@ -208,6 +257,10 @@ export interface AirportLayout {
   stands: Record<string, Stand>;
   facilities: Record<string, Facility>;
   terminalAreas: Record<string, TerminalArea>;
+  /** 磁気偏角（度、東偏差を正、[-180, 180]）。欠落 = 0（手入力のみ） */
+  magneticVariationDeg?: number;
+  /** 判定ルール。欠落 = 'classic' */
+  ruleSet?: 'classic' | 'realistic';
 }
 
 export type EntityType = 'runway' | 'taxiNode' | 'taxiway' | 'roadNode' | 'road' | 'stand' | 'facility' | 'terminalArea';

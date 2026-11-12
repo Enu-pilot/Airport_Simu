@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { tilesToM, worldPolyToMap, worldPolyToScene, worldToMap, worldToScene } from '../../../src/core/geometry/frames';
 import { roadBandSurface, runwayPavementSurface, runwayStripSurface, taxiwayBandSurface } from '../../../src/core/layout/surfaces';
-import type { Runway } from '../../../src/core/model/types';
+import type { Runway, RunwayGrid8 } from '../../../src/core/model/types';
 
 /**
  * 同じ World 頂点を 2D（worldToMap）と 3D（worldToScene）へ変換したとき、位置が一貫する:
  * Scene = Map × 25 m（x, z）。滑走路・誘導路・道路で同じ規約（以前は 3D の滑走路だけ +0.5 が抜けていた）。
  */
 describe('surfaces の頂点が 2D と 3D で一貫して変換される', () => {
-  const mk = (heading: Runway['heading']): Runway =>
+  const mk = (heading: RunwayGrid8['heading']): Runway =>
     ({ id: 'r', name: '', start: { x: 4, y: 7 }, heading, length: 30, surfaceWidthM: 45, buildState: 'operational' }) as Runway;
   const shapes = [
     ...([0, 45, 90, 135, 180, 225, 270, 315] as const).flatMap((h) => [runwayPavementSurface(mk(h)), runwayStripSurface(mk(h))]),

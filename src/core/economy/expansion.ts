@@ -1,6 +1,8 @@
 import { sortedValues } from '../model/ids';
-import { entityTypeOf, type AirportLayout, type BuildState, type FacilityKind } from '../model/types';
+import { entityTypeOf, isFreeRunway, type AirportLayout, type BuildState, type FacilityKind } from '../model/types';
 import { cloneLayout } from '../layout/operations';
+import { runwayAxis } from '../layout/runway';
+import { POS_EPS_T } from '../geometry/tolerance';
 import type { CompanyState, Project } from './company';
 
 /**
@@ -58,7 +60,10 @@ export function buildDays(layout: AirportLayout, id: string): number {
 /** 形状（位置・寸法・向き・階数）。変わると改修工事になる */
 function geometry(layout: AirportLayout, id: string): string {
   const r = layout.runways[id];
-  if (r) return JSON.stringify([r.start, r.heading, r.length, r.surfaceWidthM]);
+  if (r) {
+    if (isFreeRunway(r)) return JSON.stringify(['free', r.start, r.headingDeg, r.lengthM, r.surfaceWidthM, r.dims?.shoulderWidthM ?? null]);
+    return JSON.stringify([r.start, r.heading, r.length, r.surfaceWidthM]);
+  }
   const tw = layout.taxiways[id];
   if (tw) return JSON.stringify([layout.taxiNodes[tw.from]?.pos, layout.taxiNodes[tw.to]?.pos, tw.widthClass]);
   const rd = layout.roads[id];
@@ -68,6 +73,24 @@ function geometry(layout: AirportLayout, id: string): string {
   const f = layout.facilities[id];
   if (f) return JSON.stringify([f.origin, f.w, f.h, f.rotation, f.kind === 'terminal' ? f.props.levels : 0]);
   return '';
+}
+
+/**
+ * 形状が変わったか。従来形 ↔ 自由形の変換は改修として扱わない:
+ * 一方が従来形・他方が自由形で、舗装幅が同じで、中心線の始点・終点がそれぞれ POS_EPS_T 以内なら、形状は変わっていない。
+ * それ以外は `geometry` の文字列の比較（従来形どうしの比較は従来のキーのまま）。
+ */
+function geometryChanged(before: AirportLayout, after: AirportLayout, id: string): boolean {
+  const a = before.runways[id];
+  const b = after.runways[id];
+  if (a && b && isFreeRunway(a) !== isFreeRunway(b)) {
+    if (a.surfaceWidthM !== b.surfaceWidthM) return true;
+    const xa = runwayAxis(a);
+    const xb = runwayAxis(b);
+    const near = (p: { x: number; y: number }, q: { x: number; y: number }): boolean => Math.hypot(p.x - q.x, p.y - q.y) <= POS_EPS_T;
+    return !(near(xa.start, xb.start) && near(xa.end, xb.end));
+  }
+  return geometry(before, id) !== geometry(after, id);
 }
 
 function allIds(layout: AirportLayout): string[] {
@@ -99,7 +122,7 @@ export function prepareCareerEdit(c: CompanyState, before: AirportLayout, after:
     if (!prev || prev.buildState !== 'operational') {
       // 新設、または計画・建設中からの変更
       if (e.buildState === 'operational' || !project) e.buildState = 'underConstruction';
-    } else if (e.buildState === 'operational' && geometry(before, id) !== geometry(d, id)) {
+    } else if (e.buildState === 'operational' && geometryChanged(before, d, id)) {
       e.buildState = 'underConstruction';
       c.projects[id] = newProject(c, d, id, 'renovation');
     }

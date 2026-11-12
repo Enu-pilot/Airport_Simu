@@ -1,10 +1,12 @@
-import { DEFAULT_PROPS, FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS } from '../model/catalog';
+import { runwayDimsProblem } from '../model/runwayReference';
+import { DEFAULT_PROPS, FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M } from '../model/catalog';
 import { baseTerrainAt, createSite, inSite, terrainAt } from '../model/site';
 import {
   BUILD_STATES,
   HEADINGS,
   SCHEMA_VERSION,
   entityTypeOf,
+  isFreeRunway,
   type AirportLayout,
   type BuildState,
   type Facility,
@@ -13,7 +15,10 @@ import {
   type PropValue,
   type RoadClass,
   type Rotation,
-  type Runway,
+  type RunwayDims,
+  type RunwayFree,
+  type RunwayGrid8,
+  type RunwaySuffix,
   type SizeClass,
   type Site,
   type Stand,
@@ -22,7 +27,9 @@ import {
   type TerminalAreaKind,
   Terrain,
 } from '../model/types';
-import { add, sameTile, type Tile } from '../geometry/vec';
+import { add, distance, sameTile, type Tile } from '../geometry/vec';
+import { bearingToDir, dirToBearing, normalizeDeg } from '../geometry/angle';
+import type { WorldPoint } from '../geometry/frames';
 import { sortedValues } from '../model/ids';
 import { facilityDims, originAfterRotation, standDims, standEntry } from './footprint';
 import {
@@ -37,7 +44,7 @@ import {
   removeNode,
   type NetKind,
 } from './network';
-import { headingVector, runwayEnd, runwayMidpoint } from './runway';
+import { headingVector, runwayAxis, runwayEnd, runwayMidpoint } from './runway';
 
 /**
  * 編集操作。すべて純粋関数で、入力レイアウトを変更せず新しいレイアウトを返す。
@@ -51,7 +58,9 @@ export type OpFailure =
   | 'NODE_EXISTS'
   | 'EMPTY_PATH'
   | 'NO_CHANGE'
-  | 'LAND_NOT_ADJACENT';
+  | 'LAND_NOT_ADJACENT'
+  /** 自由形をグリッドに合わせたとき、長さが従来形の最大（MAX_RUNWAY_LENGTH ステップ）を超える */
+  | 'TOO_LONG_FOR_GRID';
 
 export type OpResult =
   | { ok: true; layout: AirportLayout; created: string[] }
@@ -197,6 +206,172 @@ export function placeRunway(
     buildState: opts.buildState ?? 'operational',
   };
   return ok(finalize(d), [id]);
+}
+
+export interface PlaceFreeRunwayOptions extends PlaceRunwayOptions {
+  dims?: RunwayDims;
+  designatorSuffix?: RunwaySuffix;
+}
+
+const finitePoint = (p: WorldPoint): boolean => Number.isFinite(p.x) && Number.isFinite(p.y);
+
+/**
+ * 自由形の滑走路を配置する（始点・真方位・実長）。`dims` と `designatorSuffix` は指定したときだけ保存する。
+ * 検証: 始点は有限、方位は有限（normalizeDeg で [0, 360)）、長さは [FREE_RUNWAY_MIN_M, FREE_RUNWAY_MAX_M]、dims は有限で ≥ 0。
+ */
+export function placeFreeRunway(
+  layout: AirportLayout,
+  g: { start: WorldPoint; headingDeg: number; lengthM: number },
+  opts: PlaceFreeRunwayOptions = {},
+): OpResult {
+  if (!finitePoint(g.start) || !Number.isFinite(g.headingDeg)) return fail('INVALID_VALUE');
+  if (!Number.isFinite(g.lengthM) || g.lengthM < FREE_RUNWAY_MIN_M || g.lengthM > FREE_RUNWAY_MAX_M) return fail('INVALID_VALUE');
+  if (opts.surfaceWidthM !== undefined && !RUNWAY_WIDTHS.includes(opts.surfaceWidthM)) return fail('INVALID_VALUE');
+  if (opts.designatorSuffix !== undefined && !isSuffix(opts.designatorSuffix)) return fail('INVALID_VALUE');
+  const dims = opts.dims === undefined ? undefined : sanitizeDims(opts.dims);
+  if (dims === null) return fail('INVALID_VALUE');
+  const d = cloneLayout(layout);
+  const id = allocId(d, 'rwy');
+  const r: RunwayFree = {
+    id,
+    name: opts.name ?? '',
+    alignment: 'free',
+    start: { x: g.start.x, y: g.start.y },
+    headingDeg: normalizeDeg(g.headingDeg),
+    lengthM: g.lengthM,
+    surfaceWidthM: opts.surfaceWidthM ?? 45,
+    buildState: opts.buildState ?? 'operational',
+  };
+  if (dims && Object.keys(dims).length > 0) r.dims = dims;
+  if (opts.designatorSuffix !== undefined) r.designatorSuffix = opts.designatorSuffix;
+  d.runways[id] = r;
+  return ok(finalize(d), [id]);
+}
+
+/** 始点 a・終点 b から自由形の滑走路を配置する（方位 = a → b の真方位、長さ = |b − a| × TILE_M） */
+export function placeFreeRunwayByEnds(layout: AirportLayout, a: WorldPoint, b: WorldPoint, opts: PlaceFreeRunwayOptions = {}): OpResult {
+  if (!finitePoint(a) || !finitePoint(b)) return fail('INVALID_VALUE');
+  return placeFreeRunway(layout, { start: a, headingDeg: dirToBearing(b.x - a.x, b.y - a.y), lengthM: distance(a, b) * TILE_M }, opts);
+}
+
+/**
+ * 自由形の滑走路の幾何を変える。
+ * - `end` だけ: 始点を固定して終点を動かす（方位・長さが決まる）。`start` だけ: 終点を固定して始点を動かす。両方: 両端を指定。
+ * - `headingDeg` / `lengthM`（端点の指定とは併用できない）: `pivot`（中点・始点・終点）を固定して方位・長さを変える。
+ * 従来形は NOT_SUPPORTED（先に `convertRunwayToFree`）。変化がなければ NO_CHANGE。
+ */
+export function setFreeRunwayGeometry(
+  layout: AirportLayout,
+  id: string,
+  patch: { headingDeg?: number; lengthM?: number; start?: WorldPoint; end?: WorldPoint },
+  pivot: FreePivot = 'mid',
+): OpResult {
+  const d = cloneLayout(layout);
+  const r = d.runways[id];
+  if (!r) return fail('NOT_FOUND');
+  if (!isFreeRunway(r)) return fail('NOT_SUPPORTED');
+  const byEnds = patch.start !== undefined || patch.end !== undefined;
+  if (byEnds) {
+    if (patch.headingDeg !== undefined || patch.lengthM !== undefined) return fail('INVALID_VALUE');
+    const cur = runwayAxis(r);
+    const a = patch.start ?? cur.start;
+    const b = patch.end ?? cur.end;
+    if (!finitePoint(a) || !finitePoint(b)) return fail('INVALID_VALUE');
+    const len = distance(a, b) * TILE_M;
+    if (!Number.isFinite(len) || len < FREE_RUNWAY_MIN_M || len > FREE_RUNWAY_MAX_M) return fail('INVALID_VALUE');
+    const h = normalizeDeg(dirToBearing(b.x - a.x, b.y - a.y));
+    if (a.x === r.start.x && a.y === r.start.y && h === r.headingDeg && len === r.lengthM) return fail('NO_CHANGE');
+    r.start = { x: a.x, y: a.y };
+    r.headingDeg = h;
+    r.lengthM = len;
+    return ok(finalize(d));
+  }
+  const f = applyFreeGeometry(r, patch, pivot);
+  if (f) return fail(f);
+  return ok(finalize(d));
+}
+
+/**
+ * 従来形 → 自由形（プレイヤーの明示操作）。始点・方位はそのまま、長さは丸めない実長（斜めは n√2·25 m）。
+ * dims は書かない（既定値）。ID・名前・幅・建設状態・番号の接尾辞は保つ。自由形には NO_CHANGE。
+ */
+export function convertRunwayToFree(layout: AirportLayout, id: string): OpResult {
+  const d = cloneLayout(layout);
+  const r = d.runways[id];
+  if (!r) return fail('NOT_FOUND');
+  if (isFreeRunway(r)) return fail('NO_CHANGE');
+  const axis = runwayAxis(r);
+  const f: RunwayFree = {
+    id: r.id,
+    name: r.name,
+    alignment: 'free',
+    start: { x: r.start.x, y: r.start.y },
+    headingDeg: r.heading,
+    lengthM: axis.lengthT * TILE_M,
+    surfaceWidthM: r.surfaceWidthM,
+    buildState: r.buildState,
+  };
+  if (r.designatorSuffix !== undefined) f.designatorSuffix = r.designatorSuffix;
+  d.runways[id] = f;
+  return ok(finalize(d));
+}
+
+/**
+ * 自由形 → 従来形（「グリッドに合わせる」。プレイヤーの明示操作）。方位を 45° の倍数に、始点を整数タイルに、
+ * 長さをステップ数（1〜MAX_RUNWAY_LENGTH）に丸める。dims は捨てる。丸めが恒等なら位置は変わらない。従来形には NO_CHANGE。
+ */
+export function snapRunwayToGrid(layout: AirportLayout, id: string): OpResult {
+  const d = cloneLayout(layout);
+  const r = d.runways[id];
+  if (!r) return fail('NOT_FOUND');
+  if (!isFreeRunway(r)) return fail('NO_CHANGE');
+  const heading = ((Math.round(r.headingDeg / 45) * 45) % 360) as Heading;
+  const stepT = heading % 90 === 0 ? 1 : Math.SQRT2;
+  const steps = Math.round(r.lengthM / TILE_M / stepT);
+  // 従来形の最大を超える長さは黙って短くしない（自由形のまま）
+  if (steps > MAX_RUNWAY_LENGTH) return fail('TOO_LONG_FOR_GRID');
+  const length = Math.max(1, steps);
+  const g: RunwayGrid8 = {
+    id: r.id,
+    name: r.name,
+    start: { x: Math.round(r.start.x), y: Math.round(r.start.y) },
+    heading,
+    length,
+    surfaceWidthM: r.surfaceWidthM,
+    buildState: r.buildState,
+  };
+  if (r.designatorSuffix !== undefined) g.designatorSuffix = r.designatorSuffix;
+  d.runways[id] = g;
+  return ok(finalize(d));
+}
+
+/**
+ * 空港の設定（磁気偏角・ルール）。指定した項目だけ変える。既定値（偏角 0・classic）は項目を書かない（従来データのバイト列を保つ）。
+ * `magneticVariationDeg` は東偏差が正の [-180, 180]、`null` で解除。
+ */
+export function updateLayoutSettings(
+  layout: AirportLayout,
+  s: { magneticVariationDeg?: number | null; ruleSet?: 'classic' | 'realistic' },
+): OpResult {
+  const d = cloneLayout(layout);
+  let changed = false;
+  if (s.magneticVariationDeg !== undefined) {
+    const v = s.magneticVariationDeg;
+    if (v !== null && (!Number.isFinite(v) || v < -180 || v > 180)) return fail('INVALID_VALUE');
+    const before = d.magneticVariationDeg ?? 0;
+    const next = v ?? 0;
+    if (next !== before) changed = true;
+    if (next === 0) delete d.magneticVariationDeg;
+    else d.magneticVariationDeg = next;
+  }
+  if (s.ruleSet !== undefined) {
+    if (s.ruleSet !== 'classic' && s.ruleSet !== 'realistic') return fail('INVALID_VALUE');
+    if ((d.ruleSet ?? 'classic') !== s.ruleSet) changed = true;
+    if (s.ruleSet === 'classic') delete d.ruleSet;
+    else d.ruleSet = s.ruleSet;
+  }
+  if (!changed) return fail('NO_CHANGE');
+  return ok(finalize(d));
 }
 
 export interface PlaceAreaOptions {
@@ -397,8 +572,11 @@ export function moveEntity(layout: AirportLayout, id: string, delta: Tile): OpRe
   return ok(finalize(d));
 }
 
-/** 回転: 建物・スポットは中心を保って時計回り90度、滑走路は中点を保って時計回り45度 */
-export function rotateEntity(layout: AirportLayout, id: string): OpResult {
+/**
+ * 回転: 建物・スポットは中心を保って時計回り90度、従来形の滑走路は中点を保って時計回り45度（`stepDeg` は無視）、
+ * 自由形の滑走路は中点を保って時計回りに `stepDeg`（既定 15°）。
+ */
+export function rotateEntity(layout: AirportLayout, id: string, stepDeg = 15): OpResult {
   const d = cloneLayout(layout);
   const type = entityTypeOf(id);
   if (type === 'facility') {
@@ -430,6 +608,12 @@ export function rotateEntity(layout: AirportLayout, id: string): OpResult {
   } else if (type === 'runway') {
     const r = d.runways[id];
     if (!r) return fail('NOT_FOUND');
+    if (isFreeRunway(r)) {
+      if (!Number.isFinite(stepDeg)) return fail('INVALID_VALUE');
+      const f = applyFreeGeometry(r, { headingDeg: r.headingDeg + stepDeg }, 'mid');
+      if (f) return fail(f);
+      return ok(finalize(d));
+    }
     setRunwayHeadingAroundMid(r, ((r.heading + 45) % 360) as Heading);
   } else {
     return fail(layout.taxiNodes[id] || layout.roadNodes[id] || layout.taxiways[id] || layout.roads[id] ? 'NOT_SUPPORTED' : 'NOT_FOUND');
@@ -437,7 +621,7 @@ export function rotateEntity(layout: AirportLayout, id: string): OpResult {
   return ok(finalize(d));
 }
 
-function setRunwayHeadingAroundMid(r: Runway, heading: Heading): void {
+function setRunwayHeadingAroundMid(r: RunwayGrid8, heading: Heading): void {
   const mid = runwayMidpoint(r);
   const v = headingVector(heading);
   r.heading = heading;
@@ -454,6 +638,11 @@ export function defaultDuplicateOffset(layout: AirportLayout, id: string): Tile 
   if (s) return { x: standDims(s).w + 1, y: 0 };
   const r = layout.runways[id];
   if (r) {
+    if (isFreeRunway(r)) {
+      // 進行方向に直交（右手）へ 12 タイル。整数に丸める
+      const d = bearingToDir(r.headingDeg + 90);
+      return { x: Math.round(d.x * 12), y: Math.round(d.y * 12) };
+    }
     const v = headingVector(r.heading);
     return { x: -v.y * 12, y: v.x * 12 };
   }
@@ -555,6 +744,48 @@ const isInt = (v: unknown, min: number, max: number): v is number =>
   typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
 const isBuildState = (v: unknown): v is BuildState => BUILD_STATES.includes(v as BuildState);
 
+const isSuffix = (v: unknown): boolean => v === 'L' || v === 'C' || v === 'R' || v === 'none';
+
+/** dims の検証（runwayDimsProblem）。既知のキーの有限な数だけを残す。不正なら null（undefined の値は捨てる） */
+function sanitizeDims(v: unknown): RunwayDims | null {
+  if (runwayDimsProblem(v) !== null) return null;
+  const out: RunwayDims = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (x !== undefined) out[k as keyof RunwayDims] = x as number;
+  }
+  return out;
+}
+
+/** 自由形の幾何の変更の基準点（中点・始点・終点を固定） */
+export type FreePivot = 'mid' | 'start' | 'end';
+
+/**
+ * 自由形の方位・長さを変える（`r` を直接書き換える。呼び出し側が複製済みのレイアウトに対して使う）。
+ * 基準点（pivot）は変更の前後で動かさない。方位は normalizeDeg、長さは [FREE_RUNWAY_MIN_M, FREE_RUNWAY_MAX_M]。
+ * 戻り値: 成功 null、失敗は理由（変化なしは 'NO_CHANGE'）。
+ */
+function applyFreeGeometry(r: RunwayFree, g: { headingDeg?: number; lengthM?: number }, pivot: FreePivot): OpFailure | null {
+  const h = g.headingDeg === undefined ? r.headingDeg : g.headingDeg;
+  const len = g.lengthM === undefined ? r.lengthM : g.lengthM;
+  if (!Number.isFinite(h) || !Number.isFinite(len) || len < FREE_RUNWAY_MIN_M || len > FREE_RUNWAY_MAX_M) return 'INVALID_VALUE';
+  const nh = normalizeDeg(h);
+  if (nh === r.headingDeg && len === r.lengthM) return 'NO_CHANGE';
+  const cur = runwayAxis(r);
+  const dir = bearingToDir(nh);
+  const lenT = len / TILE_M;
+  let start: Tile;
+  if (pivot === 'start') start = { x: r.start.x, y: r.start.y };
+  else if (pivot === 'end') start = { x: cur.end.x - dir.x * lenT, y: cur.end.y - dir.y * lenT };
+  else {
+    const mid = { x: cur.start.x + (cur.dir.x * cur.lengthT) / 2, y: cur.start.y + (cur.dir.y * cur.lengthT) / 2 };
+    start = { x: mid.x - (dir.x * lenT) / 2, y: mid.y - (dir.y * lenT) / 2 };
+  }
+  r.start = start;
+  r.headingDeg = nh;
+  r.lengthM = len;
+  return null;
+}
+
 /**
  * プロパティを変更する。値は種別ごとに検証し、不正な値・未知のキーは拒否する。
  */
@@ -564,13 +795,13 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
   const entries = Object.entries(patch);
   if (entries.length === 0) return fail('NO_CHANGE');
 
-  const apply = <T extends object>(target: T | undefined, validators: Record<string, (v: unknown) => boolean>): OpFailure | null => {
+  const apply = <T extends object>(target: T | undefined, validators: Record<string, (v: unknown) => boolean>, only: Record<string, unknown> = patch): OpFailure | null => {
     if (!target) return 'NOT_FOUND';
-    for (const [k, v] of entries) {
+    for (const [k, v] of Object.entries(only)) {
       const check = validators[k];
       if (!check || !check(v)) return 'INVALID_VALUE';
     }
-    Object.assign(target, patch);
+    Object.assign(target, only);
     return null;
   };
   const str = (v: unknown) => typeof v === 'string' && v.length <= 40;
@@ -581,7 +812,43 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
   switch (type) {
     case 'runway': {
       const r = d.runways[id];
+      // 接尾辞の上書きの解除（null = 自動に戻す。キーを書かない）
+      if (r && patch.designatorSuffix === null) {
+        const { designatorSuffix: _s, ...rest } = patch;
+        void _s;
+        const had = r.designatorSuffix !== undefined;
+        delete r.designatorSuffix;
+        if (Object.keys(rest).length === 0) return had ? ok(finalize(d)) : fail('NO_CHANGE');
+        return updateEntity(d, id, rest);
+      }
       // 方位変更は中点を保つ
+      if (r && isFreeRunway(r)) {
+        // 自由形: 方位・長さの変更は中点を保つ（heading / length は従来形の項目なので INVALID_VALUE）
+        const { headingDeg, lengthM, dims, ...rest } = patch;
+        let changed = false;
+        if ('headingDeg' in patch || 'lengthM' in patch) {
+          const g: { headingDeg?: number; lengthM?: number } = {};
+          if ('headingDeg' in patch) g.headingDeg = headingDeg as number;
+          if ('lengthM' in patch) g.lengthM = lengthM as number;
+          const f = applyFreeGeometry(r, g, 'mid');
+          if (f === null) changed = true;
+          else if (f !== 'NO_CHANGE') return fail(f);
+        }
+        if ('dims' in patch) {
+          const nd = sanitizeDims(dims);
+          if (nd === null) return fail('INVALID_VALUE');
+          if (Object.keys(nd).length === 0) delete r.dims;
+          else r.dims = nd;
+          changed = true;
+        }
+        if (Object.keys(rest).length > 0) {
+          const e = apply(r, { name: str, surfaceWidthM: (v) => RUNWAY_WIDTHS.includes(v as 30 | 45 | 60), buildState: isBuildState, designatorSuffix: isSuffix }, rest);
+          if (e) return fail(e);
+          changed = true;
+        }
+        if (!changed) return fail('NO_CHANGE');
+        return ok(finalize(d));
+      }
       if (r && 'heading' in patch && HEADINGS.includes(patch.heading as Heading)) {
         const { heading, ...rest } = patch;
         setRunwayHeadingAroundMid(r, heading as Heading);
@@ -593,6 +860,7 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
         length: (v) => isInt(v, 1, MAX_RUNWAY_LENGTH),
         surfaceWidthM: (v) => RUNWAY_WIDTHS.includes(v as 30 | 45 | 60),
         buildState: isBuildState,
+        designatorSuffix: isSuffix,
       });
       break;
     }

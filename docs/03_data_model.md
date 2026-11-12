@@ -122,7 +122,9 @@ interface DerivedState {
 
 ```ts
 interface AirportLayout {
-  schemaVersion: 1;
+  schemaVersion: number;                     // 現行 SCHEMA_VERSION = 3（v2 → v3 は任意項目の追加のみで書き換えなし。docs/27）
+  magneticVariationDeg?: number;             // 磁気偏角（東偏差が正、[-180, 180]。欠落 = 0。Phase 12）
+  ruleSet?: 'classic' | 'realistic';         // 判定ルール（欠落 = classic。Phase 12。docs/26）
   name: string;
   site: Site;                                // 地形（不変。Undo 履歴の全スナップショットで共有）
   counters: Record<string, number>;          // ID発行カウンタ
@@ -137,8 +139,11 @@ interface AirportLayout {
 
 type BuildState = 'planned' | 'underConstruction' | 'operational';   // 計画 / 建設中 / 運用中
 
-interface Runway   { id; name; start: Tile; heading: 0|45|…|315; length: number /*ステップ数*/; surfaceWidthM: 30|45|60; buildState }
-interface NetNode  { id; pos: Tile; name; holdShort: boolean /* 滑走路入口での停止義務 */ }
+/** Phase 12: 判別共用体（discriminant = alignment）。詳細は docs/23 */
+type Runway = RunwayGrid8 | RunwayFree;
+interface RunwayGrid8 { id; name; start: Tile; heading: 0|45|…|315; length: number /*ステップ数*/; surfaceWidthM: 30|45|60; buildState; designatorSuffix?; alignment?: undefined }  // 従来形（v1/v2 はすべてこれ）
+interface RunwayFree  { id; name; alignment: 'free'; start: WorldPoint /*実数可*/; headingDeg: number /*真方位*/; lengthM: number /*m、丸めない*/; surfaceWidthM; buildState; designatorSuffix?; dims?: RunwayDims }
+interface NetNode  { id; pos: WorldPoint /*従来は整数。自由形の中心線上の入口だけ実数*/; name; holdShort: boolean /* 滑走路入口での停止義務 */ }
 interface TaxiwayEdge { id; from; to; name; widthClass: 'S'|'M'|'L'; oneWay: boolean /* from→to */; buildState }
 interface RoadEdge    { id; from; to; name; roadClass: 'public'|'service'; oneWay; buildState }
 interface Stand    { id; name; origin: Tile; rotation: 0|90|180|270 /* 機首の向き */; size: 'S'|'M'|'L'; buildState }
@@ -173,8 +178,11 @@ interface Facility { id; kind: FacilityKind; name; origin: Tile; w; h /* 回転�
 | 操作 | 対象 |
 |------|------|
 | `placeFacility` / `placeStand` / `placeRunway` / `addTaxiwayPath` / `addRoadPath` | 配置 |
+| `placeFreeRunway` / `placeFreeRunwayByEnds` / `setFreeRunwayGeometry` | 自由形の滑走路の配置（始点・真方位・実長、または両端）と幾何の変更（中点・始点・終点を固定） |
+| `convertRunwayToFree` / `snapRunwayToGrid` | 従来形 → 自由形、自由形 → 従来形（プレイヤーの明示操作のみ） |
+| `updateLayoutSettings` | 磁気偏角・判定ルール |
 | `moveEntity` | 全種別（エッジは両端ノードを移動） |
-| `rotateEntity` | 施設・スポット: 90°、滑走路: 45°（中点を保つ） |
+| `rotateEntity` | 施設・スポット: 90°、従来形の滑走路: 45°（中点を保つ）、自由形の滑走路: 中点まわりに指定角（既定 15°） |
 | `duplicateEntity` | 施設・スポット・滑走路（新ID。ゲートの紐付けは複製しない） |
 | `deleteEntity` | 全種別（ノード削除は接続エッジも削除、孤立ノードは掃除） |
 | `updateEntity` | 種別ごとに許可されたプロパティのみ（値を検証） |
@@ -189,7 +197,7 @@ Undo / Redo はレイアウトのスナップショット履歴（`src/core/edit
 
 ```ts
 interface AirsideNetwork {
-  nodes: Record<string, AirsideNode>;     // kind: taxiway | intersection | endpoint | runwayEntry | runwayThreshold | stand
+  nodes: Record<string, AirsideNode>;     // kind: taxiway | intersection | endpoint | runwayEntry | runwayThreshold | runwayIntersection（Phase 12。自由形が関与する滑走路どうしの交差点）| stand
   edges: Record<string, AirsideEdge>;     // kind: taxiway | runway | standLink
   outgoing / incoming: Record<nodeId, edgeId[]>;  // 一方通行を考慮した隣接
   runwayNodes: Record<runwayId, nodeId[]>;        // 滑走路上のノード（始点側から順）

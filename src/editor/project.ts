@@ -106,10 +106,13 @@ function applyProject(p: ProjectFile, id: string | null): void {
     catalogPin: pin,
   });
   if (p.sim) {
-    const { sim, violations } = restoreSimulation(p.layout, p.sim, effectiveModels(pin));
+    const { sim, violations, repaired } = restoreSimulation(p.layout, p.sim, effectiveModels(pin));
     // 検証で復元済みなので通常は起きない。万一不整合なら運航状態は使わない
     if (violations.length) showToast(`運航状態に不整合があったため建設モードで開きました: ${violations[0]}`, 'error');
-    else ops.resume(sim);
+    else {
+      if (repaired.length > 0) showToast(`横断の占有の不整合を修復して運航状態を開きました（${repaired.length} 件）`);
+      ops.resume(sim);
+    }
   }
 }
 

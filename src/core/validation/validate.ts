@@ -1,11 +1,12 @@
 import { FACILITY_SPECS, GATE_MAX_STAND_DISTANCE, type FootprintLayer } from '../model/catalog';
 import { compareIds, sortedValues } from '../model/ids';
 import { inSite, isBuildable, isSiteEdge } from '../model/site';
-import { sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
+import { isFreeRunway, sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
 import {
   chebyshevDistance,
   cross,
   dot,
+  roundPoint,
   segmentIntersection,
   sub,
   tileKey,
@@ -15,7 +16,13 @@ import {
 import { buildAirsideNetwork, reachableNodes, type AirsideNetwork } from '../airside/network';
 import { collectFootprints, facilityTiles, standTiles, type FootprintPart } from '../layout/footprint';
 import { edgesOfNode, type AnyEdge } from '../layout/network';
-import { positionOnRunway, runwayEnd, runwayMaxSize } from '../layout/runway';
+import { positionOnRunway, runwayAxis, runwayEnd, runwayMaxSize } from '../layout/runway';
+import { designatorsOf } from '../layout/designators';
+import { holdWalkLimitM, walkToClear, type HoldRunway } from '../layout/holdShort';
+import { resolveRunwayDims } from '../layout/runwayAreas';
+import { classifySegmentIntersection } from '../geometry/segment';
+import { satOverlapConvex } from '../geometry/polygon';
+import { TILE_M } from '../model/catalog';
 import type { NetNode, TerminalAreaKind } from '../model/types';
 import { areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
 import { findPaxRoute } from '../terminal/route';
@@ -34,10 +41,15 @@ export type IssueCode =
   | 'UNBUILDABLE_TERRAIN'
   | 'OVERLAP'
   | 'IN_RUNWAY_STRIP'
+  | 'IN_RUNWAY_RESA'
   | 'STAND_NOT_ON_APRON'
   // 滑走路
   | 'RUNWAY_TOO_SHORT'
   | 'RUNWAY_NO_TAXIWAY'
+  | 'RUNWAY_PARALLEL_TOO_CLOSE'
+  | 'RUNWAY_PARALLEL_DEPENDENT'
+  | 'RUNWAY_DESIGNATOR_CONFLICT'
+  | 'HOLD_SHORT_TOO_CLOSE'
   // 誘導路
   | 'TAXIWAY_ON_RUNWAY'
   | 'TAXIWAY_CROSSES_RUNWAY_NO_ENTRY'
@@ -94,9 +106,14 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   UNBUILDABLE_TERRAIN: 'error',
   OVERLAP: 'error',
   IN_RUNWAY_STRIP: 'error',
+  IN_RUNWAY_RESA: 'error',
   STAND_NOT_ON_APRON: 'error',
   RUNWAY_TOO_SHORT: 'error',
   RUNWAY_NO_TAXIWAY: 'error',
+  RUNWAY_PARALLEL_TOO_CLOSE: 'warning',
+  RUNWAY_PARALLEL_DEPENDENT: 'info',
+  RUNWAY_DESIGNATOR_CONFLICT: 'warning',
+  HOLD_SHORT_TOO_CLOSE: 'warning',
   TAXIWAY_ON_RUNWAY: 'error',
   TAXIWAY_CROSSES_RUNWAY_NO_ENTRY: 'error',
   TAXIWAY_CROSSING_NO_JUNCTION: 'error',
@@ -212,6 +229,10 @@ const COMPATIBLE = new Set<string>(
     ['rail', 'roadPublic'],
     ['rail', 'roadService'],
     ['strip', 'strip'],
+    // 自由形の RESA は着陸帯と同じ扱い（誘導路・着陸帯・RESA と両立）
+    ['taxiway', 'resa'],
+    ['strip', 'resa'],
+    ['resa', 'resa'],
   ].flatMap(([a, b]) => [`${a}|${b}`, `${b}|${a}`]),
 );
 
@@ -221,13 +242,28 @@ function edgeTouchesRunway(layout: AirportLayout, edge: AnyEdge, runwayId: strin
   const b = layout.taxiNodes[edge.to];
   if (!r || !a || !b) return false;
   if (positionOnRunway(r, a.pos) !== null || positionOnRunway(r, b.pos) !== null) return true;
+  if (isFreeRunway(r)) {
+    const ax = runwayAxis(r);
+    return classifySegmentIntersection(a.pos, b.pos, ax.start, ax.end).kind === 'point';
+  }
   return segmentIntersection(a.pos, b.pos, r.start, runwayEnd(r)) !== null;
 }
 
-function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: IssueSink): void {
+/** 交差点ノードを持つ滑走路の組（`${a}|${b}`、a < b）。この組の間の滑走路・着陸帯・RESA の重なりは許す */
+const pairKey = (a: string, b: string): string => (compareIds(a, b) <= 0 ? `${a}|${b}` : `${b}|${a}`);
+
+function polyBBox(poly: readonly Vec2[]): { x0: number; y0: number; x1: number; y1: number } {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of poly) {
+    x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+  }
+  return { x0, y0, x1, y1 };
+}
+
+function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: IssueSink, net: AirsideNetwork): void {
   const occ = new Map<string, { ownerId: string; layer: FootprintLayer }[]>();
   for (const p of parts) {
-    if (p.layer !== 'strip') {
+    if (p.layer !== 'strip' && p.layer !== 'resa') {
       let outside = 0;
       let unbuildable = 0;
       let firstBad: Tile | undefined;
@@ -243,6 +279,8 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
       if (outside > 0) sink.add('OUT_OF_BOUNDS', [p.ownerId], { tiles: outside }, firstBad);
       else if (unbuildable > 0) sink.add('UNBUILDABLE_TERRAIN', [p.ownerId], { tiles: unbuildable }, firstBad);
     }
+    // 多角形で判定する部分（自由形）は下の多角形の判定で扱う
+    if (p.poly) continue;
     for (const t of p.tiles) {
       const k = tileKey(t.x, t.y);
       let list = occ.get(k);
@@ -263,25 +301,69 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
     return v;
   };
 
+  // 交差点ノードがある滑走路の組（自由形が関与する組だけ。従来形だけなら空）
+  const crossingPairs = new Set((net.crossings ?? []).map((c) => pairKey(c.a, c.b)));
+  const RUNWAYISH = new Set<FootprintLayer>(['runway', 'strip', 'resa']);
+
+  /** 2 つの占有の組を判定する（real = 自由形の多角形による判定） */
+  const judge = (
+    a: { ownerId: string; layer: FootprintLayer },
+    b: { ownerId: string; layer: FootprintLayer },
+    at: Tile,
+    real: boolean,
+  ): void => {
+    if (a.ownerId === b.ownerId) return;
+    if (COMPATIBLE.has(`${a.layer}|${b.layer}`)) return;
+    if (a.layer === 'taxiway' && b.layer === 'runway' && touches(a.ownerId, b.ownerId)) return;
+    if (b.layer === 'taxiway' && a.layer === 'runway' && touches(b.ownerId, a.ownerId)) return;
+    if (
+      crossingPairs.size > 0 &&
+      RUNWAYISH.has(a.layer) &&
+      RUNWAYISH.has(b.layer) &&
+      crossingPairs.has(pairKey(a.ownerId, b.ownerId))
+    ) {
+      return;
+    }
+    const params: Record<string, string | number> = real ? { criterion: 'real' } : {};
+    if (a.layer === 'strip' || b.layer === 'strip' || a.layer === 'resa' || b.layer === 'resa') {
+      const [strip, other] = a.layer === 'strip' || a.layer === 'resa' ? [a, b] : [b, a];
+      sink.add(strip.layer === 'resa' ? 'IN_RUNWAY_RESA' : 'IN_RUNWAY_STRIP', [other.ownerId], params, at, [strip.ownerId]);
+      return;
+    }
+    const [p, q] = compareIds(a.ownerId, b.ownerId) <= 0 ? [a, b] : [b, a];
+    sink.add('OVERLAP', [p.ownerId, q.ownerId], params, at);
+  };
+
   for (const [k, list] of occ) {
     if (list.length < 2) continue;
     const [x, y] = k.split(',').map(Number) as [number, number];
     for (let i = 0; i < list.length; i++) {
-      for (let j = i + 1; j < list.length; j++) {
-        const a = list[i]!;
-        const b = list[j]!;
-        if (a.ownerId === b.ownerId) continue;
-        if (COMPATIBLE.has(`${a.layer}|${b.layer}`)) continue;
-        if (a.layer === 'taxiway' && b.layer === 'runway' && touches(a.ownerId, b.ownerId)) continue;
-        if (b.layer === 'taxiway' && a.layer === 'runway' && touches(b.ownerId, a.ownerId)) continue;
-        if (a.layer === 'strip' || b.layer === 'strip') {
-          const [strip, other] = a.layer === 'strip' ? [a, b] : [b, a];
-          sink.add('IN_RUNWAY_STRIP', [other.ownerId], {}, { x, y }, [strip.ownerId]);
-          continue;
-        }
-        const [p, q] = compareIds(a.ownerId, b.ownerId) <= 0 ? [a, b] : [b, a];
-        sink.add('OVERLAP', [p.ownerId, q.ownerId], {}, { x, y });
-      }
+      for (let j = i + 1; j < list.length; j++) judge(list[i]!, list[j]!, { x, y }, false);
+    }
+  }
+
+  // 自由形（多角形）の判定: 従来の占有（タイルの正方形）と、別の自由形の多角形。従来形だけなら空ループ
+  const polys = parts.filter((p) => p.poly);
+  for (const p of polys) {
+    for (const t of p.tiles) {
+      for (const o of occ.get(tileKey(t.x, t.y)) ?? []) judge({ ownerId: p.ownerId, layer: p.layer }, o, t, true);
+    }
+  }
+  const boxes = polys.map((p) => polyBBox(p.poly!));
+  for (let i = 0; i < polys.length; i++) {
+    for (let j = i + 1; j < polys.length; j++) {
+      const A = polys[i]!;
+      const B = polys[j]!;
+      if (A.ownerId === B.ownerId) continue;
+      const a = boxes[i]!;
+      const b = boxes[j]!;
+      if (a.x1 < b.x0 || b.x1 < a.x0 || a.y1 < b.y0 || b.y1 < a.y0) continue;
+      if (!satOverlapConvex(A.poly!, B.poly!)) continue;
+      const at = roundPoint({
+        x: (Math.max(a.x0, b.x0) + Math.min(a.x1, b.x1)) / 2,
+        y: (Math.max(a.y0, b.y0) + Math.min(a.y1, b.y1)) / 2,
+      });
+      judge({ ownerId: A.ownerId, layer: A.layer }, { ownerId: B.ownerId, layer: B.layer }, at, true);
     }
   }
 
@@ -349,6 +431,134 @@ function collinearOverlap(a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean {
   return hi - lo > 1e-9;
 }
 
+// ---------------------------------------------------------------- 滑走路どうしの関係（Phase 12）
+
+/** 平行とみなす方位差（度。ゲーム値） */
+const PARALLEL_MAX_DIFF_DEG = 1;
+/** 同時使用する平行滑走路の中心線間隔の最小（m）。参考: EASA CS B.050（非計器・コード 3〜4）の 210 m */
+export const PARALLEL_MIN_SPACING_M = 210;
+/** 独立した平行進入の中心線間隔（m）。参考: EASA CS B.055 の 1035 m（従属 915 m、独立出発 760 m。FAA 3.9.3 は 975 m） */
+export const PARALLEL_INDEPENDENT_SPACING_M = 1035;
+
+/**
+ * 平行間隔・番号の重複（自由形が関与する組、または ruleSet が realistic のときだけ。従来形だけの既定では何もしない）。
+ * 値はすべてゲームの判定（参考値は RUNWAY_REFERENCE）。
+ */
+function checkRunwayRules(layout: AirportLayout, sink: IssueSink): void {
+  const realistic = layout.ruleSet === 'realistic';
+  const rs = sortedValues(layout.runways);
+  const involved = (a: (typeof rs)[number], b: (typeof rs)[number]): boolean => realistic || isFreeRunway(a) || isFreeRunway(b);
+  for (let i = 0; i < rs.length; i++) {
+    for (let j = i + 1; j < rs.length; j++) {
+      const a = rs[i]!;
+      const b = rs[j]!;
+      if (!involved(a, b)) continue;
+      const xa = runwayAxis(a);
+      const xb = runwayAxis(b);
+      let dh = Math.abs(xa.trueHeadingDeg - xb.trueHeadingDeg) % 180;
+      if (dh > 90) dh = 180 - dh;
+      if (dh > PARALLEL_MAX_DIFF_DEG) continue;
+      // 長さ方向に重なるか（a の軸への射影）
+      const proj = (p: Vec2): number => (p.x - xa.start.x) * xa.dir.x + (p.y - xa.start.y) * xa.dir.y;
+      const [b0, b1] = [proj(xb.start), proj(xb.end)].sort((x, y) => x - y) as [number, number];
+      if (Math.min(xa.lengthT, b1) - Math.max(0, b0) <= 0) continue;
+      const mb = { x: (xb.start.x + xb.end.x) / 2, y: (xb.start.y + xb.end.y) / 2 };
+      const spacingM = Math.abs((mb.x - xa.start.x) * xa.dir.y - (mb.y - xa.start.y) * xa.dir.x) * TILE_M;
+      const at = roundPoint({ x: (xa.start.x + xa.end.x + xb.start.x + xb.end.x) / 4, y: (xa.start.y + xa.end.y + xb.start.y + xb.end.y) / 4 });
+      if (spacingM < PARALLEL_MIN_SPACING_M) {
+        sink.add('RUNWAY_PARALLEL_TOO_CLOSE', [a.id, b.id], { distanceM: Math.round(spacingM), refM: PARALLEL_MIN_SPACING_M }, at);
+      } else if (realistic && spacingM < PARALLEL_INDEPENDENT_SPACING_M) {
+        sink.add('RUNWAY_PARALLEL_DEPENDENT', [a.id, b.id], { distanceM: Math.round(spacingM), refM: PARALLEL_INDEPENDENT_SPACING_M }, at);
+      }
+    }
+  }
+  // 番号（接尾辞を含む）の重複
+  const byText = new Map<string, string[]>();
+  for (const r of rs) {
+    for (const t of designatorsOf(r, layout).text) byText.set(t, [...(byText.get(t) ?? []), r.id]);
+  }
+  for (const [text, ids] of [...byText].sort((x, y) => compareIds(x[0], y[0]))) {
+    const uniq = [...new Set(ids)];
+    if (uniq.length < 2) continue;
+    // 自由形が 1 本も関与しない組は realistic のときだけ
+    if (!realistic && !uniq.some((id) => isFreeRunway(layout.runways[id]!))) continue;
+    sink.add('RUNWAY_DESIGNATOR_CONFLICT', uniq, { designator: text }, roundPoint(runwayAxis(layout.runways[uniq[0]!]!).start));
+  }
+}
+
+/**
+ * 自由形の滑走路の停止位置（Phase 12 M1）。滑走路の各ノードから誘導路を経路に沿って外へたどり、
+ * 滑走路の中心線（線分）からの距離が H（実寸の停止位置）以上になる点に届かない枝があれば警告する。
+ * 届かない例: 浅い角度で入る誘導路、短い連絡誘導路、別の滑走路の保護区域の中に停止位置がある（連続横断の幾何）。
+ * 探索は他の滑走路ノード・行き止まり・上限 max(3H, 300 m) で止める。従来形の滑走路は対象外。
+ */
+function checkHoldShort(layout: AirportLayout, net: AirsideNetwork, sink: IssueSink): void {
+  const frees = sortedValues(layout.runways).filter(isFreeRunway);
+  if (frees.length === 0) return;
+  const zones: HoldRunway[] = frees.map((r) => {
+    const ax = runwayAxis(r);
+    return { a: ax.start, b: ax.end, holdM: resolveRunwayDims(r).holdingPositionM };
+  });
+  for (const r of frees) {
+    const holdM = resolveRunwayDims(r).holdingPositionM;
+    const limit = holdWalkLimitM(holdM);
+    for (const nodeId of net.runwayNodes[r.id] ?? []) {
+      const start = net.nodes[nodeId]!;
+      const nextEdges = (id: string, from: string): { edge: string; to: string }[] =>
+        [...(net.outgoing[id] ?? []), ...(net.incoming[id] ?? [])]
+          .map((eid) => net.edges[eid]!)
+          .filter((e) => e.kind === 'taxiway')
+          .map((e) => ({ edge: e.id, to: e.from === id ? e.to : e.from }))
+          .filter((x) => x.to !== from)
+          .sort((p, q) => compareIds(p.edge, q.edge));
+      if (nextEdges(nodeId, '').length === 0) continue; // 誘導路が接続していないノードは停止位置の対象ではない
+      let worst: number | null = null;
+      const related: string[] = [];
+      // Dijkstra 風: 各ノードは最短距離の経路で 1 度だけ展開する（経路は最短路で、ノードを再訪しないので、
+      // 到達済みの停止位置は届く／届かないを 1 度だけ判定すればよい）。届いた枝は打ち切る。
+      type Item = { id: string; from: string; pts: Vec2[]; dist: number; fe: string };
+      const settled = new Set<string>([nodeId]);
+      const best = new Map<string, Item>();
+      const consider = (id: string, it: Item): void => {
+        const cur = best.get(id);
+        if (!cur || it.dist < cur.dist - 1e-9) best.set(id, it);
+      };
+      const expand = (it: Item): void => {
+        for (const n of nextEdges(it.id, it.from)) {
+          if (settled.has(n.to)) continue;
+          const nn = net.nodes[n.to]!;
+          const p = it.pts[it.pts.length - 1]!;
+          const seg = Math.hypot(nn.pos.x - p.x, nn.pos.y - p.y) * TILE_M;
+          consider(n.to, { id: n.to, from: it.id, pts: [...it.pts, nn.pos], dist: it.dist + seg, fe: it.fe || n.edge });
+        }
+      };
+      expand({ id: nodeId, from: '', pts: [start.pos], dist: 0, fe: '' });
+      while (best.size > 0) {
+        let pick: Item | null = null;
+        for (const it of best.values()) {
+          if (!pick || it.dist < pick.dist - 1e-9 || (Math.abs(it.dist - pick.dist) <= 1e-9 && compareIds(it.id, pick.id) < 0)) pick = it;
+        }
+        const it = pick!;
+        best.delete(it.id);
+        settled.add(it.id);
+        const w = walkToClear(it.pts, zones, Math.min(limit, it.dist));
+        if (w.clearM !== null) continue; // 届いた: この先は調べない
+        const nn = net.nodes[it.id]!;
+        const deadEnd = nextEdges(it.id, it.from).length === 0;
+        if (nn.runwayIds.length > 0 || it.dist >= limit || deadEnd) {
+          const achieved = holdM + w.bestSlackM;
+          worst = worst === null ? achieved : Math.min(worst, achieved);
+          const src = net.edges[it.fe]?.sourceId;
+          if (src && !related.includes(src)) related.push(src);
+        } else expand(it);
+      }
+      if (worst !== null) {
+        sink.add('HOLD_SHORT_TOO_CLOSE', [r.id], { runwayId: r.id, achievedM: Math.max(0, Math.round(worst)), requiredM: Math.round(holdM) }, roundPoint(start.pos), related);
+      }
+    }
+  }
+}
+
 /** 素集合（連結成分の計算用） */
 class UnionFind {
   private parent = new Map<string, string>();
@@ -370,12 +580,12 @@ class UnionFind {
 function checkAirside(layout: AirportLayout, net: AirsideNetwork, sink: IssueSink, isolatedEdges: Set<string>): void {
   // 滑走路
   for (const r of sortedValues(layout.runways)) {
-    if (runwayMaxSize(r) === null) sink.add('RUNWAY_TOO_SHORT', [r.id], {}, r.start);
+    if (runwayMaxSize(r) === null) sink.add('RUNWAY_TOO_SHORT', [r.id], {}, isFreeRunway(r) ? roundPoint(r.start) : r.start);
     const entries = (net.runwayNodes[r.id] ?? []).filter((n) =>
       (net.outgoing[n] ?? []).some((eid) => net.edges[eid]!.kind === 'taxiway') ||
       (net.incoming[n] ?? []).some((eid) => net.edges[eid]!.kind === 'taxiway'),
     );
-    if (entries.length === 0) sink.add('RUNWAY_NO_TAXIWAY', [r.id], {}, r.start);
+    if (entries.length === 0) sink.add('RUNWAY_NO_TAXIWAY', [r.id], {}, isFreeRunway(r) ? roundPoint(r.start) : r.start);
   }
 
   // 誘導路と滑走路の関係
@@ -388,6 +598,15 @@ function checkAirside(layout: AirportLayout, net: AirsideNetwork, sink: IssueSin
       const tb = positionOnRunway(r, b.pos);
       if (ta !== null && tb !== null) {
         sink.add('TAXIWAY_ON_RUNWAY', [e.id], {}, a.pos, [r.id]);
+        continue;
+      }
+      if (isFreeRunway(r)) {
+        // 自由形: 両方の内部で 1 点で交わる（端点が中心線上・端での接触は除く）
+        const ax = runwayAxis(r);
+        const c = classifySegmentIntersection(a.pos, b.pos, ax.start, ax.end);
+        if (c.kind === 'point' && !c.atEndA && !c.atEndB) {
+          sink.add('TAXIWAY_CROSSES_RUNWAY_NO_ENTRY', [e.id], {}, roundPoint(c.p), [r.id]);
+        }
         continue;
       }
       const hit = segmentIntersection(a.pos, b.pos, r.start, runwayEnd(r));
@@ -675,10 +894,12 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
     if (Object.values(layout.terminalAreas).some((a) => a.kind === 'checkIn') && !has('baggageSort')) sink.add('NO_BAGGAGE_SORT', []);
   }
 
-  checkPlacement(layout, parts, sink);
+  checkPlacement(layout, parts, sink, network);
   checkNetworkGeometry(layout.taxiNodes, layout.taxiways, 'TAXIWAY_CROSSING_NO_JUNCTION', sink);
   checkNetworkGeometry(layout.roadNodes, layout.roads, 'ROAD_CROSSING_NO_JUNCTION', sink);
   checkAirside(layout, network, sink, isolatedEdges);
+  checkRunwayRules(layout, sink);
+  checkHoldShort(layout, network, sink);
   checkFacilities(layout, parts, sink);
   checkRoads(layout, parts, sink);
   checkAccess(layout, sink);

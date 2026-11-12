@@ -36,7 +36,7 @@ Phase 11 の目的は、Phase 12〜16（自由方位の滑走路・曲線誘導�
 - データは **度・真方位**: 0 = 北 = −y、時計回り、[0, 360)。内部計算はラジアン。保存データは度のみ。
 - 円弧の内部パラメータは数学角 θ（`p = c + r(cos θ, sin θ)`）。World フレームは y が下向きなので θ の増加は画面上の時計回り。方位との関係は `θ = 方位(rad) − π/2`。
   両者を混ぜないよう、円弧の API は θ を外に出さず「始点・終点・接線・方位」で受け渡す。
-- **磁方位 = 真方位 − 東偏差**（東偏差を正）。例: 真 090°・偏差 10°E → 磁 080° → 滑走路番号 "08"（`magneticFromTrue`）。偏差の入力・保存は Phase 12（未実装）。
+- **磁方位 = 真方位 − 東偏差**（東偏差を正）。例: 真 090°・偏差 10°E → 磁 080° → 滑走路番号 "08"（`magneticFromTrue`）。偏差の入力・保存は Phase 12 で実装済み（空港の設定、[23](23_runway_design.md) §3）。
 - 主な関数: `normalizeDeg`（-0 は 0）、`bearingToDir`（90° の倍数は厳密値、45° の奇数倍は ±√½）、`dirToBearing`（旧 `routes.ts headingOf` と同一式）、
   `turnAngleDeg`（旧 `turnAngleAt` の式）、`signedAngleDiffDeg`、`magneticFromTrue`、`designatorNumber`（1e-6 度に丸めてから 10° 単位に四捨五入。非有限は `RangeError`）。
 - `GRID8_STEP`: 8 方位 → 1 ステップのタイル差分（整数表）。`Object.freeze` 済みで、各エントリも凍結。**-0 の成分を持たない**
@@ -113,13 +113,12 @@ interface RunwayAxis {
 }
 ```
 
-従来形（8 方位）のみ対応。Phase 12 で滑走路を判別共用体にするとき、`r.length` / `r.heading` の直接参照はコンパイルエラーになり、すべてこのアクセサに寄る。
-**現時点では呼び出し元は `runwayRect`（占有・着陸帯の多角形）だけ** で、直接参照の置換は Phase 12 の作業である。
+Phase 11 時点は従来形（8 方位）のみ対応だった。**Phase 12 で滑走路を判別共用体（`RunwayGrid8 | RunwayFree`）にし、`runwayAxis` は自由形にも対応した**（`r.length` / `r.heading` の直接参照はコンパイルエラーに従ってすべてこのアクセサへ。従来形の式は不変）。
 
 ### 描画用の面（`layout/surfaces.ts`）と 2D/3D の整合
 
 - 形状（滑走路の舗装・着陸帯、誘導路・道路の帯）は core の `surfaces.ts` が **World フレーム・タイル単位** で生成し、2D は `worldPolyToMap`、3D は `worldPolyToScene` で変換して描く。
-  形状を 2D と 3D で別々に作らない。Phase 11 時点の滑走路の面は従来の占有フットプリントと同じ形（実寸の舗装は Phase 12 で追加予定）。
+  形状を 2D と 3D で別々に作らない。Phase 11 時点の滑走路の面は従来の占有フットプリントと同じ形だった。**Phase 12 で `runwaySurfaces(r, layout)`（舗装・肩・着陸帯・RESA・標示・番号）を追加**し、2D/3D の滑走路はこれを使う（従来形の舗装は実寸の幅で表示）。既存の `runwayPavementSurface` / `runwayStripSurface` は占有の多角形のまま残している（[23](23_runway_design.md) §9）。
 - 幅は m の表を 1 つだけ持つ: `TAXIWAY_DRAW_WIDTH_M = { S: 15, M: 23, L: 30, codeF: 38 }`、`ROAD_DRAW_WIDTH_M = { road: 12, rail: 8 }`（`model/catalog.ts`。ゲームの表示用の値）。
 - S13 で修正した差異（PO 承認済み、表示のみ・運航と検証に影響なし）: 3D の滑走路だけ +0.5 タイルが抜けて北西に 12.5 m ずれていた／誘導路の幅が 2D（タイル単位の固定値・コード F 無視）と 3D（m・コード F 反映）で違った。
   2D の誘導路は 3D と同じ帯の形状で描き（節点に半幅の円を置いて角の隙間を埋める）、道路・鉄道の幅も m の表に統一した（以前より細くなる）。
@@ -169,11 +168,17 @@ GOLDEN_FIXTURES_UPDATE=1 npx vitest run tests/unit/golden.fixtures.test.ts   # �
   版の更新だけなら変わらない。**再採取のとき、このファイルが変わらないことが「版番号以外は何も変わっていない」証拠** になる。
   既存の基準値のバイト同一性を保つため、従来のハッシュの形式は変えず、新しいファイルに追加した。
 
-## 6. データモデルの計画（Phase 12〜16）— **未実装**
+### Phase 12 の不具合修正と運航ゴールデン
 
-以下は設計上の決定であり、Phase 11 では **型を変えていない**（`Heading`・`Runway`・`TaxiwayEdge` は従来のまま）。
+連続横断の占有の漏れ（C1）の修正は、全レイアウトに適用するが `SIM_MODEL_VERSION` を上げない（PO 承認）。既存の運航ゴールデン（sim / stress-sim / sim-midrun / project-sim / routes）は不変で、
+S13 で追加した自由形のゴールデン `crossing-sim.golden.json` だけ、M1（自由形の停止位置）で交差のレイアウトの運航が変わったため再採取した（台帳の版は同じ）。詳細は [23](23_runway_design.md) §7.1.1・[21](21_save_format.md)。
 
-### 6.1 滑走路（Phase 12）
+## 6. データモデルの計画（Phase 12〜16）
+
+6.1（滑走路）は **Phase 12 で実装済み**（実装の記録は [23](23_runway_design.md)。下の型は計画時の記述で、実装では `dims` を自由形だけに持たせ、`magneticVariationDeg` に加えて `ruleSet`・`designatorSuffix` を持つ）。
+6.2 以降は **未実装**で、Phase 11 では `TaxiwayEdge` を変えていない。
+
+### 6.1 滑走路（Phase 12・実装済み）
 
 ```ts
 interface RunwayBase { id; name; surfaceWidthM: 30 | 45 | 60; buildState; dims?: RunwayDims }
@@ -218,7 +223,7 @@ type EdgeGeometry =
 
 | 版 | Phase 11 | 上げる時点（計画） | 移行 |
 |---|---|---|---|
-| `SCHEMA_VERSION` | 2 のまま | Phase 12（`alignment` / `dims` / `magneticVariationDeg` を保存できる時）→ 3。Phase 13 の `geometry` は任意項目なので同じ 3 に含める案（推奨）か 4 | v2 → v3 は恒等（`schemaVersion` のみ更新）。移行は `io/migrate.ts` の 1 か所。旧アプリは v3 を「未対応の版」として拒否（既存の処理） |
+| `SCHEMA_VERSION` | 2 のまま（**Phase 12 で 3 に更新済み**。[27](27_migration_and_compatibility.md)） | Phase 12（`alignment` / `dims` / `magneticVariationDeg` を保存できる時）→ 3。Phase 13 の `geometry` は任意項目なので同じ 3 に含める案（推奨）か 4 | v2 → v3 は恒等（`schemaVersion` のみ更新）。移行は `io/migrate.ts` の 1 か所。旧アプリは v3 を「未対応の版」として拒否（既存の処理） |
 | `PROJECT_FORMAT_VERSION` | 1 | ファイル構造が変わるときだけ（Phase 11〜15 では予定なし） | — |
 | `CATALOG_VERSION` | 不変 | Phase 14（脚配置・操向角などを機種に追加） | 保存済みの機種データに新項目が無い場合は `status: 'unset'` + ゲーム推定値で補う |
 | `ASSET_VERSION` | 不変 | Phase 16（表示のみ） | — |
@@ -250,6 +255,6 @@ Phase 11 は **どの版も上げていない**（データと運航の計算を
 
 - Q1: S13（3D の滑走路ずれ修正、誘導路の表示幅を m の表 S15 / M23 / L30 / codeF38 に統一）を Phase 11 で実施（独立コミット）。→ **実施済み**。
 - Q2: 実寸判定（翼端クリアランス、曲率速度制限）の既存空港への適用は、空港ごとの「実寸ルール」切替（既定は従来）。→ Phase 14/15 で実装（未実装）。
-- Q3: 従来形の滑走路を、表示のみ実寸の舗装幅で描画（占有・検証は従来のまま）。→ Phase 12（未実装）。
-- Q4: 磁気偏角は空港ごとの手入力（地磁気モデル・年変化なし）。→ Phase 12（未実装）。
-- Q5: 従来形と自由形で判定基準が異なることを許容（UI で区別表示）。→ Phase 12（未実装）。
+- Q3: 従来形の滑走路を、表示のみ実寸の舗装幅で描画（占有・検証は従来のまま）。→ **Phase 12 で実施済み**（S12、独立コミット）。
+- Q4: 磁気偏角は空港ごとの手入力（地磁気モデル・年変化なし）。→ **Phase 12 で実施済み**（空港の設定）。
+- Q5: 従来形と自由形で判定基準が異なることを許容（UI で区別表示）。→ **Phase 12 で実施済み**（「従来」/「実寸」のバッジ・タグ）。

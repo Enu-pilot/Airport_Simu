@@ -12,6 +12,7 @@ import {
 } from '../../src/core/layout/operations';
 import { facilityTiles, standEntry, standTiles } from '../../src/core/layout/footprint';
 import { pickAt } from '../../src/core/layout/pick';
+import type { RunwayGrid8 } from '../../src/core/model/types';
 import { emptyLayout, must } from './helpers';
 
 describe('施設の配置・回転・移動・削除・複製', () => {
@@ -79,7 +80,7 @@ describe('施設の配置・回転・移動・削除・複製', () => {
   it('滑走路の回転は45度刻みで中点を保つ', () => {
     const { layout, created } = must(placeRunway(emptyLayout(), { x: 10, y: 20 }, 90, 40));
     const r = must(rotateEntity(layout, created[0]!)).layout.runways[created[0]!]!;
-    expect(r.heading).toBe(135);
+    expect((r as RunwayGrid8).heading).toBe(135);
     expect(r.start).toEqual({ x: 10, y: 0 });
   });
 });
