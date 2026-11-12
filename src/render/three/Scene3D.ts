@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { bearingToSceneYawRad, tilesToM, worldPolyToScene, worldToScene } from '../../core/geometry/frames';
-import type { AirportLayout, Facility, FacilityKind } from '../../core/model/types';
+import { isFreeRunway, type AirportLayout, type Facility, type FacilityKind } from '../../core/model/types';
 import { facilityDims, standDims } from '../../core/layout/footprint';
-import { roadBandSurface, runwayPavementSurface, taxiwayBandSurface } from '../../core/layout/surfaces';
+import { bandSurface, roadBandSurface, runwayPavementSurface, runwaySurfaces, taxiwayBandSurface } from '../../core/layout/surfaces';
 import { resolveType, type AircraftType } from '../../core/sim/aircraftTypes';
 import { isVisible } from '../../core/sim/query';
 import type { Aircraft, UnitKind } from '../../core/sim/types';
@@ -159,21 +159,45 @@ export class Scene3D {
     this.staticGroup.add(ground);
 
     /** pts は Map フレーム（タイル）。metres = true のときは変換済み（m）の Scene の (x, z) */
-    const flat = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string, metres = false) => {
+    const flat = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string, metres = false, depthBias = 0) => {
       const shape = new THREE.Shape(pts.map((p) => (metres ? new THREE.Vector2(p.x, p.y) : new THREE.Vector2(w(p.x), w(p.y)))));
       const g = new THREE.ShapeGeometry(shape);
       g.rotateX(Math.PI / 2);
-      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: opacity < 1, opacity }));
+      const m = new THREE.Mesh(
+        g,
+        new THREE.MeshBasicMaterial({
+          color,
+          side: THREE.DoubleSide,
+          transparent: opacity < 1,
+          opacity,
+          // 同じ高さに近い面（舗装・肩・標示）の重なりを安定させる（描画順の奪い合いを避ける）
+          ...(depthBias > 0 ? { polygonOffset: true, polygonOffsetFactor: -depthBias, polygonOffsetUnits: -depthBias } : {}),
+        }),
+      );
       m.position.y = y;
       if (entityId) m.userData.entityId = entityId;
       this.staticGroup.add(m);
     };
 
     // World フレームの形状は frames の worldPolyToScene 経由で描く（滑走路・誘導路・道路で同じ位置規約）
-    const flatWorld = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string) => {
-      if (pts.length > 0) flat(worldPolyToScene(pts).map((p) => ({ x: p.x, y: p.z })), y, color, opacity, entityId, true);
+    const flatWorld = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string, depthBias = 0) => {
+      if (pts.length > 0) flat(worldPolyToScene(pts).map((p) => ({ x: p.x, y: p.z })), y, color, opacity, entityId, true, depthBias);
     };
-    for (const r of Object.values(layout.runways)) flatWorld(runwayPavementSurface(r), 0.3, 0x3a3f45, r.buildState === 'operational' ? 1 : 0.5, r.id);
+    for (const r of Object.values(layout.runways)) {
+      const alpha = r.buildState === 'operational' ? 1 : 0.5;
+      if (!isFreeRunway(r)) {
+        flatWorld(runwayPavementSurface(r), 0.3, 0x3a3f45, alpha, r.id);
+        continue;
+      }
+      // 自由形: 2D と同じ runwaySurfaces（着陸帯・RESA は薄く、舗装 + 肩、舗装、中心線の破線、進入端の縦じま。番号の文字は Phase 16）
+      const sf = runwaySurfaces(r, layout);
+      flatWorld(sf.strip, 0.1, 0xffffff, 0.08, undefined, 1);
+      for (const p of sf.resa) flatWorld(p, 0.12, 0xffb74d, 0.3, undefined, 2);
+      flatWorld(sf.paved, 0.28, 0x565b61, alpha, r.id, 3);
+      flatWorld(sf.pavement, 0.3, 0x3a3f45, alpha, r.id, 4);
+      for (const [a, b] of sf.centrelineDashes) flatWorld(bandSurface(a, b, 0.9), 0.34, 0xf2f2f2, alpha, undefined, 5);
+      for (const bar of sf.thresholdBars) flatWorld(bar, 0.34, 0xf2f2f2, alpha, undefined, 5);
+    }
 
     // 誘導路・道路（ノード間の帯。形状は core の surfaces、幅は m の表）
     for (const e of Object.values(layout.taxiways)) {

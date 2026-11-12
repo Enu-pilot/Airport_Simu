@@ -194,3 +194,16 @@ test('自由形の滑走路を含む空港で運航を開始できる（ペー�
   await expect(page.getByTestId('sim-clock')).not.toContainText('06:00', { timeout: 20_000 });
   await expect(page.getByTestId('runway-rwy_1')).toContainText('09');
 });
+
+test('交差する自由形の滑走路を 2D と 3D で描ける（エラーなし）', async ({ page }) => {
+  await page.getByTestId('new-empty').click();
+  await selectFreeNumeric(page);
+  await placeNumeric(page, [80, 60], 90, 2000);
+  await placeNumeric(page, [80, 60], 30, 2000);
+  await expect(page.getByTestId('map-canvas')).toBeVisible();
+  await page.getByTestId('view-toggle').click();
+  await expect(page.getByTestId('view3d-canvas')).toBeVisible();
+  await page.waitForTimeout(1000);
+  await page.getByTestId('view-toggle').click();
+  await expect(page.getByTestId('map-canvas')).toBeVisible();
+});
