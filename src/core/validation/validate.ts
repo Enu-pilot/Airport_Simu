@@ -511,37 +511,47 @@ function checkHoldShort(layout: AirportLayout, net: AirsideNetwork, sink: IssueS
           .map((e) => ({ edge: e.id, to: e.from === id ? e.to : e.from }))
           .filter((x) => x.to !== from)
           .sort((p, q) => compareIds(p.edge, q.edge));
+      if (nextEdges(nodeId, '').length === 0) continue; // 誘導路が接続していないノードは停止位置の対象ではない
       let worst: number | null = null;
       const related: string[] = [];
-      const dfs = (id: string, from: string, points: Vec2[], acc: number, firstEdge: string): void => {
-        const nexts = nextEdges(id, from);
-        let extended = false;
-        for (const n of nexts) {
-          const nn = net.nodes[n.to]!;
-          const p = points[points.length - 1]!;
-          const seg = Math.hypot(nn.pos.x - p.x, nn.pos.y - p.y) * TILE_M;
-          const pts = [...points, nn.pos];
-          const dist = acc + seg;
-          const fe = firstEdge || n.edge;
-          if (nn.runwayIds.length > 0 || dist >= limit) {
-            // 他の滑走路のノード・上限で打ち切り
-            finish(pts, Math.min(limit, dist), fe);
-          } else dfs(n.to, id, pts, dist, fe);
-          extended = true;
-        }
-        if (!extended) finish(points, limit, firstEdge); // 行き止まり
+      // Dijkstra 風: 各ノードは最短距離の経路で 1 度だけ展開する（経路は最短路で、ノードを再訪しないので、
+      // 到達済みの停止位置は届く／届かないを 1 度だけ判定すればよい）。届いた枝は打ち切る。
+      type Item = { id: string; from: string; pts: Vec2[]; dist: number; fe: string };
+      const settled = new Set<string>([nodeId]);
+      const best = new Map<string, Item>();
+      const consider = (id: string, it: Item): void => {
+        const cur = best.get(id);
+        if (!cur || it.dist < cur.dist - 1e-9) best.set(id, it);
       };
-      const finish = (pts: Vec2[], cap: number, fe: string): void => {
-        const w = walkToClear(pts, zones, cap);
-        if (w.clearM === null) {
+      const expand = (it: Item): void => {
+        for (const n of nextEdges(it.id, it.from)) {
+          if (settled.has(n.to)) continue;
+          const nn = net.nodes[n.to]!;
+          const p = it.pts[it.pts.length - 1]!;
+          const seg = Math.hypot(nn.pos.x - p.x, nn.pos.y - p.y) * TILE_M;
+          consider(n.to, { id: n.to, from: it.id, pts: [...it.pts, nn.pos], dist: it.dist + seg, fe: it.fe || n.edge });
+        }
+      };
+      expand({ id: nodeId, from: '', pts: [start.pos], dist: 0, fe: '' });
+      while (best.size > 0) {
+        let pick: Item | null = null;
+        for (const it of best.values()) {
+          if (!pick || it.dist < pick.dist - 1e-9 || (Math.abs(it.dist - pick.dist) <= 1e-9 && compareIds(it.id, pick.id) < 0)) pick = it;
+        }
+        const it = pick!;
+        best.delete(it.id);
+        settled.add(it.id);
+        const w = walkToClear(it.pts, zones, Math.min(limit, it.dist));
+        if (w.clearM !== null) continue; // 届いた: この先は調べない
+        const nn = net.nodes[it.id]!;
+        const deadEnd = nextEdges(it.id, it.from).length === 0;
+        if (nn.runwayIds.length > 0 || it.dist >= limit || deadEnd) {
           const achieved = holdM + w.bestSlackM;
           worst = worst === null ? achieved : Math.min(worst, achieved);
-          const src = net.edges[fe]?.sourceId;
+          const src = net.edges[it.fe]?.sourceId;
           if (src && !related.includes(src)) related.push(src);
-        }
-      };
-      if (nextEdges(nodeId, '').length === 0) continue; // 誘導路が接続していないノードは停止位置の対象ではない
-      dfs(nodeId, '', [start.pos], 0, '');
+        } else expand(it);
+      }
       if (worst !== null) {
         sink.add('HOLD_SHORT_TOO_CLOSE', [r.id], { runwayId: r.id, achievedM: Math.max(0, Math.round(worst)), requiredM: Math.round(holdM) }, roundPoint(start.pos), related);
       }
