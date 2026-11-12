@@ -6,7 +6,7 @@ import { distance, type Tile, type Vec2 } from '../core/geometry/vec';
 import { FACILITY_SPECS, STRIP_HALF_WIDTH } from '../core/model/catalog';
 import { isBuildable } from '../core/model/site';
 import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Site, Stand, TerminalAreaKind } from '../core/model/types';
-import { entityTypeOf } from '../core/model/types';
+import { entityTypeOf, isFreeRunway } from '../core/model/types';
 import { facilityDims, standDims, standEntry } from '../core/layout/footprint';
 import { offsiteTilesIn } from '../core/layout/operations';
 import { designatorsOf } from '../core/layout/designators';
@@ -14,7 +14,7 @@ import { runwayAxis, runwayEnd } from '../core/layout/runway';
 import { roadDrawWidthM, runwayPavementSurface, runwayStripSurface, taxiwayBandSurface, taxiwayDrawWidthM } from '../core/layout/surfaces';
 import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
-import { computePreview, facilityKindOf, nextPathPoint, rectFromDrag } from '../editor/tools';
+import { computePreview, facilityKindOf, nextPathPoint, nextTaxiPoint, rectFromDrag } from '../editor/tools';
 import { getAnalysis, type EditorState, type OpsState } from '../editor/store';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../core/sim/aircraftTypes';
 import { isVisible } from '../core/sim/query';
@@ -35,6 +35,8 @@ import { airportKpis, type AirportKpis } from '../core/analytics/kpi';
 
 /** World フレーム（ノード・滑走路端など）→ Map フレーム（描画）。変換は frames.ts のみで行う */
 const c = (t: Tile): Vec2 => worldToMap(t);
+
+const fmtDeg = (d: number): string => (Math.round(d * 10) / 10).toFixed(1);
 
 const BUILD_ALPHA: Record<BuildState, number> = { operational: 1, underConstruction: 0.8, planned: 0.45 };
 
@@ -110,6 +112,15 @@ export class MapRenderer {
       this.outline(o, layout, id, bad ? COLOR.ghostBad : COLOR.ghostOk, 3);
     }
     this.drawDraft(s);
+    // 配置・回転のプレビュー中の滑走路: 番号・真方位・磁方位・長さを表示
+    for (const id of ghostIds) {
+      const gr = layout.runways[id];
+      if (!gr || !isFreeRunway(gr)) continue;
+      const ds = designatorsOf(gr, layout);
+      const mid = c({ x: (runwayAxis(gr).start.x + runwayAxis(gr).end.x) / 2, y: (runwayAxis(gr).start.y + runwayAxis(gr).end.y) / 2 });
+      const text = `${ds.text.join('/')}  真 ${fmtDeg(ds.trueDeg[0])}° / 磁 ${fmtDeg(ds.magDeg[0])}°  ${Math.round(gr.lengthM)} m`;
+      this.label(`ghostinfo:${id}`, text, { x: mid.x, y: mid.y - 2 }, cam, { size: 12, color: 0xb9f6ca });
+    }
     if (s.overlays.labels) this.drawLabels(layout, analysis, cam);
     if (s.ops && s.overlays.congestion) this.drawCongestion(layout, s.ops, cam, s.overlays.labels);
     if (s.ops) this.drawOps(s.ops, cam, s.overlays.network);
@@ -496,11 +507,21 @@ export class MapRenderer {
     if (d?.kind === 'path') {
       for (const p of d.points) o.circle(c(p).x, c(p).y, 0.3).fill({ color: COLOR.ghostOk });
       if (s.hover && d.points.length > 0) {
-        const next = c(nextPathPoint(d.points, s.hover));
+        const next = c(s.tool === 'taxiway' ? nextTaxiPoint(s.history.present, d.points, s.hover) : nextPathPoint(d.points, s.hover));
         o.circle(next.x, next.y, 0.25).stroke({ width: this.px(2), color: COLOR.ghostOk });
       }
     }
     if (d?.kind === 'runway') o.circle(c(d.start).x, c(d.start).y, 0.4).fill({ color: COLOR.ghostOk });
+    if (d?.kind === 'freeRunway') o.circle(c(d.start).x, c(d.start).y, 0.4).fill({ color: COLOR.ghostOk });
+    // 選択中の自由形の端のハンドル（端 = 回転、Shift + 端 = 反対の端を固定）
+    const sel = s.selection ? s.history.present.runways[s.selection] : undefined;
+    if (sel && isFreeRunway(sel) && s.mode === 'build' && s.tool === 'select') {
+      const ax = runwayAxis(sel);
+      for (const p of [ax.start, ax.end]) {
+        const q = c(p);
+        o.circle(q.x, q.y, this.px(6)).fill({ color: 0xffffff, alpha: 0.95 }).stroke({ width: this.px(2), color: COLOR.selection });
+      }
+    }
     if (d?.kind === 'rect' && s.hover) {
       const r = rectFromDrag(d.start, s.hover);
       if (s.tool === 'land') {

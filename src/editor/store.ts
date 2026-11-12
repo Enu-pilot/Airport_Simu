@@ -3,6 +3,7 @@ import { useStore } from 'zustand';
 import type { Camera } from '../core/geometry/camera';
 import { centerOn } from '../core/geometry/camera';
 import type { Tile, Vec2 } from '../core/geometry/vec';
+import type { WorldPoint } from '../core/geometry/frames';
 import { commit, createHistory, redo, undo, type History } from '../core/editor/history';
 import type { OpResult } from '../core/layout/operations';
 import { createEmptyLayout } from '../core/layout/operations';
@@ -41,12 +42,30 @@ export interface ToolOptions {
   roadClass: RoadClass;
   runwayWidth: 30 | 45 | 60;
   buildState: BuildState;
+  /** 滑走路ツールの方式。既定は従来形（8 方向のグリッド）。自由形は任意方位・実寸（Phase 12） */
+  runwayAlignment: 'grid8' | 'free';
+  /** 自由形の始点の格子への吸着（タイル = 整数、半タイル、なし） */
+  gridSnap: 'tile' | 'half' | 'off';
+  /** 自由形の方位の吸着（度）。0 = 吸着なし */
+  angleSnapDeg: 0 | 1 | 5 | 10 | 15 | 45;
+  /** 自由形の長さの吸着（m）。0 = 吸着なし */
+  lengthSnapM: 0 | 10 | 50 | 100;
+  /** 自由形の配置方法: ドラッグ（始点→終点）/ 数値入力（方位・長さを入力してクリックで置く） */
+  freeInput: 'drag' | 'numeric';
+  /** 数値入力: 真方位（度）、長さ（m）、クリックした点が滑走路の始点 / 中点 */
+  freeHeadingDeg: number;
+  freeLengthM: number;
+  freeAnchor: 'start' | 'mid';
 }
 
 /** 進行中のマウス操作 */
 export type Draft =
   | { kind: 'path'; points: Tile[] }
   | { kind: 'runway'; start: Tile }
+  /** 自由形の滑走路: 始点（吸着済みの実数の World 座標）からドラッグ */
+  | { kind: 'freeRunway'; start: WorldPoint }
+  /** 選択中の自由形の端のハンドル: 端をドラッグして中点まわりに回転（fixOpposite = 反対の端を固定して方位・長さを変える） */
+  | { kind: 'rwyHandle'; id: string; which: 'start' | 'end'; fixOpposite: boolean }
   | { kind: 'rect'; start: Tile }
   | { kind: 'move'; id: string; start: Tile }
   | null;
@@ -77,6 +96,8 @@ export interface EditorState {
   camera: Camera;
   viewSize: { w: number; h: number };
   hover: Tile | null;
+  /** カーソルの World 座標（丸めない）。自由形の操作中だけ精密で、それ以外は hover のタイル中心 */
+  hoverW: WorldPoint | null;
   draft: Draft;
   overlays: Overlays;
   /** ターミナル内部の表示・編集中の階（0 = 1F） */
@@ -171,10 +192,19 @@ export const editorStore = createStore<EditorState>(() => ({
     roadClass: 'public',
     runwayWidth: 45,
     buildState: 'operational',
+    runwayAlignment: 'grid8',
+    gridSnap: 'tile',
+    angleSnapDeg: 1,
+    lengthSnapM: 10,
+    freeInput: 'drag',
+    freeHeadingDeg: 90,
+    freeLengthM: 2000,
+    freeAnchor: 'start',
   },
   camera: { x: 10, y: 20, zoom: 9 },
   viewSize: { w: 800, h: 600 },
   hover: null,
+  hoverW: null,
   draft: null,
   overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true, congestion: false },
   interiorLevel: 1,
@@ -451,10 +481,14 @@ export const actions = {
   setViewSize(w: number, h: number): void {
     set({ viewSize: { w, h } });
   },
-  setHover(hover: Tile | null): void {
-    const cur = get().hover;
-    if (cur === hover || (cur && hover && cur.x === hover.x && cur.y === hover.y)) return;
-    set({ hover });
+  /** hoverW を省略するとタイル中心（World では (x, y)） */
+  setHover(hover: Tile | null, hoverW?: WorldPoint | null): void {
+    const cur = get();
+    const w = hoverW === undefined ? (hover ? { x: hover.x, y: hover.y } : null) : hoverW;
+    const sameTile = cur.hover === hover || (cur.hover && hover && cur.hover.x === hover.x && cur.hover.y === hover.y);
+    const sameW = cur.hoverW === w || (cur.hoverW && w && cur.hoverW.x === w.x && cur.hoverW.y === w.y);
+    if (sameTile && sameW) return;
+    set({ hover, hoverW: w });
   },
   setDraft(draft: Draft): void {
     set({ draft });
