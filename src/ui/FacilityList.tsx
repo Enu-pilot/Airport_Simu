@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { sortedValues } from '../core/model/ids';
-import type { AirportLayout, BuildState } from '../core/model/types';
+import { isFreeRunway, type AirportLayout, type BuildState } from '../core/model/types';
 import { FACILITY_SPECS } from '../core/model/catalog';
 import { useAnalysis, useEditor, useLayout } from '../editor/store';
 import { focusEntity } from '../editor/input';
-import { BUILD_STATE_LABEL, NODE_KIND_LABEL, displayName } from '../i18n/ja';
+import { BUILD_STATE_LABEL, NODE_KIND_LABEL, RUNWAY_UI, displayName } from '../i18n/ja';
 import type { LayoutAnalysis } from '../core/validation/validate';
 
 interface Row {
@@ -66,6 +66,11 @@ export function FacilityList() {
                   data-testid={`row-${r.id}`}
                 >
                   <span className="row-name">{r.label ?? displayName(layout, r.id)}</span>
+                  {layout.runways[r.id] && (
+                    <span className={isFreeRunway(layout.runways[r.id]!) ? 'badge free-badge' : 'badge legacy-badge'} data-testid={`badge-${r.id}`}>
+                      {isFreeRunway(layout.runways[r.id]!) ? RUNWAY_UI.badgeFree : RUNWAY_UI.badgeLegacy}
+                    </span>
+                  )}
                   {r.buildState && r.buildState !== 'operational' && (
                     <span className={`badge ${r.buildState}`}>{BUILD_STATE_LABEL[r.buildState]}</span>
                   )}

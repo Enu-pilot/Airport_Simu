@@ -3,7 +3,7 @@ import { worldToMap } from '../core/geometry/frames';
 import type { Severity } from '../core/validation/validate';
 import { actions, useAnalysis, useLayout } from '../editor/store';
 import { focusEntity } from '../editor/input';
-import { SEVERITY_LABEL, issueText } from '../i18n/ja';
+import { RUNWAY_UI, SEVERITY_LABEL, issueText } from '../i18n/ja';
 
 const ICON: Record<Severity, string> = { error: '⛔', warning: '⚠', info: 'ℹ' };
 
@@ -37,7 +37,14 @@ export function IssuesPanel() {
             }}
           >
             <span className="icon">{ICON[iss.severity]}</span>
-            <span>{issueText(layout, iss)}</span>
+            <span>
+              {issueText(layout, iss)}
+              {iss.params.criterion === 'real' && (
+                <span className="badge free-badge" data-testid="issue-real" title={RUNWAY_UI.freeCriterion}>
+                  {RUNWAY_UI.tagReal}
+                </span>
+              )}
+            </span>
           </div>
         ))}
       </div>

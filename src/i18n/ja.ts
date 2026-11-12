@@ -720,3 +720,86 @@ export const BOTTLENECK_AREA_LABEL: Record<Bottleneck['area'], string> = {
   ground: '地上支援（作業員・車両）',
   baggage: '手荷物設備',
 };
+
+// ---------------------------------------------------------------- 滑走路（Phase 12: 自由方位・実寸）
+
+/** 参考値の注意書き（RUNWAY_REFERENCE_DISCLAIMER と同文）。参考値・ゲーム値の表示には必ず添える */
+export const RUNWAY_DISCLAIMER = '参考値。ゲーム内の判定であり、実際の安全基準への適合を保証しません';
+
+export const RUNWAY_UI = {
+  alignment: { grid8: '従来形（8 方向のグリッド）', free: '自由形（任意の方位・実寸）' },
+  input: { drag: 'ドラッグ（始点 → 終点）', numeric: '数値入力（方位・長さ）' },
+  gridSnap: { tile: 'タイル', half: '半タイル', off: 'なし' },
+  angleSnap: { 0: 'なし（自由）', 1: '1°', 5: '5°', 10: '10°', 15: '15°', 45: '45°' } as Record<number, string>,
+  lengthSnap: { 0: 'なし', 10: '10 m', 50: '50 m', 100: '100 m' } as Record<number, string>,
+  anchor: { start: '始点', mid: '中点' },
+  hintFreeDrag: '始点 → 終点をドラッグ（またはクリック 2 回）。方位・長さは下の吸着の設定に丸められます。R: 数値入力の方位を回す',
+  hintFreeNumeric: '方位・長さを入力して、置きたい位置をクリック',
+  freeNote: '方位は真方位（北 = 0°、時計回り）。磁方位と滑走路番号は「空港の設定」の磁気偏角から計算されます。',
+  badgeLegacy: '従来',
+  badgeFree: '実寸',
+  legacyCriterion: '判定: 従来（ゲームの簡易判定）',
+  freeCriterion: '判定: 実寸（舗装・肩・着陸帯・RESA の多角形で判定）',
+  convertToFree: '自由形に変換（実寸の判定に切り替え）…',
+  convertExplain:
+    '自由形に変換すると、この滑走路の判定が実寸に切り替わります。位置・方位・長さは変わりませんが、次の点が変わります。',
+  convertChanges: [
+    '占有と検証が実寸の多角形になります（着陸帯の半幅 87.5 m → 140 m など。周囲の施設が「保護区域内」になることがあります）',
+    '停止位置が 87.5 m から 90 m（60 m 幅は 107.5 m）になり、運航に影響します',
+    'ほかの滑走路との交差・平行間隔・番号の重複の判定の対象になります',
+    '任意の方位に回転でき、端のハンドルで操作できます',
+  ],
+  convertUndo: '元に戻すには Undo（Ctrl+Z）を使います。自動では変換しません。',
+  convertDo: '自由形に変換する',
+  cancel: 'やめる',
+  snapToGrid: 'グリッドに合わせる（従来形に変換）…',
+  snapExplain: '従来形（8 方向・整数タイル）に丸めます。',
+  snapChanges: [
+    '方位を 45° の倍数に、始点を整数タイルに、長さを整数のステップ数に丸めます（位置が少し動くことがあります）',
+    '実寸の設定（肩・着陸帯・RESA・停止位置・標高）は捨てられます',
+    '判定が従来のゲームの簡易判定に戻ります',
+  ],
+  snapDo: 'グリッドに合わせる',
+  trueHeading: '真方位（°）',
+  magHeading: '磁方位（°）',
+  designators: '滑走路番号',
+  suffix: '番号の接尾辞（始点側）',
+  suffixOptions: { auto: '自動', L: 'L', C: 'C', R: 'R', none: 'なし' },
+  lengthM: '長さ（m）',
+  startEnd: '始点 / 終点（タイル座標）',
+  dimsTitle: '実寸（ゲーム値・上書き）',
+  dimsExplain: '空欄ではなく数値が入っている項目が、現在の値です。「ゲーム既定値に戻す」で上書きをすべて解除します。',
+  dimsReset: 'ゲーム既定値に戻す',
+  dimsOverridden: '上書き',
+  dimLabels: {
+    shoulderWidthM: '肩の幅（片側, m）',
+    stripHalfWidthM: '着陸帯の半幅（m）',
+    stripEndM: '着陸帯の端部延長（m）',
+    resaLengthM: 'RESA の長さ（m。0 = なし）',
+    resaWidthM: 'RESA の全幅（m）',
+    holdingPositionM: '停止位置（中心線から, m）',
+  },
+  elevationStart: '標高 始点（m）',
+  elevationEnd: '標高 終点（m）',
+  slope: '勾配（表示のみ）',
+  slopeNote: '標高差 ÷ 長さ。判定・3D には使いません（参考値がないため警告も出しません）',
+  refTitle: '参考値と出典',
+  refGame: 'ゲーム値',
+  refRef: '参考値',
+  settingsTitle: '空港の設定',
+  magVar: '磁気偏角（°、東を正）',
+  magVarHelp: '東偏差を正で入力します（例: 10 = 10°E、-5 = 5°W）。公式の偏角（NOAA の磁場計算機など）を手入力します。滑走路番号は磁方位から決まります。',
+  ruleSet: '判定ルール',
+  ruleClassic: '従来（既定）',
+  ruleRealistic: '実寸（参考値に基づく追加の警告）',
+  ruleExplain:
+    '「実寸」にすると、平行滑走路の間隔と番号の重複の警告が従来形の滑走路にも適用されます。今後の版（Phase 13 以降）で判定が追加される予定で、現時点では実寸の判定の大半は自由形の滑走路で行われます。',
+  numbersTitle: '滑走路番号の一覧',
+  noRunways: '滑走路がありません',
+  tagReal: '実寸',
+  crossingTitle: '交差する滑走路',
+  crossingDependent: '従属運用（2 本の離着陸を同時に使いません）',
+  handleHelp: '端のハンドルをドラッグ: 中点まわりに回転 / Shift + ドラッグ: 反対の端を固定して方位・長さを変更',
+} as const;
+
+export const MAG_VAR_LABEL = (v: number): string => (v === 0 ? '0°' : v > 0 ? `${v}°E` : `${-v}°W`);

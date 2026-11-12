@@ -201,3 +201,15 @@ tr.selected td { background: rgba(63, 240, 255, 0.08); }
 .view3d { cursor: grab; }
 .view3d canvas { display: block; }
 .perf-hud { position: absolute; left: 8px; top: 8px; padding: 2px 8px; font-size: 11px; background: rgba(0, 0, 0, 0.55); color: #e5f2ff; border-radius: 4px; pointer-events: none; }
+
+/* Phase 12: 自由方位・実寸の滑走路 */
+.badge.free-badge { color: #7fd6ff; border-color: currentColor; margin-left: 4px; }
+.badge.legacy-badge { color: var(--muted); margin-left: 4px; }
+.criterion-row { margin: 4px 0; display: flex; align-items: center; gap: 4px; }
+.confirm-box { border: 1px solid var(--warning); border-radius: 4px; padding: 6px 8px; margin: 6px 0; }
+.free-options { display: flex; flex-direction: column; gap: 4px; padding-left: 8px; border-left: 2px solid var(--border); }
+.ref-table { margin-top: 6px; font-size: 12px; }
+.ref-table .ref-row { margin: 4px 0; padding-bottom: 4px; border-bottom: 1px dotted var(--border); }
+.small { font-size: 11px; }
+.muted { color: var(--muted); }
+.link-like { color: var(--accent); }

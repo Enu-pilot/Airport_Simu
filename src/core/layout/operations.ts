@@ -812,6 +812,15 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
   switch (type) {
     case 'runway': {
       const r = d.runways[id];
+      // 接尾辞の上書きの解除（null = 自動に戻す。キーを書かない）
+      if (r && patch.designatorSuffix === null) {
+        const { designatorSuffix: _s, ...rest } = patch;
+        void _s;
+        const had = r.designatorSuffix !== undefined;
+        delete r.designatorSuffix;
+        if (Object.keys(rest).length === 0) return had ? ok(finalize(d)) : fail('NO_CHANGE');
+        return updateEntity(d, id, rest);
+      }
       // 方位変更は中点を保つ
       if (r && isFreeRunway(r)) {
         // 自由形: 方位・長さの変更は中点を保つ（heading / length は従来形の項目なので INVALID_VALUE）

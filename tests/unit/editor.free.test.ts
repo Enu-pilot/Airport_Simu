@@ -276,3 +276,21 @@ describe('入力（ストア経由）', () => {
     expect(editorStore.getState().history.present.runways[g.created[0]!]).toMatchObject({ heading: 135 });
   });
 });
+
+describe('接尾辞の上書きの解除（UI の「自動」）', () => {
+  it('designatorSuffix: null でキーを消す。もともと無ければ NO_CHANGE', async () => {
+    const { updateEntity } = await import('../../src/core/layout/operations');
+    const l = must(placeFreeRunway(emptyLayout(100, 100), { start: { x: 10, y: 10 }, headingDeg: 90, lengthM: 1000 }, { designatorSuffix: 'L' }));
+    const id = l.created[0]!;
+    const r1 = must(updateEntity(l.layout, id, { designatorSuffix: null }));
+    expect('designatorSuffix' in r1.layout.runways[id]!).toBe(false);
+    const r2 = updateEntity(r1.layout, id, { designatorSuffix: null });
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.reason).toBe('NO_CHANGE');
+    const g = must(placeRunway(emptyLayout(100, 100), { x: 10, y: 10 }, 90, 10, {}));
+    const r3 = must(updateEntity(g.layout, g.created[0]!, { designatorSuffix: 'R' }));
+    const r4 = must(updateEntity(r3.layout, g.created[0]!, { designatorSuffix: null, name: 'x' }));
+    expect(r4.layout.runways[g.created[0]!]).toMatchObject({ name: 'x' });
+    expect('designatorSuffix' in r4.layout.runways[g.created[0]!]!).toBe(false);
+  });
+});

@@ -39,6 +39,7 @@ import {
   eventText,
   formatClock,
   formatSimTime,
+  RUNWAY_UI,
 } from '../i18n/ja';
 
 /** 運航状態（約10Hzで更新）。sim は可変オブジェクトなので uiVersion の変化で再描画する */
@@ -121,6 +122,14 @@ export function OpsControls() {
         .map((rid) => (
           <RunwayRow key={rid} state={state} rid={rid} layoutRunway={ctx.layout.runways[rid]!} layout={ctx.layout} />
         ))}
+      {ctx.crossings.map((x) => (
+        <div key={x.id} className="runway-row" data-testid={`crossing-${x.id}`}>
+          <div className="runway-name">
+            {RUNWAY_UI.crossingTitle}: {designatorsOf(ctx.layout.runways[x.a]!, ctx.layout).text.join('/')} × {designatorsOf(ctx.layout.runways[x.b]!, ctx.layout).text.join('/')}
+          </div>
+          <div className="runway-q">{RUNWAY_UI.crossingDependent}</div>
+        </div>
+      ))}
 
       <div className="tool-group-title">便の追加</div>
       <div className="tool-options">
