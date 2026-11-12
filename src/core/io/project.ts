@@ -5,7 +5,7 @@ import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
 import { SIM_MODEL_VERSION, modelsUsed, type Scenario } from '../scenario/scenario';
 import { buildTypeTable } from '../sim/aircraftTypes';
 import { createContext } from '../sim/context';
-import { checkInvariants } from '../sim/invariants';
+import { checkInvariants, repairCrossingState } from '../sim/invariants';
 import type { Simulation } from '../sim/simulation';
 import type { SimState } from '../sim/types';
 import { SAVE_FORMAT, checkRunwayFields, validateLayoutData } from './serialize';
@@ -198,6 +198,19 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
     for (const rid of a.crossing?.alsoRunwayIds ?? []) {
       if (!layout.runways[rid]) errors.push(`運航状態: 機体 ${id} の横断の滑走路 ${rid} がレイアウトにありません`);
     }
+    // heldCrossings（連続横断・先の許可。空のときはキーを書かない）
+    if (a.heldCrossings !== undefined) {
+      if (!Array.isArray(a.heldCrossings) || a.heldCrossings.length === 0) errors.push(`運航状態: 機体 ${id} の heldCrossings が不正です`);
+      else {
+        for (const c of a.heldCrossings) {
+          if (!isObj(c) || typeof c.index !== 'number' || typeof c.runwayId !== 'string' || !layout.runways[c.runwayId]) {
+            errors.push(`運航状態: 機体 ${id} の heldCrossings の滑走路・位置が不正です`);
+            continue;
+          }
+          for (const rid of c.alsoRunwayIds ?? []) if (!layout.runways[rid]) errors.push(`運航状態: 機体 ${id} の横断の滑走路 ${rid} がレイアウトにありません`);
+        }
+      }
+    }
     if (!state.flights[a.arrivalFlightId] || !state.flights[a.departureFlightId]) errors.push(`運航状態: 機体 ${id} の便が見つかりません`);
   }
   for (const [standId, acId] of Object.entries(state.standAssignments)) {
@@ -208,10 +221,16 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
 }
 
 /** 運航状態を復元する（文脈はレイアウトと機種データから作り直す）。不整合は violations に返す */
-export function restoreSimulation(layout: AirportLayout, snap: SimSnapshot, models: Record<string, AircraftModel>): { sim: Simulation; violations: string[] } {
+export function restoreSimulation(
+  layout: AirportLayout,
+  snap: SimSnapshot,
+  models: Record<string, AircraftModel>,
+): { sim: Simulation; violations: string[]; repaired: string[] } {
   const ctx = createContext(structuredClone(layout), { types: buildTypeTable(models) });
   const sim: Simulation = { ctx, state: structuredClone(snap.state), company: snap.company ? structuredClone(snap.company) : null };
-  return { sim, violations: checkInvariants(sim) };
+  // 横断の占有が漏れた状態（修正前の版で保存されたもの）は、厳しくした R2 を通る前に修復する
+  const repaired = repairCrossingState(sim.state);
+  return { sim, violations: checkInvariants(sim), repaired };
 }
 
 export interface ValidateOptions {
@@ -352,7 +371,10 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
 
   // 運航状態は実際に復元して不変条件を確かめる
   if (sim) {
-    const { violations } = restoreSimulation(layout, sim, models);
+    const { violations, repaired } = restoreSimulation(layout, sim, models);
+    if (repaired.length > 0) {
+      warnings.push(`運航状態の横断の占有に不整合（以前の版の不具合で漏れた占有）があったため修復しました（${repaired.length} 件。例: ${repaired[0]}）`);
+    }
     if (violations.length) {
       errors.push(...violations.slice(0, 10).map((x) => `運航状態の不整合: ${x}`));
       return fail();

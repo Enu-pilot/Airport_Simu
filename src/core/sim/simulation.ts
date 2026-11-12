@@ -655,16 +655,17 @@ function runwayControl(sim: Simulation): void {
       const req = pendingCrossing(sim, ac);
       if (!req || req.runwayId !== rid || req.distToHold > 100) continue;
       // 交差点ノードで横断するときは、交差する滑走路も同時に予約する（すべて空いているときだけ。部分的な予約はしない）
-      const group = sim.ctx.crossingNodeRunways[ac.route!.nodes[req.index]!];
-      const ids = group && group.includes(rid) ? group : [rid];
-      const free = ids.every((id) => {
+      // 連続横断: 次の滑走路の停止位置がこの滑走路の解放位置より手前なら（間で止まれない）、まとめて予約する
+      const chain = crossingChain(sim, ac, req.index);
+      const free = chain.every((c) => [c.runwayId, ...(c.alsoRunwayIds ?? [])].every((id) => {
         const s = state.runways[id]!;
         return !s.occupant && (!s.booking || s.booking.eta - state.now >= CROSSING_WINDOW_SEC);
-      });
+      }));
       if (free) {
-        for (const id of ids) state.runways[id]!.occupant = { aircraftId: ac.id, purpose: 'crossing', since: state.now };
-        const also = ids.filter((id) => id !== rid);
-        ac.crossing = also.length > 0 ? { index: req.index, runwayId: rid, alsoRunwayIds: also } : { index: req.index, runwayId: rid };
+        for (const c of chain) for (const id of [c.runwayId, ...(c.alsoRunwayIds ?? [])]) state.runways[id]!.occupant = { aircraftId: ac.id, purpose: 'crossing', since: state.now };
+        if (ac.crossing) (ac.heldCrossings ??= []).push(ac.crossing);
+        if (chain.length > 1) (ac.heldCrossings ??= []).push(...chain.slice(0, -1));
+        ac.crossing = chain[chain.length - 1]!;
         if (ac.holdReason === 'crossing') setHold(state, ac, null);
       }
     }
@@ -828,6 +829,7 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
       moveTaxi(sim, ac);
       const r = ac.route!;
       if (ac.dist >= routeLength(r) - 0.01) {
+        if (ac.crossing || ac.heldCrossings) { releaseOpenCrossings(sim, ac); }
         releaseAll(state, ac.id);
         ac.route = null;
         ac.speed = 0;
@@ -1046,6 +1048,7 @@ function releaseEverything(sim: Simulation, ac: Aircraft): void {
   ac.route = null;
   ac.standId = null;
   ac.crossing = null;
+  delete ac.heldCrossings;
 }
 
 function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
@@ -1102,6 +1105,7 @@ function startTakeoff(sim: Simulation, ac: Aircraft): void {
   const rw = runwayFor(sim, ac.runwayId!)!;
   const startNode = ac.route!.nodes[ac.route!.nodes.length - 1]!;
   const idx = rw.nodes.indexOf(startNode);
+  if (ac.crossing || ac.heldCrossings) { releaseOpenCrossings(sim, ac); }
   releaseAll(state, ac.id);
   const nodes = rw.nodes.slice(idx);
   const edges: string[] = [];
@@ -1126,6 +1130,54 @@ function edgeBetween(sim: Simulation, a: string, b: string): string {
 
 // ---------------------------------------------------------------- 移動
 
+function releaseCrossingIfClear(sim: Simulation, ac: Aircraft, c: { index: number; runwayId: string; alsoRunwayIds?: string[] }, lengthM: number): boolean {
+  const r = ac.route!;
+  const k = c.index;
+  const after = r.cum[k + 1]! - r.cum[k]!;
+  if (ac.dist < r.cum[k]! + Math.max(holdShortDistanceAt(sim.ctx, r.nodes[k]!, r.nodes[k + 1]!, after), lengthM)) return false;
+  for (const id of [c.runwayId, ...(c.alsoRunwayIds ?? [])]) {
+    const rs = sim.state.runways[id]!;
+    if (rs.occupant?.aircraftId === ac.id) rs.occupant = null;
+  }
+  return true;
+}
+
+function releaseOpenCrossings(sim: Simulation, ac: Aircraft): void {
+  for (const c of [...(ac.heldCrossings ?? []), ...(ac.crossing ? [ac.crossing] : [])]) {
+    for (const id of [c.runwayId, ...(c.alsoRunwayIds ?? [])]) {
+      const rs = sim.state.runways[id]!;
+      if (rs.occupant?.aircraftId === ac.id && rs.occupant.purpose === 'crossing') rs.occupant = null;
+    }
+  }
+  ac.crossing = null;
+  delete ac.heldCrossings;
+}
+
+function crossingGrantAt(sim: Simulation, ac: Aircraft, i: number): { index: number; runwayId: string; alsoRunwayIds?: string[] } {
+  const r = ac.route!;
+  const rid = sim.ctx.network.nodes[r.nodes[i]!]!.runwayIds[0]!;
+  const group = sim.ctx.crossingNodeRunways[r.nodes[i]!];
+  const ids = group && group.includes(rid) ? group : [rid];
+  const also = ids.filter((id) => id !== rid);
+  return also.length > 0 ? { index: i, runwayId: rid, alsoRunwayIds: also } : { index: i, runwayId: rid };
+}
+
+function crossingChain(sim: Simulation, ac: Aircraft, first: number): { index: number; runwayId: string; alsoRunwayIds?: string[] }[] {
+  const r = ac.route!;
+  const len = typeOf(sim, ac).lengthM;
+  const chain = [crossingGrantAt(sim, ac, first)];
+  let k = first;
+  for (let j = k + 1; j < r.nodes.length - 1; j++) {
+    if (sim.ctx.network.nodes[r.nodes[j]!]!.runwayIds.length === 0) continue;
+    const release = r.cum[k]! + Math.max(holdShortDistanceAt(sim.ctx, r.nodes[k]!, r.nodes[k + 1]!, r.cum[k + 1]! - r.cum[k]!), len);
+    const hold = r.cum[j]! - holdShortDistanceAt(sim.ctx, r.nodes[j]!, r.nodes[j - 1]!, r.cum[j]! - r.cum[j - 1]!);
+    if (hold >= release) break;
+    chain.push(crossingGrantAt(sim, ac, j));
+    k = j;
+  }
+  return chain;
+}
+
 /** 次に横断許可が必要な滑走路ノード（経路の途中にある滑走路ノード） */
 function pendingCrossing(sim: Simulation, ac: Aircraft): { index: number; runwayId: string; distToHold: number } | null {
   if (!['taxiIn', 'taxiOut', 'vacating'].includes(ac.state) || !ac.route) return null;
@@ -1134,7 +1186,7 @@ function pendingCrossing(sim: Simulation, ac: Aircraft): { index: number; runway
   for (let i = Math.max(from, r.runwayEnd + 1, 1); i < r.nodes.length - 1; i++) {
     const n = sim.ctx.network.nodes[r.nodes[i]!]!;
     if (n.runwayIds.length === 0) continue;
-    if (ac.crossing?.index === i) return null;
+    if (ac.crossing?.index === i || ac.heldCrossings?.some((c) => c.index === i)) return null;
     const hold = r.cum[i]! - holdShortDistanceAt(sim.ctx, r.nodes[i]!, r.nodes[i - 1]!, r.cum[i]! - r.cum[i - 1]!);
     return { index: i, runwayId: n.runwayIds[0]!, distToHold: hold - ac.dist };
   }
@@ -1178,6 +1230,10 @@ function moveTaxi(sim: Simulation, ac: Aircraft): void {
   if (limit - ac.dist < 0.01 && ac.speed < 0.5) ac.speed = 0;
   releasePassed(sim.state, ac, type.lengthM);
   // 横断を終えたら滑走路を解放する
+  if (ac.heldCrossings) {
+    ac.heldCrossings = ac.heldCrossings.filter((c) => !releaseCrossingIfClear(sim, ac, c, type.lengthM));
+    if (ac.heldCrossings.length === 0) delete ac.heldCrossings;
+  }
   if (ac.crossing) {
     const k = ac.crossing.index;
     const after = r.cum[k + 1]! - r.cum[k]!;

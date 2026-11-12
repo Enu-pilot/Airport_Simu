@@ -6,7 +6,57 @@ import { checkStand } from '../aircraft/compat';
 import { edgeIndexAt } from './routes';
 import { MIN_GROUND_SEPARATION_M, TICK_SEC } from './rules';
 import type { Simulation } from './simulation';
-import { GROUND_MOVING_STATES, TERMINAL_STATES, type AircraftState } from './types';
+import { GROUND_MOVING_STATES, TERMINAL_STATES, type Aircraft, type AircraftState, type CrossingGrant, type SimState } from './types';
+
+/** 横断中の機体の状態（経路上を地上走行している） */
+const TAXIING_STATES: readonly AircraftState[] = ['vacating', 'taxiIn', 'docking', 'taxiOut', 'holdShort', 'lineUp'];
+
+/** 機体が開いている横断の許可（crossing と heldCrossings）のうち、滑走路 rid を含むものを持つか */
+function crossingHeld(ac: Aircraft, rid: string): boolean {
+  if (!ac.route || !TAXIING_STATES.includes(ac.state)) return false;
+  return openGrants(ac).some((c) => c.runwayId === rid || !!c.alsoRunwayIds?.includes(rid));
+}
+
+export function openGrants(ac: Aircraft): CrossingGrant[] {
+  return [...(ac.heldCrossings ?? []), ...(ac.crossing ? [ac.crossing] : [])];
+}
+
+/**
+ * 保存された運航状態の横断の占有の修復（復元時に checkInvariants の前に呼ぶ）。
+ * 厳しくした R2 が拒否する占有（許可を持たない機体・地上走行でない機体の占有）を解放し、
+ * 地上走行でない機体の許可を消す。整合した状態は何も変えない。戻り値は修復した項目の説明。
+ */
+export function repairCrossingState(state: SimState): string[] {
+  const fixed: string[] = [];
+  for (const [rid, rs] of Object.entries(state.runways)) {
+    if (rs.occupant?.purpose !== 'crossing') continue;
+    const ac = state.aircraft[rs.occupant.aircraftId];
+    if (!ac || !crossingHeld(ac, rid)) {
+      fixed.push(`滑走路 ${rid} の横断の占有（${rs.occupant.aircraftId}）を解放しました`);
+      rs.occupant = null;
+    }
+  }
+  for (const ac of Object.values(state.aircraft)) {
+    const taxiing = !!ac.route && TAXIING_STATES.includes(ac.state);
+    if (!taxiing && (ac.crossing || ac.heldCrossings)) {
+      fixed.push(`機体 ${ac.id} の横断の許可を取り消しました`);
+      ac.crossing = null;
+      delete ac.heldCrossings;
+      continue;
+    }
+    // R2b: 許可に書かれた滑走路の占有が自機でなければ、その許可を取り消す
+    const owns = (c: CrossingGrant): boolean => [c.runwayId, ...(c.alsoRunwayIds ?? [])].every((id) => state.runways[id]?.occupant?.aircraftId === ac.id);
+    if (ac.heldCrossings) {
+      ac.heldCrossings = ac.heldCrossings.filter(owns);
+      if (ac.heldCrossings.length === 0) delete ac.heldCrossings;
+    }
+    if (ac.crossing && !owns(ac.crossing)) {
+      fixed.push(`機体 ${ac.id} の横断の許可を取り消しました`);
+      ac.crossing = null;
+    }
+  }
+  return fixed;
+}
 
 /**
  * 状態と占有情報の整合性チェック。テストでは毎ティック実行し、違反があれば失敗させる。
@@ -49,7 +99,7 @@ export function checkInvariants(sim: Simulation): string[] {
         ac &&
         ((rs.occupant.purpose === 'landing' && (ac.state === 'landing' || ac.state === 'vacating')) ||
           (rs.occupant.purpose === 'takeoff' && (ac.state === 'lineUp' || ac.state === 'takeoff')) ||
-          (rs.occupant.purpose === 'crossing' && (ac.crossing?.runwayId === rid || !!ac.crossing?.alsoRunwayIds?.includes(rid))));
+          (rs.occupant.purpose === 'crossing' && crossingHeld(ac, rid)));
       if (!ok) out.push(`R2 滑走路 ${rid} の占有 ${rs.occupant.aircraftId}(${rs.occupant.purpose}) と機体状態が不一致`);
     }
     if (rs.booking) {
@@ -63,6 +113,15 @@ export function checkInvariants(sim: Simulation): string[] {
     const ob = state.runways[c.b]?.occupant;
     if (oa && ob && oa.purpose !== 'crossing' && ob.purpose !== 'crossing') {
       out.push(`R6 交差する滑走路 ${c.a} と ${c.b} が同時に使用中（${oa.aircraftId}, ${ob.aircraftId}）`);
+    }
+  }
+  // R2b: 開いている横断の許可に書かれた滑走路は、すべてその機体が占有している
+  for (const ac of aircraft) {
+    for (const c of openGrants(ac)) {
+      for (const id of [c.runwayId, ...(c.alsoRunwayIds ?? [])]) {
+        const o = state.runways[id]?.occupant;
+        if (o?.aircraftId !== ac.id || o.purpose !== 'crossing') out.push(`R2b 機体 ${ac.id} の横断の許可の滑走路 ${id} を自機が占有していない`);
+      }
     }
   }
   for (const ac of aircraft) {

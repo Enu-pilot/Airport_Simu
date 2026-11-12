@@ -127,9 +127,13 @@ export interface Aircraft {
   taxiStartedAt: number | null;
   /** 横断許可を得ている滑走路ノード（経路上の番号） */
   /** alsoRunwayIds: 交差点ノードで横断するとき、同時に予約している交差する滑走路（交差点のときだけ書く） */
-  crossing: { index: number; runwayId: string; alsoRunwayIds?: string[] } | null;
+  crossing: CrossingGrant | null;
+  /** 先に許可を得て、まだ尾部が抜けていない横断（crossing より前の滑走路ノード）。空なら書かない */
+  heldCrossings?: CrossingGrant[];
   history: HistoryEntry[];
 }
+
+export interface CrossingGrant { index: number; runwayId: string; alsoRunwayIds?: string[] }
 
 export type FlightStatus = 'scheduled' | 'active' | 'completed' | 'diverted' | 'cancelled';
 
