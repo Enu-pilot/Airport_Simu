@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addTurnaround, createSimulation, stepSimulation, type Simulation } from '../../../src/core/sim/simulation';
-import { checkInvariants } from '../../../src/core/sim/invariants';
+import { checkInvariants, repairCrossingState } from '../../../src/core/sim/invariants';
 import { buildProject, effectiveModels, restoreSimulation, serializeProject, validateProject } from '../../../src/core/io/project';
 import { createSandboxCompany } from '../../../src/core/economy/company';
 import type { Aircraft } from '../../../src/core/sim/types';
@@ -172,5 +172,68 @@ describe('保存と復元（C1）', () => {
     expect(repaired).toHaveLength(1);
     expect(violations).toEqual([]);
     expect(sim.state.runways[rid]!.occupant).toBeNull();
+  });
+});
+
+describe('同じ滑走路を 2 回横切る経路（R1）', () => {
+  it('先の許可の解放位置を過ぎても、後の開いた許可に同じ滑走路が書かれていれば解放しない', { timeout: 60_000 }, () => {
+    const sim = createSimulation(legacyTwinAirport(), { seed: 'a', settings: { autoSchedule: false } });
+    const acs = schedule(sim);
+    let found: { ac: Aircraft; i: number; rid: string } | null = null;
+    for (let t = 0; t < 6 * 3600 && !found; t++) {
+      stepSimulation(sim);
+      for (const ac of acs) {
+        if (!ac.route || !['taxiIn', 'taxiOut'].includes(ac.state) || ac.crossing || ac.heldCrossings) continue;
+        const r = ac.route;
+        const i = r.nodes.findIndex((n, k) => k >= 1 && k < r.nodes.length - 1 && sim.ctx.network.nodes[n]!.runwayIds.length > 0 && r.cum[k]! > ac.dist + 50);
+        const rid = i >= 0 ? sim.ctx.network.nodes[r.nodes[i]!]!.runwayIds[0]! : '';
+        if (i >= 0 && !sim.state.runways[rid]!.occupant) {
+          found = { ac, i, rid };
+          break;
+        }
+      }
+    }
+    expect(found).not.toBeNull();
+    const { ac, i, rid } = found!;
+    const r = ac.route!;
+    const last = r.nodes.length - 1;
+    // 許可 i はすでに解放位置を過ぎ、後の許可（同じ滑走路）はまだ開いている状態をつくる
+    sim.state.runways[rid]!.occupant = { aircraftId: ac.id, purpose: 'crossing', since: sim.state.now };
+    ac.heldCrossings = [{ index: i, runwayId: rid }];
+    ac.crossing = { index: last, runwayId: rid };
+    ac.dist = r.cum[i]! + 400;
+    expect(ac.dist).toBeLessThan(r.cum[last]!);
+    stepSimulation(sim);
+    expect(sim.state.runways[rid]!.occupant).toMatchObject({ aircraftId: ac.id, purpose: 'crossing' });
+    expect(ac.heldCrossings).toBeUndefined();
+    expect(ac.crossing).toEqual({ index: last, runwayId: rid });
+  });
+});
+
+describe('repairCrossingState の順序（R2）', () => {
+  it('一部しか自機が占有していない許可を取り消すと、自機が占有する滑走路も解放する。保留中の許可の取り消しも報告する', { timeout: 60_000 }, () => {
+    const sim = createSimulation(legacyTwinAirport(), { seed: 'a', settings: { autoSchedule: false } });
+    const acs = schedule(sim);
+    let ac: Aircraft | undefined;
+    for (let t = 0; t < 6 * 3600 && !ac; t++) {
+      stepSimulation(sim);
+      ac = acs.find((a) => a.route && ['taxiIn', 'taxiOut'].includes(a.state));
+    }
+    expect(ac).toBeDefined();
+    const [a, b] = Object.keys(sim.state.runways);
+    const rs = sim.state.runways;
+    rs[a!]!.occupant = { aircraftId: ac!.id, purpose: 'crossing', since: 1 };
+    rs[b!]!.occupant = null;
+    ac!.crossing = { index: 1, runwayId: a!, alsoRunwayIds: [b!] };
+    const fixed = repairCrossingState(sim.state);
+    expect(ac!.crossing).toBeNull();
+    expect(rs[a!]!.occupant).toBeNull();
+    expect(fixed.length).toBeGreaterThan(0);
+    expect(checkInvariants(sim).filter((v) => v.startsWith('R'))).toEqual([]);
+    // 保留中の許可（自機が占有していない）も報告して取り消す
+    ac!.heldCrossings = [{ index: 1, runwayId: a! }];
+    const fixed2 = repairCrossingState(sim.state);
+    expect(ac!.heldCrossings).toBeUndefined();
+    expect(fixed2.join('\n')).toContain('保留中');
   });
 });

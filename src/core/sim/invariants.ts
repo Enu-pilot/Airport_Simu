@@ -28,14 +28,8 @@ export function openGrants(ac: Aircraft): CrossingGrant[] {
  */
 export function repairCrossingState(state: SimState): string[] {
   const fixed: string[] = [];
-  for (const [rid, rs] of Object.entries(state.runways)) {
-    if (rs.occupant?.purpose !== 'crossing') continue;
-    const ac = state.aircraft[rs.occupant.aircraftId];
-    if (!ac || !crossingHeld(ac, rid)) {
-      fixed.push(`滑走路 ${rid} の横断の占有（${rs.occupant.aircraftId}）を解放しました`);
-      rs.occupant = null;
-    }
-  }
+  // 1. 許可の修復を先に行う（一部しか自機が占有していない許可を取り消すと、残りの占有が持ち主のない状態になるため、
+  //    占有の解放はこのあとに行う）
   for (const ac of Object.values(state.aircraft)) {
     const taxiing = !!ac.route && TAXIING_STATES.includes(ac.state);
     if (!taxiing && (ac.crossing || ac.heldCrossings)) {
@@ -47,12 +41,23 @@ export function repairCrossingState(state: SimState): string[] {
     // R2b: 許可に書かれた滑走路の占有が自機でなければ、その許可を取り消す
     const owns = (c: CrossingGrant): boolean => [c.runwayId, ...(c.alsoRunwayIds ?? [])].every((id) => state.runways[id]?.occupant?.aircraftId === ac.id);
     if (ac.heldCrossings) {
-      ac.heldCrossings = ac.heldCrossings.filter(owns);
-      if (ac.heldCrossings.length === 0) delete ac.heldCrossings;
+      const kept = ac.heldCrossings.filter(owns);
+      if (kept.length < ac.heldCrossings.length) fixed.push(`機体 ${ac.id} の保留中の横断の許可を取り消しました`);
+      if (kept.length === 0) delete ac.heldCrossings;
+      else ac.heldCrossings = kept;
     }
     if (ac.crossing && !owns(ac.crossing)) {
       fixed.push(`機体 ${ac.id} の横断の許可を取り消しました`);
       ac.crossing = null;
+    }
+  }
+  // 2. 許可のない横断の占有（R2）を解放する
+  for (const [rid, rs] of Object.entries(state.runways)) {
+    if (rs.occupant?.purpose !== 'crossing') continue;
+    const ac = state.aircraft[rs.occupant.aircraftId];
+    if (!ac || !crossingHeld(ac, rid)) {
+      fixed.push(`滑走路 ${rid} の横断の占有（${rs.occupant.aircraftId}）を解放しました`);
+      rs.occupant = null;
     }
   }
   return fixed;
