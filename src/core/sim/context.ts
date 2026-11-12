@@ -6,6 +6,7 @@ import type { AirportLayout, SizeClass } from '../model/types';
 import { AIRCRAFT_TYPES, resolveType, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
 import { canOperate } from '../aircraft/compat';
 import { distance } from '../geometry/vec';
+import { mapToWorld } from '../geometry/frames';
 import { runwayMaxSize } from '../layout/runway';
 import type { RunwayConfig, UnitKind } from './types';
 import { rotatedDims } from '../layout/footprint';
@@ -101,7 +102,7 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
       .find((t) => terminal.byTerminal[t]!.some((id) => terminal.areas[id]!.kind === 'entrance')) ?? null;
   const center = (f: (typeof layout.facilities)[string]) => {
     const d = rotatedDims(f.w, f.h, f.rotation);
-    return { x: f.origin.x + d.w / 2 - 0.5, y: f.origin.y + d.h / 2 - 0.5 };
+    return mapToWorld({ x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 });
   };
   const operational = sortedValues(layout.facilities).filter((f) => f.buildState === 'operational');
   const n = (f: (typeof layout.facilities)[string], k: string) => Math.max(0, Number(f.props[k] ?? 0));

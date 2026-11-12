@@ -1,5 +1,6 @@
 import { TILE_M } from '../model/catalog';
 import { distance } from '../geometry/vec';
+import { dirToBearing, turnAngleDeg } from '../geometry/angle';
 import type { SimContext } from './context';
 import { HOLD_SHORT_M, HOLD_SHORT_MAX_RATIO } from './rules';
 import type { Aircraft, Route, SimState } from './types';
@@ -39,8 +40,7 @@ export function pointAt(ctx: SimContext, r: Route, dist: number): { x: number; y
 }
 
 export function headingOf(dx: number, dy: number): number {
-  if (dx === 0 && dy === 0) return 0;
-  return ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+  return dirToBearing(dx, dy);
 }
 
 /** 滑走路手前の停止位置: 滑走路ノードから手前へ戻る距離 */
@@ -56,8 +56,7 @@ export function turnAngleAt(ctx: SimContext, r: Route, i: number): number {
   const s = ctx.network.nodes[r.nodes[i + 1]!]!.pos;
   const h1 = headingOf(q.x - p.x, q.y - p.y);
   const h2 = headingOf(s.x - q.x, s.y - q.y);
-  const d = Math.abs(h2 - h1) % 360;
-  return d > 180 ? 360 - d : d;
+  return turnAngleDeg(h1, h2);
 }
 
 // ---------------------------------------------------------------- 予約

@@ -2,6 +2,7 @@ import { FACILITY_SPECS } from '../model/catalog';
 import { compareIds } from '../model/ids';
 import type { AirportLayout } from '../model/types';
 import { distPointSegment, distance, pointInPolygon, type Vec2 } from '../geometry/vec';
+import { mapToWorld } from '../geometry/frames';
 import { facilityDims, standDims } from './footprint';
 import { runwayPolygon } from './runway';
 
@@ -10,8 +11,8 @@ import { runwayPolygon } from './runway';
  * ノード > ゲート > スポット > 建物 > 誘導路 > 道路 > 滑走路 > エリア（エプロン等）
  */
 export function pickAt(layout: AirportLayout, world: Vec2): string | null {
-  // ノード・エッジはタイル中心が基準なので、タイル番号空間に直す
-  const p = { x: world.x - 0.5, y: world.y - 0.5 };
+  // ノード・エッジはタイル中心が基準なので、World フレームに直す
+  const p = mapToWorld(world);
   const inRect = (o: Vec2, w: number, h: number) => world.x >= o.x && world.x < o.x + w && world.y >= o.y && world.y < o.y + h;
   const first = (ids: string[]) => (ids.length > 0 ? ids.sort(compareIds)[ids.length - 1]! : null);
 

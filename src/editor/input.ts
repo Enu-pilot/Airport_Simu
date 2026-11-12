@@ -1,4 +1,5 @@
 import { panBy, screenToTile, screenToWorld, zoomAt } from '../core/geometry/camera';
+import { worldToMap } from '../core/geometry/frames';
 import { sameTile, type Tile, type Vec2 } from '../core/geometry/vec';
 import { FACILITY_SPECS } from '../core/model/catalog';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
@@ -287,7 +288,7 @@ export function entityCenter(layout: AirportLayout, id: string): Vec2 | null {
   const type = entityTypeOf(id);
   if (type === 'taxiNode' || type === 'roadNode') {
     const n = layout.taxiNodes[id] ?? layout.roadNodes[id];
-    return n ? { x: n.pos.x + 0.5, y: n.pos.y + 0.5 } : null;
+    return n ? worldToMap(n.pos) : null;
   }
   const tiles = entityTiles(layout, id);
   if (tiles.length === 0) return null;

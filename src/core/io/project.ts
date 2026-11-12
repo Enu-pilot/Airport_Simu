@@ -9,6 +9,7 @@ import { checkInvariants } from '../sim/invariants';
 import type { Simulation } from '../sim/simulation';
 import type { SimState } from '../sim/types';
 import { SAVE_FORMAT, validateLayoutData } from './serialize';
+import { migrateLayout } from './migrate';
 
 /**
  * プロジェクトの保存形式（docs/21_save_format.md）。
@@ -241,10 +242,7 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     const ver = data.schemaVersion;
     if (typeof ver !== 'number' || ver < 1 || ver > SCHEMA_VERSION) errors.push(`未対応のレイアウトの版です: ${String(ver)}`);
     const l = data.layout;
-    if (isObj(l) && ver === 1) {
-      l.terminalAreas = {};
-      l.schemaVersion = 2;
-    }
+    if (ver === 1) migrateLayout(l, ver);
     if (!errors.length) errors.push(...checkLayout(l));
     if (errors.length) return fail();
     warnings.push('旧形式のレイアウトファイルです。会社（資金・契約）は現在のものを使い、機種データは現在のカタログで固定します');
@@ -274,10 +272,7 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
   // レイアウト
   const v = data.versions as Record<string, unknown>;
   const l = data.layout;
-  if (isObj(l) && l.schemaVersion === 1) {
-    l.terminalAreas = {};
-    l.schemaVersion = 2;
-  }
+  if (isObj(l) && l.schemaVersion === 1) migrateLayout(l, 1);
   errors.push(...checkLayout(l));
   const layout = l as unknown as AirportLayout;
 

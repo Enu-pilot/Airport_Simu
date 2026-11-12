@@ -75,6 +75,7 @@
 - 出力: 最終状態の **正規化ハッシュ**（ID順にソートした JSON の SHA-256）と主要 KPI（旅客数・OTP・純利益）。
 - 期待値ファイル `tests/regression/golden/*.json` と比較。
 - 仕様変更で結果が変わる場合は `npm run test:update-golden` で更新し、**差分（KPIの変化）をPRに記載** する運用とする。
+- **実装後の運用は §17**（`tests/golden/` に基準値・入力フィクスチャ、`GOLDEN_UPDATE=1` で再採取、運航ゴールデンは `SIM_MODEL_VERSION` を上げずに変える再採取を拒否。docs/22 §5）。上の `tests/regression/golden` と `npm run test:update-golden` は Phase 0 の案で、実在しない。
 - バランス値の変更はゴールデンを変えるため、ゴールデンは「固定バランス値（テスト用 `balance.test.json`）」で実行し、ロジックの回帰とバランス調整を分離する。
 
 ## 7. E2E テスト（Playwright）
@@ -208,3 +209,40 @@ E2E: `tests/e2e/access.spec.ts`（アクセスの画面とタクシー乗り場�
 | 過密日 12 時間（90 往復/日、旅客 8,476 人、手荷物 8,068 個） | 約 15 秒（ゲーム時間 ÷ 実時間 ≈ 2,850 倍。運航画面の最大 ×600 を上回る） |
 | 保存・復元 10 回 | 保存データ最大 660 KB、検証 + 復元 最大 16〜20 ms、続きの状態は中断なしと一致 |
 | 3D（SwiftShader、機体 20 機） | 約 25 fps、描画命令 59、三角形 約 400（docs/20） |
+
+## 17. Phase 11 で追加したテスト（幾何基盤）
+
+設計は [22](22_geometry_architecture.md)。完了条件: 既存テストの期待値の変更なし（追加のみ）、ゴールデン完全一致、型・lint・単体・統合・E2E が緑。
+
+| ファイル | 件数 | 内容 |
+|---|---|---|
+| `tests/unit/geometry/frames.test.ts` | 8 | 座標フレームの往復、`mapToTile(worldToMap(p)) === worldToTile(p)`（.5 境界）、`worldToScene` が `(x + 0.5) × 25` と `===` |
+| `tests/unit/geometry/angle.test.ts` | 12 | 旧 `headingVector` / `headingOf` / `runwayDesignators` の式をテスト内に複製したオラクルとの `===` 比較（8 方位、乱数 10,000 方向）、磁方位の符号（10°E・7°W）、`GRID8_STEP` の凍結・-0 なし |
+| `tests/unit/geometry/segment.test.ts` / `polygon.test.ts` / `stroke.test.ts` / `raster.test.ts` | 13 / 10 / 11 / 4 | 端点・共線・平行・退化の分類、SAT と総当たりの一致、`rectAlong` が旧 `runwayRect`（オラクル）と頂点 `===`、ラスタの移動前後の一致 |
+| `tests/unit/geometry/curve.test.ts` | 27 | 解析解（円弧長 = rθ、曲率 = 1/r、直線に退化した Bezier の長さ = 弦長）、`split` / `reverse` / `flatten`（弦高誤差）/ `closestPoint` / `pointAtLength` の性質（シード付き乱数、1,000 ケース）、退化 |
+| `tests/unit/geometry/intersect.test.ts` | 18 | 線・円弧の解析解、接線・端点・重なり、Bezier の細分 + Newton、決定性（2 回実行で同順同値） |
+| `tests/unit/geometry/audit.test.ts` | 26 | 独立監査の指摘の回帰: 巨大な半径、NaN / ±Infinity の入力、予算超過（`truncated`）、`flatten` の上限など |
+| `tests/unit/geometry/index.test.ts` | 1 | 公開 API の export |
+| `tests/unit/geometry/frames.lint.test.ts` | 3 | 描画・UI・編集コード・`camera.ts` の座標の `±0.5` の生リテラル禁止（検出器自体のテストを含む）、2D・3D が `worldPolyToMap` / `worldPolyToScene` を使うこと |
+| `tests/unit/geometry/surfaces.frames.test.ts` | 2 | 面の頂点が 2D・3D の変換で一貫（`worldPolyTo…` が頂点ごとの変換と `===`、Scene = Map × 25） |
+| `tests/unit/surfaces.test.ts` | 5 | 描画用の面（滑走路・誘導路・道路の帯、幅の表） |
+| `tests/unit/runway.test.ts`（追加分） | 8 のうち 3 | `runwayAxis`（`trueHeadingDeg`・`lengthT`・`lengthM`）、`headingVector` が旧式と一致 |
+| `tests/unit/migrate.test.ts` | 4 | 版移行の一元化（v1 レイアウト・v1 プロジェクト・運航状態入りの読込が従来と同じ） |
+| `tests/unit/golden.test.ts` | 6 | 幾何 3 レイアウト・滑走路表・`project`・24 時間運航の基準値（入力はフィクスチャ） |
+| `tests/unit/golden.midrun.test.ts` | 1 | +3 時間で保存 → 検証 → 復元 → +2 時間が元と一致、基準値と一致 |
+| `tests/unit/golden.ops.test.ts` | 5 | ストレス運航（2 シード、**横断 > 0**）、経路（nodes・cum・旋回角・停止位置）、運航状態入りの保存、版非依存ハッシュ（正規化が `schemaVersion` だけを無視すること） |
+| `tests/unit/golden.fixtures.test.ts` | 5 | 凍結した 4 つの入力レイアウトが読めて妥当（エラー 0、保存・読込で不変）、ストレスレイアウトの構成（2 滑走路・斜め誘導路・10 以上のスポット） |
+
+ゴールデン基準値の一覧・再採取の手順・`SIM_MODEL_VERSION` による保護・`SCHEMA_VERSION` 更新時の扱いは [22](22_geometry_architecture.md) §5。
+
+### 実行結果（Phase 11 完了時、このリポジトリのコンテナ環境）
+
+| 検証 | 結果 |
+|---|---|
+| 型チェック `tsc --noEmit` | エラー 0 |
+| Lint `eslint . --max-warnings=0` | エラー・警告 0 |
+| 単体・統合 `vitest run` | 38 ファイル / 395 件すべて合格（単体 382 + 統合 13） |
+| E2E `playwright test --trace off` | 28 件すべて合格 |
+| ゴールデン | S0 で採取した 7 ファイル（`geometry-*` ×3、`runway-table`、`project`、`sim`、`sim-midrun`）は、レビュー対応の前後で 1 バイトも変更なし。追加: `stress-sim` / `routes` / `project-sim` / `normalized-hashes` と入力フィクスチャ 4 件 |
+
+ゴールデン（`tests/unit/golden*.test.ts`、17 件）の実行時間は合計で約 13 秒（ストレス運航 約 10 秒を含む）。

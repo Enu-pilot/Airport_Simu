@@ -1,3 +1,4 @@
+import { worldToMap } from './frames';
 import type { Tile, Vec2 } from './vec';
 
 /**
@@ -31,7 +32,7 @@ export function screenToTile(cam: Camera, s: Vec2): Tile {
 
 /** タイル中心の世界座標 */
 export function tileCenter(t: Tile): Vec2 {
-  return { x: t.x + 0.5, y: t.y + 0.5 };
+  return worldToMap(t);
 }
 
 /** 画面上の点 anchor を固定したままズームする */

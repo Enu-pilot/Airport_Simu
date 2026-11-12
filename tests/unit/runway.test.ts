@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  headingVector,
+  runwayAxis,
   runwayDesignators,
   runwayEnd,
   runwayLengthM,
@@ -58,5 +60,38 @@ describe('滑走路の属性', () => {
     expect(r2.start).toEqual({ x: 30, y: 10 });
     expect(updateEntity(layout, 'rwy_1', { length: 0 })).toEqual({ ok: false, reason: 'INVALID_VALUE' });
     expect(updateEntity(layout, 'rwy_1', { surfaceWidthM: 50 })).toEqual({ ok: false, reason: 'INVALID_VALUE' });
+  });
+});
+
+describe('runwayAxis', () => {
+  const headings = [0, 45, 90, 135, 180, 225, 270, 315] as const;
+  it('8 方位で端点・単位方向・方位・実長が従来関数と一致する', () => {
+    for (const h of headings) {
+      const r = rwy({ start: { x: 3, y: -4 }, heading: h, length: 37 });
+      const ax = runwayAxis(r);
+      expect(ax.start).toEqual({ x: 3, y: -4 });
+      expect(ax.end).toEqual(runwayEnd(r));
+      expect(ax.trueHeadingDeg).toBe(h);
+      expect(ax.lengthM).toBe(runwayLengthM(r));
+      // lengthT は丸めなしのタイル長（端点間距離）。斜めは √2 倍
+      expect(ax.lengthT).toBeCloseTo(Math.hypot(ax.end.x - ax.start.x, ax.end.y - ax.start.y), 12);
+      expect(ax.lengthT).toBe(h % 90 === 0 ? 37 : 37 * Math.SQRT2);
+      expect(Math.round(ax.lengthT * 25)).toBe(ax.lengthM);
+      expect(Math.hypot(ax.dir.x, ax.dir.y)).toBeCloseTo(1, 15);
+    }
+  });
+  it('90° は厳密に東向き、斜めは ±√½', () => {
+    expect(runwayAxis(rwy({ heading: 90 })).dir).toEqual({ x: 1, y: 0 });
+    const d = runwayAxis(rwy({ heading: 135 })).dir;
+    expect(d.x).toBeCloseTo(Math.SQRT1_2, 15);
+    expect(d.y).toBeCloseTo(Math.SQRT1_2, 15);
+  });
+  it('headingVector は旧式（sin/cos の丸め）と全方位で一致する', () => {
+    for (const h of headings) {
+      const rad = (h * Math.PI) / 180;
+      const v = headingVector(h);
+      expect(v.x).toBe(Math.round(Math.sin(rad)) + 0);
+      expect(v.y).toBe(Math.round(-Math.cos(rad)) + 0);
+    }
   });
 });

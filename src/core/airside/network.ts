@@ -1,6 +1,7 @@
 import { TILE_M } from '../model/catalog';
 import { sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
 import { distance, type Tile, type Vec2 } from '../geometry/vec';
+import { mapToWorld } from '../geometry/frames';
 import { rectCenter, standDims, standEntry } from '../layout/footprint';
 import { edgesOfNode, findNodeAt } from '../layout/network';
 import { compareIds, sortedValues } from '../model/ids';
@@ -178,7 +179,7 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
     const pid = `${s.id}:P`;
     nodes[pid] = {
       id: pid,
-      pos: { x: c.x - 0.5, y: c.y - 0.5 },
+      pos: mapToWorld(c),
       kind: 'stand',
       runwayIds: [],
       standIds: [s.id],

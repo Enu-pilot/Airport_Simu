@@ -46,7 +46,7 @@ type Id<K extends string> = `${K}_${number}`;   // 例: "ac_42", "std_7"
 interface GameState {
   schemaVersion: number;          // セーブ互換用
   meta: { name: string; createdAt: string; mode: 'sandbox' | 'free' };
-  time: { now: SimTime; speed: 0 | 1 | 2 | 4 | 8 };
+  time: { now: SimTime; speed: 0 | 1 | 15 | 60 | 240 | 600 };
   rng: RngState;                  // ストリーム別の乱数状態（§9）
   idCounters: Record<string, number>;
 
@@ -102,10 +102,21 @@ interface DerivedState {
 
 ### 4.1 座標系
 
-- タイル `(i, j)` は世界座標 `[i, i+1) × [j, j+1)`、中心は `(i+0.5, j+0.5)`。1タイル = 25m。
-- ネットワークのノード・滑走路端点は **タイル中心** に置き、整数のタイル番号で保持する。
-- 施設・スポットは回転後の外接矩形の左上タイル `origin` で位置を持つ。
-- 画面 ↔ 世界座標の変換は `src/core/geometry/camera.ts`（`worldToScreen` / `screenToWorld` / `screenToTile` / `zoomAt`）。
+座標系は 4 つに名前を付けて区別する（詳細・変換関数は [22](22_geometry_architecture.md) §1、実装は `src/core/geometry/frames.ts`）。
+
+| フレーム | 単位 | 原点・向き | 使う場所 |
+|---|---|---|---|
+| Tile | タイル番号（整数） | タイル (i, j) | 地形・施設の `origin`・占有ラスタ |
+| World | タイル（1 = 25 m）、実数 | **整数 = タイル中心**。+x = 東、+y = 南 | core 全般: ノード・滑走路端点・機体の x/y・多角形 |
+| Map | タイル、実数 | タイル (i, j) は `[i, i+1) × [j, j+1)`。**Map = World + 0.5** | 2D 描画、`camera.ts`（コード上は「世界座標」） |
+| Scene | m | X = Map.x × 25、Z = Map.y × 25、Y = 上 | 3D（three.js） |
+
+- **ノード・滑走路端点は整数のタイル番号（= World フレームの整数点、タイル中心を指す）として保存**し、描画のときに +0.5 してタイルの中心に置く（Map フレーム）。
+  保存データに 0.5 は現れない。`±0.5` の変換は `frames.ts`（`worldToMap` / `mapToWorld` など）だけで行う。
+- 位置にはメートルを使わない（長さ・幅・半径だけ m。位置 × 25 を経由すると距離が 1 ulp ずれ、保存済みの経路 `cum` が一致しなくなる）。
+- 角度は度・真方位（0 = 北 = −y、時計回り、[0, 360)）。磁方位 = 真方位 − 東偏差（偏差の保存は Phase 12 の予定で未実装）。
+- 1タイル = 25m。施設・スポットは回転後の外接矩形の左上タイル `origin` で位置を持つ。
+- 画面 ↔ Map の変換は `src/core/geometry/camera.ts`（`worldToScreen` / `screenToWorld` / `screenToTile` / `zoomAt`。「世界座標」= Map フレーム）。
 
 ### 4.2 AirportLayout
 
@@ -421,7 +432,7 @@ type LedgerCategory =
 type Command =
   | { type: 'build'; kind: StructureKind; footprint: TileRect | TileKey[]; params: unknown }
   | { type: 'demolish'; target: Id<'st'> | TileKey[] }
-  | { type: 'setSpeed'; speed: 0 | 1 | 2 | 4 | 8 }
+  | { type: 'setSpeed'; speed: 0 | 1 | 15 | 60 | 240 | 600 }
   | { type: 'acceptContract'; contractId: Id<'ct'> }
   | { type: 'rejectContract'; contractId: Id<'ct'> }
   | { type: 'setFees'; fees: Partial<FeeSettings> }
@@ -437,6 +448,9 @@ interface CommandEnvelope { atTick: SimTime; seq: number; command: Command }
 
 ## 12. セーブ形式
 
+> 以下は Phase 0 の案（`skyport-save` / IndexedDB）で、**実装とは異なる**。実際の保存形式（`skyport-project` / `skyport-layout`、4 つの版、検証と移行、保存先）は
+> [21_save_format.md](21_save_format.md) を参照。
+
 ```json
 {
   "format": "skyport-save",
@@ -446,6 +460,5 @@ interface CommandEnvelope { atTick: SimTime; seq: number; command: Command }
 }
 ```
 
-- 保存先: IndexedDB（スロット制）+ JSONファイルのダウンロード/アップロード。
-- ロード時: `schemaVersion` を確認 → マイグレーション関数を順に適用 → 派生データ再構築 → 不変条件チェック。
-- 大きな配列（地形）は Base64 で圧縮格納を検討（未決事項）。
+- ロード時: `schemaVersion` を確認 → マイグレーション関数を順に適用 → 派生データ再構築 → 不変条件チェック、という流れは実装でも同じ（レイアウトの移行は `src/core/io/migrate.ts`）。
+- 大きな配列（地形）の圧縮格納は未決事項のまま（現状は JSON の数値配列）。

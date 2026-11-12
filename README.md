@@ -86,6 +86,7 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 19 | [docs/19_disruptions.md](docs/19_disruptions.md) | 天候・障害・運航トラブルと対応 |
 | 20 | [docs/20_3d_view.md](docs/20_3d_view.md) | 3D 表示、3D アセットの対応一覧と利用条件、性能計測 |
 | 21 | [docs/21_save_format.md](docs/21_save_format.md) | 保存形式・バージョン管理・移行・保存先とバックアップ |
+| 22 | [docs/22_geometry_architecture.md](docs/22_geometry_architecture.md) | 幾何基盤（座標フレーム・角度規約・許容誤差・ゴールデン基準値）とデータモデルの計画（Phase 11） |
 
 ## 技術構成
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { worldToMap } from '../core/geometry/frames';
 import type { Severity } from '../core/validation/validate';
 import { actions, useAnalysis, useLayout } from '../editor/store';
 import { focusEntity } from '../editor/input';
@@ -31,7 +32,7 @@ export function IssuesPanel() {
             className={`issue ${iss.severity}`}
             onClick={() => {
               const target = iss.targets[0];
-              if (iss.at) actions.focus({ x: iss.at.x + 0.5, y: iss.at.y + 0.5 }, target);
+              if (iss.at) actions.focus(worldToMap(iss.at), target);
               else if (target) focusEntity(target);
             }}
           >
