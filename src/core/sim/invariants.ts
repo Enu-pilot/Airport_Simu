@@ -49,12 +49,20 @@ export function checkInvariants(sim: Simulation): string[] {
         ac &&
         ((rs.occupant.purpose === 'landing' && (ac.state === 'landing' || ac.state === 'vacating')) ||
           (rs.occupant.purpose === 'takeoff' && (ac.state === 'lineUp' || ac.state === 'takeoff')) ||
-          (rs.occupant.purpose === 'crossing' && ac.crossing?.runwayId === rid));
+          (rs.occupant.purpose === 'crossing' && (ac.crossing?.runwayId === rid || !!ac.crossing?.alsoRunwayIds?.includes(rid))));
       if (!ok) out.push(`R2 滑走路 ${rid} の占有 ${rs.occupant.aircraftId}(${rs.occupant.purpose}) と機体状態が不一致`);
     }
     if (rs.booking) {
       const ac = state.aircraft[rs.booking.aircraftId];
       if (!ac || ac.state !== 'approach') out.push(`R3 滑走路 ${rid} の進入予約 ${rs.booking.aircraftId} が進入中でない`);
+    }
+  }
+  // R6: 交差する滑走路（従属運用）は、2 本が同時に離着陸で占有されない（自由形が関与する交差だけ。従来形だけなら空ループ）
+  for (const c of ctx.crossings) {
+    const oa = state.runways[c.a]?.occupant;
+    const ob = state.runways[c.b]?.occupant;
+    if (oa && ob && oa.purpose !== 'crossing' && ob.purpose !== 'crossing') {
+      out.push(`R6 交差する滑走路 ${c.a} と ${c.b} が同時に使用中（${oa.aircraftId}, ${ob.aircraftId}）`);
     }
   }
   for (const ac of aircraft) {

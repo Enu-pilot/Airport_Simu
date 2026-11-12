@@ -63,6 +63,7 @@ export type HoldReason =
   | 'runwayBusy' // 滑走路が使用中
   | 'departurePriority' // 出発優先のため進入保留
   | 'crossing' // 滑走路横断の許可待ち
+  | 'intersection' // 交差する滑走路が使用中（従属運用）
   | 'goAround' // 着陸復行
   | 'boarding' // 搭乗手続きの完了待ち
   | 'groundCrew'; // プッシュバックの車両・作業員待ち
@@ -125,7 +126,8 @@ export interface Aircraft {
   /** 地上走行の開始時刻（統計用） */
   taxiStartedAt: number | null;
   /** 横断許可を得ている滑走路ノード（経路上の番号） */
-  crossing: { index: number; runwayId: string } | null;
+  /** alsoRunwayIds: 交差点ノードで横断するとき、同時に予約している交差する滑走路（交差点のときだけ書く） */
+  crossing: { index: number; runwayId: string; alsoRunwayIds?: string[] } | null;
   history: HistoryEntry[];
 }
 

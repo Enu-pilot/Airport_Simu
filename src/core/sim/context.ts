@@ -5,9 +5,11 @@ import { buildTerminalModel, type TerminalModel } from '../terminal/model';
 import type { AirportLayout, SizeClass } from '../model/types';
 import { AIRCRAFT_TYPES, resolveType, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
 import { canOperate } from '../aircraft/compat';
-import { distance } from '../geometry/vec';
+import { distance, type Vec2 } from '../geometry/vec';
 import { mapToWorld } from '../geometry/frames';
-import { runwayMaxSize } from '../layout/runway';
+import { runwayAxis, runwayMaxSize } from '../layout/runway';
+import { resolveRunwayDims } from '../layout/runwayAreas';
+import { isFreeRunway } from '../model/types';
 import type { RunwayConfig, UnitKind } from './types';
 import { rotatedDims } from '../layout/footprint';
 
@@ -38,6 +40,26 @@ export interface StandInfo {
   heading: number;
 }
 
+/** 滑走路どうしの交差（自由形が関与するものだけ。従来形だけのレイアウトでは空） */
+export interface RunwayCrossing {
+  /** 組の ID（`${a}:X:${b}`） */
+  id: string;
+  a: string;
+  b: string;
+  /** 交差点のネットワークノード */
+  nodeId: string;
+  /** 各滑走路の始点から交差点までの距離（m） */
+  distA: number;
+  distB: number;
+}
+
+/** 自由形の滑走路の停止位置の計算用（自由形だけ） */
+export interface FreeRunwayInfo {
+  dir: Vec2;
+  /** 停止位置（中心線からの垂直距離、m） */
+  holdingM: number;
+}
+
 export interface SimContext {
   layout: AirportLayout;
   network: AirsideNetwork;
@@ -54,6 +76,13 @@ export interface SimContext {
   sorters: { id: string; x: number; y: number; capacityPerMin: number }[];
   /** 運用中の燃料施設があるか（給油の前提） */
   hasFuelFarm: boolean;
+  /** 滑走路どうしの交差。自由形が関与するものだけ（従来形だけなら []） */
+  crossings: RunwayCrossing[];
+  crossingsByRunway: Record<string, RunwayCrossing[]>;
+  /** 交差点ノード → そこで交わる滑走路（ID 順）。誘導路ノードが交差点にあるとき、横断で両方を予約する */
+  crossingNodeRunways: Record<string, string[]>;
+  /** 自由形の滑走路 ID → 停止位置の情報（従来形だけなら空） */
+  freeRunways: Record<string, FreeRunwayInfo>;
   /** 機種テーブル（現在のカタログ、または保存時の機種データのスナップショット） */
   types: TypeTable;
 }
@@ -73,6 +102,27 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
       distFromStart,
       lengthM: distFromStart[distFromStart.length - 1] ?? 0,
     };
+  }
+  const freeRunways: Record<string, FreeRunwayInfo> = {};
+  for (const r of sortedValues(layout.runways)) {
+    if (isFreeRunway(r)) freeRunways[r.id] = { dir: runwayAxis(r).dir, holdingM: resolveRunwayDims(r).holdingPositionM };
+  }
+  const crossings: RunwayCrossing[] = [];
+  const crossingsByRunway: Record<string, RunwayCrossing[]> = {};
+  const crossingNodeRunways: Record<string, string[]> = {};
+  const distAt = (rid: string, node: string): number => {
+    const info = runways[rid]!;
+    const i = info.nodes.indexOf(node);
+    return i >= 0 ? info.distFromStart[i]! : 0;
+  };
+  for (const c of network.crossings ?? []) {
+    if (!runways[c.a] || !runways[c.b]) continue;
+    const x: RunwayCrossing = { id: c.id, a: c.a, b: c.b, nodeId: c.nodeId, distA: distAt(c.a, c.nodeId), distB: distAt(c.b, c.nodeId) };
+    crossings.push(x);
+    (crossingsByRunway[c.a] ??= []).push(x);
+    (crossingsByRunway[c.b] ??= []).push(x);
+    const set = new Set([...(crossingNodeRunways[c.nodeId] ?? []), c.a, c.b]);
+    crossingNodeRunways[c.nodeId] = [...set].sort(compareIds);
   }
   const contactStands = new Set(
     Object.values(layout.facilities)
@@ -126,7 +176,7 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
     }));
   const sorters = operational.filter((f) => f.kind === 'baggageSort').map((f) => ({ id: f.id, ...center(f), capacityPerMin: n(f, 'capacityPerMin') }));
   const hasFuelFarm = operational.some((f) => f.kind === 'fuelFarm');
-  return { layout, network, runways, stands, terminal, standGate, paxTerminal, bases, sorters, hasFuelFarm, types: opts.types ?? AIRCRAFT_TYPES };
+  return { layout, network, runways, stands, terminal, standGate, paxTerminal, bases, sorters, hasFuelFarm, crossings, crossingsByRunway, crossingNodeRunways, freeRunways, types: opts.types ?? AIRCRAFT_TYPES };
 }
 
 /** 運用方向に並べた滑走路上ノードと、進入端からの距離 */

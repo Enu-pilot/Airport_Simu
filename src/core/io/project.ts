@@ -233,6 +233,9 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
     if (a.id !== id) errors.push(`運航状態: 機体 ${id} の ID が一致しません`);
     if (a.standId && !layout.stands[a.standId]) errors.push(`運航状態: 機体 ${id} のスポット ${a.standId} がレイアウトにありません`);
     if (a.runwayId && !layout.runways[a.runwayId]) errors.push(`運航状態: 機体 ${id} の滑走路 ${a.runwayId} がレイアウトにありません`);
+    for (const rid of a.crossing?.alsoRunwayIds ?? []) {
+      if (!layout.runways[rid]) errors.push(`運航状態: 機体 ${id} の横断の滑走路 ${rid} がレイアウトにありません`);
+    }
     if (!state.flights[a.arrivalFlightId] || !state.flights[a.departureFlightId]) errors.push(`運航状態: 機体 ${id} の便が見つかりません`);
   }
   for (const [standId, acId] of Object.entries(state.standAssignments)) {

@@ -250,6 +250,7 @@ export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
   runwayBusy: '滑走路使用中',
   departurePriority: '出発優先',
   crossing: '滑走路横断待ち',
+  intersection: '交差する滑走路が使用中',
   goAround: '着陸復行',
   boarding: '搭乗手続き中',
   groundCrew: 'トーイングカー・作業員待ち',

@@ -2,7 +2,7 @@ import { TILE_M } from '../model/catalog';
 import { distance } from '../geometry/vec';
 import { dirToBearing, turnAngleDeg } from '../geometry/angle';
 import type { SimContext } from './context';
-import { HOLD_SHORT_M, HOLD_SHORT_MAX_RATIO } from './rules';
+import { HOLD_SHORT_M, HOLD_SHORT_MAX_RATIO, SIN_MIN_HOLD } from './rules';
 import type { Aircraft, Route, SimState } from './types';
 
 /**
@@ -46,6 +46,27 @@ export function headingOf(dx: number, dy: number): number {
 /** 滑走路手前の停止位置: 滑走路ノードから手前へ戻る距離 */
 export function holdShortDistance(edgeLengthM: number): number {
   return Math.min(HOLD_SHORT_M, edgeLengthM * HOLD_SHORT_MAX_RATIO);
+}
+
+/**
+ * 滑走路ノードに接続する誘導路エッジ（nodeId — otherId、長さ edgeLengthM）の停止位置（nodeId から手前へ戻る距離、m）。
+ * ノードの滑走路がすべて従来形なら既存の式（holdShortDistance）をそのまま返す。
+ * 自由形が含まれるときは、中心線からの垂直距離 H（dims.holdingPositionM）を、エッジに沿った距離 H / max(sinθ, sin15°) に直す
+ * （θ = エッジと中心線のなす角。複数ならそのうち最大）。上限は従来どおりエッジ長の 0.6 倍。
+ */
+export function holdShortDistanceAt(ctx: SimContext, nodeId: string, otherId: string, edgeLengthM: number): number {
+  const free = Object.keys(ctx.freeRunways).length === 0 ? [] : ctx.network.nodes[nodeId]!.runwayIds.filter((id) => ctx.freeRunways[id]);
+  if (free.length === 0) return holdShortDistance(edgeLengthM);
+  const a = ctx.network.nodes[nodeId]!.pos;
+  const b = ctx.network.nodes[otherId]!.pos;
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  let d = 0;
+  for (const id of free) {
+    const f = ctx.freeRunways[id]!;
+    const sin = len > 0 ? Math.abs((b.x - a.x) * f.dir.y - (b.y - a.y) * f.dir.x) / len : 1;
+    d = Math.max(d, f.holdingM / Math.max(sin, SIN_MIN_HOLD));
+  }
+  return Math.min(d, edgeLengthM * HOLD_SHORT_MAX_RATIO);
 }
 
 /** ノード i で曲がる角度（度）。端点は 0 */
