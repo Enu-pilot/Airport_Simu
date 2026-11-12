@@ -74,6 +74,11 @@ export interface RunwaySurfaces {
   thresholdBars: WorldPoint[][];
   /** 滑走路番号（両端） */
   designators: RunwayDesignatorMark[];
+  /**
+   * 従来形のみ: 判定（占有）に使うゲームの簡易な多角形（幅 3 タイル、両端 0.5 タイル延長）。描画の舗装は実寸の幅（30/45/60 m）だが、
+   * 配置・検証はこちらで行うので、プレイヤーが判定の範囲を理解できるよう薄い輪郭で見せる。自由形は null（舗装・肩・着陸帯・RESA が判定そのもの）
+   */
+  footprint: WorldPoint[] | null;
 }
 
 /**
@@ -95,7 +100,9 @@ export const RUNWAY_MARKING_M = {
 export const RUNWAY_THRESHOLD_STRIPES: Record<30 | 45 | 60, number> = { 30: 8, 45: 12, 60: 16 };
 
 /**
- * 滑走路の面。自由形は `runwayAreas`（実寸の舗装・肩・着陸帯・RESA）、従来形は従来の占有の多角形（舗装 = 肩）。
+ * 滑走路の面。自由形は `runwayAreas`（実寸の舗装・肩・着陸帯・RESA）。
+ * 従来形は、舗装を実寸の幅（surfaceWidthM = 30/45/60 m、始点〜終点）で描く（表示のみ。占有・検証は従来のまま）。
+ * 肩・RESA はなく、着陸帯と `footprint` は判定に使うゲームの占有の多角形そのもの。
  * 標示（中心線・進入端・番号）は中心線の幾何（`runwayAxis`）と `designatorsOf` から作る。
  */
 export function runwaySurfaces(r: Runway, layout: AirportLayout): RunwaySurfaces {
@@ -109,6 +116,7 @@ export function runwaySurfaces(r: Runway, layout: AirportLayout): RunwaySurfaces
   let paved: WorldPoint[];
   let strip: WorldPoint[];
   let resa: WorldPoint[][] = [];
+  let footprint: WorldPoint[] | null = null;
   if (isFreeRunway(r)) {
     const a = runwayAreas(r);
     pavement = a.pavement;
@@ -116,9 +124,10 @@ export function runwaySurfaces(r: Runway, layout: AirportLayout): RunwaySurfaces
     strip = a.strip;
     resa = a.resa;
   } else {
-    pavement = runwayPolygon(r);
+    pavement = rectAlongDir(ax.start, ax.end, ax.dir, t(r.surfaceWidthM / 2), 0);
     paved = pavement;
     strip = runwayStripPolygon(r);
+    footprint = runwayPolygon(r);
   }
 
   // 進入端の縦じま（両端）。短い滑走路でも端から端までに収める
@@ -152,5 +161,5 @@ export function runwaySurfaces(r: Runway, layout: AirportLayout): RunwaySurfaces
   const centrelineDashes: [WorldPoint, WorldPoint][] = [];
   for (let d = zone; d + m.dash <= lengthM - zone + 1e-9; d += m.dash + m.gap) centrelineDashes.push([at(d), at(d + m.dash)]);
 
-  return { paved, pavement, strip, resa, centrelineDashes, thresholdBars, designators };
+  return { paved, pavement, strip, resa, centrelineDashes, thresholdBars, designators, footprint };
 }

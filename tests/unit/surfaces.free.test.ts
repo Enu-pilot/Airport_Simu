@@ -118,14 +118,31 @@ describe('runwaySurfaces（自由形）', () => {
     expect(runwaySurfaces(b.r, b.layout).designators[0]!.text).toBe('08');
   });
 
-  it('従来形は従来の占有の多角形（舗装 = 肩、RESA なし）を返す', () => {
-    const l = must(placeRunway(emptyLayout(100, 100), { x: 10, y: 20 }, 135, 30, { surfaceWidthM: 60 }));
-    const r = l.layout.runways[l.created[0]!]!;
-    const s = runwaySurfaces(r, l.layout);
-    expect(s.pavement).toEqual(runwayPolygon(r));
-    expect(s.paved).toEqual(runwayPolygon(r));
-    expect(s.strip).toEqual(runwayStripPolygon(r));
-    expect(s.resa).toEqual([]);
+  it('従来形（S12・表示のみ）: 舗装は実寸の幅（30/45/60 m）で始点〜終点、判定の占有 footprint と着陸帯は従来の多角形のまま、肩・RESA なし', () => {
+    for (const w of [30, 45, 60] as const) {
+      for (const h of [0, 45, 90, 135, 180, 225, 270, 315] as const) {
+        const l = must(placeRunway(emptyLayout(100, 100), { x: 40, y: 50 }, h, 20, { surfaceWidthM: w }));
+        const r = l.layout.runways[l.created[0]!]!;
+        const s = runwaySurfaces(r, l.layout);
+        const ax = runwayAxis(r);
+        const xs = s.pavement.map((p) => {
+          const dx = p.x - ax.start.x;
+          const dy = p.y - ax.start.y;
+          return { a: (dx * ax.dir.x + dy * ax.dir.y) * TILE_M, c: (dx * -ax.dir.y + dy * ax.dir.x) * TILE_M };
+        });
+        expect(Math.min(...xs.map((q) => q.a))).toBeCloseTo(0, 6);
+        expect(Math.max(...xs.map((q) => q.a))).toBeCloseTo(ax.lengthT * TILE_M, 6);
+        expect(Math.max(...xs.map((q) => q.c)) - Math.min(...xs.map((q) => q.c))).toBeCloseTo(w, 6);
+        expect(s.paved).toBe(s.pavement);
+        expect(s.resa).toEqual([]);
+        // 判定（占有）に使う多角形は不変（幅 3 タイル・両端 0.5 タイル延長）
+        expect(s.footprint).toEqual(runwayPolygon(r));
+        expect(s.strip).toEqual(runwayStripPolygon(r));
+      }
+    }
+    // 自由形には footprint がない
+    const f = free(10, 1000);
+    expect(runwaySurfaces(f.r, f.layout).footprint).toBeNull();
   });
 
   it('全方位（0〜359°）・最短〜長大の長さで、すべての頂点が有限', () => {

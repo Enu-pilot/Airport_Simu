@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { bearingToSceneYawRad, tilesToM, worldPolyToScene, worldToScene } from '../../core/geometry/frames';
-import { isFreeRunway, type AirportLayout, type Facility, type FacilityKind } from '../../core/model/types';
+import { type AirportLayout, type Facility, type FacilityKind } from '../../core/model/types';
 import { facilityDims, standDims } from '../../core/layout/footprint';
-import { bandSurface, roadBandSurface, runwayPavementSurface, runwaySurfaces, taxiwayBandSurface } from '../../core/layout/surfaces';
+import { bandSurface, roadBandSurface, runwaySurfaces, taxiwayBandSurface } from '../../core/layout/surfaces';
 import { resolveType, type AircraftType } from '../../core/sim/aircraftTypes';
 import { isVisible } from '../../core/sim/query';
 import type { Aircraft, UnitKind } from '../../core/sim/types';
@@ -185,15 +185,13 @@ export class Scene3D {
     };
     for (const r of Object.values(layout.runways)) {
       const alpha = r.buildState === 'operational' ? 1 : 0.5;
-      if (!isFreeRunway(r)) {
-        flatWorld(runwayPavementSurface(r), 0.3, 0x3a3f45, alpha, r.id);
-        continue;
-      }
-      // 自由形: 2D と同じ runwaySurfaces（着陸帯・RESA は薄く、舗装 + 肩、舗装、中心線の破線、進入端の縦じま。番号の文字は Phase 16）
+      // 従来形・自由形とも 2D と同じ runwaySurfaces（舗装は実寸の幅。番号の文字は Phase 16）。
+      // 着陸帯・RESA は薄く、従来形は判定に使う占有の多角形（footprint）も薄く示す。クリックの選択は舗装・footprint のどちらでも滑走路になる
       const sf = runwaySurfaces(r, layout);
       flatWorld(sf.strip, 0.1, 0xffffff, 0.08, undefined, 1);
       for (const p of sf.resa) flatWorld(p, 0.12, 0xffb74d, 0.3, undefined, 2);
-      flatWorld(sf.paved, 0.28, 0x565b61, alpha, r.id, 3);
+      if (sf.footprint) flatWorld(sf.footprint, 0.14, 0xffffff, 0.1, r.id, 2);
+      if (sf.paved !== sf.pavement) flatWorld(sf.paved, 0.28, 0x565b61, alpha, r.id, 3);
       flatWorld(sf.pavement, 0.3, 0x3a3f45, alpha, r.id, 4);
       for (const [a, b] of sf.centrelineDashes) flatWorld(bandSurface(a, b, 0.9), 0.34, 0xf2f2f2, alpha, undefined, 5);
       for (const bar of sf.thresholdBars) flatWorld(bar, 0.34, 0xf2f2f2, alpha, undefined, 5);
