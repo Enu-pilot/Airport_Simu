@@ -168,6 +168,11 @@ GOLDEN_FIXTURES_UPDATE=1 npx vitest run tests/unit/golden.fixtures.test.ts   # �
   版の更新だけなら変わらない。**再採取のとき、このファイルが変わらないことが「版番号以外は何も変わっていない」証拠** になる。
   既存の基準値のバイト同一性を保つため、従来のハッシュの形式は変えず、新しいファイルに追加した。
 
+### Phase 12 の不具合修正と運航ゴールデン
+
+連続横断の占有の漏れ（C1）の修正は、全レイアウトに適用するが `SIM_MODEL_VERSION` を上げない（PO 承認）。既存の運航ゴールデン（sim / stress-sim / sim-midrun / project-sim / routes）は不変で、
+S13 で追加した自由形のゴールデン `crossing-sim.golden.json` だけ、M1（自由形の停止位置）で交差のレイアウトの運航が変わったため再採取した（台帳の版は同じ）。詳細は [23](23_runway_design.md) §7.1.1・[21](21_save_format.md)。
+
 ## 6. データモデルの計画（Phase 12〜16）
 
 6.1（滑走路）は **Phase 12 で実装済み**（実装の記録は [23](23_runway_design.md)。下の型は計画時の記述で、実装では `dims` を自由形だけに持たせ、`magneticVariationDeg` に加えて `ruleSet`・`designatorSuffix` を持つ）。

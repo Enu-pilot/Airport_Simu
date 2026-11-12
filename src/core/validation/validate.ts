@@ -18,6 +18,8 @@ import { collectFootprints, facilityTiles, standTiles, type FootprintPart } from
 import { edgesOfNode, type AnyEdge } from '../layout/network';
 import { positionOnRunway, runwayAxis, runwayEnd, runwayMaxSize } from '../layout/runway';
 import { designatorsOf } from '../layout/designators';
+import { holdWalkLimitM, walkToClear, type HoldRunway } from '../layout/holdShort';
+import { resolveRunwayDims } from '../layout/runwayAreas';
 import { classifySegmentIntersection } from '../geometry/segment';
 import { satOverlapConvex } from '../geometry/polygon';
 import { TILE_M } from '../model/catalog';
@@ -47,6 +49,7 @@ export type IssueCode =
   | 'RUNWAY_PARALLEL_TOO_CLOSE'
   | 'RUNWAY_PARALLEL_DEPENDENT'
   | 'RUNWAY_DESIGNATOR_CONFLICT'
+  | 'HOLD_SHORT_TOO_CLOSE'
   // 誘導路
   | 'TAXIWAY_ON_RUNWAY'
   | 'TAXIWAY_CROSSES_RUNWAY_NO_ENTRY'
@@ -110,6 +113,7 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   RUNWAY_PARALLEL_TOO_CLOSE: 'warning',
   RUNWAY_PARALLEL_DEPENDENT: 'info',
   RUNWAY_DESIGNATOR_CONFLICT: 'warning',
+  HOLD_SHORT_TOO_CLOSE: 'warning',
   TAXIWAY_ON_RUNWAY: 'error',
   TAXIWAY_CROSSES_RUNWAY_NO_ENTRY: 'error',
   TAXIWAY_CROSSING_NO_JUNCTION: 'error',
@@ -482,6 +486,69 @@ function checkRunwayRules(layout: AirportLayout, sink: IssueSink): void {
   }
 }
 
+/**
+ * 自由形の滑走路の停止位置（Phase 12 M1）。滑走路の各ノードから誘導路を経路に沿って外へたどり、
+ * 滑走路の中心線（線分）からの距離が H（実寸の停止位置）以上になる点に届かない枝があれば警告する。
+ * 届かない例: 浅い角度で入る誘導路、短い連絡誘導路、別の滑走路の保護区域の中に停止位置がある（連続横断の幾何）。
+ * 探索は他の滑走路ノード・行き止まり・上限 max(3H, 300 m) で止める。従来形の滑走路は対象外。
+ */
+function checkHoldShort(layout: AirportLayout, net: AirsideNetwork, sink: IssueSink): void {
+  const frees = sortedValues(layout.runways).filter(isFreeRunway);
+  if (frees.length === 0) return;
+  const zones: HoldRunway[] = frees.map((r) => {
+    const ax = runwayAxis(r);
+    return { a: ax.start, b: ax.end, holdM: resolveRunwayDims(r).holdingPositionM };
+  });
+  for (const r of frees) {
+    const holdM = resolveRunwayDims(r).holdingPositionM;
+    const limit = holdWalkLimitM(holdM);
+    for (const nodeId of net.runwayNodes[r.id] ?? []) {
+      const start = net.nodes[nodeId]!;
+      const nextEdges = (id: string, from: string): { edge: string; to: string }[] =>
+        [...(net.outgoing[id] ?? []), ...(net.incoming[id] ?? [])]
+          .map((eid) => net.edges[eid]!)
+          .filter((e) => e.kind === 'taxiway')
+          .map((e) => ({ edge: e.id, to: e.from === id ? e.to : e.from }))
+          .filter((x) => x.to !== from)
+          .sort((p, q) => compareIds(p.edge, q.edge));
+      let worst: number | null = null;
+      const related: string[] = [];
+      const dfs = (id: string, from: string, points: Vec2[], acc: number, firstEdge: string): void => {
+        const nexts = nextEdges(id, from);
+        let extended = false;
+        for (const n of nexts) {
+          const nn = net.nodes[n.to]!;
+          const p = points[points.length - 1]!;
+          const seg = Math.hypot(nn.pos.x - p.x, nn.pos.y - p.y) * TILE_M;
+          const pts = [...points, nn.pos];
+          const dist = acc + seg;
+          const fe = firstEdge || n.edge;
+          if (nn.runwayIds.length > 0 || dist >= limit) {
+            // 他の滑走路のノード・上限で打ち切り
+            finish(pts, Math.min(limit, dist), fe);
+          } else dfs(n.to, id, pts, dist, fe);
+          extended = true;
+        }
+        if (!extended) finish(points, limit, firstEdge); // 行き止まり
+      };
+      const finish = (pts: Vec2[], cap: number, fe: string): void => {
+        const w = walkToClear(pts, zones, cap);
+        if (w.clearM === null) {
+          const achieved = holdM + w.bestSlackM;
+          worst = worst === null ? achieved : Math.min(worst, achieved);
+          const src = net.edges[fe]?.sourceId;
+          if (src && !related.includes(src)) related.push(src);
+        }
+      };
+      if (nextEdges(nodeId, '').length === 0) continue; // 誘導路が接続していないノードは停止位置の対象ではない
+      dfs(nodeId, '', [start.pos], 0, '');
+      if (worst !== null) {
+        sink.add('HOLD_SHORT_TOO_CLOSE', [r.id], { runwayId: r.id, achievedM: Math.max(0, Math.round(worst)), requiredM: Math.round(holdM) }, roundPoint(start.pos), related);
+      }
+    }
+  }
+}
+
 /** 素集合（連結成分の計算用） */
 class UnionFind {
   private parent = new Map<string, string>();
@@ -822,6 +889,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   checkNetworkGeometry(layout.roadNodes, layout.roads, 'ROAD_CROSSING_NO_JUNCTION', sink);
   checkAirside(layout, network, sink, isolatedEdges);
   checkRunwayRules(layout, sink);
+  checkHoldShort(layout, network, sink);
   checkFacilities(layout, parts, sink);
   checkRoads(layout, parts, sink);
   checkAccess(layout, sink);

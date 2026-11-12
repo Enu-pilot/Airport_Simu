@@ -161,6 +161,8 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   RUNWAY_PARALLEL_DEPENDENT: (n, p) =>
     `${n[0]} と ${n[1]} の平行滑走路の間隔（${p.distanceM}m）は、独立した計器運用の参考値（${p.refM}m）未満です（情報。ゲームの判定）`,
   RUNWAY_DESIGNATOR_CONFLICT: (n, p) => `滑走路番号 ${p.designator} が重複しています（${n.join(', ')}）。番号の接尾辞を設定してください`,
+  HOLD_SHORT_TOO_CLOSE: (n, p) =>
+    `${n[0]} の滑走路入口の停止位置に十分な距離がありません（誘導路に沿って中心線から ${p.achievedM}m までしか離れられません。停止位置 ${p.requiredM}m。ゲームの判定）。誘導路を長くするか、入る角度を大きくしてください`,
   TAXIWAY_ON_RUNWAY: (n) => `${n[0]} が ${n[1]} の上を走っています`,
   TAXIWAY_CROSSES_RUNWAY_NO_ENTRY: (n) => `${n[0]} が ${n[1]} を入口ノードなしで横切っています`,
   TAXIWAY_CROSSING_NO_JUNCTION: (n) => `${n[0]} と ${n[1]} が交差点なしで交差しています`,

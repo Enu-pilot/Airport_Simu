@@ -2,6 +2,7 @@ import { TILE_M } from '../model/catalog';
 import { distance } from '../geometry/vec';
 import { dirToBearing, turnAngleDeg } from '../geometry/angle';
 import type { SimContext } from './context';
+import { holdWalkLimitM, walkToClear, type HoldRunway } from '../layout/holdShort';
 import { HOLD_SHORT_M, HOLD_SHORT_MAX_RATIO, SIN_MIN_HOLD } from './rules';
 import type { Aircraft, Route, SimState } from './types';
 
@@ -67,6 +68,85 @@ export function holdShortDistanceAt(ctx: SimContext, nodeId: string, otherId: st
     d = Math.max(d, f.holdingM / Math.max(sin, SIN_MIN_HOLD));
   }
   return Math.min(d, edgeLengthM * HOLD_SHORT_MAX_RATIO);
+}
+
+const holdCache = new WeakMap<Route, Map<number, number>>();
+
+/**
+ * 経路 r の滑走路ノード i の停止位置（dir = -1: 手前、ノードから経路に沿って戻る距離 m）または通過後の解放位置（dir = +1: 先、m）。
+ * - ノードの滑走路がすべて従来形: 従来の式（`holdShortDistance(エッジ長)`）をそのまま返す。
+ * - 自由形が含まれ、`holdShortDistanceAt` の換算が頭打ちにならない場合は、その値（従来どおり）。
+ * - 頭打ちになる場合（浅い角度・短いエッジ）: 経路を dir の向きにたどり、各滑走路（ノードの滑走路と、交差点のグループ）の中心線（線分）からの
+ *   距離が H 以上になる最初の点までの距離。他の滑走路ノード・滑走路区間・スポット接続・探索の上限（max(3H, 300 m)）で止め、届かなければ換算の値。
+ * 混在ノード（従来形と自由形）は max(自由形の結果, 従来の式)。
+ */
+export function holdShortOnRoute(ctx: SimContext, r: Route, i: number, dir: -1 | 1): number {
+  const j = i + dir;
+  const edgeLen = Math.abs(r.cum[j]! - r.cum[i]!);
+  const nodeId = r.nodes[i]!;
+  const d0 = holdShortDistanceAt(ctx, nodeId, r.nodes[j]!, edgeLen);
+  if (Object.keys(ctx.freeRunways).length === 0) return d0;
+  const node = ctx.network.nodes[nodeId]!;
+  const ids = new Set([...node.runwayIds, ...(ctx.crossingNodeRunways[nodeId] ?? [])]);
+  const free = [...ids].filter((id) => ctx.freeRunways[id]).sort();
+  if (free.length === 0) return d0;
+  const legacyToo = node.runwayIds.some((id) => !ctx.freeRunways[id]);
+  const wrap = (v: number): number => (legacyToo ? Math.max(v, holdShortDistance(edgeLen)) : v);
+  // 頭打ちかどうか（頭打ちでなければ従来の値のまま）
+  const a = node.pos;
+  const b = ctx.network.nodes[r.nodes[j]!]!.pos;
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  let clamped = false;
+  let want = 0;
+  for (const id of free) {
+    const f = ctx.freeRunways[id]!;
+    const sin = len > 0 ? Math.abs((b.x - a.x) * f.dir.y - (b.y - a.y) * f.dir.x) / len : 1;
+    if (sin < SIN_MIN_HOLD) clamped = true;
+    want = Math.max(want, f.holdingM / Math.max(sin, SIN_MIN_HOLD));
+  }
+  if (want > edgeLen * HOLD_SHORT_MAX_RATIO) clamped = true;
+  if (!clamped) return wrap(d0);
+
+  let memo = holdCache.get(r);
+  if (!memo) holdCache.set(r, (memo = new Map()));
+  const key = i * 2 + (dir > 0 ? 1 : 0);
+  let v = memo.get(key);
+  if (v === undefined) {
+    v = walkRoute(ctx, r, i, dir, free) ?? -1;
+    memo.set(key, v);
+  }
+  return wrap(v < 0 ? d0 : v);
+}
+
+/** 経路に沿って、余裕 ≥ 0 になる最初の点までの距離（m）。届かなければ null */
+function walkRoute(ctx: SimContext, r: Route, i: number, dir: -1 | 1, free: string[]): number | null {
+  const runways: HoldRunway[] = free.map((id) => {
+    const f = ctx.freeRunways[id]!;
+    return { a: f.a, b: f.b, holdM: f.holdingM };
+  });
+  const limit0 = holdWalkLimitM(Math.max(...runways.map((x) => x.holdM)));
+  const points = [ctx.network.nodes[r.nodes[i]!]!.pos];
+  let cap = limit0;
+  for (let k = i + dir; k >= 0 && k < r.nodes.length; k += dir) {
+    const dist = Math.abs(r.cum[k]! - r.cum[i]!);
+    const edge = ctx.network.edges[r.edges[Math.min(k, k - dir)]!];
+    if (edge && edge.kind === 'standLink') {
+      cap = Math.min(cap, Math.abs(r.cum[k - dir]! - r.cum[i]!));
+      break;
+    }
+    if (dir < 0 && r.runwayEnd >= 0 && k <= r.runwayEnd) {
+      cap = Math.min(cap, dist);
+      points.push(ctx.network.nodes[r.nodes[k]!]!.pos);
+      break;
+    }
+    points.push(ctx.network.nodes[r.nodes[k]!]!.pos);
+    if (ctx.network.nodes[r.nodes[k]!]!.runwayIds.length > 0) {
+      cap = Math.min(cap, dist);
+      break;
+    }
+    if (dist >= cap) break;
+  }
+  return walkToClear(points, runways, cap).clearM;
 }
 
 /** ノード i で曲がる角度（度）。端点は 0 */

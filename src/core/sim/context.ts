@@ -58,6 +58,9 @@ export interface FreeRunwayInfo {
   dir: Vec2;
   /** 停止位置（中心線からの垂直距離、m） */
   holdingM: number;
+  /** 中心線の端点（タイル）。停止位置を経路に沿って求めるのに使う */
+  a: Vec2;
+  b: Vec2;
 }
 
 export interface SimContext {
@@ -105,7 +108,10 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
   }
   const freeRunways: Record<string, FreeRunwayInfo> = {};
   for (const r of sortedValues(layout.runways)) {
-    if (isFreeRunway(r)) freeRunways[r.id] = { dir: runwayAxis(r).dir, holdingM: resolveRunwayDims(r).holdingPositionM };
+    if (isFreeRunway(r)) {
+      const ax = runwayAxis(r);
+      freeRunways[r.id] = { dir: ax.dir, holdingM: resolveRunwayDims(r).holdingPositionM, a: ax.start, b: ax.end };
+    }
   }
   const crossings: RunwayCrossing[] = [];
   const crossingsByRunway: Record<string, RunwayCrossing[]> = {};

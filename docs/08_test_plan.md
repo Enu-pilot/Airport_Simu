@@ -271,12 +271,15 @@ E2E: `tests/e2e/access.spec.ts`（アクセスの画面とタクシー乗り場�
 既存のテストの変更は、Phase 12 の各ステップで **新しい期待を追加する形** に限った（`operations.test.ts` / `project.test.ts` / `runway.test.ts` / `surfaces.frames.test.ts` の追加分、S1 の再採取）。
 既存の e2e（`editor` / `operations` ほか 28 件）は変更なし。
 
+| `tests/unit/sim/crossing.chain.test.ts` | 8 | C1 の回帰: 従来形の平行 2 本（不変条件 0・全機出発・占有が漏れない、2 シード）、自由形の浅い交差、heldCrossings、安全網 2 種、保存・復元（バイト列同一・不正な heldCrossings の拒否・漏れの修復） |
+| `tests/unit/sim/holdshort.test.ts` | 5 | M1: 浅い角度・短いエッジで H まで戻る、届かない配置は換算に戻り `HOLD_SHORT_TOO_CLOSE`、頭打ちにならなければ従来の値、固定フィクスチャの全経路で従来形は `holdShortDistance` と === 一致 |
+
 ### 実行結果（Phase 12 完了時、このリポジトリのコンテナ環境）
 
 | 検証 | 結果 |
 |---|---|
 | 型チェック `tsc --noEmit` | エラー 0 |
 | Lint `eslint src tests --max-warnings=0` | エラー・警告 0（frames lint を含む） |
-| 単体・統合 `vitest run` | 52 ファイル / 551 件すべて合格（Phase 11 完了時は 38 ファイル / 395 件）。負荷の高い環境で 1 件のタイムアウトが再現しない形で 2 度出たが、再実行は常に全件合格 |
+| 単体・統合 `vitest run` | 54 ファイル / 564 件すべて合格（Phase 11 完了時は 38 ファイル / 395 件）。負荷の高い環境で 1 件のタイムアウトが再現しない形で 2 度出たが、再実行は常に全件合格 |
 | E2E `playwright test --trace off` | 35 件すべて合格（既存 28 + 新規 `runway.spec.ts` 7） |
 | ゴールデン | 既存のゴールデンは S1 の 1 回だけの再採取（版に敏感なキーのみ。[27](27_migration_and_compatibility.md) §5）以外は 1 バイトも変更なし。追加: `free-runways` / `crossing-sim` と入力フィクスチャ 2 件。台帳 `sim-versions.json` に 1 行追加 |

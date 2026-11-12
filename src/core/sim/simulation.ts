@@ -9,7 +9,7 @@ import { findPath } from './pathfinding';
 import {
   edgeIndexAt,
   headingOf,
-  holdShortDistanceAt,
+  holdShortOnRoute,
   isFree,
   makeRoute,
   pointAt,
@@ -810,8 +810,7 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
       moveTaxi(sim, ac);
       const r = ac.route!;
       const exitIdx = r.runwayEnd;
-      const nextEdgeLen = r.cum[exitIdx + 1]! - r.cum[exitIdx]!;
-      if (ac.dist >= r.cum[exitIdx]! + Math.max(holdShortDistanceAt(sim.ctx, r.nodes[exitIdx]!, r.nodes[exitIdx + 1]!, nextEdgeLen), type.lengthM)) {
+      if (ac.dist >= r.cum[exitIdx]! + Math.max(holdShortOnRoute(sim.ctx, r, exitIdx, 1), type.lengthM)) {
         const rs = state.runways[ac.runwayId!]!;
         if (rs.occupant?.aircraftId === ac.id) rs.occupant = null;
         ac.taxiStartedAt = state.now;
@@ -897,7 +896,7 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
       moveTaxi(sim, ac);
       const r = ac.route!;
       const limit = movementLimit(sim, ac);
-      const holdAt = r.cum[r.nodes.length - 1]! - holdShortDistanceAt(sim.ctx, r.nodes[r.nodes.length - 1]!, r.nodes[r.nodes.length - 2]!, r.cum[r.nodes.length - 1]! - r.cum[r.nodes.length - 2]!);
+      const holdAt = r.cum[r.nodes.length - 1]! - holdShortOnRoute(sim.ctx, r, r.nodes.length - 1, -1);
       if (ac.dist >= holdAt - 0.01 && limit <= holdAt + 0.01) {
         ac.speed = 0;
         ac.queuedSince = state.now;
@@ -1133,8 +1132,7 @@ function edgeBetween(sim: Simulation, a: string, b: string): string {
 function releaseCrossingIfClear(sim: Simulation, ac: Aircraft, c: { index: number; runwayId: string; alsoRunwayIds?: string[] }, lengthM: number): boolean {
   const r = ac.route!;
   const k = c.index;
-  const after = r.cum[k + 1]! - r.cum[k]!;
-  if (ac.dist < r.cum[k]! + Math.max(holdShortDistanceAt(sim.ctx, r.nodes[k]!, r.nodes[k + 1]!, after), lengthM)) return false;
+  if (ac.dist < r.cum[k]! + Math.max(holdShortOnRoute(sim.ctx, r, k, 1), lengthM)) return false;
   for (const id of [c.runwayId, ...(c.alsoRunwayIds ?? [])]) {
     const rs = sim.state.runways[id]!;
     if (rs.occupant?.aircraftId === ac.id) rs.occupant = null;
@@ -1169,8 +1167,8 @@ function crossingChain(sim: Simulation, ac: Aircraft, first: number): { index: n
   let k = first;
   for (let j = k + 1; j < r.nodes.length - 1; j++) {
     if (sim.ctx.network.nodes[r.nodes[j]!]!.runwayIds.length === 0) continue;
-    const release = r.cum[k]! + Math.max(holdShortDistanceAt(sim.ctx, r.nodes[k]!, r.nodes[k + 1]!, r.cum[k + 1]! - r.cum[k]!), len);
-    const hold = r.cum[j]! - holdShortDistanceAt(sim.ctx, r.nodes[j]!, r.nodes[j - 1]!, r.cum[j]! - r.cum[j - 1]!);
+    const release = r.cum[k]! + Math.max(holdShortOnRoute(sim.ctx, r, k, 1), len);
+    const hold = r.cum[j]! - holdShortOnRoute(sim.ctx, r, j, -1);
     if (hold >= release) break;
     chain.push(crossingGrantAt(sim, ac, j));
     k = j;
@@ -1187,7 +1185,7 @@ function pendingCrossing(sim: Simulation, ac: Aircraft): { index: number; runway
     const n = sim.ctx.network.nodes[r.nodes[i]!]!;
     if (n.runwayIds.length === 0) continue;
     if (ac.crossing?.index === i || ac.heldCrossings?.some((c) => c.index === i)) return null;
-    const hold = r.cum[i]! - holdShortDistanceAt(sim.ctx, r.nodes[i]!, r.nodes[i - 1]!, r.cum[i]! - r.cum[i - 1]!);
+    const hold = r.cum[i]! - holdShortOnRoute(sim.ctx, r, i, -1);
     return { index: i, runwayId: n.runwayIds[0]!, distToHold: hold - ac.dist };
   }
   return null;
@@ -1199,7 +1197,7 @@ function movementLimit(sim: Simulation, ac: Aircraft): number {
   const last = r.nodes.length - 1;
   let limit = r.cum[last]!;
   // 出発機は滑走路手前の停止位置まで（離陸許可後は滑走路ノードまで）
-  if (r.kind === 'pushback' && ac.state !== 'lineUp') limit = r.cum[last]! - holdShortDistanceAt(sim.ctx, r.nodes[last]!, r.nodes[last - 1]!, r.cum[last]! - r.cum[last - 1]!);
+  if (r.kind === 'pushback' && ac.state !== 'lineUp') limit = r.cum[last]! - holdShortOnRoute(sim.ctx, r, last, -1);
   const req = pendingCrossing(sim, ac);
   if (req) limit = Math.min(limit, req.distToHold + ac.dist);
   return limit;
@@ -1236,8 +1234,7 @@ function moveTaxi(sim: Simulation, ac: Aircraft): void {
   }
   if (ac.crossing) {
     const k = ac.crossing.index;
-    const after = r.cum[k + 1]! - r.cum[k]!;
-    if (ac.dist >= r.cum[k]! + Math.max(holdShortDistanceAt(sim.ctx, r.nodes[k]!, r.nodes[k + 1]!, after), type.lengthM)) {
+    if (ac.dist >= r.cum[k]! + Math.max(holdShortOnRoute(sim.ctx, r, k, 1), type.lengthM)) {
       for (const id of [ac.crossing.runwayId, ...(ac.crossing.alsoRunwayIds ?? [])]) {
         const rs = sim.state.runways[id]!;
         if (rs.occupant?.aircraftId === ac.id) rs.occupant = null;

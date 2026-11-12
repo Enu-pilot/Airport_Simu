@@ -5,7 +5,7 @@
   "free-crossing|free-a": {
    "seconds": 10800,
    "now": 32400,
-   "stateSha256": "86cd2c8ae098f2c97ba46bafb70dd703b70505398111319a7dfc04fe58329210",
+   "stateSha256": "d31a789650a077cbfd11ace183da63ebc8dd39e3afa5e2d61bfb9d01c4a88eee",
    "stateLength": 281194,
    "stats": {
     "arrivals": 12,
@@ -14,11 +14,11 @@
     "cancelled": 0,
     "goArounds": 0,
     "conflicts": 0,
-    "taxiInSecTotal": 1422,
-    "taxiOutSecTotal": 2834
+    "taxiInSecTotal": 1386,
+    "taxiOutSecTotal": 2853
    },
-   "crossingTicks": 499,
-   "atomicCrossingTicks": 323,
+   "crossingTicks": 529,
+   "atomicCrossingTicks": 349,
    "aircraft": 120,
    "kpis": {
     "elapsedSec": 10800,
@@ -32,15 +32,15 @@
     "runways": [
      {
       "id": "rwy_1",
-      "util": 0.11805555555555555,
+      "util": 0.1237962962962963,
       "ops": 12,
-      "avgWaitMin": 1.7
+      "avgWaitMin": 1.8
      },
      {
       "id": "rwy_2",
-      "util": 0.07138888888888889,
+      "util": 0.07490740740740741,
       "ops": 4,
-      "avgWaitMin": 1.4
+      "avgWaitMin": 1.5
      }
     ],
     "stands": [
@@ -68,7 +68,7 @@
     "hotspots": [
      {
       "node": "tn_3",
-      "waitMin": 6.7
+      "waitMin": 6.9
      },
      {
       "node": "tn_14",
@@ -137,15 +137,15 @@
     },
     "avgTaxiInMin": 2.9,
     "avgTaxiOutMin": 8.1,
-    "avgGroundDistM": 2983.6,
+    "avgGroundDistM": 2984.1,
     "avgAirborneHoldMin": 15.5
    }
   },
   "free-crossing|free-b": {
    "seconds": 10800,
    "now": 32400,
-   "stateSha256": "d18cf6b70a16fdd9e71fdbbc8c347528193d4dc125f299ff9cfb8a0603956f2f",
-   "stateLength": 294356,
+   "stateSha256": "07614a12c9b0d355b2c953ba9b22ce25a3e9bf472cada1ca70461c6f4d261f27",
+   "stateLength": 294394,
    "stats": {
     "arrivals": 14,
     "departures": 10,
@@ -153,11 +153,11 @@
     "cancelled": 0,
     "goArounds": 0,
     "conflicts": 0,
-    "taxiInSecTotal": 1654,
-    "taxiOutSecTotal": 3541
+    "taxiInSecTotal": 1612,
+    "taxiOutSecTotal": 3566
    },
-   "crossingTicks": 662,
-   "atomicCrossingTicks": 442,
+   "crossingTicks": 707,
+   "atomicCrossingTicks": 482,
    "aircraft": 120,
    "kpis": {
     "elapsedSec": 10800,
@@ -168,15 +168,15 @@
     "runways": [
      {
       "id": "rwy_1",
-      "util": 0.14694444444444443,
+      "util": 0.15453703703703703,
       "ops": 15,
       "avgWaitMin": 1.3
      },
      {
       "id": "rwy_2",
-      "util": 0.09277777777777778,
+      "util": 0.09787037037037037,
       "ops": 5,
-      "avgWaitMin": 2.1
+      "avgWaitMin": 2.2
      }
     ],
     "stands": [
@@ -204,7 +204,7 @@
     "hotspots": [
      {
       "node": "tn_3",
-      "waitMin": 11.9
+      "waitMin": 12.2
      },
      {
       "node": "tn_15",
@@ -272,7 +272,7 @@
     },
     "avgTaxiInMin": 2.9,
     "avgTaxiOutMin": 8.1,
-    "avgGroundDistM": 2971.5,
+    "avgGroundDistM": 2971.8,
     "avgAirborneHoldMin": 22.3
    }
   },

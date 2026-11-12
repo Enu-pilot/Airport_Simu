@@ -35,6 +35,7 @@ issue が出るのは、少なくとも一方が自由形の組、または `rul
 | `IN_RUNWAY_RESA` | error | 誘導路・着陸帯・RESA 以外が RESA（着陸帯の両端から外側へ 90 m、全幅 = 舗装幅の 2 倍が既定）の中にある。誘導路・着陸帯・RESA は両立 |
 | `RUNWAY_PARALLEL_TOO_CLOSE` | warning | 真方位の差が 1° 以内（逆向きを含む）で、長さ方向に重なる 2 本の中心線間隔が 210 m 未満（参考: EASA CS B.050、非計器・同時使用・コード 3〜4）。`params: { distanceM, refM: 210 }` |
 | `RUNWAY_PARALLEL_DEPENDENT` | info | 同じ条件で 210 m 以上 1,035 m 未満（独立した計器運用の参考値 EASA CS B.055 未満）。**`ruleSet = 'realistic'` のときだけ** |
+| `HOLD_SHORT_TOO_CLOSE` | warning | 自由形の滑走路のノードから誘導路を経路に沿って外へたどっても、すべての自由形の中心線（線分）から H（実寸の停止位置）以上離れる点に届かない枝がある（浅い角度・短い連絡誘導路・別の滑走路の保護区域の中に停止位置がある連続横断の幾何）。探索は他の滑走路ノード・行き止まり・max(3H, 300 m) で止める。`params: { runwayId, achievedM, requiredM }`。従来形の滑走路は対象外 |
 | `RUNWAY_DESIGNATOR_CONFLICT` | warning | 接尾辞まで含めた番号が 2 本以上で同じ（手動の上書きの重複、4 本以上の平行など）。自由形が 1 本も関与しない組は `realistic` のときだけ |
 
 「勾配」の issue（`RUNWAY_SLOPE_INFO`）は作らない（参考値が資料に無い）。標高と勾配は表示のみ。

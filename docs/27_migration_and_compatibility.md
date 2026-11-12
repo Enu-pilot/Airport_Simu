@@ -52,5 +52,5 @@
   版に依存しないハッシュ（`normalized-hashes.golden.json`、`project-sim.golden.json` の `normalizedSha256`）と、そのほかのすべての項目は不変であることをスクリプトで確認した。
 - 運航ゴールデン（`sim: true`）は版に敏感なキー（`sha256`・`length`・`exportLayoutSha256`）だけの変更で、`normalizedSha256` が同じときに限って再採取を許す（`isVersionOnlyChange`、単体テストあり）。それ以外の変化は `SIM_MODEL_VERSION` を上げずに再採取できない。
 - **S1 以降はゴールデンを変えない**。Phase 12 の自由形のゴールデンは **新しいファイルだけ** を追加した: `free-runways.golden.json`（ネットワーク・検証・runwayAreas・番号）、`crossing-sim.golden.json`（運航の状態ハッシュ、交差・平行 × 2 シード × 3 時間）、
-  入力のフィクスチャ `fixtures/free-crossing.layout.json` / `free-parallel.layout.json`。運航のゴールデンの台帳（`sim-versions.json`）に新しい行を 1 つ足した。既存のゴールデンファイルは変更していない。
+  入力のフィクスチャ `fixtures/free-crossing.layout.json` / `free-parallel.layout.json`。運航のゴールデンの台帳（`sim-versions.json`）に新しい行を 1 つ足した。既存のゴールデンファイルは変更していない。その後の不具合修正 M1（自由形の停止位置）で交差のレイアウトの運航が変わったため、**この新しいファイル `crossing-sim.golden.json` だけ** を再採取した（台帳の版は同じ。既存のゴールデンは不変）。
 - 再採取: `GOLDEN_UPDATE=1 npx vitest run tests/unit/golden.free.test.ts`。入力フィクスチャの再生成: `GOLDEN_FIXTURES_UPDATE=1 npx vitest run tests/unit/golden.free.test.ts`（ゴールデン全体の再採取が必要になる）。
