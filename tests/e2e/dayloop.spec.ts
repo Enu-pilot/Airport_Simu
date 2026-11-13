@@ -97,7 +97,9 @@ test('締めの直後に「建設モードに戻る」と、空の日報を作�
 
 test('設定で「0:00 で一時停止」を切ると止まらずに 2 日目へ続き、「前日の振り返り」から見られる', async ({ page }) => {
   await loadNearMidnight(page);
+  await page.getByText('⚙ 日の設定').click();
   await page.getByTestId('pref-pause-at-close').uncheck();
+  await page.getByText('⚙ 日の設定').click();
   await page.getByTestId('speed-60').click();
   await expect(page.getByTestId('sim-clock')).toContainText('2日目', { timeout: 15_000 });
   await expect(page.getByTestId('day-review')).toBeHidden();

@@ -166,3 +166,20 @@
 - **航空会社の評価**（`core/economy/airlineScore.ts` の `airlineScorecard`、読み取り専用）: 定時性・折り返し・スポット/ゲート・料金・枠・機材の対応・旅客体験を 良好/注意/不足/判定不可 と 0〜100 で示し、悪い順に最大 2 つを「足りないもの」として出す。既存の記録・運航計画の分析・料金・機材だけから導出し、満足度の計算には使わない。
 - 幅 1400〜1920px: 列幅 260/260（〜1599）・280/300（1600）・300/320（1760〜）。運航表は 420px（〜1599、遅延・機種列を省略）/ 約 470px / 最大 620px。1400px 未満は右列を隠す（未対応の調整は docs/10 §N）。
 - 既存の testid は同じ部品・同じ名前で到達できる（`tab-*` は OpsNav、`flight-board` は運航表、`aircraft-panel` は下部）。新しい testid: `card-*`、`today-kpi-*`、`fids-*`、`alert-*`、`detail-overlay`・`overlay-close`、`airline-score-<id>`・`airline-lacking-<id>`。
+
+## 9. 1 日のループの画面（Phase 12B-2 実装）
+
+運航 → 振り返り →（次の日の準備＝建設モード | 続ける）→ 運航、の流れを画面で見えるようにする。コア（`settleDay`・`stepSimulation`）は変えない。
+
+```
+build ─start-ops→ operate ─0:00 の締め（自動で一時停止）→ review ─review-next→ operate（夜間を早送りして翌朝から）
+  ▲                 │  ▲ skip-day（ヘッドレス。進捗バー）└─ review-build → build（締め済み。空の日報なし）
+  └──── stop-ops ───┘  └── 重大な障害で停止 / 中止 → 一時停止の運航
+```
+
+- **自動一時停止と振り返り**（上部バーの「⚙ 日の設定」の `pref-pause-at-close`、既定 ON、localStorage `skyport.opsPrefs.v1`）: 0:00 の締めを行った tick の直後で一時停止し、上部バーを残した全画面の `day-review` を出す。切ると止まらずに日をまたぎ、「前日の振り返り」（`open-review`）から見られる。上部バーの「建設モードに戻る」（`stop-ops`）は従来どおり（途中締め）。**締めの直後は締め済みなので、`review-build` と `stop-ops` は `settleDay` を呼ばず、日は 1 だけ進む**。
+- **振り返りの内容**（`core/analytics/review.ts` の `buildDayReview`。純関数・既存データのみ）: 収入と費用の内訳（`review-revenue`・`review-cost`、営業利益・資金）、定時率と主な遅延理由（`review-otp`・`review-causes`）、旅客・満足度（`review-pax`）、障害と対応（`review-disruptions`。対応の回数は UI が数える）、前日比（`review-compare`。改善・悪化・変化なしを ▲▼＝で表示。向きはシナリオ比較と同じ）、航空会社の評価の変化（`review-airlines`。日の初めと締めの満足度＋足りないもの）、明日の見通し（`review-tomorrow`。便数＝`planDay`、計画の問題、翌日完成する工事、天候予報は 12B-3a まで「予報なし」）。ボタン: `review-next`（次の日へ）・`review-build`（建設モードへ）・`review-history`。
+- **1 日スキップ**（上部バー `skip-day`。ボタン群は建設モードの上部バーの高さを変えないよう小さく並べる。建設モードからは運航を始めてすぐ進める）: 残りの 1 日を、時間予算 12ms ごと（`setTimeout(0)`、1 チャンク最大 2,000 tick）に `stepTicks` で進める。描画は止め、`skip-overlay` に進捗バー（`skip-progress`）と `skip-cancel`。中止または重大な障害（滑走路の閉鎖・整備、ダイバート。設定 `pref-skip-autostop`、既定 ON）で、その時刻の一時停止の運航に戻る。締めに着いたら振り返り（設定に関わらず表示）。
+- **次の日へ**: 締めの直後なら夜間（次の到着機が現れる 10 分前まで）を同じ方法で早送りしてから、元の倍率で再開する。
+- **履歴**（`open-history`・`history-overlay`、プロジェクトのパネルの `project-history`、振り返りの `review-history`）: 行 `history-row-<日>`（日・資金・評価・営業利益・サイズ）、`history-view-<日>`（その日の振り返りを読み取り専用で開く）、`history-restore-<日>`（確認あり。建設モードのみ。検証に失敗したら何も変えない）、`history-delete-<日>`。保存の仕組みは [21](21_save_format.md) §日ごとの履歴。
+- 運航中の速度操作（Space・倍率）は、スキップ中・振り返り中は無効。新しい testid: `skip-day`・`open-review`・`open-history`・`pref-*`・`skip-*`・`day-review`・`review-*`・`history-*`。

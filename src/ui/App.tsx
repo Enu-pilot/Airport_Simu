@@ -198,29 +198,6 @@ function TopBar() {
           </>
         )}
       </div>
-      <div className="top-group">
-        <button onClick={() => ops.skipDay()} disabled={skipping} title={DAY_LOOP.skipDayTitle} data-testid="skip-day">
-          {DAY_LOOP.skipDay}
-        </button>
-        {hasReview && (
-          <button onClick={() => ops.openReview()} data-testid="open-review">
-            {DAY_LOOP.openReview}
-          </button>
-        )}
-        <button onClick={() => dayFlowActions.openHistory(true)} data-testid="open-history">
-          {DAY_LOOP.openHistory}
-        </button>
-        <span className="day-prefs">
-          <label title={DAY_LOOP.prefPauseTitle}>
-            <input type="checkbox" checked={prefs.pauseAtDayClose} onChange={(e) => setOpsPrefs({ pauseAtDayClose: e.target.checked })} data-testid="pref-pause-at-close" />
-            {DAY_LOOP.prefPause}
-          </label>
-          <label title={DAY_LOOP.prefAutoStopTitle}>
-            <input type="checkbox" checked={prefs.skipAutoStop} onChange={(e) => setOpsPrefs({ skipAutoStop: e.target.checked })} data-testid="pref-skip-autostop" />
-            {DAY_LOOP.prefAutoStop}
-          </label>
-        </span>
-      </div>
       {mode === 'build' && (
         <>
         <div className="top-group">
@@ -282,6 +259,32 @@ function TopBar() {
             {OVERLAY_LABEL[k]}
           </label>
         ))}
+      </div>
+      <div className="top-group">
+        <button className="small day-btn" onClick={() => ops.skipDay()} disabled={skipping} title={DAY_LOOP.skipDayTitle} data-testid="skip-day">
+          {DAY_LOOP.skipDay}
+        </button>
+        {hasReview && (
+          <button className="small day-btn" onClick={() => ops.openReview()} data-testid="open-review">
+            {DAY_LOOP.openReview}
+          </button>
+        )}
+        <button className="small day-btn" onClick={() => dayFlowActions.openHistory(true)} data-testid="open-history">
+          {DAY_LOOP.openHistory}
+        </button>
+        <details className="day-prefs-pop">
+          <summary title="1 日のループの設定">⚙ 日の設定</summary>
+          <div className="day-prefs">
+          <label title={DAY_LOOP.prefPauseTitle}>
+            <input type="checkbox" checked={prefs.pauseAtDayClose} onChange={(e) => setOpsPrefs({ pauseAtDayClose: e.target.checked })} data-testid="pref-pause-at-close" />
+            {DAY_LOOP.prefPause}
+          </label>
+          <label title={DAY_LOOP.prefAutoStopTitle}>
+            <input type="checkbox" checked={prefs.skipAutoStop} onChange={(e) => setOpsPrefs({ skipAutoStop: e.target.checked })} data-testid="pref-skip-autostop" />
+            {DAY_LOOP.prefAutoStop}
+          </label>
+          </div>
+        </details>
       </div>
       {mode === 'operate' && <OpsNav />}
     </header>

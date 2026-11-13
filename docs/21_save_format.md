@@ -91,3 +91,12 @@
 - バックアップ・別端末への移動は「JSON に書き出し」。ファイル名は `skyport-<名前の英数字>-<日時>.skyport.json`（日本語の名前はファイルの中に残る）。
 - サンプル空港・運航中の保存データは 1 件あたり数百 KB（運航 5 時間で約 660 KB を計測）。localStorage の容量（ブラウザにより約 5 MB）を
   超えると保存に失敗し、その旨を表示する。
+
+## 日ごとの履歴（Phase 12B-2。保存形式の版は変えない）
+
+- 日次の締めのたびに、**その日の朝（締めの直後）の建設モードの復元点**を IndexedDB に残す（DB `skyport`・ストア `dayHistory`・キー `<プロジェクトのスロット ID | "unsaved">:<締めた後の会社の日>`）。値 = `{ day, savedAt, cash, rating, operatingProfit, review（振り返りのデータ）, projectJson }`。`projectJson` は通常のプロジェクトファイル（`formatVersion: 1`）で、`sim: null`・`scenarios: []`（運航状態とシナリオは入れない）。完了した工事は、運航を終えたときと同じようにレイアウトへ反映済み。
+- localStorage は小さい（約 5 MB。運航状態入りの 1 件が数百 KB）ため IndexedDB を使う。使えない環境（`indexedDB` がない・開けない）ではメモリに置き、1 回だけ「履歴はこのタブを閉じると消えます」と表示する。`DayHistoryStore` 抽象（`IndexedDbHistoryStore` / `MemoryHistoryStore`）は `src/editor/dayHistoryStore.ts`、IndexedDB は editor / ui 層のみ（core には置かない）。
+- **保持規則**（`core/io/historyPolicy.ts` の純関数 `retainHistoryDays`、書き込みのたびに整理）: 現在の日より先の履歴は捨てる（戻ってやり直した別の経過の残り）／直近 7 日はすべて／それより古いものは 7 日ごとの区間につき 1 件（区間で最も新しい日）で新しい区間から最大 8 件。1 プロジェクトあたり最大 15 件。
+- **戻す**: 「この日の朝に戻る」→ `validateProject`（読み込みと同じ検証）に通ったときだけ適用（レイアウト・会社・機種データの固定）し、失敗したら開いているプロジェクトは変えない。建設モードのみ。**現在のシナリオは保つ**（履歴に含めないため）。
+- 未保存のプロジェクトは `unsaved` に残り、保存すると新しいスロット ID に付け替える。新しいゲーム・JSON の読み込みで `unsaved` は消す。スロットを削除するとそのスロットの履歴も消す。
+- **書き出し（JSON）に履歴は含めない**（端末・ブラウザごと）。サイズ（計測: サンプル空港＋サンドボックス会社、2 日分）: `projectJson` は 1 件あたり約 77〜78 KB、振り返りのデータは約 2〜3 KB。15 件でも約 1.2 MB で、IndexedDB の容量には十分収まる。
