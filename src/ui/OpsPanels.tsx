@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { worldToMap } from '../core/geometry/frames';
 import { compareIds } from '../core/model/ids';
 import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, resolveType, type AircraftTypeId } from '../core/sim/aircraftTypes';
 import { SPEED_LEVELS } from '../core/sim/clock';
@@ -14,7 +13,7 @@ import { designatorsOf } from '../core/layout/designators';
 import type { AirportLayout, Runway } from '../core/model/types';
 import { editorStore, useEditor, type OpsState } from '../editor/store';
 import { disruptionActions, ops } from '../editor/simRunner';
-import { checkStand } from '../core/aircraft/compat';
+import { compatibleStands, standOptionLabel } from './operate/flightActions';
 import { REPAIR_COST } from '../core/sim/disruptions';
 import { focusEntity } from '../editor/input';
 import { actions } from '../editor/store';
@@ -39,11 +38,10 @@ import {
   eventText,
   formatClock,
   formatSimTime,
-  RUNWAY_UI,
 } from '../i18n/ja';
 
 /** 運航状態（約10Hzで更新）。sim は可変オブジェクトなので uiVersion の変化で再描画する */
-function useOps(): OpsState | null {
+export function useOps(): OpsState | null {
   useEditor((s) => s.ops?.uiVersion ?? -1);
   return editorStore.getState().ops;
 }
@@ -116,21 +114,6 @@ export function OpsControls() {
         <b>{st.departures ? `${Math.round(st.taxiOutSecTotal / st.departures / 6) / 10}分` : '—'}</b>
       </div>
 
-      <div className="tool-group-title">滑走路</div>
-      {Object.keys(state.runways)
-        .sort(compareIds)
-        .map((rid) => (
-          <RunwayRow key={rid} state={state} rid={rid} layoutRunway={ctx.layout.runways[rid]!} layout={ctx.layout} />
-        ))}
-      {ctx.crossings.map((x) => (
-        <div key={x.id} className="runway-row" data-testid={`crossing-${x.id}`}>
-          <div className="runway-name">
-            {RUNWAY_UI.crossingTitle}: {designatorsOf(ctx.layout.runways[x.a]!, ctx.layout).text.join('/')} × {designatorsOf(ctx.layout.runways[x.b]!, ctx.layout).text.join('/')}
-          </div>
-          <div className="runway-q">{RUNWAY_UI.crossingDependent}</div>
-        </div>
-      ))}
-
       <div className="tool-group-title">便の追加</div>
       <div className="tool-options">
         <label>
@@ -165,7 +148,7 @@ export function OpsControls() {
   );
 }
 
-function RunwayRow({ state, rid, layoutRunway, layout }: { state: SimState; rid: string; layoutRunway: Runway; layout: AirportLayout }) {
+export function RunwayRow({ state, rid, layoutRunway, layout }: { state: SimState; rid: string; layoutRunway: Runway; layout: AirportLayout }) {
   const rs = state.runways[rid]!;
   const cfg = state.runwayConfig[rid]!;
   const [d0, d1] = designatorsOf(layoutRunway, layout).text;
@@ -209,13 +192,12 @@ function ResponseSection({ acId }: { acId: string }) {
   const o = useOps();
   const [stand, setStand] = useState('');
   if (!o) return null;
-  const { state, ctx } = o.sim;
+  const { state } = o.sim;
   const ac = state.aircraft[acId]!;
   const dep = state.flights[ac.departureFlightId]!;
   const arr = state.flights[ac.arrivalFlightId]!;
   const beforeLanding = ac.state === 'scheduled' || ac.state === 'inbound' || ac.state === 'holding';
-  const type = resolveType(ctx.types, ac.typeId);
-  const stands = Object.values(ctx.layout.stands).filter((s) => checkStand(type, s, ctx.network).status === 'ok');
+  const stands = compatibleStands(o.sim, acId);
   return (
     <div className="prop-section" data-testid="aircraft-response">
       <div className="prop-section-title">対応</div>
@@ -224,9 +206,8 @@ function ResponseSection({ acId }: { acId: string }) {
           <select value={stand} onChange={(e) => setStand(e.target.value)} data-testid="reassign-stand">
             <option value="">選択…</option>
             {stands.map((s) => (
-              <option key={s.id} value={s.id} disabled={state.closures.stands.includes(s.id)}>
-                {displayName(ctx.layout, s.id)}
-                {state.closures.stands.includes(s.id) ? '（閉鎖中）' : state.standAssignments[s.id] ? '（使用中）' : ''}
+              <option key={s.id} value={s.id} disabled={standOptionLabel(o.sim, s.id).closed}>
+                {standOptionLabel(o.sim, s.id).text}
               </option>
             ))}
           </select>
@@ -494,98 +475,7 @@ function Link({ layoutName, id }: { layoutName: string; id: string }) {
   );
 }
 
-// ---------------------------------------------------------------- 下: 運航表・イベント
-
-export function FlightBoard() {
-  const o = useOps();
-  const [filter, setFilter] = useState<'all' | 'arrival' | 'departure'>('all');
-  const [hideDone, setHideDone] = useState(true);
-  if (!o) return null;
-  const { state } = o.sim;
-  const flights = Object.values(state.flights)
-    .filter((f) => filter === 'all' || f.direction === filter)
-    .filter((f) => !hideDone || f.status === 'scheduled' || f.status === 'active' || state.now - (f.actual ?? f.block ?? f.estimated) < 15 * 60)
-    .sort((a, b) => a.scheduled - b.scheduled || compareIds(a.id, b.id))
-    .slice(0, 150);
-  const select = (acId: string) => {
-    ops.selectAircraft(acId);
-    const ac = state.aircraft[acId];
-    if (ac && ac.state !== 'scheduled') actions.focus(worldToMap(ac));
-  };
-
-  return (
-    <div className="issues" data-testid="flight-board">
-      <div className="issues-header">
-        <strong>運航表</strong>
-        {(['all', 'arrival', 'departure'] as const).map((k) => (
-          <label key={k} className="sev-toggle">
-            <input type="radio" checked={filter === k} onChange={() => setFilter(k)} />
-            {{ all: 'すべて', arrival: '到着', departure: '出発' }[k]}
-          </label>
-        ))}
-        <label className="sev-toggle">
-          <input type="checkbox" checked={hideDone} onChange={(e) => setHideDone(e.target.checked)} />
-          完了した便を隠す
-        </label>
-      </div>
-      <div className="issues-list">
-        <table className="board">
-          <thead>
-            <tr>
-              <th>便名</th>
-              <th>区分</th>
-              <th>機種</th>
-              <th>予定</th>
-              <th>予想/実績</th>
-              <th>遅延</th>
-              <th>滑走路</th>
-              <th>スポット</th>
-              <th>旅客</th>
-              <th>便の状態</th>
-              <th>機体の状態</th>
-              <th>遅延理由</th>
-            </tr>
-          </thead>
-          <tbody>
-            {flights.map((f) => {
-              const ac = state.aircraft[f.aircraftId]!;
-              const delay = flightDelayMin(f, state.now);
-              const rw = f.runwayId ? o.sim.ctx.layout.runways[f.runwayId] : undefined;
-              return (
-                <tr key={f.id} onClick={() => select(ac.id)} className={ac.id === o.selectedAircraft ? 'selected' : ''} data-testid={`flight-${f.number}`}>
-                  <td>{f.number}</td>
-                  <td>{f.direction === 'arrival' ? '到着' : '出発'}</td>
-                  <td>{resolveType(o.sim.ctx.types, ac.typeId).shortLabel}</td>
-                  <td>{formatClock(f.scheduled)}</td>
-                  <td>{f.actual !== null ? formatClock(f.actual) : f.status === 'scheduled' || f.status === 'active' ? formatClock(f.estimated) : '—'}</td>
-                  <td className={delay && delay >= 15 ? 'ng-text' : ''}>{delay ? `${delay}分` : ''}</td>
-                  <td>{rw ? designatorsOf(rw, o.sim.ctx.layout).text.join('/') : ''}</td>
-                  <td>{f.standId ? displayName(o.sim.ctx.layout, f.standId).replace('スポット ', '') : ''}</td>
-                  <td data-testid={`pax-${f.number}`}>{paxCell(f)}</td>
-                  <td>{FLIGHT_STATUS_LABEL[f.status]}</td>
-                  <td>
-                    {AIRCRAFT_STATE_LABEL[ac.state]}
-                    {ac.holdReason ? `（${HOLD_REASON_LABEL[ac.holdReason]}）` : ''}
-                  </td>
-                  <td className="muted">{f.delayCauses.map((c) => DELAY_CAUSE_LABEL[c]).join('、')}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {flights.length === 0 && <div className="empty">表示する便はありません</div>}
-      </div>
-    </div>
-  );
-}
-
-/** 運航表の旅客欄: 出発便 = 搭乗/予約（乗り遅れ）、到着便 = 退出/降機 */
-function paxCell(f: Flight): string {
-  const p = f.pax;
-  if (!p.generated) return '';
-  if (f.direction === 'departure') return `${BOARDING_LABEL[p.boarding]} ${p.boarded}/${p.booked}${p.missed ? `（乗遅${p.missed}）` : ''}`;
-  return `退出 ${p.exited}/${p.deplaned + p.deplaneRemaining}`;
-}
+// ---------------------------------------------------------------- 下: ターミナル・イベント
 
 /** ターミナル: 施設ごとの処理状況と旅客の集計 */
 export function TerminalBoard() {

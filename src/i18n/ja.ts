@@ -14,6 +14,8 @@ import type { CompatReason, CompatStatus } from '../core/aircraft/compat';
 import type { FleetResult } from '../core/economy/company';
 import type { ResponseResult } from '../core/sim/disruptions';
 import type { PlanIssueCode } from '../core/economy/planning';
+import type { AirlineScore, ScoreComponent, ScoreKey, ScoreLevel } from '../core/economy/airlineScore';
+import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 
 export const FACILITY_LABEL: Record<FacilityKind, string> = {
   apron: 'エプロン',
@@ -805,3 +807,170 @@ export const RUNWAY_UI = {
 } as const;
 
 export const MAG_VAR_LABEL = (v: number): string => (v === 0 ? '0°' : v > 0 ? `${v}°E` : `${-v}°W`);
+
+// ---------------------------------------------------------------- 運航モードの画面（12B-1）
+
+/** 運航モードの上部のボタン列（キーは従来のタブと同じ） */
+export const OPS_NAV: readonly (readonly [string, string])[] = [
+  ['flights', '運航表（全列）'],
+  ['terminal', 'ターミナル'],
+  ['ground', '地上支援'],
+  ['baggage', '手荷物'],
+  ['plan', '運航計画'],
+  ['finance', '経営'],
+  ['disruptions', '天候・障害'],
+  ['analytics', '分析'],
+  ['scenarios', 'シナリオ'],
+  ['access', 'アクセス'],
+  ['expansion', '拡張計画'],
+  ['catalog', '機種カタログ'],
+  ['project', 'プロジェクト'],
+  ['events', 'イベント'],
+  ['issues', '配置チェック'],
+  ['airlines', '航空会社'],
+];
+
+/** 運航モードの常設カード・運航表・アラートの文言 */
+export const OPS_UI = {
+  dayUnit: '日目',
+  jump: 'クリックでその場所へ移動',
+  repair: '修理',
+  closed: '閉鎖',
+  // KPI
+  kpiTitle: '本日の KPI（暫定）',
+  kpiMovements: '完了した便',
+  kpiOtp: '定時率',
+  kpiDelay: '平均遅延',
+  kpiPax: '旅客（出発＋到着）',
+  kpiMissed: '乗り遅れ',
+  kpiRevenue: '収入（本日）',
+  kpiCost: '費用（本日）',
+  kpiProfit: '営業利益（本日）',
+  kpiNote: '日締め前の暫定値。詳細は「経営」',
+  kpiNone: '経営の集計がありません',
+  // 天候・障害
+  weatherTitle: '天候・障害',
+  weatherNow: '天候',
+  closures: '閉鎖中',
+  closuresText: (t: number, s: number, g: number) => `誘導路 ${t} · スポット ${s} · ゲート ${g}`,
+  noDisruption: '発生中の障害はありません',
+  // ターミナル
+  terminalTitle: 'ターミナル',
+  inTerminal: (n: number) => `館内 ${n}人`,
+  paxMissed: '乗り遅れ',
+  noTerminal: '処理施設がありません',
+  queueText: (queued: number, avgWaitMin: number, crowd: number) => `待ち ${queued}人 · 平均 ${avgWaitMin}分 · 混雑 ${crowd}%`,
+  // 地上支援・手荷物
+  groundTitle: '地上支援・手荷物',
+  brokenBadge: (n: number) => `故障 ${n}`,
+  unitText: (working: number, total: number, broken: number) => `作業中 ${working}/${total}${broken > 0 ? ` · 故障 ${broken}` : ''}`,
+  blockedTasks: '止まっている作業',
+  bagsActive: '手荷物（処理中）',
+  bagsLeft: '積み残し',
+  equipment: '仕分け・ベルト',
+  equipmentDown: (n: number) => `停止 ${n}`,
+  equipmentOk: (n: number) => (n > 0 ? '稼働' : '—'),
+  // アクセス
+  accessTitle: 'アクセス',
+  accessNone: 'アクセスの集計がありません',
+  accessNoPax: 'まだ旅客が来ていません',
+  paxCount: (n: number) => `${n}人`,
+  waiting: (n: number) => `待ち ${n}人`,
+  parking: '駐車場',
+  parkingText: (used: number, spaces: number) => `${used} / ${spaces}台`,
+  parkingFull: '満車で断った車',
+  transitWait: '乗り場の待ち',
+  // 工事
+  constructionTitle: '工事',
+  noProjects: '工事中の施設はありません',
+  projectsCount: (n: number) => `${n}件`,
+  remainingDays: (n: number) => `残り ${n}日`,
+  // イベント
+  eventsTitle: 'イベント（新しい順）',
+  noEvents: '重要なイベントはありません',
+  // 運航表（案内板風）
+  fidsTitle: '運航表 FLIGHTS',
+  fidsFilter: { all: 'すべて', departure: '出発', arrival: '到着' },
+  fidsHideDone: '完了を隠す',
+  fidsOpen: '運航表を開く',
+  fidsFold: '運航表を畳む',
+  fidsCols: ['予定', '便名', '行先・出発地', '機種', 'スポット', '状態', '遅延'],
+  fidsColsFull: ['便名', '区分', '機種', '予定', '予想/実績', '遅延', '滑走路', 'スポット', '旅客', '便の状態', '機体の状態', '遅延理由'],
+  fidsFrom: 'FROM ',
+  fidsTo: 'TO ',
+  fidsActions: 'この便への操作',
+  fidsEmpty: '表示する便はありません',
+  delay15: '+15分',
+  delay30: '+30分',
+  reassign: 'スポット変更',
+  apply: '変更',
+  prio: '優先',
+  prioOff: '優先を解除',
+  goto: '機体へ移動',
+  close: '閉じる',
+  // アラート
+  airlineTitle: '航空会社の評価',
+  airlineNone: '契約している航空会社がありません',
+  airlineNote: '既存のデータからの導出（表示のみ）。点数は 0〜100 のゲーム用の指標で、満足度の計算には使いません',
+  satisfaction: '満足度',
+  lackingNone: '足りないもの: 特になし',
+  noContract: '契約なし',
+  alertCritical: '重大',
+  alertWarning: '注意',
+  alertAction: { focus: '移動', repair: '修理', delay15: '+15分', reassign: 'スポット変更', openPanel: '詳細' } as Record<string, string>,
+  alertMore: (n: number) => `他 ${n} 件（イベントを開く）`,
+} as const;
+
+// ---------------------------------------------------------------- 航空会社の評価カード（12B-1）
+
+export const SCORE_LABEL: Record<ScoreKey, string> = {
+  otp: '定時性',
+  turnaround: '折り返し',
+  stand: 'スポット・ゲート',
+  fees: '料金',
+  slots: '枠（時間帯）',
+  aircraft: '機材の対応',
+  pax: '旅客体験',
+};
+
+export const SCORE_LEVEL_LABEL: Record<ScoreLevel, string> = { good: '良好', warn: '注意', bad: '不足', 'n/a': '—' };
+
+const pctText = (v: number) => `${Math.round(v * 1000) / 10}%`;
+const typeNames = (ids: string[] | undefined) => (ids ?? []).map((id) => resolveType(AIRCRAFT_TYPES, id).label).join('、');
+
+/** 要素の一文の説明（良好なときは状況、注意・不足のときは足りないもの） */
+export function scoreText(c: ScoreComponent): string {
+  const f = c.facts;
+  if (c.level === 'n/a') return 'まだ判定できません（実績・契約がありません）';
+  switch (c.key) {
+    case 'otp': {
+      const cause = f.names?.[0] ? `。主な遅延理由: ${DELAY_CAUSE_LABEL[f.names[0] as DelayCause] ?? f.names[0]}` : '';
+      return `定時率 ${pctText(f.value ?? 0)}（要求 ${pctText(f.target ?? 0)}）${f.fallback ? '・空港全体の値' : ''}${c.level === 'good' ? '' : cause}`;
+    }
+    case 'turnaround':
+      return (f.value ?? 0) <= 0 ? `折り返しは標準（${f.target}分）以内` : `折り返しが標準（${f.target}分）より ${f.value}分長い`;
+    case 'stand':
+      if ((f.value ?? 0) > 0) return `明日 ${f.value}便でスポットが不足`;
+      if ((f.target ?? 0) > 0) return `ゲートのないスポットに ${f.target}便が割り当てられる`;
+      if ((f.n ?? 0) > 0) return `スポット待ちの遅れが ${f.n}便`;
+      return 'スポット・ゲートは足りている';
+    case 'fees':
+      return `${c.level === 'good' ? '料金は許容範囲' : '料金が高いと感じている'}（倍率 ×${(f.value ?? 1).toFixed(2)}${f.target !== undefined && Math.abs((f.target ?? 0) - (f.value ?? 0)) > 0.005 ? `、割引後 ×${f.target.toFixed(2)}` : ''}）`;
+    case 'slots':
+      if ((f.n ?? 0) > 0) return `運用時間・時間帯に入らない契約が ${f.n}件`;
+      if ((f.value ?? 0) > 0) return `希望の時間帯の枠に入らない便が ${f.value}便`;
+      return '希望の枠に収まっている';
+    case 'aircraft':
+      if ((f.value ?? 0) > 0) return `${typeNames(f.names)} に対応するスポット・滑走路がない`;
+      if ((f.target ?? 0) > 0) return `保有機材のうち ${typeNames(f.names)} は運航できない`;
+      return '契約の機材はすべて運航できる';
+    case 'pax':
+      return `乗り遅れ ${pctText(f.value ?? 0)}・手荷物の積み残し ${pctText(f.target ?? 0)}`;
+  }
+}
+
+/** 「足りないもの」の一行（なければ不足なし） */
+export function lackingText(s: AirlineScore): string {
+  if (s.lacking.length === 0) return '足りないもの: 特になし';
+  return `足りないもの: ${s.lacking.map((c) => `${SCORE_LABEL[c.key]}（${scoreText(c)}）`).join(' / ')}`;
+}

@@ -1,25 +1,26 @@
 import { useEffect, useRef } from 'react';
 import { Viewport } from '../render/MapView';
-import { actions, editorStore, formatCr, newGame, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { actions, formatCr, newGame, useEditor, useLayout } from '../editor/store';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
 import { CatalogPanel } from './CatalogPanel';
-import { AnalyticsPanel, ScenarioPanel } from './AnalysisPanels';
-import { computePreview } from '../editor/tools';
-import { constructionCost } from '../core/economy/construction';
+import { ScenarioPanel } from './AnalysisPanels';
 import { MODE_LABEL } from '../i18n/ja';
 import { onKeyDown, onKeyUp } from '../editor/input';
 import { projectActions } from '../editor/project';
 import { downloadText, ProjectPanel } from './ProjectPanel';
 import { setBuildState } from '../core/layout/operations';
 import { applyOp } from '../editor/store';
-import { Toolbox, toolHint } from './Toolbox';
+import { Toolbox } from './Toolbox';
 import { FacilityList } from './FacilityList';
 import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
 import type { Overlays } from '../editor/store';
 import { ops } from '../editor/simRunner';
-import { AircraftPanel, BaggageBoard, DisruptionBoard, EventLog, FlightBoard, GroundBoard, OpsControls, TerminalBoard } from './OpsPanels';
+import { OperateLayout } from './operate/OperateLayout';
+import { OpsNav } from './operate/OpsNav';
+import { opsUi } from './operate/opsUi';
+import { StatusBar, Toast } from './StatusBar';
 import { useState } from 'react';
 
 const OVERLAY_LABEL: Record<keyof Overlays, string> = {
@@ -38,6 +39,12 @@ export function App() {
       t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA');
     const down = (e: KeyboardEvent) => {
       if (isEditable(e.target)) return;
+      // 運航モードの大きなオーバーレイは Esc で閉じる（他のキー処理より先）
+      if (e.key === 'Escape' && opsUi.get().overlay) {
+        opsUi.closeOverlay();
+        e.preventDefault();
+        return;
+      }
       if (onKeyDown({ key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })) e.preventDefault();
     };
     const up = (e: KeyboardEvent) => onKeyUp({ key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
@@ -50,12 +57,20 @@ export function App() {
   }, []);
 
   const mode = useEditor((s) => s.mode);
-  const hasAircraft = useEditor((s) => !!s.ops?.selectedAircraft);
   return (
     <div className={`app mode-${mode}`}>
       <TopBar />
+      {mode === 'build' ? <BuildLayout /> : <OperateLayout />}
+    </div>
+  );
+}
+
+/** 建設モードの画面（従来のまま: 左にツールボックスと一覧、右にプロパティ、下にタブ） */
+function BuildLayout() {
+  return (
+    <>
       <aside className="left">
-        {mode === 'build' ? <Toolbox /> : <OpsControls />}
+        <Toolbox />
         <FacilityList />
       </aside>
       <main className="center">
@@ -63,13 +78,17 @@ export function App() {
         <StatusBar />
         <Toast />
       </main>
-      <aside className="right">{mode === 'operate' && hasAircraft ? <AircraftPanel /> : <PropertiesPanel />}</aside>
-      <footer className="bottom">{mode === 'build' ? <BuildBottom /> : <OpsBottom />}</footer>
-    </div>
+      <aside className="right">
+        <PropertiesPanel />
+      </aside>
+      <footer className="bottom">
+        <BuildBottom />
+      </footer>
+    </>
   );
 }
 
-type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance' | 'access' | 'expansion' | 'catalog' | 'disruptions' | 'analytics' | 'scenarios' | 'project';
+type BottomTab = 'issues' | 'plan' | 'finance' | 'access' | 'expansion' | 'catalog' | 'scenarios' | 'project';
 
 function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
   return (
@@ -120,66 +139,6 @@ function BuildBottom() {
           <IssuesPanel />
         )}
       </div>
-    </div>
-  );
-}
-
-function OpsBottom() {
-  const [tab, setTab] = useState<BottomTab>('flights');
-  return (
-    <div className="tabbed">
-      <Tabs
-        tabs={[
-          ['flights', '運航表'],
-          ['terminal', 'ターミナル'],
-          ['ground', '地上支援'],
-          ['baggage', '手荷物'],
-          ['plan', '運航計画'],
-          ['finance', '経営'],
-          ['disruptions', '天候・障害'],
-          ['analytics', '分析'],
-          ['scenarios', 'シナリオ'],
-          ['access', 'アクセス'],
-          ['expansion', '拡張計画'],
-          ['catalog', '機種カタログ'],
-          ['project', 'プロジェクト'],
-          ['events', 'イベント'],
-          ['issues', '配置チェック'],
-        ]}
-        tab={tab}
-        setTab={setTab}
-      />
-      <div className="tab-body">{tab === 'flights' ? (
-          <FlightBoard />
-        ) : tab === 'terminal' ? (
-          <TerminalBoard />
-        ) : tab === 'ground' ? (
-          <GroundBoard />
-        ) : tab === 'baggage' ? (
-          <BaggageBoard />
-        ) : tab === 'plan' ? (
-          <PlanPanel />
-        ) : tab === 'finance' ? (
-          <FinancePanel />
-        ) : tab === 'access' ? (
-          <AccessPanel />
-        ) : tab === 'expansion' ? (
-          <ExpansionPanel />
-        ) : tab === 'catalog' ? (
-          <CatalogPanel />
-        ) : tab === 'disruptions' ? (
-          <DisruptionBoard />
-        ) : tab === 'analytics' ? (
-          <AnalyticsPanel />
-        ) : tab === 'scenarios' ? (
-          <ScenarioPanel />
-        ) : tab === 'project' ? (
-          <ProjectPanel />
-        ) : tab === 'events' ? (
-          <EventLog />
-        ) : (
-          <IssuesPanel />
-        )}</div>
     </div>
   );
 }
@@ -290,6 +249,7 @@ function TopBar() {
           </label>
         ))}
       </div>
+      {mode === 'operate' && <OpsNav />}
     </header>
   );
 }
@@ -305,54 +265,5 @@ function CompanyBadge() {
       <span title="空港評価（旅客満足度・航空会社満足度・定時率から）">評価 {c.rating.toFixed(1)}</span>
       {c.bankrupt && <b className="ng-text">経営破綻</b>}
     </span>
-  );
-}
-
-function StatusBar() {
-  const hover = useEditor((s) => s.hover);
-  const zoom = useEditor((s) => s.camera.zoom);
-  const tool = useEditor((s) => s.tool);
-  const draft = useEditor((s) => s.draft);
-  const analysis = useAnalysis();
-  const layout = useLayout();
-  const mode = useEditor((s) => s.mode);
-  const cash = useEditor((s) => s.company.cash);
-  // 配置・移動・土地購入のプレビューの建設費（確定時と同じ計算）
-  const estimate = (() => {
-    if (mode !== 'build' || (tool === 'select' && draft?.kind !== 'move')) return null;
-    const p = computePreview(editorStore.getState());
-    if (!p?.result.ok) return null;
-    const cost = constructionCost(layout, p.result.layout);
-    return cost === 0 ? null : cost;
-  })();
-  return (
-    <div className="status" data-testid="status">
-      <span data-testid="status-tile">{hover ? `タイル (${hover.x}, ${hover.y})` : 'タイル —'}</span>
-      <span>ズーム {zoom.toFixed(1)} px/タイル</span>
-      <span>
-        滑走路 {Object.keys(layout.runways).length} / 誘導路 {Object.keys(layout.taxiways).length} / スポット {Object.keys(layout.stands).length} / 施設{' '}
-        {Object.keys(layout.facilities).length}
-      </span>
-      <span>
-        エラー {analysis.counts.error} · 警告 {analysis.counts.warning}
-      </span>
-      {estimate !== null && (
-        <span className={estimate > cash ? 'ng-text' : ''} data-testid="cost-estimate">
-          {estimate >= 0 ? `建設費 ${formatCr(estimate)}` : `払い戻し ${formatCr(-estimate)}`}
-          {estimate > cash ? '（資金不足）' : ''}
-        </span>
-      )}
-      <span className="hint">{mode === 'operate' ? '機体をクリックで選択 / Space: 一時停止 / 1〜5: 時間倍率 / 右ドラッグ: パン' : draft?.kind === 'path' ? `頂点 ${draft.points.length} — ダブルクリック/Enter/右クリックで確定、Esc で取り消し` : toolHint(tool)}</span>
-    </div>
-  );
-}
-
-function Toast() {
-  const toast = useEditor((s) => s.toast);
-  if (!toast) return null;
-  return (
-    <div className={`toast ${toast.kind}`} data-testid="toast">
-      {toast.text}
-    </div>
   );
 }
