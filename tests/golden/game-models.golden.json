@@ -23,7 +23,7 @@
     "cancelled": 0,
     "paxSatisfaction": 90.6,
     "airlineSatisfaction": 61.1,
-    "rating": 58.7,
+    "rating": 59.7,
     "modePax": {
      "car": 1619,
      "dropoff": 2578,
@@ -229,7 +229,7 @@
     "cancelled": 1,
     "paxSatisfaction": 90.3,
     "airlineSatisfaction": 60.7,
-    "rating": 58.8,
+    "rating": 59.8,
     "modePax": {
      "car": 1663,
      "dropoff": 2471,

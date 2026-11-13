@@ -268,3 +268,20 @@ describe('先行欠航の満足度ペナルティは 1 日を通して −1（�
     expect(base.sat - cancelled.sat).toBeCloseTo(1, 6);
   });
 });
+
+describe('12B 審査 R2: 目標の報酬は日の締めの資金・評価に含まれる', () => {
+  it('日報の cashEnd・kpi.rating は報酬を加えたあとの値で、報酬は grants に別掲され営業利益に入らない', { timeout: 300_000 }, () => {
+    const c = createSandboxCompany('r2');
+    c.game = { ...defaultGame(), weather: 'legacy', airlineEval: false, goals: true };
+    c.goals = { done: {}, streaks: {}, tier: 0, grants: [], boostUntil: 0 };
+    const sim = createSimulation(createSampleAirport(), { seed: 'r2', company: c });
+    const cash0 = c.cash;
+    while (sim.company!.day === 0) stepSimulation(sim);
+    const co = sim.company!;
+    const r = co.reports[co.reports.length - 1]!;
+    expect(r.grants ?? 0).toBeGreaterThan(0);
+    expect(r.cashEnd).toBe(co.cash);
+    expect(r.kpi.rating).toBe(co.rating);
+    expect(r.cashEnd).toBeCloseTo(cash0 + r.operatingProfit + r.construction + (r.grants ?? 0), 0);
+  });
+});

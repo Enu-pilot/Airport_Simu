@@ -3,6 +3,8 @@ import { EVAL_WEIGHTS, type AirlineEvalEntry, checkAirlineEval, evalDelta, stepA
 import type { AirlineScore, ScoreComponent, ScoreKey } from '../../src/core/economy/airlineScore';
 import { SCORE_KEYS } from '../../src/core/economy/airlineScore';
 import { createSandboxCompany, generateOffers, updateContracts, changeFrequency, contractsOf } from '../../src/core/economy/company';
+import { complaintCount, tierBonus } from '../../src/core/economy/evalRules';
+import { importCompany } from '../../src/core/economy/company';
 import { defaultGame, applyGameState, checkGameFields } from '../../src/core/economy/game';
 import { GOALS, TIER_STREAK, checkGoals, evaluateGoals, initialGoals } from '../../src/core/economy/goals';
 import { AIRCRAFT_TYPES } from '../../src/core/sim/aircraftTypes';
@@ -115,10 +117,17 @@ describe('12B-3a B5: 航空会社の評価', () => {
     };
     expect(JSON.stringify(mk(false))).toBe(JSON.stringify(mk(false)));
     const c = createSandboxCompany('rel');
+    c.game = defaultGame();
     c.airlineEval = { SK: { ...emptyE(), ema: { slots: 80 } } };
     c.airlines.SK!.satisfaction = 55;
     const k = contractsOf(c, 'active').find((x) => x.airlineId === 'SK')!;
     expect(changeFrequency(c, k.id, 1)).toEqual({ ok: true }); // slots の移動平均が高いと下限 60 → 50
+    // フラグがなければ、データがあっても従来どおり（評価・目標の効果はゲーム設定のフラグで決まる）
+    c.game = { ...defaultGame(), airlineEval: false };
+    expect(changeFrequency(c, k.id, 1)).toEqual({ ok: false, reason: 'AIRLINE_REFUSED' });
+    expect(complaintCount(c, 'SK')).toBe(0);
+    expect(tierBonus({ game: { ...defaultGame(), goals: false }, goals: { ...initialGoals(), tier: 3 } })).toBe(0);
+    expect(tierBonus({ game: defaultGame(), goals: { ...initialGoals(), tier: 3 } })).toBe(3);
     const d = createSandboxCompany('rel');
     d.airlines.SK!.satisfaction = 55;
     expect(changeFrequency(d, contractsOf(d, 'active').find((x) => x.airlineId === 'SK')!.id, 1)).toEqual({ ok: false, reason: 'AIRLINE_REFUSED' });
@@ -185,5 +194,28 @@ describe('12B-3a B6: 目標・空港の格', () => {
   it('提案への効果: 格で 1 日の便数の上限が増える。目標がなければ従来と同じ', () => {
     expect(checkGoals(initialGoals())).toEqual([]);
     expect(checkGoals({ ...initialGoals(), done: { nope: 1 } })).not.toEqual([]);
+  });
+});
+
+describe('12B 審査 R3: 評価・目標のデータはゲーム設定のフラグと整合しているときだけ受け入れる', () => {
+  it('checkGameFields: フラグなしの airlineEval・goals は不整合として報告する。フラグありは通る', () => {
+    const base = { game: { ...defaultGame(), airlineEval: false, goals: false } };
+    expect(checkGameFields({ ...base, airlineEval: {} }).join()).toContain('airlineEval');
+    expect(checkGameFields({ ...base, goals: initialGoals() }).join()).toContain('goals');
+    expect(checkGameFields({ airlineEval: {} }).length).toBeGreaterThan(0);
+    expect(checkGameFields({ game: defaultGame(), airlineEval: {}, goals: initialGoals() })).toEqual([]);
+    expect(checkGameFields({})).toEqual([]);
+  });
+
+  it('importCompany: フラグのないデータは捨てる。フラグがあれば残す', () => {
+    const c = createSandboxCompany('imp');
+    c.airlineEval = {};
+    c.goals = initialGoals();
+    const plain = importCompany(JSON.stringify(c))!;
+    expect('airlineEval' in plain || 'goals' in plain).toBe(false);
+    c.game = defaultGame();
+    const kept = importCompany(JSON.stringify(c))!;
+    expect(kept.airlineEval).toBeDefined();
+    expect(kept.goals).toBeDefined();
   });
 });
