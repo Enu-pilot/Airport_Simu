@@ -2,7 +2,7 @@ import { HistoryList } from './HistoryPanel';
 import { useRef, useState } from 'react';
 import { CATALOG_VERSION } from '../core/aircraft/catalog';
 import { ASSET_VERSION } from '../core/assets/registry';
-import { PROJECT_FORMAT_VERSION, type ValidationReport } from '../core/io/project';
+import { formatVersionOf, type ValidationReport } from '../core/io/project';
 import { catalogDiff, SIM_MODEL_VERSION } from '../core/scenario/scenario';
 import { listSlots, projectActions } from '../editor/project';
 import { useEditor } from '../editor/store';
@@ -16,6 +16,12 @@ export function ProjectPanel() {
   const projectId = useEditor((s) => s.projectId);
   const pin = useEditor((s) => s.catalogPin);
   const operating = useEditor((s) => s.mode === 'operate');
+  const layout = useEditor((s) => s.history.present);
+  const company = useEditor((s) => s.company);
+  const scenarios = useEditor((s) => s.scenarios);
+  const opsSim = useEditor((s) => s.ops?.sim ?? null);
+  // いま保存したときの保存形式の版（新しい項目を使うときだけ 2）
+  const formatVersion = formatVersionOf({ layout, company: opsSim?.company ?? company, scenarios, sim: opsSim ? { state: opsSim.state, company: opsSim.company ?? null } : null });
   // スロット一覧は保存・削除のたびに読み直す
   const [rev, setRev] = useState(0);
   const slots = listSlots();
@@ -130,7 +136,7 @@ export function ProjectPanel() {
           )}
           <h4>版</h4>
           <div className="muted small" data-testid="project-versions">
-            保存形式 v{PROJECT_FORMAT_VERSION} ／ 機種データ {pin ? `${pin.version}（保存時の値で固定）` : `${CATALOG_VERSION}（最新カタログ）`} ／ 3D アセット {ASSET_VERSION} ／
+            保存形式 v{formatVersion} ／ 機種データ {pin ? `${pin.version}（保存時の値で固定）` : `${CATALOG_VERSION}（最新カタログ）`} ／ 3D アセット {ASSET_VERSION} ／
             シミュレーション {SIM_MODEL_VERSION}
           </div>
           {pin && (

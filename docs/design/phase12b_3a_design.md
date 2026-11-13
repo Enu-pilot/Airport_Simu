@@ -356,7 +356,7 @@ interface WxRuntime { day: number; hours: WxHour[]; level; type; override: { lev
 - **予報**: 3 区間（6〜12・12〜18・18〜24 時）の最大段階と代表の種類。各区間を確率 `1 − accuracy` で ±1 ずらす（`Rng(`${seed}:fc:${day}`)`、決定的）。`accuracy`: normal 0.9 / hard 0.8 / expert 0.65。`WeatherForecast` を `{ day, blocks: { fromH, toH, level, type }[], accuracy, summary }` に広げる（`summary` は残す → 12B-2 の UI と互換）。
 - **シミュレーションへの組み込み**（`company.game?.weather === 'levels'` のときだけ `createSimulation` が `state.wx` を作る）:
   - `weatherEffects(state)`: `state.wx` があれば `LEVEL_EFFECTS[effectiveLevel]`、なければ従来の `WEATHER_EFFECTS[state.weather.kind]`（`disruptions.ts:64-66`）。`state.weather.kind` は表示用に写像（clear/cloud → clear、rain/storm → rain、snow、fog）。
-  - `stepWeather(sim)`（`stepSimulation` で `stepDisruptions` の前、`if (state.wx)`）: `now % 3600 === 0` で段階を更新、日が変わったら計画を作り直す、`override` の期限切れを外す。
+  - `stepWeather(sim)`（設計は `stepSimulation` で `stepDisruptions` の前としたが、実装は後。上書きが同じティックの障害を見られるため意図どおり。`if (state.wx)`）: `now % 3600 === 0` で段階を更新、日が変わったら計画を作り直す、`override` の期限切れを外す。
   - 効果（design.md §C.3 の表）: 離着陸間隔・走行速度（既存の倍率の経路）。着陸復行は `approach` の着陸の瞬間に `wx.rng` で判定 → 既存の `goAround`（イベントの `reason: 'weather'`）。欠航は段階 ≥3 の時間の始めに、2 時間以内に到着予定で `scheduled` の機体を判定 → 新しい `cancelTurnaround(sim, ac, 'weather')`（到着・出発とも `cancelled`、`stats.cancelled++`、`onFlightLost`、`HoldReason 'weather'`）。段階 2 の到着の遅れ（20% で +0〜10 分）は時間の始めに次の 1 時間の `scheduled` 便へ。段階 4 の storm は地上作業の通常進捗を 20 分ごとに 5 分止める（`stepGround` の既定の進捗の分岐に `if (state.wx && lightningStop(state))`）。
   - 手動・シナリオの天候の障害: `wx` があれば `override` に写像（rain→2、snow→3、fog→3）。ランダムな天候の障害: 乱数は従来どおり引いたうえで登録しない（`disruptions.ts:385`）。
   - `wx.rng` は `${state.seed}:wx` で、`state.rng` を消費しない。

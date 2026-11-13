@@ -332,3 +332,5 @@ E2E: `tests/e2e/access.spec.ts`（アクセスの画面とタクシー乗り場�
 ## ゲームのモデル（Phase 12B-3a Part B）
 
 `gameModels` / `weatherSim` / `airlineEvalGoals` / `gameSave` の単体テスト、`golden.gameWeather` / `golden.gameModels`、e2e `gamemodels.spec.ts`。実測（Phase 12B-3a Part B 完了時）: Vitest 74 ファイル・674 テスト、Playwright 67 テスト（すべて通過）。
+
+実測（PR #5 の最終確認、監査・レビューの修正後。2026-11-13）: 型チェック・Lint エラー 0、Vitest 74 ファイル・683 テスト、Playwright 67 テスト（いずれも全件通過）。

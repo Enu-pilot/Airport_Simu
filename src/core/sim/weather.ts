@@ -29,7 +29,7 @@ export const WX_BASE: Record<Climate, readonly [number, number, number, number]>
 
 /** 0 時の段階の分布（段階 0〜3。難易度の倍率が高いほど悪い側に寄る） */
 const START_CUM = [0.5, 0.8, 0.95, 1] as const;
-/** 段階が上がる確率 = 悪天の出やすさ × 0.9、下がる確率 = 0.35（時間ごとのマルコフ連鎖。ゲーム値） */
+/** 段階が上がる確率 = 悪天の出やすさ × 0.55（UP_FACTOR）、下がる確率 = 0.35（時間ごとのマルコフ連鎖。ゲーム値） */
 const UP_FACTOR = 0.55;
 const DOWN_PROB = 0.35;
 
