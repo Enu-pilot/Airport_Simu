@@ -29,12 +29,40 @@ export interface OpsUiState {
   fidsHideDone: boolean;
   fidsCollapsed: boolean;
   fidsFull: boolean;
+  /** 運航表: 直近の便だけ（コンパクト）/ 全件。位置はマップ左上からの px（null = 既定の右上）。閲覧環境の設定として localStorage に覚える */
+  fidsCompact: boolean;
+  fidsPos: { x: number; y: number } | null;
   /** 運航表の行メニューを開いている便の ID */
   fidsMenu: string | null;
   /** 下部の詳細を折りたたむ */
   detailCollapsed: boolean;
+  /** アラートを全件展開する */
+  alertsExpanded: boolean;
   /** 閉じたアラートのキー（保存しない） */
   dismissed: string[];
+}
+
+const FIDS_PREF_KEY = 'skyport.fids.v1';
+
+/** 運航表の閲覧環境の設定（位置・コンパクト）を読む。壊れていても既定に戻すだけ */
+function loadFidsPrefs(): Pick<OpsUiState, 'fidsCompact' | 'fidsPos'> {
+  try {
+    const raw = globalThis.localStorage?.getItem(FIDS_PREF_KEY);
+    if (!raw) return { fidsCompact: false, fidsPos: null };
+    const j = JSON.parse(raw) as { compact?: unknown; pos?: { x?: unknown; y?: unknown } | null };
+    const pos = j.pos && Number.isFinite(j.pos.x) && Number.isFinite(j.pos.y) ? { x: Number(j.pos.x), y: Number(j.pos.y) } : null;
+    return { fidsCompact: j.compact === true, fidsPos: pos };
+  } catch {
+    return { fidsCompact: false, fidsPos: null };
+  }
+}
+
+export function saveFidsPrefs(): void {
+  try {
+    globalThis.localStorage?.setItem(FIDS_PREF_KEY, JSON.stringify({ compact: state.fidsCompact, pos: state.fidsPos }));
+  } catch {
+    // 保存できなくても表示には影響しない
+  }
 }
 
 const initial = (): OpsUiState => ({
@@ -43,8 +71,10 @@ const initial = (): OpsUiState => ({
   fidsHideDone: true,
   fidsCollapsed: false,
   fidsFull: false,
+  ...loadFidsPrefs(),
   fidsMenu: null,
   detailCollapsed: false,
+  alertsExpanded: false,
   dismissed: [],
 });
 

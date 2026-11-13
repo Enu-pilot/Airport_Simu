@@ -184,7 +184,9 @@ function TopBar() {
           </button>
         ) : (
           <>
-            <button onClick={() => ops.restart()} data-testid="restart-ops">最初から</button>
+            <button onClick={() => ops.restart()} title="今日を締めて（結果を日報に記録して）次の日を 0:00 から始めます。同じ日をやり直すものではありません" data-testid="restart-ops">
+              今日を締めて次の日へ
+            </button>
             <button
               className="primary"
               onClick={() => {
@@ -252,14 +254,28 @@ function TopBar() {
           {viewMode === '3d' ? '2D表示へ' : '3D表示へ'}
         </button>
       </div>
-      <div className="top-group overlays">
-        {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
-          <label key={k}>
-            <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
-            {OVERLAY_LABEL[k]}
-          </label>
-        ))}
-      </div>
+      {mode === 'operate' ? (
+        <details className="overlays-pop" data-testid="overlays-pop">
+          <summary title="マップの表示切り替え">表示</summary>
+          <div className="overlays-menu">
+            {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
+              <label key={k}>
+                <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
+                {OVERLAY_LABEL[k]}
+              </label>
+            ))}
+          </div>
+        </details>
+      ) : (
+        <div className="top-group overlays">
+          {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
+            <label key={k}>
+              <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
+              {OVERLAY_LABEL[k]}
+            </label>
+          ))}
+        </div>
+      )}
       <div className="top-group">
         <button className="small day-btn" onClick={() => ops.skipDay()} disabled={skipping} title={DAY_LOOP.skipDayTitle} data-testid="skip-day">
           {DAY_LOOP.skipDay}

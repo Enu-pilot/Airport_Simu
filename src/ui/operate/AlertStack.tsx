@@ -9,7 +9,8 @@ import { opsUi, useOpsUi } from './opsUi';
 
 function jump(a: Alert): void {
   if (a.target.kind === 'aircraft' && a.target.id) selectAircraftAndFocus(a.target.id);
-  else focusTarget(a.target.id);
+  else if (a.target.kind === 'unit') opsUi.openOverlay('ground');
+  else if (!focusTarget(a.target.id) && a.target.kind === 'area') opsUi.openOverlay(a.panel ?? 'terminal');
 }
 
 /** 既存の対応（sim/disruptions.ts）を呼ぶ。マップへの移動・パネルを開く操作は表示だけの処理 */
@@ -38,6 +39,7 @@ export function AlertStack() {
   const o = useOps();
   const company = useCompany();
   const dismissed = useOpsUi((s) => s.dismissed);
+  const expanded = useOpsUi((s) => s.alertsExpanded);
   const result = o ? deriveAlerts(o.sim, company, dismissed) : { alerts: [], keys: [] };
   const staleCount = dismissed.filter((k) => !result.keys.includes(k)).length;
   // 解消したアラートの「閉じた」記録は消す（同じ key で再び起きたら、また通知する）
@@ -45,7 +47,7 @@ export function AlertStack() {
     if (staleCount > 0) opsUi.patch({ dismissed: dismissed.filter((k) => result.keys.includes(k)) });
   }, [staleCount, dismissed, result.keys]);
   if (!o || result.alerts.length === 0) return null;
-  const shown = result.alerts.slice(0, ALERT_VISIBLE);
+  const shown = expanded ? result.alerts : result.alerts.slice(0, ALERT_VISIBLE);
   const more = result.alerts.length - shown.length;
   return (
     <div className="alert-stack" data-testid="alert-stack">
@@ -70,10 +72,15 @@ export function AlertStack() {
           </span>
         </div>
       ))}
-      {more > 0 && (
-        <button className="alert-more" onClick={() => opsUi.openOverlay('events')} data-testid="alert-more">
-          {OPS_UI.alertMore(more)}
-        </button>
+      {(more > 0 || expanded) && (
+        <span className="alert-more-row">
+          <button className="alert-more" onClick={() => opsUi.patch({ alertsExpanded: !expanded })} aria-expanded={expanded} data-testid="alert-more">
+            {expanded ? OPS_UI.alertLess : OPS_UI.alertMore(more)}
+          </button>
+          <button className="alert-more" onClick={() => opsUi.openOverlay('events')} data-testid="alert-events">
+            {OPS_UI.alertOpenEvents}
+          </button>
+        </span>
       )}
     </div>
   );

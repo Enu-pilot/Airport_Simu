@@ -35,6 +35,22 @@ describe('12B-1: 読み取り専用の集計・導出は状態を変えない', 
     expect(a.kpi.flights).toBeGreaterThan(0);
   });
 
+  it('機体・旅客グループが欠けていても computeKpi は例外にならず、残りの集計は変わらない', () => {
+    const copy = createSimulation(createSampleAirport(), { company: createSandboxCompany() });
+    for (let i = 0; i < 3; i++) addTurnaround(copy, 'narrow180', copy.state.now + 600 + i * 900);
+    runFor(copy, 3 * 3600);
+    const base = computeKpi(copy, copy.company!);
+    // 欠損を作る: 旅客グループの参照だけ残して実体を消す / 機体を消す
+    const groupId = copy.state.activePax[0];
+    if (groupId) delete copy.state.paxGroups[groupId];
+    const flight = Object.values(copy.state.flights).find((f) => f.status === 'cancelled' || f.status === 'diverted' || f.direction === 'departure')!;
+    delete copy.state.aircraft[flight.aircraftId];
+    expect(() => computeKpi(copy, copy.company!)).not.toThrow();
+    const after = computeKpi(copy, copy.company!);
+    expect(after.kpi.avgWaitMin).toBe(base.kpi.avgWaitMin);
+    expect(base.kpi.flights).toBeGreaterThan(0);
+  });
+
   it('airlineScorecard と deriveAlerts も状態を変えず、同じ入力で同じ結果になる', () => {
     const c = sim.company!;
     const plan = planDay(c, c.day, sim.state.access?.factor ?? 1, sim.ctx.types);

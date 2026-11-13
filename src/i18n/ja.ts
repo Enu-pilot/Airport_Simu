@@ -893,6 +893,11 @@ export const OPS_UI = {
   fidsTitle: '運航表 FLIGHTS',
   fidsFilter: { all: 'すべて', departure: '出発', arrival: '到着' },
   fidsHideDone: '完了を隠す',
+  fidsDrag: '見出しをドラッグして移動できます（位置はこのブラウザに記憶します）',
+  fidsCompactLabel: (n: number) => `直近${n}便`,
+  fidsAllLabel: '全件',
+  fidsCompactOn: (n: number) => `直近 ${n} 便だけ表示します（クリックで全件）`,
+  fidsCompactOff: '全件を表示中（クリックで直近の便だけ）',
   fidsOpen: '運航表を開く',
   fidsFold: '運航表を畳む',
   fidsCols: ['予定', '便名', '行先・出発地', '機種', 'スポット', '状態', '遅延'],
@@ -919,7 +924,9 @@ export const OPS_UI = {
   alertCritical: '重大',
   alertWarning: '注意',
   alertAction: { focus: '移動', repair: '修理', delay15: '+15分', reassign: 'スポット変更', openPanel: '詳細' } as Record<string, string>,
-  alertMore: (n: number) => `他 ${n} 件（イベントを開く）`,
+  alertMore: (n: number) => `他 ${n} 件を表示`,
+  alertLess: '畳む',
+  alertOpenEvents: 'イベントを開く',
 } as const;
 
 // ---------------------------------------------------------------- 航空会社の評価カード（12B-1）

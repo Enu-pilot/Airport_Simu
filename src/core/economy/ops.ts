@@ -308,8 +308,8 @@ function legsInPeriod(sim: Simulation, from: number, to: number): Leg[] {
   const inP = (t: number | null) => t !== null && t >= from && t < to;
   for (const f of Object.values(state.flights)) {
     if (f.status === 'diverted' || f.status === 'cancelled') {
-      const ac = state.aircraft[f.aircraftId]!;
-      if ((ac.state === 'diverted' || ac.state === 'cannotOperate') && inP(ac.stateSince)) legs.push({ f, at: ac.stateSince, lost: true, delaySec: 0 });
+      const ac = state.aircraft[f.aircraftId];
+      if (ac && (ac.state === 'diverted' || ac.state === 'cannotOperate') && inP(ac.stateSince)) legs.push({ f, at: ac.stateSince, lost: true, delaySec: 0 });
       continue;
     }
     const ref = f.direction === 'arrival' ? f.actual : f.block;
@@ -351,13 +351,15 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
   const ground: number[] = [];
   for (const f of Object.values(state.flights)) {
     if (f.direction !== 'departure' || f.readyAt === null || f.readyAt < from || f.readyAt >= state.now) continue;
-    const arr = state.flights[state.aircraft[f.aircraftId]!.arrivalFlightId]!;
-    if (arr.block !== null) ground.push(f.readyAt - arr.block);
+    const acf = state.aircraft[f.aircraftId];
+    const arr = acf ? state.flights[acf.arrivalFlightId] : undefined;
+    if (arr && arr.block !== null) ground.push(f.readyAt - arr.block);
   }
   const runways = Object.values(ctx.runways).filter((r) => r.operational).length;
   const stands = Object.values(ctx.stands).filter((s) => s.operational).length;
   const unprocessed = state.activePax.reduce((s, id) => {
-    const g = state.paxGroups[id]!;
+    const g = state.paxGroups[id];
+    if (!g) return s;
     return s + (g.state !== 'toAirport' && !PAX_FINAL_STATES.includes(g.state) ? g.count : 0);
   }, 0);
   const paxTotal = dPax.boarded + dPax.missed;
@@ -383,7 +385,8 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
       r.paxBoarded += l.f.pax.boarded;
       r.missedPax += l.f.pax.missed;
       r.leftBags += (state.flightBags[l.f.id] ?? []).filter((bid) => {
-        const bag = state.bags[bid]!;
+        const bag = state.bags[bid];
+        if (!bag) return false;
         const g = state.paxGroups[bag.paxGroupId];
         return bag.state === 'leftBehind' && g?.state !== 'missed' && g?.state !== 'cancelled';
       }).length;

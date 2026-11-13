@@ -42,7 +42,7 @@
 /* 下部の詳細 */
 .ops-detail { grid-area: detail; background: var(--panel); border-top: 1px solid var(--border); min-height: 0; min-width: 0; }
 .ops-detail-bar { display: flex; justify-content: space-between; align-items: center; padding: 2px 10px; font-size: 12px; height: 24px; }
-.ops-detail.open { height: 236px; display: flex; flex-direction: column; }
+.ops-detail.open { height: clamp(150px, 22vh, 190px); display: flex; flex-direction: column; }
 .ops-detail-body { flex: 1; min-height: 0; overflow: hidden; }
 .ops-detail .properties { height: 100%; column-width: 330px; column-fill: auto; column-gap: 16px; overflow-x: auto; overflow-y: hidden; padding: 4px 10px; }
 .ops-detail .properties .prop-section, .ops-detail .properties .operability { break-inside: avoid-column; }
@@ -57,6 +57,10 @@
 
 /* 運航表（案内板風。表示のみの演出）: 暗い盤面・琥珀色の等幅文字。定刻 = 白、遅延 = 琥珀、搭乗中 = 緑、欠航・ダイバート = 赤 */
 .fids { position: absolute; top: 8px; right: 8px; width: clamp(420px, 46%, 620px); max-height: 62%; z-index: 10; display: flex; flex-direction: column; background: #070b10; border: 1px solid #3a4658; border-radius: 4px; box-shadow: 0 4px 18px #000b; font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Noto Sans Mono CJK JP', monospace; }
+.fids.moved { max-width: calc(100% - 8px); }
+.fids-head { cursor: grab; touch-action: none; }
+.fids-compact.on { background: #ffb400; color: #1a1200; }
+.fids-compact { background: #0b1118; border: 1px solid #3a4658; color: #c9d3de; padding: 1px 8px; font-size: 11px; margin: 0; }
 .fids.full { width: min(calc(100% - 16px), 1100px); }
 .fids.collapsed { width: auto; min-width: 240px; }
 .fids-head { display: flex; align-items: center; gap: 10px; padding: 4px 8px; background: #101820; border-bottom: 1px solid #3a4658; border-radius: 4px 4px 0 0; flex: none; }
@@ -69,8 +73,8 @@
 .fids-check { display: flex; align-items: center; gap: 3px; color: #9aa4ae; font-size: 11px; }
 .fids-fold { background: none; border: none; color: #ffb400; padding: 0 4px; }
 .fids-scroll { overflow: auto; min-height: 0; flex: 1; }
-.fids-table { font-size: 12px; color: #e8eef5; }
-.fids-table th { position: sticky; top: 0; background: #0d141c; color: #ffb400; font-weight: 400; font-size: 11px; letter-spacing: 0.04em; border-bottom: 1px solid #3a4658; z-index: 1; }
+.fids-table { font-size: 13px; color: #e8eef5; }
+.fids-table th { position: sticky; top: 0; background: #0d141c; color: #ffb400; font-weight: 400; font-size: 12px; letter-spacing: 0.04em; border-bottom: 1px solid #3a4658; z-index: 1; }
 .fids-table td { border-top: 1px solid #141c26; padding: 2px 6px; }
 .fids-table tbody tr:hover { background: #121b26; }
 .fids-table tr.selected { background: #1d3a4a; }
@@ -88,7 +92,8 @@
 .fids-empty { padding: 10px; color: #6f7d8c; text-align: center; font-size: 12px; }
 .fids-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid #3a4658; background: #101820; flex: none; }
 .fids-menu b { color: #ffb400; }
-.fids-menu button, .fids-menu select { font-size: 11px; background: #0b1118; border-color: #3a4658; color: #e8eef5; }
+.fids-stand select { min-width: 150px; max-width: 260px; }
+.fids-menu button, .fids-menu select { font-size: 12px; background: #0b1118; border-color: #3a4658; color: #e8eef5; }
 .fids-menu button.on { background: #ffb400; color: #1a1200; }
 .fids-stand { display: inline-flex; gap: 3px; }
 @media (max-width: 1759px) { .fids .col-type { display: none; } }
@@ -164,3 +169,16 @@
 .day-prefs-pop summary { cursor: pointer; padding: 1px 6px; font-size: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); color: var(--text); }
 .day-prefs-pop .day-prefs { position: absolute; z-index: 60; top: 100%; right: 0; margin-top: 4px; background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; white-space: nowrap; box-shadow: 0 6px 24px #000a; }
 .day-prefs-pop .day-prefs label { display: flex; align-items: center; gap: 5px; }
+
+/* 運航モードの施設詳細は読み取り専用 */
+.ro-fields { border: none; margin: 0; padding: 0; min-width: 0; }
+.ro-fields input:disabled, .ro-fields select:disabled { opacity: 0.8; }
+
+/* 上部の「表示」ポップオーバー（運航モードのみ。建設モードは従来どおりチェックを並べる） */
+.overlays-pop { position: relative; }
+.overlays-pop summary { cursor: pointer; padding: 1px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); color: var(--text); }
+.overlays-pop .overlays-menu { position: absolute; z-index: 60; top: 100%; left: 0; margin-top: 4px; background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; white-space: nowrap; box-shadow: 0 6px 24px #000a; }
+.overlays-pop .overlays-menu label { display: flex; align-items: center; gap: 5px; color: var(--text); }
+.mode-operate .top { gap: 8px 10px; padding: 4px 10px; }
+.alert-more-row { display: flex; gap: 6px; }
+.alert-stack { max-height: calc(100% - 44px); overflow-y: auto; }

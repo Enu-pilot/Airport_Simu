@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Field, Info, NumberInput, Section, TextInput } from './fields';
 import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
 import { FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M } from '../core/model/catalog';
@@ -130,6 +130,8 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
   const canTransform = type === 'facility' || type === 'stand' || type === 'runway' || type === 'terminalArea';
   const buildState = (layout.runways[id] ?? layout.taxiways[id] ?? layout.roads[id] ?? layout.stands[id] ?? layout.facilities[id])?.buildState;
   const typeLabel = type === 'facility' ? FACILITY_LABEL[layout.facilities[id]!.kind] : ENTITY_LABEL[type];
+  // 運航モードは読み取り専用（編集ボタン・入力を出さない／無効にする）。運用状況・閉鎖/再開（AreaOpsSection）だけは操作できる
+  const readOnly = useEditor((s) => s.mode) === 'operate';
 
   return (
     <>
@@ -146,6 +148,7 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
         </div>
       </div>
 
+      {!readOnly && (
       <div className="prop-actions">
         {canTransform && (
           <>
@@ -157,6 +160,7 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
           削除
         </button>
       </div>
+      )}
 
       <ProjectInfo layout={layout} id={id} buildState={buildState} />
 
@@ -171,7 +175,8 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
         </div>
       )}
 
-      <Section title="基本">
+      <Section title={readOnly ? '基本（運航中は変更できません）' : '基本'} testid={readOnly ? 'prop-readonly' : undefined}>
+        <FieldsetIf readOnly={readOnly}>
         {buildState && (
           <Field label="建設状態">
             <select value={buildState} onChange={(e) => update(layout, id, { buildState: e.target.value as BuildState })} data-testid="prop-buildState">
@@ -183,7 +188,9 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
             </select>
           </Field>
         )}
-        <TypeFields layout={layout} id={id} />
+        <TypeFields layout={layout} id={id} readOnly={readOnly} />
+        </FieldsetIf>
+        {readOnly && type === 'terminalArea' && <AreaOpsSection id={id} />}
       </Section>
 
       {issues.length > 0 && (
@@ -200,7 +207,18 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
   );
 }
 
-function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
+/** 運航モードだけ、入力を一括で無効にする fieldset で包む（建設モードの DOM は従来どおり） */
+function FieldsetIf({ readOnly, children }: { readOnly: boolean; children: ReactNode }) {
+  return readOnly ? (
+    <fieldset className="ro-fields" disabled data-testid="prop-readonly-fields">
+      {children}
+    </fieldset>
+  ) : (
+    <>{children}</>
+  );
+}
+
+function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; id: string; readOnly?: boolean }) {
   const analysis = useAnalysis();
   const net = analysis.network;
   const type = entityTypeOf(id);
@@ -440,7 +458,7 @@ function TypeFields({ layout, id }: { layout: AirportLayout; id: string }) {
         <Info label={`接続（${links.length}）`}>
           {links.length === 0 ? <span className="ng-text">どこにも接していません</span> : links.map((l) => <EntityLink key={l} layout={layout} id={l} />)}
         </Info>
-        <AreaOpsSection id={id} />
+        {!readOnly && <AreaOpsSection id={id} />}
       </>
     );
   }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { compareIds } from '../../core/model/ids';
 import { designatorsOf } from '../../core/layout/designators';
 import { destinationDef } from '../../core/economy/registry';
@@ -19,10 +19,12 @@ import {
 import { useOps } from '../OpsPanels';
 import { canReassignStand, compatibleStands, standOptionLabel } from './flightActions';
 import { selectAircraftAndFocus } from './focus';
-import { opsUi, useOpsUi } from './opsUi';
+import { opsUi, saveFidsPrefs, useOpsUi } from './opsUi';
 
 const STANDARD_ROWS = 40;
 const FULL_ROWS = 150;
+/** コンパクト表示で出す便数（直近の N 便） */
+const COMPACT_ROWS = 8;
 
 /** 運航表の旅客欄（全列表示）: 出発便 = 搭乗/予約（乗り遅れ）、到着便 = 退出/降機 */
 function paxCell(f: Flight): string {
@@ -52,18 +54,51 @@ export function FidsOverlay() {
   const collapsed = useOpsUi((s) => s.fidsCollapsed);
   const full = useOpsUi((s) => s.fidsFull);
   const menu = useOpsUi((s) => s.fidsMenu);
+  const compact = useOpsUi((s) => s.fidsCompact);
+  const pos = useOpsUi((s) => s.fidsPos);
+  const boardRef = useRef<HTMLDivElement>(null);
   if (!o) return null;
   const { state, ctx } = o.sim;
   const flights = Object.values(state.flights)
     .filter((f) => filter === 'all' || f.direction === filter)
     .filter((f) => !hideDone || f.status === 'scheduled' || f.status === 'active' || state.now - (f.actual ?? f.block ?? f.estimated) < 15 * 60)
     .sort((a, b) => a.scheduled - b.scheduled || compareIds(a.id, b.id))
-    .slice(0, full ? FULL_ROWS : STANDARD_ROWS);
+    .slice(0, full ? FULL_ROWS : compact ? COMPACT_ROWS : STANDARD_ROWS);
   const menuFlight = menu ? state.flights[menu] : undefined;
 
+  /** 見出しのドラッグで移動する（ボタン・入力の上では動かさない）。位置は親（マップ）の内側に収める */
+  const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button, input, label, select')) return;
+    const el = boardRef.current;
+    const parent = el?.offsetParent as HTMLElement | null;
+    if (!el || !parent) return;
+    const pr = parent.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const dx = e.clientX - r.left;
+    const dy = e.clientY - r.top;
+    const move = (ev: PointerEvent) => {
+      const x = Math.min(Math.max(0, ev.clientX - pr.left - dx), Math.max(0, pr.width - 80));
+      const y = Math.min(Math.max(0, ev.clientY - pr.top - dy), Math.max(0, pr.height - 30));
+      opsUi.patch({ fidsPos: { x: Math.round(x), y: Math.round(y) } });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      saveFidsPrefs();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    e.preventDefault();
+  };
+
   return (
-    <div className={`fids ${full ? 'full' : ''} ${collapsed ? 'collapsed' : ''}`} data-testid="flight-board">
-      <div className="fids-head">
+    <div
+      ref={boardRef}
+      className={`fids ${full ? 'full' : ''} ${collapsed ? 'collapsed' : ''} ${pos ? 'moved' : ''}`}
+      style={pos ? { left: pos.x, top: pos.y, right: 'auto' } : undefined}
+      data-testid="flight-board"
+    >
+      <div className="fids-head" onPointerDown={startDrag} title={OPS_UI.fidsDrag} data-testid="fids-head">
         <span className="fids-title">{OPS_UI.fidsTitle}</span>
         <span className="fids-clock" data-testid="fids-clock">
           {formatClock(state.now)}
@@ -77,6 +112,20 @@ export function FidsOverlay() {
                 </button>
               ))}
             </span>
+            {!full && (
+              <button
+                className={`small fids-compact ${compact ? 'on' : ''}`}
+                aria-pressed={compact}
+                onClick={() => {
+                  opsUi.patch({ fidsCompact: !compact });
+                  saveFidsPrefs();
+                }}
+                title={compact ? OPS_UI.fidsCompactOff : OPS_UI.fidsCompactOn(COMPACT_ROWS)}
+                data-testid="fids-compact"
+              >
+                {compact ? OPS_UI.fidsCompactLabel(COMPACT_ROWS) : OPS_UI.fidsAllLabel}
+              </button>
+            )}
             <label className="fids-check">
               <input type="checkbox" checked={hideDone} onChange={(e) => opsUi.patch({ fidsHideDone: e.target.checked })} />
               {OPS_UI.fidsHideDone}
@@ -178,6 +227,20 @@ export function FidsOverlay() {
 function FlightMenu({ flight }: { flight: Flight }) {
   const o = useOps();
   const [stand, setStand] = useState('');
+  const close = () => opsUi.patch({ fidsMenu: null });
+  // 外側のクリック・Esc で閉じる（遅延・優先は続けて押せるよう開いたまま。スポット変更・移動は操作後に閉じる）
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-testid^="fids-menu"], [data-testid="flight-board"] table')) close();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  });
   if (!o) return null;
   const sim = o.sim;
   const ac = sim.state.aircraft[flight.aircraftId]!;
@@ -203,14 +266,21 @@ function FlightMenu({ flight }: { flight: Flight }) {
             </option>
           ))}
         </select>
-        <button disabled={!canStand || !stand} onClick={() => disruptionActions.reassignStand(ac.id, stand)} data-testid={`fids-stand-apply-${n}`}>
+        <button disabled={!canStand || !stand} onClick={() => {
+            disruptionActions.reassignStand(ac.id, stand);
+            close();
+          }} data-testid={`fids-stand-apply-${n}`}>
           {OPS_UI.apply}
         </button>
       </span>
       <button className={dep.priority ? 'on' : ''} onClick={() => disruptionActions.prioritize(ac.id, !dep.priority)} data-testid={`fids-prio-${n}`}>
         {dep.priority ? OPS_UI.prioOff : OPS_UI.prio}
       </button>
-      <button onClick={() => selectAircraftAndFocus(ac.id)} data-testid={`fids-goto-${n}`}>
+      <button onClick={() => {
+          selectAircraftAndFocus(ac.id);
+          close();
+        }}
+        data-testid={`fids-goto-${n}`}>
         {OPS_UI.goto}
       </button>
       <button className="small" onClick={() => opsUi.patch({ fidsMenu: null })} aria-label={OPS_UI.close}>
