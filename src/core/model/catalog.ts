@@ -68,7 +68,23 @@ export type PropDef =
   | { key: string; type: 'bool' }
   | { key: string; type: 'enum'; options: readonly string[] }
   /** スポットIDへの参照 */
-  | { key: string; type: 'standRef' };
+  | { key: string; type: 'standRef' }
+  /** 施設（種類 of）への参照。null = 未指定（欠落と同じ） */
+  | { key: string; type: 'facilityRef'; of: FacilityKind };
+
+/** プロパティが欠落しているときの値（DEFAULT_PROPS には入れない: 新しく置いた施設の JSON を従来と同じに保つため）。読む側と UI が使う */
+export function propDefault(def: PropDef): PropValue {
+  switch (def.type) {
+    case 'int':
+      return def.min;
+    case 'bool':
+      return false;
+    case 'enum':
+      return def.options[0] ?? null;
+    default:
+      return null;
+  }
+}
 
 export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
   apron: [],
@@ -76,6 +92,10 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
   gate: [
     { key: 'standId', type: 'standRef' },
     { key: 'jetBridge', type: 'bool' },
+    /** 搭乗方式（欠落 = 'contact'）。'bus' はランプバスでリモートスポットへ運ぶバスゲート（docs/29） */
+    { key: 'boardingMode', type: 'enum', options: ['contact', 'bus'] },
+    /** 明示の接続先ターミナル（欠落 = 隣接で決まる）。隣接しないゲートは連絡通路でつながる独立ゲート */
+    { key: 'connectedTo', type: 'facilityRef', of: 'terminal' },
   ],
   hangar: [{ key: 'maxSize', type: 'enum', options: ['S', 'M', 'L'] }],
   tower: [{ key: 'level', type: 'int', min: 1, max: 3 }],
@@ -93,6 +113,8 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
     { key: 'fuelTrucks', type: 'int', min: 0, max: 30 },
     { key: 'cateringTrucks', type: 'int', min: 0, max: 30 },
     { key: 'cleaningVans', type: 'int', min: 0, max: 30 },
+    /** ランプバス（旅客を運ぶバス）の台数（欠落 = 0） */
+    { key: 'apronBuses', type: 'int', min: 0, max: 30 },
   ],
   baggageSort: [{ key: 'capacityPerMin', type: 'int', min: 1, max: 500 }],
   serviceArea: [],

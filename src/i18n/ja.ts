@@ -73,6 +73,9 @@ export const PROP_LABEL: Record<string, string> = {
   securityLanes: '保安検査レーン数',
   standId: '紐付けスポット',
   jetBridge: 'ボーディングブリッジ',
+  boardingMode: '搭乗方式',
+  connectedTo: '接続先ターミナル',
+  apronBuses: 'ランプバス',
   maxSize: '収容可能な最大機体',
   level: 'レベル',
   bays: '整備ベイ数',
@@ -95,6 +98,13 @@ export const PROP_LABEL: Record<string, string> = {
   trainsPerHour: '列車本数（毎時）',
   rooms: '客室数',
 };
+
+/** ゲートの搭乗方式（docs/29） */
+export const BOARDING_MODE_LABEL = {
+  contact: '通常（コンタクト）',
+  bus: 'バス（ランプバスでリモートスポットへ）',
+  connectAuto: '（自動: 隣接するターミナル）',
+} as const;
 
 export const SEVERITY_LABEL: Record<Severity, string> = { error: 'エラー', warning: '警告', info: '情報' };
 

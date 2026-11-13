@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { Field, Info, NumberInput, Section, TextInput } from './fields';
 import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
-import { FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M } from '../core/model/catalog';
+import { FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
+import { connectedTerminal, gateMode } from '../core/model/gates';
 import { sortedValues } from '../core/model/ids';
 import {
   BUILD_STATES,
@@ -29,6 +30,7 @@ import { ops } from '../editor/simRunner';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { focusEntity } from '../editor/input';
 import {
+  BOARDING_MODE_LABEL,
   BUILD_STATE_LABEL,
   ENTITY_LABEL,
   FACILITY_LABEL,
@@ -467,6 +469,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
     const f = layout.facilities[id]!;
     const spec = FACILITY_SPECS[f.kind];
     const dims = facilityDims(f);
+    const busGate = gateMode(f) === 'bus';
     return (
       <>
         <NameField layout={layout} id={id} value={f.name} />
@@ -484,11 +487,13 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
           <Info label="大きさ">{`${dims.w} × ${dims.h} タイル`}</Info>
         )}
         {f.kind !== 'gate' && <RotationField value={f.rotation} onChange={(r) => update(layout, id, { rotation: r })} label="向き" />}
-        {PROP_SCHEMAS[f.kind].map((def) => (
+        {PROP_SCHEMAS[f.kind]
+          .filter((def) => !(f.kind === 'gate' && busGate && (def.key === 'standId' || def.key === 'jetBridge')))
+          .map((def) => (
           <Field key={def.key} label={PROP_LABEL[def.key] ?? def.key}>
             {def.type === 'int' && (
               <NumberInput
-                value={f.props[def.key] as number}
+                value={(f.props[def.key] as number | undefined) ?? propDefault(def) as number}
                 min={def.min}
                 max={def.max}
                 onCommit={(v) => update(layout, id, { props: { [def.key]: v } })}
@@ -498,13 +503,41 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             {def.type === 'bool' && (
               <input type="checkbox" checked={!!f.props[def.key]} onChange={(e) => update(layout, id, { props: { [def.key]: e.target.checked } })} />
             )}
-            {def.type === 'enum' && (
-              <select value={String(f.props[def.key])} onChange={(e) => update(layout, id, { props: { [def.key]: e.target.value } })}>
+            {def.type === 'enum' && def.key === 'boardingMode' && (
+              <select
+                value={busGate ? 'bus' : 'contact'}
+                onChange={(e) =>
+                  update(layout, id, { props: e.target.value === 'bus' ? { boardingMode: 'bus', standId: null, jetBridge: false } : { boardingMode: 'contact', jetBridge: true } })
+                }
+                data-testid="prop-boardingMode"
+              >
+                <option value="contact">{BOARDING_MODE_LABEL.contact}</option>
+                <option value="bus">{BOARDING_MODE_LABEL.bus}</option>
+              </select>
+            )}
+            {def.type === 'enum' && def.key !== 'boardingMode' && (
+              <select value={String((f.props[def.key] as string | undefined) ?? propDefault(def))} onChange={(e) => update(layout, id, { props: { [def.key]: e.target.value } })}>
                 {def.options.map((o) => (
                   <option key={o} value={o}>
                     {o}
                   </option>
                 ))}
+              </select>
+            )}
+            {def.type === 'facilityRef' && (
+              <select
+                value={connectedTerminal(f, layout) ?? ''}
+                onChange={(e) => update(layout, id, { props: { [def.key]: e.target.value || null } })}
+                data-testid={`prop-${def.key}`}
+              >
+                <option value="">{BOARDING_MODE_LABEL.connectAuto}</option>
+                {sortedValues(layout.facilities)
+                  .filter((x) => x.kind === def.of)
+                  .map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {displayName(layout, x.id)}
+                    </option>
+                  ))}
               </select>
             )}
             {def.type === 'standRef' && (
@@ -523,10 +556,24 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             )}
           </Field>
         ))}
+        {f.kind === 'gate' && busGate && (
+          <Info label="対象のスポット" testid="prop-bus-targets" title="バスゲートは、ゲートのないリモートスポットの便をランプバスで運びます（docs/29）">
+            {`リモートスポット ${remoteStandCount(layout)} か所`}
+          </Info>
+        )}
       </>
     );
   }
   return null;
+}
+
+/** ゲートのない（コンタクトでない）スポットの数。バスゲートが受け持つ対象 */
+function remoteStandCount(layout: AirportLayout): number {
+  const contact = new Set<string>();
+  for (const g of Object.values(layout.facilities)) {
+    if (g.kind === 'gate' && gateMode(g) !== 'bus' && typeof g.props.standId === 'string') contact.add(g.props.standId);
+  }
+  return Object.values(layout.stands).filter((s) => !contact.has(s.id)).length;
 }
 
 // ---------------------------------------------------------------- 部品
