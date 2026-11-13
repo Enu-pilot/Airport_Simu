@@ -311,6 +311,10 @@ export function acceptOffer(c: CompanyState, id: string, supported: boolean): Co
   if (!k) return { ok: false, reason: 'NOT_FOUND' };
   if (k.status !== 'offered') return { ok: false, reason: 'NOT_OFFERED' };
   if (!supported) return { ok: false, reason: 'UNSUPPORTED' };
+
+  // 新規契約の受諾時に、過去の撤退カウントをリセットする
+  c.airlines[k.airlineId]!.lowDays = 0;
+
   k.status = 'active';
   k.startDay = c.day;
   k.endDay = c.day + BALANCE.offers.contractDays - 1;
