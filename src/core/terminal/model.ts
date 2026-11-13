@@ -67,8 +67,8 @@ export interface TerminalModel {
   gates: Record<string, GateAccess>;
   /** ターミナルID → エリアID（ID 順） */
   byTerminal: Record<string, string[]>;
-  /** 独立ゲートの接続（無ければ空）。描画・検証・将来の拡張（サテライト・ピープルムーバー）用 */
-  connectors: GateConnector[];
+  /** 独立ゲートの接続。独立ゲートがなければキー自体を持たない（従来の結果の形を変えない）。描画・検証・将来の拡張（サテライト・ピープルムーバー）用 */
+  connectors?: GateConnector[];
 }
 
 /** 独立ゲートの搭乗待合の混雑の目安人数 */
@@ -161,7 +161,7 @@ export function buildTerminalModel(layout: AirportLayout): TerminalModel {
     gates[g.id] = access;
   }
   for (const list of Object.values(links)) list.sort((p, q) => compareIds(p.to, q.to));
-  return { areas, links, gates, byTerminal, connectors };
+  return connectors.length > 0 ? { areas, links, gates, byTerminal, connectors } : { areas, links, gates, byTerminal };
 }
 
 /**

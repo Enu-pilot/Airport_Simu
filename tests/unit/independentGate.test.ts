@@ -23,7 +23,7 @@ describe('独立ゲートの接続', () => {
   it('connectedTo のないレイアウトでは従来と同じ（合成ノード・接続なし）', () => {
     const l = createSampleAirport();
     const m = buildTerminalModel(l);
-    expect(m.connectors).toEqual([]);
+    expect(m.connectors).toBeUndefined();
     expect(Object.values(m.areas).some((a) => a.synthetic)).toBe(false);
   });
 
@@ -40,7 +40,7 @@ describe('独立ゲートの接続', () => {
     expect(acc.deplane).toBe(`${gid}:arr`);
     expect(m.areas[acc.boarding!]!.synthetic).toBe(true);
     expect(m.connectors).toHaveLength(1);
-    expect(m.connectors[0]!.lengthM).toBeGreaterThan(0);
+    expect(m.connectors![0]!.lengthM).toBeGreaterThan(0);
     for (const ids of Object.values(m.byTerminal)) expect(ids.some((id) => id.includes(':'))).toBe(false);
     // 他のゲートの入口は不変
     for (const g of gateIds(l).slice(1)) expect(m.gates[g]).toEqual(before.gates[g]);

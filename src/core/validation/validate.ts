@@ -873,7 +873,7 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
   }
 
   // 独立ゲートの連絡通路が長すぎる（1.5 km 超）
-  for (const c of model.connectors) {
+  for (const c of model.connectors ?? []) {
     const tiles = c.lengthM / CONNECTOR_DETOUR / TILE_M;
     if (tiles > GATE_CONNECTOR_MAX_TILES) sink.add('GATE_CONNECTOR_LONG', [c.gateId, c.terminalId], { tiles: Math.round(tiles) }, layout.facilities[c.gateId]?.origin);
   }

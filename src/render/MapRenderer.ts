@@ -475,7 +475,7 @@ export class MapRenderer {
   /** 独立ゲート（connectedTo で接続されたゲート）から接続先の区域のエリアへの連絡通路を破線で描く（選択中は太く） */
   private drawConnectors(layout: AirportLayout, analysis: LayoutAnalysis, selection: string | null): void {
     const o = this.overlay;
-    for (const cn of analysis.terminal.connectors) {
+    for (const cn of analysis.terminal.connectors ?? []) {
       const gate = layout.facilities[cn.gateId];
       if (!gate) continue;
       const from = worldToMap(gate.origin);
