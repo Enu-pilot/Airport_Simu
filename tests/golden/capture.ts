@@ -22,7 +22,9 @@ import { airportKpis } from '../../src/core/analytics/kpi';
 import { SIM_MODEL_VERSION } from '../../src/core/scenario/scenario';
 import { createSimulation, stepSimulation } from '../../src/core/sim/simulation';
 import { analyzeLayout } from '../../src/core/validation/validate';
-import { loadFixture } from './io';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { goldenDir, loadFixture } from './io';
 
 export const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 
@@ -286,4 +288,43 @@ export function captureProjectWithSim(): { length: number; sha256: string; norma
     buildProject({ name: 'golden-midrun', savedAt: '2026-11-10T00:00:00Z', layout: sim.ctx.layout, company, pin: null, scenarios: [], sim }),
   );
   return { simModelVersion: SIM_MODEL_VERSION, now: sim.state.now, length: json.length, sha256: sha256(json), normalizedSha256: sha256(normalizedProjectJson(json)) };
+}
+
+// ---------------------------------------------------------------- 12B-3a A0: リモートスポットの従来の挙動（特性テスト）
+
+/**
+ * ゲートのないスポット（リモート）を含む従来のレイアウト（legacy-remote.layout.json = サンプルからゲート 2 つを外したもの）の 1 日の運航。
+ * 12B-3a（バス搭乗・独立ゲート）を入れる前の現行コードの出力で、バスゲートのないデータでは 1 ビットも変わらないことを固定する。
+ * 出発旅客は「ゲートなし」で乗り遅れ（noGate）、到着旅客は到達不能で降機口のないまま留まる（stranded）のが従来の挙動。
+ */
+export function captureLegacyRemote(): unknown {
+  const layout = JSON.parse(readFileSync(resolve(goldenDir, 'fixtures', 'legacy-remote.layout.json'), 'utf8')) as AirportLayout;
+  const runs: Record<string, unknown> = {};
+  const variants: { name: string; make: () => ReturnType<typeof createSimulation> }[] = [
+    { name: 'sandbox', make: () => createSimulation(layout, { company: createSandboxCompany() }) },
+    { name: 'plain-seed', make: () => createSimulation(layout, { seed: 'legacy-remote', settings: { flightsPerDay: 160 } }) },
+  ];
+  for (const v of variants) {
+    const sim = v.make();
+    for (let i = 0; i < SIM_SECONDS; i++) stepSimulation(sim);
+    const json = JSON.stringify(sim.state);
+    const byReason: Record<string, number> = {};
+    const byState: Record<string, number> = {};
+    for (const g of Object.values(sim.state.paxGroups)) {
+      if (g.state === 'missed') byReason[g.reason ?? 'none'] = (byReason[g.reason ?? 'none'] ?? 0) + g.count;
+      if (g.direction === 'arrival') byState[g.state] = (byState[g.state] ?? 0) + g.count;
+    }
+    runs[v.name] = {
+      seconds: SIM_SECONDS,
+      stateSha256: sha256(json),
+      stateLength: json.length,
+      stats: sim.state.stats,
+      paxStats: sim.state.paxStats,
+      missedByReason: byReason,
+      arrivalPaxByState: byState,
+      remoteStands: Object.values(sim.ctx.stands).filter((s) => !s.contact).length,
+      kpis: JSON.parse(JSON.stringify(airportKpis(sim))),
+    };
+  }
+  return { simModelVersion: SIM_MODEL_VERSION, runs };
 }
