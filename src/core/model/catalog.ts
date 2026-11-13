@@ -74,9 +74,11 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
   apron: [],
   terminal: [{ key: 'levels', type: 'int', min: 1, max: 3 }],
   gate: [
-    { key: 'standId', type: 'standRef' },
-    { key: 'jetBridge', type: 'bool' },
-  ],
+      { key: 'standId', type: 'standRef' },
+      { key: 'boardingMode', type: 'enum',
+        options: ['contact', 'bus'] },
+      { key: 'jetBridge', type: 'bool' },
+    ];
   hangar: [{ key: 'maxSize', type: 'enum', options: ['S', 'M', 'L'] }],
   tower: [{ key: 'level', type: 'int', min: 1, max: 3 }],
   maintenance: [
