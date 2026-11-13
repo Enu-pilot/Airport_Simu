@@ -4,6 +4,9 @@ import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from
 import { BALANCE } from './balance';
 import { AIRLINES, DESTINATIONS, airlineDef, type FleetEntry } from './registry';
 import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
+import { checkGameSettings, otpAddOf, type GameSettings } from './game';
+import type { AirlineEvalState } from './airlineEval';
+import type { GoalState } from './goals';
 
 /**
  * 空港会社（経営）の状態。建設モードと運航モードをまたいで保持し、レイアウトと一緒に保存する。
@@ -170,6 +173,12 @@ export interface CompanyState {
   projects: Record<string, Project>;
   /** 航空会社の保有機材と座席構成（機種ID で参照。Phase 7） */
   fleets: Record<string, FleetEntry[]>;
+  /** ゲームのモデル（12B-3a）の設定。ない会社は従来のルールのまま（docs/30） */
+  game?: GameSettings;
+  /** game.airlineEval のときの航空会社の評価（移動平均・不満・要望） */
+  airlineEval?: AirlineEvalState;
+  /** game.goals のときの目標・空港の格 */
+  goals?: GoalState;
 }
 
 /** 工事: 新設・改修（移設・拡張）は建設中、一時閉鎖は運用を止めるだけ。残り日数は運航した日で進む */
@@ -417,6 +426,10 @@ export interface AirlineDayResult {
   missedPax: number;
   leftBags: number;
   cancelled: number;
+  /** 天候による欠航の数（cancelled の内数。天候 5 段階の運航だけ設定する。欠航の満足度ペナルティは半分） */
+  weatherCancelled?: number;
+  /** プレイヤーの先行欠航の数（cancelled の内数。満足度のペナルティは 1 便あたり 0.5 = 折り返し 1 回で 1） */
+  earlyCancelled?: number;
 }
 
 /**
@@ -435,10 +448,14 @@ export function updateContracts(c: CompanyState, results: Record<string, Airline
     let delta = 0;
     if (r && r.flights > 0) {
       const otp = r.onTime / r.flights;
-      delta += otp >= a.minOtp ? 2 : -(a.minOtp - otp) * 40;
+      const minOtp = a.minOtp + otpAddOf(c);
+      delta += otp >= minOtp ? 2 : -(minOtp - otp) * 40;
       if (r.paxBoarded + r.missedPax > 0) delta -= (r.missedPax / (r.paxBoarded + r.missedPax)) * 100;
       if (r.paxBoarded > 0) delta -= Math.min(20, (r.leftBags / Math.max(1, r.paxBoarded)) * 50);
-      delta -= r.cancelled * 5;
+      // 欠航 1 便あたり 5。天候による欠航は 1/4（折り返し 1 回 = 2 便で 2.5）、先行欠航は 1/10（折り返し 1 回で 1）
+      const wc = r.weatherCancelled ?? 0;
+      const ec = r.earlyCancelled ?? 0;
+      delta -= (r.cancelled - wc - ec + wc * 0.25 + ec * 0.1) * 5;
     }
     delta -= (feeRatio - 1) * a.priceSensitivity * BALANCE.feeSensitivity.satisfactionPerRatio;
     rel.satisfaction = Math.max(0, Math.min(100, rel.satisfaction + delta));
@@ -508,6 +525,8 @@ export function importCompany(json: string): CompanyState | null {
     c.accessFeedback ??= { ...NO_FEEDBACK, waitMin: {} };
     c.parkedCars ??= [];
     c.projects ??= {};
+    // 12B-3a: ゲームの設定の形が不正なら捨てて従来のルールに戻す（読み込みは止めない。厳格な検証は validateProject）
+    if (c.game !== undefined && checkGameSettings(c.game) !== null) delete c.game;
     // Phase 6 以前の保存データ: 保有機材の設定がないので初期設定を入れ、契約で使っている機種（旧形式の汎用機材を含む）は
     // そのまま保有機材に加える（汎用機材を実在の機種に置き換えない）
     if (!c.fleets) {

@@ -8,6 +8,7 @@ import { setEquipmentBroken } from './baggage';
 import { setUnitBroken } from './ground';
 import { setAreaClosed } from './passengers';
 import type { Simulation } from './simulation';
+import { wxEffects } from './weather';
 import { EVENT_LOG_LIMIT, type Disruption, type DisruptionKind, type SimState, type WeatherKind } from './types';
 
 /**
@@ -62,7 +63,8 @@ const addSorted = (list: string[], id: string) => (list.includes(id) ? list : [.
 const remove = (list: string[], id: string) => list.filter((x) => x !== id);
 
 export function weatherEffects(state: SimState): { separation: number; taxi: number } {
-  return WEATHER_EFFECTS[state.weather.kind];
+  // 天候 5 段階の運航（state.wx）は段階の表、そうでなければ従来の 4 種の表
+  return state.wx ? wxEffects(state.wx) : WEATHER_EFFECTS[state.weather.kind];
 }
 
 export type DisruptionInput = Pick<Disruption, 'kind' | 'targetId'> &
@@ -378,11 +380,16 @@ function randomDisruptions(sim: Simulation): void {
   const picks: DisruptionInput[] = [];
   const rng = new Rng(state.rng);
   const pick = <T>(list: T[]): T | undefined => (list.length ? list[rng.int(0, list.length - 1)] : undefined);
+  const scale = state.settings.randomDisruptionScale ?? 1;
   for (const [kind, p] of Object.entries(RANDOM_PROB_PER_HOUR) as [DisruptionKind, number][]) {
-    if (rng.next() >= p) continue;
+    if (rng.next() >= p * scale) continue;
     const dur = rng.int(30, 120) * 60;
     const end = state.now + dur;
-    if (kind === 'weather') picks.push({ kind, targetId: null, weather: pick<WeatherKind>(['rain', 'snow', 'fog'])!, end });
+    // 天候 5 段階の運航では天候は計画で決まるので、乱数は従来どおり引いたうえで天候の障害だけ登録しない（他の障害の乱数列を変えない）
+    if (kind === 'weather') {
+      const w = pick<WeatherKind>(['rain', 'snow', 'fog'])!;
+      if (!state.wx) picks.push({ kind, targetId: null, weather: w, end });
+    }
     else if (kind === 'runwayClosed') {
       const r = pick(Object.keys(ctx.runways).sort(compareIds));
       if (r) picks.push({ kind, targetId: r, end });

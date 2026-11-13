@@ -275,6 +275,7 @@ export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
   goAround: '着陸復行',
   boarding: '搭乗手続き中',
   groundCrew: 'トーイングカー・作業員待ち',
+  weather: '天候',
 };
 
 export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
@@ -287,6 +288,7 @@ export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
   boarding: '搭乗手続き',
   groundHandling: '地上支援作業',
   apronBus: 'ランプバス待ち',
+  weather: '天候',
 };
 
 export const FLIGHT_STATUS_LABEL: Record<FlightStatus, string> = {
@@ -330,7 +332,7 @@ export function eventText(e: SimEvent, callsign: (id: string) => string): string
     case 'hold':
       return `${who} 待機: ${HOLD_REASON_LABEL[e.reason!]}`;
     case 'goAround':
-      return `${who} 着陸復行（滑走路が空いていない）`;
+      return e.reason === 'weather' ? `${who} 着陸復行（天候）` : `${who} 着陸復行（滑走路が空いていない）`;
     case 'diverted':
       return `${who} ダイバート（${e.reason ? HOLD_REASON_LABEL[e.reason] : '待機上限'}）`;
     case 'cannotOperate':
@@ -954,6 +956,9 @@ export const OPS_UI = {
   reassign: 'スポット変更',
   apply: '変更',
   prio: '優先',
+  cancelEarly: '先行欠航',
+  cancelEarlyTitle: 'まだ現れていない折り返しを欠航にします（補償なし・航空会社の満足度 −1。悪天の前に使います）',
+  cancelEarlyConfirm: (n: string) => `${n} の折り返しを先行欠航にしますか？（元には戻せません）`,
   prioOff: '優先を解除',
   goto: '機体へ移動',
   close: '閉じる',
@@ -1123,4 +1128,50 @@ export const DAY_LOOP = {
   historyView: '振り返り',
   historyRestoreBlocked: '運航中は戻れません。建設モードに戻ってから行ってください',
   historyDay: (d: number) => `${d + 1}日目の朝`,
+};
+
+/** ゲームのモデル（12B-3a Part B）の文言。数値はゲーム用の値で、実在の基準への適合をうたうものではない（docs/30） */
+export const GAME_UI = {
+  setupNew: '新しいゲーム（設定）',
+  setupNewTitle: '難易度・気候・ルールを選んで新しいゲームを始めます',
+  setupSettings: 'ゲーム設定',
+  setupSettingsTitle: '天候・難易度・評価・目標のルールを選びます（以後の運航から反映）',
+  setupDialog: 'ゲームの設定',
+  setupMode: 'モード',
+  setupModeCareer: 'キャリア（小さな飛行場から）',
+  setupModeSandbox: 'サンドボックス（サンプル空港・潤沢な資金）',
+  setupDifficulty: '難易度',
+  setupClimate: '気候（天候の出方の傾向）',
+  setupRules: '使うルール',
+  setupWeather: '天候 5 段階・予報（オフ = 従来の 4 種の天候の障害）',
+  setupEval: '航空会社の評価要素・不満・要望',
+  setupGoals: '目標・空港の格',
+  setupLegacy: '新しいルールを使わない（従来のルールのまま）',
+  setupStart: 'この設定で始める',
+  setupApply: '設定を反映',
+  setupCancel: '閉じる',
+  setupConfirm: '新しいゲームを始めますか？（現在の空港と経営データは失われます）',
+  setupApplyConfirm: 'ルールを変更しますか？（運航の結果が変わります）',
+  setupNote: '数値はすべてゲーム用の値です。難易度は初期資金・建設費・悪天の頻度・求める定時率・予報の的中率を変えます',
+  difficulty: { normal: '標準', hard: '難しい', expert: '上級' } as Record<string, string>,
+  difficultyHint: {
+    normal: '悪天 ×1.0 / 障害 ×0.6 / 資金 ×1.0 / 建設費 ×1.0 / 予報 90%',
+    hard: '悪天 ×1.5 / 障害 ×1.0 / 資金 ×0.75 / 建設費 ×1.1 / 定時率 +5pt / 予報 80%',
+    expert: '悪天 ×2.0 / 障害 ×1.5 / 資金 ×0.5 / 建設費 ×1.2 / 定時率 +10pt / 予報 65%',
+  } as Record<string, string>,
+  climate: { temperate: '温帯', snowy: '雪国', humid: '多雨' } as Record<string, string>,
+  difficultyBadge: (d: string) => `難易度 ${d}`,
+  rulesLegacy: '従来のルール',
+  // 天候（段階 0〜4。ゲーム用の区分）
+  wxLevel: ['晴れ', '曇り・小雨', '雨', '荒天', '悪天'] as readonly string[],
+  wxType: { clear: '晴れ', cloud: '曇り', rain: '雨', snow: '雪', fog: '霧', storm: '雷雨' } as Record<string, string>,
+  wxTitle: '天候の段階',
+  wxNow: '現在',
+  wxForecast: '明日の予報',
+  wxForecastToday: '今日の予報',
+  wxForecastNote: (acc: number) => `予報の的中率 ${Math.round(acc * 100)}%（区間ごと。外れると段階が 1 ずれる）`,
+  wxBlock: (a: number, b: number) => `${a}〜${b}時`,
+  wxHourly: '今日の残りの時間',
+  wxEffectNote: '段階が高いほど離着陸の間隔が広がり、走行が遅くなり、着陸復行・欠航が増えます（ゲーム用の値）',
+  wxNoForecast: '予報なし（天候 5 段階を使っていません）',
 };

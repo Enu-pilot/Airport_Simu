@@ -1,4 +1,4 @@
-import { addTurnaround, createSimulation, setRunwayConfig, type Simulation } from '../core/sim/simulation';
+import { addTurnaround, cancelFlightEarly, createSimulation, setRunwayConfig, type Simulation } from '../core/sim/simulation';
 import { majorDisruptionWatcher, nextCloseAt, nightEndAt, stepTicks, type StepResult } from '../core/sim/dayloop';
 import { buildDayReview, emptyResponses, type DayReview, type ReviewResponses } from '../core/analytics/review';
 import { recordDayClose } from './dayHistory';
@@ -211,7 +211,9 @@ export const ops = {
     }
     // プロジェクトが保存時の機種データで固定されていれば、その値で運航する
     const types = s.catalogPin ? buildTypeTable(effectiveModels(s.catalogPin)) : undefined;
-    const sim = createSimulation(s.history.present, { ...(seed ? { seed } : {}), company: structuredClone(s.company), ...(types ? { types } : {}) });
+    // ゲームのモデル（会社の game）がある会社は、運航を始める日ごとに運航のシードを変える（同じ日付の運航が毎回同じにならない）
+    const runSeed = seed ?? (s.company.game ? `${s.history.present.site.seed}:ops:${s.company.day}` : undefined);
+    const sim = createSimulation(s.history.present, { ...(runSeed ? { seed: runSeed } : {}), company: structuredClone(s.company), ...(types ? { types } : {}) });
     if (Object.keys(sim.ctx.runways).length === 0) {
       showToast('滑走路がないため運航できません', 'error');
       return;
@@ -393,6 +395,9 @@ export const disruptionActions = {
   },
   delay(flightId: string, minutes: number): void {
     respond((o) => delayFlight(o.sim, flightId, minutes), `${minutes}分遅らせました`, 'delays');
+  },
+  cancelEarly(acId: string): void {
+    respond((o) => cancelFlightEarly(o.sim, acId), '先行欠航にしました（補償なし・航空会社の満足度 −1）');
   },
   prioritize(acId: string, on: boolean): void {
     respond((o) => prioritize(o.sim, acId, on), on ? '地上作業を優先します' : '優先を解除しました', on ? 'priorities' : undefined);

@@ -286,6 +286,21 @@ function FlightMenu({ flight }: { flight: Flight }) {
           {OPS_UI.apply}
         </button>
       </span>
+      {sim.company?.game && (
+        <button
+          disabled={ac.state !== 'scheduled'}
+          title={OPS_UI.cancelEarlyTitle}
+          onClick={() => {
+            if (window.confirm(OPS_UI.cancelEarlyConfirm(n))) {
+              disruptionActions.cancelEarly(ac.id);
+              close();
+            }
+          }}
+          data-testid={`fids-cancel-${n}`}
+        >
+          {OPS_UI.cancelEarly}
+        </button>
+      )}
       <button className={dep.priority ? 'on' : ''} onClick={() => disruptionActions.prioritize(ac.id, !dep.priority)} data-testid={`fids-prio-${n}`}>
         {dep.priority ? OPS_UI.prioOff : OPS_UI.prio}
       </button>

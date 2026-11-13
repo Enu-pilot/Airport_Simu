@@ -1,5 +1,6 @@
 import { DAY_SEC, INBOUND_LEAD_SEC } from './rules';
 import { stepSimulation, type Simulation } from './simulation';
+import { effectiveWx } from './weather';
 
 /**
  * 1 日のループの読み取り補助（docs/14_management_rules.md §N「日のループ」）。
@@ -52,8 +53,15 @@ export function nextCloseAt(sim: Simulation): number {
 export function majorDisruptionWatcher(sim: Simulation): (sim: Simulation) => boolean {
   const known = new Set(sim.state.disruptions.map((d) => d.id));
   let diverted = sim.state.stats.diverted;
+  // 天候 5 段階の運航: 段階 4（悪天）の開始でも止める（state.wx がない運航は何も変わらない）
+  const severe = (st: Simulation['state']): boolean => !!st.wx && effectiveWx(st.wx).level >= 4;
+  let wasSevere = severe(sim.state);
   return (s) => {
     const st = s.state;
+    const nowSevere = severe(st);
+    const started = nowSevere && !wasSevere;
+    wasSevere = nowSevere;
+    if (started) return true;
     if (st.stats.diverted > diverted) {
       diverted = st.stats.diverted;
       return true;

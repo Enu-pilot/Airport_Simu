@@ -1,6 +1,7 @@
 import { CATALOG, CATALOG_VERSION, type AircraftModel } from '../aircraft/catalog';
 import { AIRCRAFT_ASSETS, ASSET_VERSION } from '../assets/registry';
 import { importCompany, type CompanyState } from '../economy/company';
+import { checkGameFields } from '../economy/game';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
 import { SIM_MODEL_VERSION, modelsUsed, type Scenario } from '../scenario/scenario';
 import { buildTypeTable } from '../sim/aircraftTypes';
@@ -8,6 +9,7 @@ import { createContext } from '../sim/context';
 import { checkInvariants, repairCrossingState } from '../sim/invariants';
 import type { Simulation } from '../sim/simulation';
 import type { SimState } from '../sim/types';
+import { checkWxState } from '../sim/weather';
 import { SAVE_FORMAT, checkRunwayFields, validateLayoutData } from './serialize';
 import { migrateLayout } from './migrate';
 
@@ -208,7 +210,7 @@ function checkCompany(c: unknown, where: string): { errors: string[]; company: C
   if (!isObj(c)) return { errors: [`${where}: 会社のデータがありません`], company: null };
   const company = importCompany(JSON.stringify(c));
   if (!company) return { errors: [`${where}: 会社のデータが不正です（版・資金・契約）`], company: null };
-  const errors: string[] = [];
+  const errors: string[] = checkGameFields(c).map((e) => `${where}: ${e}`);
   for (const [key, k] of Object.entries(company.contracts)) {
     if (!isObj(k) || k.id !== key) errors.push(`${where}: 契約 ${key} の ID が一致しません`);
     else if (typeof k.typeId !== 'string' || typeof k.airlineId !== 'string') errors.push(`${where}: 契約 ${key} の機種・航空会社が不正です`);
@@ -268,11 +270,22 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
     if (!state.flights[a.arrivalFlightId] || !state.flights[a.departureFlightId]) errors.push(`運航状態: 機体 ${id} の便が見つかりません`);
   }
   errors.push(...checkBusState(state, layout));
+  errors.push(...checkWeatherState(state, sim.company));
   for (const [standId, acId] of Object.entries(state.standAssignments)) {
     if (!layout.stands[standId]) errors.push(`運航状態: スポット割り当て ${standId} がレイアウトにありません`);
     if (!state.aircraft[acId as string]) errors.push(`運航状態: スポット ${standId} に割り当てた機体 ${String(acId)} がありません`);
   }
   return errors;
+}
+
+/** 天候 5 段階の運航状態（state.wx）の形。会社の game.weather === 'levels' のときだけ持つ（従来の運航は持たない） */
+function checkWeatherState(state: SimState, company: unknown): string[] {
+  const raw = (state as unknown as Record<string, unknown>).wx;
+  const game = isObj(company) && isObj(company.game) ? company.game : null;
+  const levels = game !== null && game.weather === 'levels';
+  if (raw === undefined) return levels ? ['運航状態: 会社の設定は天候 5 段階ですが、運航状態の天候（wx）がありません'] : [];
+  if (!levels) return ['運航状態: 天候（wx）があるのに、会社の設定は天候 5 段階ではありません'];
+  return checkWxState(raw);
 }
 
 const BUS_PHASES = ['waiting', 'toPickup', 'loading', 'driving', 'unloading', 'stalled', 'done', 'cancelled'];

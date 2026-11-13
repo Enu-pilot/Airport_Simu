@@ -386,6 +386,10 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
     const r = (byAirline[id] ??= { flights: 0, onTime: 0, paxBoarded: 0, missedPax: 0, leftBags: 0, cancelled: 0 });
     if (l.lost) {
       r.cancelled++;
+      const lostAc = state.aircraft[l.f.aircraftId];
+      const note = lostAc?.state === 'cannotOperate' ? lostAc.history[lostAc.history.length - 1]?.note : undefined;
+      if (state.wx && note === 'weather') r.weatherCancelled = (r.weatherCancelled ?? 0) + 1;
+      if (c.game && note === 'early') r.earlyCancelled = (r.earlyCancelled ?? 0) + 1;
       continue;
     }
     r.flights++;

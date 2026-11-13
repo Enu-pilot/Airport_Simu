@@ -2,6 +2,7 @@ import { airlineScorecard, type ScoreKey } from '../economy/airlineScore';
 import type { CompanyState, DailyReport } from '../economy/company';
 import { analyzeDayPlan, planDay, type PlanIssue } from '../economy/planning';
 import type { Simulation } from '../sim/simulation';
+import { forecastForDay, type WeatherForecast } from '../sim/weather';
 import type { DisruptionKind } from '../sim/types';
 import type { FlightRecord } from './records';
 
@@ -70,10 +71,8 @@ export interface ReviewResponses {
 
 export const emptyResponses = (): ReviewResponses => ({ delays: 0, reassigns: 0, priorities: 0, repairs: 0 });
 
-/** 天候予報（12B-3a で実装。それまでは常に null） */
-export interface WeatherForecast {
-  summary: string;
-}
+/** 天候予報（会社の game.weather === 'levels' のときだけ。それ以外は null。sim/weather.ts） */
+export type { WeatherForecast };
 
 export interface DayReview {
   /** 締めた日（0 始まり） */
@@ -174,7 +173,7 @@ export function buildDayReview(input: ReviewInput): DayReview {
       completing: Object.values(company.projects)
         .filter((p) => p.remaining === 1 && p.kind !== 'closure')
         .map((p) => ({ id: p.id, kind: p.kind })),
-      weather: null,
+      weather: company.game?.weather === 'levels' ? forecastForDay(company.seed, company.day, company.game) : null,
     },
   };
 }

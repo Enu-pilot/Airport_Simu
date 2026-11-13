@@ -183,3 +183,25 @@
 .alert-more-row { display: flex; gap: 6px; }
 .alert-stack { max-height: calc(100% - 44px); overflow-y: auto; }
 .fids-bus { display: inline-block; padding: 0 4px; border-radius: 3px; background: #2b8cff; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; }
+
+/* ゲーム設定ダイアログ（12B-3a） */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 60; }
+.modal { background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; padding: 14px 18px; max-width: 640px; max-height: 90vh; overflow: auto; }
+.modal h3 { margin: 0 0 8px; }
+.modal fieldset { margin: 6px 0; border: 1px solid #2a3b55; border-radius: 4px; }
+.modal fieldset label, .modal > label { display: block; margin: 3px 0; }
+.modal-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* 天候の段階の札・予報（12B-3a） */
+.wx-chip { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 12px; background: #284a2a; color: #d5f0d5; }
+.wx-chip.wx-l1 { background: #3b4a58; color: #dbe7f2; }
+.wx-chip.wx-l2 { background: #3f5f86; color: #e6f0fb; }
+.wx-chip.wx-l3 { background: #8a5a14; color: #fff1d6; }
+.wx-chip.wx-l4 { background: #8a2420; color: #ffe3e0; }
+.wx-forecast { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.wx-block { display: flex; flex-direction: column; gap: 2px; }
+.wx-hourly { display: flex; gap: 1px; margin: 4px 0; }
+.wx-hourly span { flex: 1; height: 10px; background: #284a2a; }
+.wx-hourly span.wx-l1 { background: #3b4a58; } .wx-hourly span.wx-l2 { background: #3f5f86; }
+.wx-hourly span.wx-l3 { background: #8a5a14; } .wx-hourly span.wx-l4 { background: #8a2420; }
+.wx-hourly span.now { outline: 1px solid #fff; }

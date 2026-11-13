@@ -22,6 +22,7 @@ import { airportKpis } from '../../src/core/analytics/kpi';
 import { checkInvariants } from '../../src/core/sim/invariants';
 import { SIM_MODEL_VERSION } from '../../src/core/scenario/scenario';
 import { createSimulation, stepSimulation } from '../../src/core/sim/simulation';
+import { forecastForDay } from '../../src/core/sim/weather';
 import { analyzeLayout } from '../../src/core/validation/validate';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -372,6 +373,55 @@ export function captureBusSim(): unknown {
       tripsByPhase,
       busRecords: sim.state.analytics.records.filter((r) => r.boarding === 'bus').length,
       kpis: JSON.parse(JSON.stringify(airportKpis(sim))),
+    };
+  }
+  return { simModelVersion: SIM_MODEL_VERSION, runs };
+}
+
+/**
+ * 天候 5 段階・難易度の運航（12B-3a B3。docs/30）。サンプル空港・サンドボックスの会社（game: weather levels・評価と目標は無効）で、
+ * 最初の日の晴れと、悪天の日（冬の段階 4・夏の雷雨）を 1 日締めまで運航する。SIM_MODEL_VERSION は上げない（game のある会社だけの挙動）。
+ */
+export function captureGameWeather(): unknown {
+  const variants: { name: string; day: number; difficulty: 'normal' | 'hard' | 'expert'; climate: 'temperate' | 'snowy' | 'humid' }[] = [
+    { name: 'day0-normal', day: 0, difficulty: 'normal', climate: 'temperate' },
+    { name: 'bad-winter-normal', day: 108, difficulty: 'normal', climate: 'temperate' },
+    { name: 'bad-humid-expert', day: 10, difficulty: 'expert', climate: 'humid' },
+  ];
+  const runs: Record<string, unknown> = {};
+  for (const v of variants) {
+    const c = createSandboxCompany();
+    c.day = v.day;
+    c.game = { version: 1, difficulty: v.difficulty, weather: 'levels', airlineEval: false, goals: false, climate: v.climate };
+    const sim = createSimulation(loadFixture('sample'), { seed: `game-weather:${v.name}`, company: c });
+    const plan = sim.state.wx!.hours.map((h) => h.level).join('');
+    const types = sim.state.wx!.hours.map((h) => h.type[0]).join('');
+    let violations = 0;
+    let i = 0;
+    while (sim.company!.day === v.day) {
+      stepSimulation(sim);
+      if (++i % 1200 === 0) violations += checkInvariants(sim).length;
+    }
+    const report = sim.company!.reports[sim.company!.reports.length - 1]!;
+    const json = JSON.stringify(sim.state);
+    const weatherCancels = sim.state.events.filter((e) => e.kind === 'cannotOperate' && e.reason === 'weather').length;
+    const weatherGoArounds = sim.state.events.filter((e) => e.kind === 'goAround' && e.reason === 'weather').length;
+    runs[v.name] = {
+      day: v.day,
+      difficulty: v.difficulty,
+      plan,
+      types,
+      forecast: forecastForDay(c.seed, v.day, c.game),
+      ticks: i,
+      invariantViolations: violations,
+      stats: sim.state.stats,
+      weatherCancels,
+      weatherGoArounds,
+      randomDisruptions: sim.state.disruptions.filter((d) => d.origin === 'random').map((d) => d.kind),
+      kpi: report.kpi,
+      airlineSatisfaction: Object.fromEntries(Object.entries(sim.company!.airlines).map(([id, a]) => [id, Math.round(a.satisfaction * 100) / 100])),
+      stateSha256: sha256(json),
+      stateLength: json.length,
     };
   }
   return { simModelVersion: SIM_MODEL_VERSION, runs };

@@ -5,11 +5,13 @@ import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type Compan
 import { analyzeDayPlan, planDay } from '../core/economy/planning';
 import { AIRLINES, airlineDef, destinationDef } from '../core/economy/registry';
 import { BALANCE } from '../core/economy/balance';
+import { forecastForDay } from '../core/sim/weather';
 import { analyzeAccess, type AccessMode } from '../core/access/model';
 import { companyActions } from '../editor/simRunner';
 import { editorStore, formatCr, useEditor, useLayout } from '../editor/store';
 import {
   ACCESS_MODE_LABEL,
+  GAME_UI,
   AIRLINE_TYPE_LABEL,
   CONTRACT_STATUS_LABEL,
   COST_LABEL,
@@ -59,6 +61,11 @@ export function PlanPanel() {
         <strong>運航計画</strong>
         <span>{c.day + 1}日目の計画: {plan.flights.length}往復</span>
         <span className="muted">料金・単価はゲームバランス用の設定値で、実在の空港料金とは無関係です</span>
+        {c.game?.weather === 'levels' && (
+          <span data-testid="plan-forecast" title={GAME_UI.wxForecastNote(forecastForDay(c.seed, c.day, c.game).accuracy)}>
+            {GAME_UI.wxForecastToday}: {forecastForDay(c.seed, c.day, c.game).summary}
+          </span>
+        )}
       </div>
       <div className="issues-list mgmt-grid">
         <section>

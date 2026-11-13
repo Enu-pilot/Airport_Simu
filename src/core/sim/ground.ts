@@ -3,6 +3,7 @@ import { compareIds } from '../model/ids';
 import { TILE_M } from '../model/catalog';
 import { mapToWorld } from '../geometry/frames';
 import { resolveType } from './aircraftTypes';
+import { lightningStop } from './weather';
 import { TASK_DEFS, TURNAROUND_TASKS, taskNeeds, taskWorkSec } from './tasks';
 import {
   BAG_CUTOFF_AFTER_BOARDING_SEC,
@@ -424,6 +425,8 @@ function stepTask(sim: Simulation, t: GroundTask, starved: Set<UnitKind>): void 
       // 機体側（プッシュバック完了）で終了する
       return;
     default:
+      // 雷雨（天候 5 段階の段階 4）の間は、屋外の地上作業を 20 分ごとに 5 分止める
+      if (state.wx && lightningStop(state)) return;
       t.doneSec++;
       if (t.doneSec >= t.workSec) finishTask(sim, t);
   }

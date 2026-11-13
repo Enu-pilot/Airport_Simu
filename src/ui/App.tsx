@@ -5,8 +5,9 @@ import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
 import { CatalogPanel } from './CatalogPanel';
 import { ScenarioPanel } from './AnalysisPanels';
-import { DAY_LOOP, MODE_LABEL } from '../i18n/ja';
+import { DAY_LOOP, GAME_UI, MODE_LABEL } from '../i18n/ja';
 import { DayReviewOverlay } from './DayReview';
+import { GameSetupDialog, gameSetupUi } from './GameSetup';
 import { HistoryOverlay } from './HistoryPanel';
 import { SkipDayOverlay } from './SkipDayOverlay';
 import { dayFlowActions } from '../editor/dayFlowActions';
@@ -24,6 +25,9 @@ import { ops } from '../editor/simRunner';
 import { OperateLayout } from './operate/OperateLayout';
 import { OpsNav } from './operate/OpsNav';
 import { opsUi } from './operate/opsUi';
+import { useSecondly } from './operate/Card';
+import { LevelChip } from './operate/WxView';
+import { effectiveWx } from '../core/sim/weather';
 import { StatusBar, Toast } from './StatusBar';
 import { useState } from 'react';
 
@@ -68,6 +72,7 @@ export function App() {
       <DayReviewOverlay />
       <SkipDayOverlay />
       <HistoryOverlay />
+      <GameSetupDialog />
     </div>
   );
 }
@@ -177,6 +182,7 @@ function TopBar() {
       <span className="brand">✈ SkyPort</span>
       <span className="subtitle">{mode === 'build' ? '建設モード' : '運航モード'}</span>
       <CompanyBadge />
+      {mode === 'operate' && <WxBadge />}
       <div className="top-group">
         {mode === 'build' ? (
           <button className="primary" onClick={() => ops.start()} data-testid="start-ops">
@@ -222,6 +228,12 @@ function TopBar() {
             data-testid="new-sandbox"
           >
             サンドボックス
+          </button>
+          <button onClick={() => gameSetupUi.open('new')} title={GAME_UI.setupNewTitle} data-testid="new-game-setup">
+            {GAME_UI.setupNew}
+          </button>
+          <button onClick={() => gameSetupUi.open('settings')} title={GAME_UI.setupSettingsTitle} data-testid="tab-settings">
+            {GAME_UI.setupSettings}
           </button>
           <button onClick={actions.loadSample} data-testid="load-sample" title="現在の資金で建設（キャリアでは建設費がかかる）">サンプル空港を生成</button>
           <button onClick={actions.newEmpty} data-testid="new-empty">空の敷地</button>
@@ -307,6 +319,13 @@ function TopBar() {
   );
 }
 
+/** 運航中の天候の段階（天候 5 段階の運航だけ） */
+function WxBadge() {
+  const eff = useSecondly((o) => (o.sim.state.wx ? effectiveWx(o.sim.state.wx) : null));
+  if (!eff) return null;
+  return <LevelChip level={eff.level} type={eff.type} testId="weather-level-top" />;
+}
+
 /** 資金・日・評価 */
 function CompanyBadge() {
   const c = useCompany();
@@ -315,6 +334,9 @@ function CompanyBadge() {
       <span>{MODE_LABEL[c.mode]}</span>
       <b data-testid="cash">💴 {formatCr(c.cash)}</b>
       <span data-testid="company-day">{c.day + 1}日目</span>
+      <span className="muted" data-testid="game-difficulty" title={c.game ? GAME_UI.difficultyHint[c.game.difficulty] : GAME_UI.rulesLegacy}>
+        {c.game ? GAME_UI.difficultyBadge(GAME_UI.difficulty[c.game.difficulty]!) : GAME_UI.rulesLegacy}
+      </span>
       <span title="空港評価（旅客満足度・航空会社満足度・定時率から）">評価 {c.rating.toFixed(1)}</span>
       {c.bankrupt && <b className="ng-text">経営破綻</b>}
     </span>

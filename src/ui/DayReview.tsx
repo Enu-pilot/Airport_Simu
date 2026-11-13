@@ -7,6 +7,7 @@ import { COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_RE
 import type { DelayCause, HoldReason } from '../core/sim/types';
 import { DAY_SEC } from '../core/sim/rules';
 import { dayFlowActions } from '../editor/dayFlowActions';
+import { ForecastBlocks } from './operate/WxView';
 
 const pct = (v: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)}%`);
 const num = (v: number | null, d = 1) => (v === null ? '—' : v.toFixed(d));
@@ -226,7 +227,7 @@ export function ReviewBody({ review }: { review: DayReview }) {
         </div>
         <div className="card-sub">
           <b>{DAY_LOOP.weather}</b>
-          <div>{review.tomorrow.weather?.summary ?? DAY_LOOP.weatherNone}</div>
+          {review.tomorrow.weather ? <ForecastBlocks f={review.tomorrow.weather} testId="review-forecast" /> : <div>{DAY_LOOP.weatherNone}</div>}
         </div>
       </Section>
     </div>

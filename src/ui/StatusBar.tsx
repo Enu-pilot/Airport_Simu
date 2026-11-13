@@ -1,4 +1,4 @@
-import { editorStore, formatCr, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { editorStore, formatCr, scaledConstructionCost, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { computePreview } from '../editor/tools';
 import { constructionCost } from '../core/economy/construction';
 import { toolHint } from './Toolbox';
@@ -17,7 +17,7 @@ export function StatusBar() {
     if (mode !== 'build' || (tool === 'select' && draft?.kind !== 'move')) return null;
     const p = computePreview(editorStore.getState());
     if (!p?.result.ok) return null;
-    const cost = constructionCost(layout, p.result.layout);
+    const cost = scaledConstructionCost(editorStore.getState().company, constructionCost(layout, p.result.layout));
     return cost === 0 ? null : cost;
   })();
   return (

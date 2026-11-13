@@ -1,0 +1,274 @@
+{
+ "simModelVersion": "skyport-sim-10.0",
+ "runs": {
+  "day0-normal": {
+   "day": 0,
+   "difficulty": "normal",
+   "plan": "000000000000000000000000",
+   "types": "cccccccccccccccccccccccc",
+   "forecast": {
+    "day": 0,
+    "blocks": [
+     {
+      "fromH": 6,
+      "toH": 12,
+      "level": 0,
+      "type": "clear"
+     },
+     {
+      "fromH": 12,
+      "toH": 18,
+      "level": 0,
+      "type": "clear"
+     },
+     {
+      "fromH": 18,
+      "toH": 24,
+      "level": 0,
+      "type": "clear"
+     }
+    ],
+    "accuracy": 0.9,
+    "summary": "6〜12時 晴れ（段階 0） / 12〜18時 晴れ（段階 0） / 18〜24時 晴れ（段階 0）"
+   },
+   "ticks": 64801,
+   "invariantViolations": 0,
+   "stats": {
+    "arrivals": 19,
+    "departures": 19,
+    "diverted": 0,
+    "cancelled": 0,
+    "goArounds": 0,
+    "conflicts": 0,
+    "taxiInSecTotal": 3350,
+    "taxiOutSecTotal": 3843
+   },
+   "weatherCancels": 0,
+   "weatherGoArounds": 0,
+   "randomDisruptions": [],
+   "kpi": {
+    "flights": 38,
+    "movements": 38,
+    "paxDeparted": 2096,
+    "paxArrived": 2104,
+    "otp": 0.9210526315789473,
+    "avgDelayMin": 2.5,
+    "runwayUtil": 0.07037037037037037,
+    "gateUtil": 0.1600531550068587,
+    "facilityUtil": 0.09932253086419753,
+    "avgWaitMin": 3.7,
+    "avgWalkMin": 9.8,
+    "avgGroundMin": 43.6,
+    "unprocessedPax": 0,
+    "missedPax": 0,
+    "leftBags": 0,
+    "diverted": 0,
+    "cancelled": 0,
+    "paxSatisfaction": 90.2,
+    "airlineSatisfaction": 60.8,
+    "rating": 58.6,
+    "modePax": {
+     "car": 1618,
+     "dropoff": 2573,
+     "taxi": 0,
+     "bus": 0,
+     "rail": 0,
+     "walk": 9
+    },
+    "parkingFull": 0,
+    "roadDelayMin": 0,
+    "transitWaitMin": 0,
+    "accessFactor": 1.00187668174666
+   },
+   "airlineSatisfaction": {
+    "SK": 56,
+    "NP": 62,
+    "RJ": 62,
+    "AQ": 62,
+    "HB": 62
+   },
+   "stateSha256": "63a45257d30b869550f78ab7c030b33a2802e55694efc508f361bd95f6f1bcd7",
+   "stateLength": 2243417
+  },
+  "bad-winter-normal": {
+   "day": 108,
+   "difficulty": "normal",
+   "plan": "233332232223344444443332",
+   "types": "ssssssssssssssssssssssss",
+   "forecast": {
+    "day": 108,
+    "blocks": [
+     {
+      "fromH": 6,
+      "toH": 12,
+      "level": 3,
+      "type": "snow"
+     },
+     {
+      "fromH": 12,
+      "toH": 18,
+      "level": 4,
+      "type": "snow"
+     },
+     {
+      "fromH": 18,
+      "toH": 24,
+      "level": 4,
+      "type": "snow"
+     }
+    ],
+    "accuracy": 0.9,
+    "summary": "6〜12時 雪（段階 3） / 12〜18時 雪（段階 4） / 18〜24時 雪（段階 4）"
+   },
+   "ticks": 64801,
+   "invariantViolations": 0,
+   "stats": {
+    "arrivals": 18,
+    "departures": 18,
+    "diverted": 0,
+    "cancelled": 1,
+    "goArounds": 4,
+    "conflicts": 0,
+    "taxiInSecTotal": 4174,
+    "taxiOutSecTotal": 4498
+   },
+   "weatherCancels": 1,
+   "weatherGoArounds": 4,
+   "randomDisruptions": [
+    "standClosed"
+   ],
+   "kpi": {
+    "flights": 36,
+    "movements": 36,
+    "paxDeparted": 1877,
+    "paxArrived": 1879,
+    "otp": 0.9210526315789473,
+    "avgDelayMin": 2.9,
+    "runwayUtil": 0.06666666666666667,
+    "gateUtil": 0.1495233196159122,
+    "facilityUtil": 0.08939120370370371,
+    "avgWaitMin": 3.4,
+    "avgWalkMin": 10.2,
+    "avgGroundMin": 41.6,
+    "unprocessedPax": 0,
+    "missedPax": 0,
+    "leftBags": 0,
+    "diverted": 0,
+    "cancelled": 1,
+    "paxSatisfaction": 90.1,
+    "airlineSatisfaction": 61.5,
+    "rating": 58.7,
+    "modePax": {
+     "car": 1543,
+     "dropoff": 2207,
+     "taxi": 0,
+     "bus": 0,
+     "rail": 0,
+     "walk": 6
+    },
+    "parkingFull": 0,
+    "roadDelayMin": 0,
+    "transitWaitMin": 0,
+    "accessFactor": 1.00187668174666
+   },
+   "airlineSatisfaction": {
+    "SK": 62,
+    "NP": 59.5,
+    "RJ": 62,
+    "AQ": 62,
+    "HB": 62
+   },
+   "stateSha256": "d0b65cf2176c4115cb6d6e508d0026605170e3205949b9cc0142c38292cb9b60",
+   "stateLength": 2072293
+  },
+  "bad-humid-expert": {
+   "day": 10,
+   "difficulty": "expert",
+   "plan": "123234444443222223321101",
+   "types": "crrrrrrffrrrrrrrrrrrcccc",
+   "forecast": {
+    "day": 10,
+    "blocks": [
+     {
+      "fromH": 6,
+      "toH": 12,
+      "level": 4,
+      "type": "rain"
+     },
+     {
+      "fromH": 12,
+      "toH": 18,
+      "level": 2,
+      "type": "rain"
+     },
+     {
+      "fromH": 18,
+      "toH": 24,
+      "level": 4,
+      "type": "rain"
+     }
+    ],
+    "accuracy": 0.65,
+    "summary": "6〜12時 雨（段階 4） / 12〜18時 雨（段階 2） / 18〜24時 雨（段階 4）"
+   },
+   "ticks": 64801,
+   "invariantViolations": 0,
+   "stats": {
+    "arrivals": 19,
+    "departures": 19,
+    "diverted": 0,
+    "cancelled": 0,
+    "goArounds": 0,
+    "conflicts": 0,
+    "taxiInSecTotal": 3874,
+    "taxiOutSecTotal": 4137
+   },
+   "weatherCancels": 0,
+   "weatherGoArounds": 0,
+   "randomDisruptions": [],
+   "kpi": {
+    "flights": 38,
+    "movements": 38,
+    "paxDeparted": 2165,
+    "paxArrived": 2087,
+    "otp": 0.8947368421052632,
+    "avgDelayMin": 3.2,
+    "runwayUtil": 0.07037037037037037,
+    "gateUtil": 0.15758573388203018,
+    "facilityUtil": 0.10238194444444444,
+    "avgWaitMin": 3.7,
+    "avgWalkMin": 10.8,
+    "avgGroundMin": 43.9,
+    "unprocessedPax": 0,
+    "missedPax": 0,
+    "leftBags": 0,
+    "diverted": 0,
+    "cancelled": 0,
+    "paxSatisfaction": 88.6,
+    "airlineSatisfaction": 60,
+    "rating": 58.2,
+    "modePax": {
+     "car": 1706,
+     "dropoff": 2531,
+     "taxi": 0,
+     "bus": 0,
+     "rail": 0,
+     "walk": 15
+    },
+    "parkingFull": 0,
+    "roadDelayMin": 0.1,
+    "transitWaitMin": 0,
+    "accessFactor": 1.00187668174666
+   },
+   "airlineSatisfaction": {
+    "SK": 52,
+    "NP": 62,
+    "RJ": 62,
+    "AQ": 62,
+    "HB": 62
+   },
+   "stateSha256": "274c1b7e0540c0afd445457e9bebb17a271abdfb477c0d682d74405e0901d497",
+   "stateLength": 2260992
+  }
+ }
+}

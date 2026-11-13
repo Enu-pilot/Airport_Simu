@@ -3,6 +3,7 @@ import { resolveType, type TypeTable } from '../sim/aircraftTypes';
 import { operableTypes, type SimContext } from '../sim/context';
 import { ON_TIME_SEC } from './balance';
 import { contractsOf, type CompanyState } from './company';
+import { otpAddOf } from './game';
 import type { DayPlan, PlanAnalysis } from './planning';
 import { AIRLINES, type AirlineDef } from './registry';
 
@@ -93,11 +94,13 @@ function otpComponent(a: AirlineDef, recs: readonly FlightRecord[], company: Com
     }
   }
   if (otp === null) return na('otp');
+  // 難易度（game）があれば、航空会社の求める定時率が上がる（なければ加算 0 で従来と同じ）
+  const minOtp = a.minOtp + otpAddOf(company);
   const tally = new Map<string, number>();
   for (const r of recs) for (const c of r.causes) if (!c.startsWith('hold:')) tally.set(c, (tally.get(c) ?? 0) + 1);
   const main = [...tally.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))[0]?.[0];
-  const level: ScoreLevel = otp >= a.minOtp ? 'good' : otp >= a.minOtp - 0.1 ? 'warn' : 'bad';
-  return { key: 'otp', level, score: Math.round(clamp((otp / a.minOtp) * 100)), facts: { value: otp, target: a.minOtp, n: legs.length, ...(main ? { names: [main] } : {}), ...(fallback ? { fallback } : {}) } };
+  const level: ScoreLevel = otp >= minOtp ? 'good' : otp >= minOtp - 0.1 ? 'warn' : 'bad';
+  return { key: 'otp', level, score: Math.round(clamp((otp / minOtp) * 100)), facts: { value: otp, target: minOtp, n: legs.length, ...(main ? { names: [main] } : {}), ...(fallback ? { fallback } : {}) } };
 }
 
 function turnaroundComponent(recs: readonly FlightRecord[], types: TypeTable): ScoreComponent {

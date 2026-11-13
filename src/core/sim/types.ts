@@ -66,9 +66,10 @@ export type HoldReason =
   | 'intersection' // 交差する滑走路が使用中（従属運用）
   | 'goAround' // 着陸復行
   | 'boarding' // 搭乗手続きの完了待ち
-  | 'groundCrew'; // プッシュバックの車両・作業員待ち
+  | 'groundCrew' // プッシュバックの車両・作業員待ち
+  | 'weather'; // 天候による欠航（天候 5 段階のモデルだけ。欠航の理由に使う）
 
-export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling' | 'apronBus';
+export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling' | 'apronBus' | 'weather';
 
 export interface Route {
   kind: 'landing' | 'taxiIn' | 'pushback' | 'taxiOut' | 'takeoff';
@@ -482,6 +483,8 @@ export interface SimSettings {
   randomFailures: boolean;
   /** 天候・障害のランダム発生（sim/disruptions.ts） */
   randomDisruptions?: boolean;
+  /** ランダムな障害の頻度の倍率（難易度。欠落 = 1）。会社の game があるときだけ設定する */
+  randomDisruptionScale?: number;
 }
 
 export interface SimState {
@@ -543,6 +546,28 @@ export interface SimState {
   analytics: AnalyticsState;
   /** ランプバスの運行（バスゲートがある運航だけ。従来の運航にはキーがない） */
   bus?: ApronBusRuntime;
+  /** 天候 5 段階（会社の game.weather === 'levels' の運航だけ。従来の運航にはキーがない。sim/weather.ts） */
+  wx?: WxRuntime;
+}
+
+export type WxLevel = 0 | 1 | 2 | 3 | 4;
+export type WxType = 'clear' | 'cloud' | 'rain' | 'snow' | 'fog' | 'storm';
+export interface WxHour {
+  level: WxLevel;
+  type: WxType;
+}
+
+/** 天候 5 段階の運航状態。乱数は専用（`${state.seed}:wx`）で state.rng を消費しない */
+export interface WxRuntime {
+  /** 計画の暦の日と、その日の 24 時間分の計画 */
+  day: number;
+  hours: WxHour[];
+  /** 現在の時間の計画の値 */
+  level: WxLevel;
+  type: WxType;
+  /** 手動・シナリオの天候の障害による上書き（発生中の障害から毎ティック導く。なければ null） */
+  override: { level: WxLevel; type: WxType; until: number } | null;
+  rng: RngState;
 }
 
 /** ランプバスの運行の状態（sim/apronBus.ts） */

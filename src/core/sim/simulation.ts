@@ -64,7 +64,8 @@ import {
 import { TILE_M } from '../model/catalog';
 import { completeExit, emptyFlightPax, serversOf, stepPassengers } from './passengers';
 import { createAccessRuntime, refreshAccess, stepAccess } from '../access/runtime';
-import { stepDisruptions, weatherEffects } from './disruptions';
+import { stepDisruptions, weatherEffects, type ResponseResult } from './disruptions';
+import { createWx, rollWeatherGoAround, disruptionScaleFor, stepWeather } from './weatherStep';
 import { createAnalytics, stepAnalytics } from '../analytics/records';
 import type { CompanyState } from '../economy/company';
 import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
@@ -129,7 +130,13 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     now: opts.startTime ?? SIM_START_SEC,
     rng: new Rng(seed).state(),
     counters: {},
-    settings: { ...DEFAULT_SETTINGS, flightsPerDay: Math.min(60, contactStands * 3), ...opts.settings },
+    settings: {
+      ...DEFAULT_SETTINGS,
+      flightsPerDay: Math.min(60, contactStands * 3),
+      // ゲームのモデル（会社の game）がある運航だけ、ランダムな障害を難易度の頻度で有効にする（従来の運航は変わらない）
+      ...(opts.company?.game ? { randomDisruptions: true, randomDisruptionScale: disruptionScaleFor(opts.company.game.difficulty) } : {}),
+      ...opts.settings,
+    },
     runwayConfig,
     runways,
     flights: {},
@@ -177,6 +184,9 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
   if (sim.company) {
     state.economy = createEconomy(ctx, state, sim.company);
     state.access = createAccessRuntime(sim, sim.company);
+    // 天候 5 段階（会社の game.weather === 'levels' の運航だけ。従来の運航にはキー自体を作らない）
+    const wx = createWx(sim);
+    if (wx) state.wx = wx;
   }
   createGroundUnits(sim);
   // バスゲートがある運航だけランプバスの運行の状態を持つ（従来の運航にはキー自体を作らない）
@@ -620,6 +630,7 @@ export function stepSimulation(sim: Simulation): void {
     ac.pheading = ac.heading;
   }
   stepDisruptions(sim);
+  if (state.wx) stepWeather(sim, cancelTurnaround);
   runwayControl(sim);
   for (const ac of all) stepAircraft(sim, ac);
   stepPassengers(sim);
@@ -781,6 +792,12 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
       const rs = state.runways[ac.runwayId!]!;
       if (state.now >= ac.eta!) {
         if (!rs.occupant && !partnersOf(sim, ac.runwayId!).some((p) => { const o = state.runways[p]!.occupant; return !!o && o.purpose !== 'crossing'; })) {
+          // 天候 5 段階: 着陸の瞬間に、段階に応じた確率で着陸復行（state.wx がなければ判定しない）
+          if (state.wx && rollWeatherGoAround(state)) {
+            goAround(sim, ac, 'weather');
+            placeAirborne(sim, ac);
+            return;
+          }
           rs.occupant = { aircraftId: ac.id, purpose: 'landing', since: state.now };
           rs.lastOp = { kind: 'arr', size: type.size, at: state.now };
           rs.booking = null;
@@ -1016,7 +1033,7 @@ function holdArrival(sim: Simulation, ac: Aircraft, reason: HoldReason): void {
   if (ac.state !== 'holding') setState(state, ac, 'holding', reason);
 }
 
-function goAround(sim: Simulation, ac: Aircraft): void {
+function goAround(sim: Simulation, ac: Aircraft, reason?: HoldReason): void {
   const { state } = sim;
   const rs = state.runways[ac.runwayId!]!;
   if (rs.booking?.aircraftId === ac.id) rs.booking = null;
@@ -1025,8 +1042,44 @@ function goAround(sim: Simulation, ac: Aircraft): void {
   ac.eta = null;
   ac.retryAt = state.now + 4 * 60;
   state.stats.goArounds++;
-  logEvent(state, { t: state.now, kind: 'goAround', aircraftId: ac.id });
+  logEvent(state, { t: state.now, kind: 'goAround', aircraftId: ac.id, ...(reason ? { reason } : {}) });
   holdArrival(sim, ac, 'goAround');
+}
+
+/**
+ * 機体がまだ現れていない折り返し（到着・出発）をまとめて欠航にする（docs/30 §1）。到着・出発の便は cancelled、機体は cannotOperate。
+ * - 'weather': 天候 5 段階の欠航。補償は他の欠航と同じ（満足度のペナルティは半分。ops.ts の AirlineDayResult.weatherCancelled）。
+ * - 'early': プレイヤーの先行欠航（運航表の行メニュー）。補償なし・航空会社の満足度 −1 だけ（直前の欠航より安い）。
+ */
+export function cancelTurnaround(sim: Simulation, ac: Aircraft, reason: 'weather' | 'early'): void {
+  const { state } = sim;
+  if (ac.state !== 'scheduled') return;
+  const arr = state.flights[ac.arrivalFlightId]!;
+  const dep = state.flights[ac.departureFlightId]!;
+  arr.status = 'cancelled';
+  dep.status = 'cancelled';
+  state.stats.cancelled++;
+  if (reason === 'weather') {
+    addDelayCause(arr, 'weather');
+    addDelayCause(dep, 'weather');
+    onFlightLost(sim);
+    logEvent(state, { t: state.now, kind: 'cannotOperate', aircraftId: ac.id, reason: 'weather' });
+  } else {
+    const rel = sim.company && dep.airlineId ? sim.company.airlines[dep.airlineId] : undefined;
+    if (rel) rel.satisfaction = Math.max(0, rel.satisfaction - 1);
+    logEvent(state, { t: state.now, kind: 'cannotOperate', aircraftId: ac.id, note: 'early' });
+  }
+  setState(state, ac, 'cannotOperate', reason);
+}
+
+/** 先行欠航（プレイヤーの対応。まだ現れていない折り返しだけ。補償なし・満足度 −1。会社のゲーム設定があるときだけ） */
+export function cancelFlightEarly(sim: Simulation, acId: string): ResponseResult {
+  const ac = sim.state.aircraft[acId];
+  if (!ac || !sim.company?.game) return { ok: false, reason: 'NOT_FOUND' };
+  if (ac.state !== 'scheduled') return { ok: false, reason: 'TOO_LATE' };
+  cancelTurnaround(sim, ac, 'early');
+  logEvent(sim.state, { t: sim.state.now, kind: 'disruption', note: `先行欠航: ${ac.callsign}` });
+  return { ok: true };
 }
 
 function divert(sim: Simulation, ac: Aircraft): void {
