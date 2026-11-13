@@ -334,6 +334,7 @@ function CompanyBadge() {
       <span>{MODE_LABEL[c.mode]}</span>
       <b data-testid="cash">💴 {formatCr(c.cash)}</b>
       <span data-testid="company-day">{c.day + 1}日目</span>
+      {c.goals && <span data-testid="airport-tier" title={GAME_UI.goalsTitle}>{GAME_UI.tier[c.goals.tier]}</span>}
       <span className="muted" data-testid="game-difficulty" title={c.game ? GAME_UI.difficultyHint[c.game.difficulty] : GAME_UI.rulesLegacy}>
         {c.game ? GAME_UI.difficultyBadge(GAME_UI.difficulty[c.game.difficulty]!) : GAME_UI.rulesLegacy}
       </span>

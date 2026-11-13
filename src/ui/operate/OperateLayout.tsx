@@ -6,6 +6,7 @@ import { AirlineCard } from './cards/AirlineCard';
 import { AccessCard } from './cards/AccessCard';
 import { ConstructionCard } from './cards/ConstructionCard';
 import { EventsCard } from './cards/EventsCard';
+import { GoalsCard } from './cards/GoalsCard';
 import { GroundCard } from './cards/GroundCard';
 import { RunwayCard } from './cards/RunwayCard';
 import { TerminalCard } from './cards/TerminalCard';
@@ -33,6 +34,7 @@ export function OperateLayout() {
         <RunwayCard />
         <WeatherCard />
         <ConstructionCard />
+        <GoalsCard />
       </aside>
       <main className="center ops-center">
         <Viewport />

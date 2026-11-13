@@ -5,8 +5,9 @@ import { BALANCE } from './balance';
 import { AIRLINES, DESTINATIONS, airlineDef, type FleetEntry } from './registry';
 import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
 import { checkGameSettings, otpAddOf, type GameSettings } from './game';
-import type { AirlineEvalState } from './airlineEval';
-import type { GoalState } from './goals';
+import { checkAirlineEval, type AirlineEvalState } from './airlineEval';
+import { aircraftIsLow, complaintCount, COMPLAINTS_BLOCK_INCREASE, increaseMinSatRelief, offerBoost, tierBonus } from './evalRules';
+import { checkGoals, type GoalState } from './goals';
 
 /**
  * 空港会社（経営）の状態。建設モードと運航モードをまたいで保持し、レイアウトと一緒に保存する。
@@ -142,6 +143,8 @@ export interface DailyReport {
   operatingProfit: number;
   cashEnd: number;
   kpi: DailyKpi;
+  /** 目標の報酬の現金（営業収支には入れない。目標を有効にした会社で報酬があった日だけ） */
+  grants?: number;
 }
 
 export interface CompanyState {
@@ -343,7 +346,7 @@ export function changeFrequency(c: CompanyState, id: string, delta: 1 | -1): Con
   if (k.status !== 'active') return { ok: false, reason: 'NOT_ACTIVE' };
   const rel = c.airlines[k.airlineId]!;
   if (delta > 0) {
-    if (rel.satisfaction < BALANCE.contracts.increaseMinSat) return { ok: false, reason: 'AIRLINE_REFUSED' };
+    if (rel.satisfaction < BALANCE.contracts.increaseMinSat - increaseMinSatRelief(c, k.airlineId)) return { ok: false, reason: 'AIRLINE_REFUSED' };
     k.perDay += 1;
   } else {
     if (k.perDay <= 1) return { ok: false, reason: 'MIN_FREQUENCY' };
@@ -384,7 +387,7 @@ export function generateOffers(c: CompanyState, operable: readonly AircraftTypeI
     for (const a of AIRLINES) {
       if (open() >= BALANCE.offers.maxOpen) break;
       const rel = c.airlines[a.id]!;
-      const p = BALANCE.offers.baseProb + BALANCE.offers.ratingProb * (c.rating / 100) * (rel.satisfaction / 60);
+      const p = (BALANCE.offers.baseProb + BALANCE.offers.ratingProb * (c.rating / 100) * (rel.satisfaction / 60)) * offerBoost(c, a.id);
       if (rng.next() >= p) continue;
       const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && (k.status === 'active' || k.status === 'offered')).map((k) => k.destinationId));
       const dests = DESTINATIONS.filter((d) => !served.has(d.id));
@@ -393,9 +396,9 @@ export function generateOffers(c: CompanyState, operable: readonly AircraftTypeI
       // 運航できる機種を優先しつつ、評価が高いと大型機の提案も来る
       const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId);
       if (own.length === 0) continue;
-      const fleet = own.filter((t) => operable.includes(t) || (resolveType(AIRCRAFT_TYPES, t).size === 'L' && c.rating >= 60) || rng.next() < 0.25);
+      const fleet = own.filter((t) => operable.includes(t) || (resolveType(AIRCRAFT_TYPES, t).size === 'L' && c.rating >= 60 && !aircraftIsLow(c, a.id)) || rng.next() < 0.25);
       const typeId = (fleet.length > 0 ? fleet : own)[rng.int(0, (fleet.length > 0 ? fleet : own).length - 1)]!;
-      const maxPerDay = c.rating >= 70 ? 4 : c.rating >= 50 ? 3 : 2;
+      const maxPerDay = (c.rating >= 70 ? 4 : c.rating >= 50 ? 3 : 2) + tierBonus(c);
       const windows: TimeWindow[] = ['morning', 'daytime', 'evening', 'any'];
       const discount =
         a.type === 'lcc' ? 0.2 + rng.next() * 0.2 : a.type === 'regional' ? 0.1 + rng.next() * 0.15 : rng.next() * 0.15;
@@ -432,12 +435,19 @@ export interface AirlineDayResult {
   earlyCancelled?: number;
 }
 
+/** 欠航の満足度ペナルティ: 1 便あたり 5。天候による欠航は 1/4（折り返し 1 回 = 2 便で 2.5）、先行欠航は 1/10（折り返し 1 回で 1） */
+function cancelPenalty(r: AirlineDayResult): number {
+  const wc = r.weatherCancelled ?? 0;
+  const ec = r.earlyCancelled ?? 0;
+  return (r.cancelled - wc - ec + wc * 0.25 + ec * 0.1) * 5;
+}
+
 /**
  * 日次の契約更新: 航空会社の満足度、撤退、契約満了と更新、提案の期限切れ。
  * 満足度の変化 = 定時率が要求以上なら +2、未満なら −(要求 − 定時率)×40
  *              − (料金倍率 − 1) × 料金への敏感さ × 12 − 乗り遅れ率 × 100 − 積み残し率 × 50 − 欠航 × 5
  */
-export function updateContracts(c: CompanyState, results: Record<string, AirlineDayResult>): string[] {
+export function updateContracts(c: CompanyState, results: Record<string, AirlineDayResult>, ev?: { deltas: Record<string, number>; bonus: Record<string, number> }): string[] {
   const events: string[] = [];
   const feeRatio = (c.fees.landing + c.fees.terminal + c.fees.parking) / 3;
   for (const a of AIRLINES) {
@@ -446,18 +456,19 @@ export function updateContracts(c: CompanyState, results: Record<string, Airline
     const hasContract = contractsOf(c, 'active').some((k) => k.airlineId === a.id);
     if (!hasContract && !r) continue;
     let delta = 0;
-    if (r && r.flights > 0) {
+    if (ev) {
+      // 評価要素から計算した変化（定時率・乗り遅れ・料金は要素に含まれる）。欠航のペナルティだけ従来どおり別に引く
+      delta = (ev.deltas[a.id] ?? 0) + (ev.bonus[a.id] ?? 0);
+      if (r && r.flights > 0) delta -= cancelPenalty(r);
+    } else if (r && r.flights > 0) {
       const otp = r.onTime / r.flights;
       const minOtp = a.minOtp + otpAddOf(c);
       delta += otp >= minOtp ? 2 : -(minOtp - otp) * 40;
       if (r.paxBoarded + r.missedPax > 0) delta -= (r.missedPax / (r.paxBoarded + r.missedPax)) * 100;
       if (r.paxBoarded > 0) delta -= Math.min(20, (r.leftBags / Math.max(1, r.paxBoarded)) * 50);
-      // 欠航 1 便あたり 5。天候による欠航は 1/4（折り返し 1 回 = 2 便で 2.5）、先行欠航は 1/10（折り返し 1 回で 1）
-      const wc = r.weatherCancelled ?? 0;
-      const ec = r.earlyCancelled ?? 0;
-      delta -= (r.cancelled - wc - ec + wc * 0.25 + ec * 0.1) * 5;
+      delta -= cancelPenalty(r);
     }
-    delta -= (feeRatio - 1) * a.priceSensitivity * BALANCE.feeSensitivity.satisfactionPerRatio;
+    if (!ev) delta -= (feeRatio - 1) * a.priceSensitivity * BALANCE.feeSensitivity.satisfactionPerRatio;
     rel.satisfaction = Math.max(0, Math.min(100, rel.satisfaction + delta));
     rel.lowDays = rel.satisfaction < BALANCE.contracts.withdrawSat ? rel.lowDays + 1 : 0;
   }
@@ -469,7 +480,7 @@ export function updateContracts(c: CompanyState, results: Record<string, Airline
       k.status = 'withdrawn';
       events.push(`${airlineDef(k.airlineId).name} が撤退しました（満足度の低下）`);
     } else if (c.day >= k.endDay) {
-      if (rel.satisfaction >= BALANCE.contracts.renewGoodSat) {
+      if (rel.satisfaction >= BALANCE.contracts.renewGoodSat && complaintCount(c, k.airlineId) < COMPLAINTS_BLOCK_INCREASE) {
         k.endDay = c.day + BALANCE.offers.contractDays;
         k.perDay += 1;
         events.push(`${airlineDef(k.airlineId).name} が契約を増便して更新しました`);
@@ -527,6 +538,8 @@ export function importCompany(json: string): CompanyState | null {
     c.projects ??= {};
     // 12B-3a: ゲームの設定の形が不正なら捨てて従来のルールに戻す（読み込みは止めない。厳格な検証は validateProject）
     if (c.game !== undefined && checkGameSettings(c.game) !== null) delete c.game;
+    if (c.airlineEval !== undefined && checkAirlineEval(c.airlineEval).length > 0) delete c.airlineEval;
+    if (c.goals !== undefined && checkGoals(c.goals).length > 0) delete c.goals;
     // Phase 6 以前の保存データ: 保有機材の設定がないので初期設定を入れ、契約で使っている機種（旧形式の汎用機材を含む）は
     // そのまま保有機材に加える（汎用機材を実在の機種に置き換えない）
     if (!c.fleets) {

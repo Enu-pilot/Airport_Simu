@@ -1,4 +1,6 @@
 import type { CompanyState } from './company';
+import { checkAirlineEval } from './airlineEval';
+import { checkGoals, initialGoals } from './goals';
 
 /**
  * ゲームのモデル（12B-3a Part B）の設定。会社の `game` があるときだけ有効（なければ従来と完全に同じ。docs/30）。
@@ -79,13 +81,17 @@ export function checkGameFields(c: Record<string, unknown>): string[] {
     const e = checkGameSettings(c.game);
     if (e) errors.push(e);
   }
+  if (c.airlineEval !== undefined) errors.push(...checkAirlineEval(c.airlineEval));
+  if (c.goals !== undefined) errors.push(...checkGoals(c.goals));
   return errors;
 }
 
 /** 設定に合わせて会社の評価・目標の状態を整える（無効な項目は消す。有効な項目の初期状態は各モジュールが遅延して作る） */
 export function applyGameState(c: CompanyState): void {
   if (!c.game || !c.game.airlineEval) delete c.airlineEval;
+  else c.airlineEval ??= {};
   if (!c.game || !c.game.goals) delete c.goals;
+  else c.goals ??= initialGoals();
 }
 
 /** 建設費を難易度で調整する（増えた分だけ。払い戻し・0 はそのまま。game がなければ従来どおり） */

@@ -102,3 +102,5 @@
 - **戻す**: 「この日の朝に戻る」→ `validateProject`（読み込みと同じ検証）に通ったときだけ適用（レイアウト・会社・機種データの固定）し、失敗したら開いているプロジェクトは変えない。建設モードのみ。**現在のシナリオは保つ**（履歴に含めないため）。
 - 未保存のプロジェクトは `unsaved` に残り、保存すると新しいスロット ID に付け替える。新しいゲーム・JSON の読み込みで `unsaved` は消す。スロットを削除するとそのスロットの履歴も消す。
 - **書き出し（JSON）に履歴は含めない**（端末・ブラウザごと）。サイズ（計測: サンプル空港＋サンドボックス会社、2 日分）: `projectJson` は 1 件あたり約 77〜78 KB、振り返りのデータは約 2〜3 KB。15 件でも約 1.2 MB で、IndexedDB の容量には十分収まる。
+
+**Phase 12B-3a Part B**: 会社の `game`・`airlineEval`・`goals`、運航状態の `wx` を使うファイルは `formatVersion 2`。`checkGameFields`（game の値・airlineEval の要素名と範囲・goals の目標 ID と格）と `checkWxState`（24 時間・段階 0〜4・乱数）で厳格に検査し、`state.wx` と `game.weather === 'levels'` の対応も検査する。`importCompany` は不正な任意項目を捨てる。詳細は [docs/30](30_game_models.md)。

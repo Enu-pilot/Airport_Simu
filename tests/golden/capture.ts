@@ -426,3 +426,34 @@ export function captureGameWeather(): unknown {
   }
   return { simModelVersion: SIM_MODEL_VERSION, runs };
 }
+
+/**
+ * ゲームのモデル全体（12B-3a B5・B6。docs/30）: 天候 5 段階・航空会社の評価・目標を有効にした会社の、締めまでの 1 日。
+ * 評価の移動平均・満足度・不満・要望・目標の達成・報酬・空港の格を固定する。SIM_MODEL_VERSION は上げない（game のある会社だけの挙動）。
+ */
+export function captureGameModels(): unknown {
+  const runs: Record<string, unknown> = {};
+  for (const v of [{ name: 'day0-normal', day: 0, difficulty: 'normal' as const }, { name: 'bad-winter-hard', day: 108, difficulty: 'hard' as const }]) {
+    const c = createSandboxCompany();
+    c.day = v.day;
+    c.game = { version: 1, difficulty: v.difficulty, weather: 'levels', airlineEval: true, goals: true, climate: 'temperate' };
+    c.airlineEval = {};
+    c.goals = { done: {}, streaks: {}, tier: 0, grants: [], boostUntil: 0 };
+    const sim = createSimulation(loadFixture('sample'), { seed: `game-models:${v.name}`, company: c });
+    while (sim.company!.day === v.day) stepSimulation(sim);
+    const co = sim.company!;
+    const report = co.reports[co.reports.length - 1]!;
+    runs[v.name] = {
+      day: v.day,
+      kpi: report.kpi,
+      grants: report.grants ?? 0,
+      airlines: Object.fromEntries(Object.entries(co.airlines).map(([id, a]) => [id, Math.round(a.satisfaction * 100) / 100])),
+      airlineEval: co.airlineEval,
+      goals: co.goals,
+      cash: co.cash,
+      rating: co.rating,
+      weatherCancels: sim.state.events.filter((e) => e.kind === 'cannotOperate' && e.reason === 'weather').length,
+    };
+  }
+  return { simModelVersion: SIM_MODEL_VERSION, runs };
+}

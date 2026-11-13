@@ -183,3 +183,7 @@ build ─start-ops→ operate ─0:00 の締め（自動で一時停止）→ re
 - **次の日へ**: 締めの直後なら夜間（次の到着機が現れる 10 分前まで）を同じ方法で早送りしてから、元の倍率で再開する。
 - **履歴**（`open-history`・`history-overlay`、プロジェクトのパネルの `project-history`、振り返りの `review-history`）: 行 `history-row-<日>`（日・資金・評価・営業利益・サイズ）、`history-view-<日>`（その日の振り返りを読み取り専用で開く）、`history-restore-<日>`（確認あり。建設モードのみ。検証に失敗したら何も変えない）、`history-delete-<日>`。保存の仕組みは [21](21_save_format.md) §日ごとの履歴。
 - 運航中の速度操作（Space・倍率）は、スキップ中・振り返り中は無効。新しい testid: `skip-day`・`open-review`・`open-history`・`pref-*`・`skip-*`・`day-review`・`review-*`・`history-*`。
+
+## ゲームのモデルの UI（Phase 12B-3a Part B）
+
+上部バーに難易度・空港の格・天候の段階、左列に目標カード、天候カードに段階・24 時間の帯・明日の予報、航空会社カードに不満と要望、振り返りに予報・不満・達成した目標。建設モードの「新しいゲーム（設定）」「ゲーム設定」で難易度・気候・ルールを選ぶ。詳細は [docs/30](30_game_models.md)。

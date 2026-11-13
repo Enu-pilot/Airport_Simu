@@ -867,6 +867,7 @@ export const OPS_NAV: readonly (readonly [string, string])[] = [
   ['events', 'イベント'],
   ['issues', '配置チェック'],
   ['airlines', '航空会社'],
+  ['goals', '目標'],
 ];
 
 /** 運航モードの常設カード・運航表・アラートの文言 */
@@ -1174,4 +1175,43 @@ export const GAME_UI = {
   wxHourly: '今日の残りの時間',
   wxEffectNote: '段階が高いほど離着陸の間隔が広がり、走行が遅くなり、着陸復行・欠航が増えます（ゲーム用の値）',
   wxNoForecast: '予報なし（天候 5 段階を使っていません）',
+  // 航空会社の評価（不満・要望）
+  complaintTitle: '不満',
+  complaintOf: (label: string) => `${label}への不満`,
+  requestTitle: '要望',
+  requestText: (kind: string, arg?: string) =>
+    kind === 'standFor' ? `${arg ?? ''} に対応するスポット・滑走路がほしい` : kind === 'slot' ? '希望の時間帯に便を収めてほしい（枠の問題を解消）' : kind === 'contactGate' ? 'ゲート（ボーディングブリッジ）で搭乗できるようにしてほしい' : '定時率を要求の水準に戻してほしい',
+  requestDue: (d: number) => `${d + 1}日目まで`,
+  emaCol: '傾向（移動平均）',
+  trendUp: '▲',
+  trendDown: '▼',
+  noComplaint: '不満はありません',
+  newComplaint: (n: string, l: string) => `${n}: ${l}への不満が生じました`,
+  fulfilled: '達成した要望',
+  // 目標・空港の格
+  goalsTitle: '目標',
+  goalsNext: '次の目標',
+  goalsAllDone: 'すべての目標を達成しました',
+  goalsDone: (day: number) => `達成（${day + 1}日目）`,
+  goalsOverlayNote: '報酬の現金は営業収支に入らず、別枠で資金に加わります（ゲーム用の値）',
+  tier: ['飛行場', '地方空港', '拠点空港', '国際ハブ'] as readonly string[],
+  tierLabel: (t: string) => `空港の格: ${t}`,
+  tierUp: (t: string) => `空港の格が上がりました: ${t}`,
+  goalCompleted: (t: string) => `目標を達成しました: ${t}`,
+  reviewGoals: '達成した目標',
+  reviewNoGoals: 'この日に達成した目標はありません',
+  goal: {
+    flights10: { title: '1 日 10 便を完了', reward: '30 万 cr' },
+    otp85x3: { title: '定時率 85% を 3 日連続', reward: '評価 +2' },
+    mov50: { title: '1 日 50 発着', reward: '100 万 cr' },
+    firstHeavy: { title: '大型機（L 区分）の初就航', reward: '30 日間 提案が増える' },
+    firstBus: { title: 'バス搭乗の便を初めて完了', reward: '20 万 cr' },
+    rail: { title: '鉄道駅が運用中', reward: '評価 +2' },
+    noMiss: { title: '20 便以上で乗り遅れ 0', reward: '評価 +1' },
+    pax10k: { title: '旅客 1 万人/日', reward: '200 万 cr' },
+    mov200: { title: '1 日 200 発着', reward: '500 万 cr' },
+    rating80: { title: '空港評価 80 以上', reward: '30 日間 提案が増える' },
+    mov500: { title: '1 日 500 発着', reward: '1,000 万 cr' },
+    otp95x7: { title: '定時率 95% を 7 日連続', reward: '300 万 cr・評価 +2' },
+  } as Record<string, { title: string; reward: string }>,
 };

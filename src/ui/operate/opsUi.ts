@@ -19,7 +19,8 @@ export type OverlayKey =
   | 'catalog'
   | 'project'
   | 'issues'
-  | 'airlines';
+  | 'airlines'
+  | 'goals';
 
 export interface OpsUiState {
   /** 開いている大きなオーバーレイ（なければ null） */

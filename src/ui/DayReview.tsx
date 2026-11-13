@@ -3,7 +3,7 @@ import { formatCr, useEditor } from '../editor/store';
 import { airlineDef } from '../core/economy/registry';
 import type { DayReview, ReviewMetric } from '../core/analytics/review';
 import { COST_CATEGORIES, REVENUE_CATEGORIES } from '../core/economy/company';
-import { COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL } from '../i18n/ja';
+import { GAME_UI, COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL } from '../i18n/ja';
 import type { DelayCause, HoldReason } from '../core/sim/types';
 import { DAY_SEC } from '../core/sim/rules';
 import { dayFlowActions } from '../editor/dayFlowActions';
@@ -193,10 +193,25 @@ export function ReviewBody({ review }: { review: DayReview }) {
                 }
               />
               {a.worst.length > 0 && <div className="card-sub warn-text">{DAY_LOOP.lacking}: {a.worst.map((w) => SCORE_LABEL[w]).join('・')}</div>}
+              {a.newComplaints?.map((k) => (
+                <div key={k} className="card-sub ng-text" data-testid={`review-complaint-${a.id}`}>{GAME_UI.newComplaint(airlineDef(a.id).name, SCORE_LABEL[k])}</div>
+              ))}
+              {a.fulfilled && a.fulfilled.length > 0 && <div className="card-sub ok-text" data-testid={`review-fulfilled-${a.id}`}>{GAME_UI.fulfilled}: {a.fulfilled.length}</div>}
             </div>
           ))
         )}
       </Section>
+
+      {review.goals && (
+        <Section id="review-goals" title={GAME_UI.reviewGoals}>
+          {review.goals.completed.length === 0 ? (
+            <div className="card-sub">{GAME_UI.reviewNoGoals}</div>
+          ) : (
+            review.goals.completed.map((g) => <Row key={g.id} label={GAME_UI.goal[g.id]?.title ?? g.id} value={g.cash > 0 ? formatCr(g.cash) : GAME_UI.goal[g.id]?.reward} />)
+          )}
+          <Row label={GAME_UI.tierLabel(GAME_UI.tier[review.goals.tier]!)} value={review.goals.tierUp ? GAME_UI.tierUp(GAME_UI.tier[review.goals.tier]!) : ''} />
+        </Section>
+      )}
 
       <Section id="review-tomorrow" title={DAY_LOOP.tomorrowTitle}>
         <div data-testid="review-tomorrow-flights">{DAY_LOOP.tomorrowFlights(review.tomorrow.flights)}</div>

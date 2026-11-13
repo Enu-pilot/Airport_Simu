@@ -328,3 +328,7 @@ E2E: `tests/e2e/access.spec.ts`（アクセスの画面とタクシー乗り場�
 **高リスクのステップ（A5・A6）の回帰確認**: `npx vitest run`（A0・全ゴールデン・`passengers.test.ts`・`invariants.test.ts`・`dayloop.test.ts` を含む）と e2e の `operations`・`ground`・`terminal`・`opslayout`。
 
 合計: vitest 631 件（68 ファイル）、playwright 59 件。
+
+## ゲームのモデル（Phase 12B-3a Part B）
+
+`gameModels` / `weatherSim` / `airlineEvalGoals` / `gameSave` の単体テスト、`golden.gameWeather` / `golden.gameModels`、e2e `gamemodels.spec.ts`。件数は最終報告を参照（docs の件数は実測値に合わせて更新する）。

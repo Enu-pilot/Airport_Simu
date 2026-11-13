@@ -29,11 +29,16 @@ test.afterEach(async ({ page }) => {
 });
 
 /** ゲーム設定つきのサンプル空港のプロジェクト。day = 会社の暦の日（0 始まり）、nearMidnight = 0:00 の少し前まで運航した状態 */
-function gameProject(opts: { day: number; difficulty?: 'normal' | 'hard' | 'expert'; climate?: 'temperate' | 'snowy' | 'humid'; nearMidnight?: boolean }): string {
+function gameProject(opts: { day: number; difficulty?: 'normal' | 'hard' | 'expert'; climate?: 'temperate' | 'snowy' | 'humid'; nearMidnight?: boolean; rules?: boolean; mutate?: (c: ReturnType<typeof createSandboxCompany>) => void }): string {
   const layout = createSampleAirport();
   const company = createSandboxCompany();
   company.day = opts.day;
-  company.game = { ...defaultGame(opts.difficulty ?? 'normal', opts.climate ?? 'temperate'), airlineEval: false, goals: false };
+  company.game = { ...defaultGame(opts.difficulty ?? 'normal', opts.climate ?? 'temperate'), airlineEval: !!opts.rules, goals: !!opts.rules };
+  if (opts.rules) {
+    company.airlineEval = {};
+    company.goals = { done: {}, streaks: {}, tier: 0, grants: [], boostUntil: 0 };
+  }
+  opts.mutate?.(company);
   let sim = null;
   if (opts.nearMidnight) {
     sim = createSimulation(layout, { seed: 'e2e-game', company });
@@ -122,4 +127,80 @@ test('振り返りの「明日の見通し」に天候の予報（3 区間）が
   await expect(page.getByTestId('review-forecast')).toBeVisible();
   await expect(page.getByTestId('review-forecast-6')).toBeVisible();
   await expect(page.getByTestId('review-tomorrow')).not.toContainText('予報なし');
+});
+
+const emptyEntry = { ema: {}, low: {}, complaints: [], requests: [], boostUntil: 0, done: [], otpBadDays: 0 };
+
+async function closeDay(page: Page) {
+  await expect(page.getByTestId('ops-controls')).toBeVisible();
+  await page.getByTestId('speed-60').click();
+  await expect(page.getByTestId('day-review')).toBeVisible({ timeout: 30_000 });
+}
+
+test('航空会社の要素が低いまま続くと不満が出て（振り返り・カード・アラート）、改善すると消える', async ({ page }) => {
+  test.setTimeout(120_000);
+  // 料金を 2.0 倍にした航空会社 SK の料金の要素が低く、前日までに 1 回低かった状態 → この締めで不満が生じる
+  await load(
+    page,
+    gameProject({
+      day: 3,
+      nearMidnight: true,
+      rules: true,
+      mutate: (c) => {
+        c.fees.landing = 2;
+        c.fees.terminal = 2;
+        c.fees.parking = 2;
+        c.airlineEval = { SK: { ...emptyEntry, ema: { fees: 50 }, low: { fees: 1 } } };
+      },
+    }),
+  );
+  await closeDay(page);
+  await expect(page.getByTestId('review-complaint-SK')).toBeVisible();
+  await page.getByTestId('review-next').click();
+  await expect(page.getByTestId('day-review')).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByTestId('airline-complaint-SK').first()).toBeVisible();
+  await expect(page.locator('[data-testid^="alert-complaint:SK:fees"]').first()).toBeVisible();
+  // 別の状態: 料金が妥当で、すでに不満がある（移動平均が戻りつつある）→ この締めで解消する
+  await page.getByTestId('stop-ops').click();
+  await load(
+    page,
+    gameProject({
+      day: 3,
+      nearMidnight: true,
+      rules: true,
+      mutate: (c) => {
+        c.airlineEval = { SK: { ...emptyEntry, ema: { fees: 56 }, low: { fees: 2 }, complaints: [{ key: 'fees', sinceDay: 1 }] } };
+      },
+    }),
+  );
+  await closeDay(page);
+  await expect(page.getByTestId('review-airline-SK')).toBeVisible();
+  await expect(page.getByTestId('review-complaint-SK')).toHaveCount(0);
+  await page.getByTestId('review-next').click();
+  await expect(page.getByTestId('day-review')).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByTestId('airline-complaint-SK')).toHaveCount(0);
+});
+
+test('目標を達成すると報酬が付与され、振り返り・アラート・目標カードに出る', async ({ page }) => {
+  test.setTimeout(120_000);
+  await load(page, gameProject({ day: 0, nearMidnight: true, rules: true }));
+  await expect(page.getByTestId('goals-card')).toBeVisible();
+  await expect(page.getByTestId('goal-flights10')).toBeVisible();
+  await expect(page.getByTestId('airport-tier')).toContainText('飛行場');
+  await closeDay(page);
+  await expect(page.getByTestId('review-goals')).toContainText('1 日 10 便を完了');
+  await page.getByTestId('review-next').click();
+  await expect(page.getByTestId('day-review')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('[data-testid^="alert-goal:flights10"]').first()).toBeVisible();
+  await page.getByTestId('tab-goals').click();
+  await expect(page.getByTestId('goal-row-flights10')).toContainText('達成');
+  await expect(page.getByTestId('goals-panel')).toContainText('300,000');
+});
+
+test('従来のサンドボックスには目標・空港の格・不満の表示がない', async ({ page }) => {
+  await page.getByTestId('start-ops').click();
+  await expect(page.getByTestId('ops-controls')).toBeVisible();
+  await expect(page.getByTestId('goals-card')).toHaveCount(0);
+  await expect(page.getByTestId('airport-tier')).toHaveCount(0);
+  await expect(page.locator('[data-testid^="airline-complaint-"]')).toHaveCount(0);
 });

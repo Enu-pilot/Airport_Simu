@@ -27,6 +27,8 @@ export interface GoalState {
   grants: GoalGrant[];
   /** 契約提案の確率が上がる期限（日） */
   boostUntil: number;
+  /** 最後に格が上がった日（なければ欠落） */
+  tierDay?: number;
 }
 
 export const initialGoals = (): GoalState => ({ done: {}, streaks: {}, tier: 0, grants: [], boostUntil: 0 });
@@ -143,6 +145,7 @@ export function evaluateGoals(c: CompanyState, x: Omit<GoalCtx, 'c'>): GoalResul
     g.streaks.tier = meetsTier(next, ctx) ? (g.streaks.tier ?? 0) + 1 : 0;
     if ((g.streaks.tier ?? 0) >= TIER_STREAK) {
       g.tier = next;
+      g.tierDay = day;
       g.streaks.tier = 0;
       tierUp = next;
     }
@@ -170,5 +173,6 @@ export function checkGoals(raw: unknown): string[] {
   if (raw.tier !== 0 && raw.tier !== 1 && raw.tier !== 2 && raw.tier !== 3) errors.push('目標: tier（空港の格）が 0〜3 ではありません');
   if (!Array.isArray(raw.grants) || raw.grants.some((x) => !isObj(x) || !Number.isInteger(x.day) || !GOAL_IDS.includes(x.id as string) || typeof x.amount !== 'number' || !Number.isFinite(x.amount))) errors.push('目標: grants が不正です');
   if (typeof raw.boostUntil !== 'number' || !Number.isFinite(raw.boostUntil)) errors.push('目標: boostUntil が数値ではありません');
+  if (raw.tierDay !== undefined && !Number.isInteger(raw.tierDay)) errors.push('目標: tierDay が整数ではありません');
   return errors;
 }

@@ -2,7 +2,8 @@ import type { CompanyState } from '../../core/economy/company';
 import type { SimContext } from '../../core/sim/context';
 import type { Disruption, DisruptionKind, SimEvent, SimState } from '../../core/sim/types';
 import { BUS_SHORTAGE_ALERT_SEC } from '../../core/sim/busRules';
-import { DISRUPTION_KIND_LABEL, OPS_UI, HOLD_REASON_LABEL, WEATHER_LABEL, displayName } from '../../i18n/ja';
+import { airlineDef } from '../../core/economy/registry';
+import { GAME_UI, SCORE_LABEL, DISRUPTION_KIND_LABEL, OPS_UI, HOLD_REASON_LABEL, WEATHER_LABEL, displayName } from '../../i18n/ja';
 import type { OverlayKey } from './opsUi';
 
 /**
@@ -165,6 +166,20 @@ export function deriveAlerts(sim: { state: SimState; ctx: SimContext }, company:
       if (t.phase === 'stalled') add({ key: `busStalled:${t.id}`, severity: 'critical', t: t.phaseSince, title: OPS_UI.alertBusStalled(t.pax), target: { kind: 'none', id: null }, actions: ['openPanel'], panel: 'ground' });
     }
     if (shortage > 0) add({ key: 'busShortage', severity: 'warning', t: state.now, title: OPS_UI.alertBusShortage(shortage), target: { kind: 'none', id: null }, actions: ['openPanel'], panel: 'ground' });
+  }
+
+  // 航空会社の不満・目標の達成（会社の状態から導く。直前の締めで生じたものだけ）
+  if (company?.airlineEval) {
+    for (const [id, e] of Object.entries(company.airlineEval)) {
+      for (const x of e.complaints) {
+        if (x.sinceDay >= company.day - 1) add({ key: `complaint:${id}:${x.key}`, severity: 'warning', t: state.now, title: GAME_UI.newComplaint(airlineDef(id).name, SCORE_LABEL[x.key]), target: { kind: 'none', id: null }, actions: ['openPanel'], panel: 'airlines' });
+      }
+    }
+  }
+  if (company?.goals) {
+    for (const g of company.goals.grants) {
+      if (g.day >= company.day - 1) add({ key: `goal:${g.id}`, severity: 'warning', t: state.now, title: GAME_UI.goalCompleted(GAME_UI.goal[g.id]?.title ?? g.id), target: { kind: 'none', id: null }, actions: ['openPanel'], panel: 'goals' });
+    }
   }
 
   // 資金不足

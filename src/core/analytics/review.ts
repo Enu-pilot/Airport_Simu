@@ -5,6 +5,7 @@ import type { Simulation } from '../sim/simulation';
 import { forecastForDay, type WeatherForecast } from '../sim/weather';
 import type { DisruptionKind } from '../sim/types';
 import type { FlightRecord } from './records';
+import type { AirlineRequest, RequestKind } from '../economy/airlineEval';
 
 /**
  * 1 日の振り返り（docs/14_management_rules.md §N）。日次の締めの直後に、既存の日報・運航の記録・障害の記録・
@@ -83,7 +84,20 @@ export interface DayReview {
   delayCauses: { cause: string; flights: number }[];
   disruptions: ReviewDisruption[];
   responses: ReviewResponses;
-  airlines: { id: string; before: number; after: number; delta: number; worst: ScoreKey[] }[];
+  airlines: {
+    id: string;
+    before: number;
+    after: number;
+    delta: number;
+    worst: ScoreKey[];
+    /** 航空会社の評価（game.airlineEval のときだけ）: 現在の不満、この日に生じた不満、未達の要望、この日に達成した要望 */
+    complaints?: ScoreKey[];
+    newComplaints?: ScoreKey[];
+    requests?: AirlineRequest[];
+    fulfilled?: RequestKind[];
+  }[];
+  /** 目標（game.goals のときだけ）: この日に達成した目標・報酬の現金・昇格した格 */
+  goals?: { completed: { id: string; cash: number }[]; tier: number; tierUp: boolean };
   tomorrow: { flights: number; issues: PlanIssue[]; completing: { id: string; kind: string }[]; weather: WeatherForecast | null };
 }
 
@@ -155,7 +169,22 @@ export function buildDayReview(input: ReviewInput): DayReview {
     .map((s) => {
       const after = company.airlines[s.airlineId]?.satisfaction ?? s.satisfaction;
       const before = airlinesBefore[s.airlineId] ?? after;
-      return { id: s.airlineId, before, after, delta: Math.round((after - before) * 10) / 10, worst: s.lacking.map((c) => c.key) };
+      const ev = company.airlineEval?.[s.airlineId];
+      return {
+        id: s.airlineId,
+        before,
+        after,
+        delta: Math.round((after - before) * 10) / 10,
+        worst: s.lacking.map((c) => c.key),
+        ...(ev
+          ? {
+              complaints: ev.complaints.map((x) => x.key),
+              newComplaints: ev.complaints.filter((x) => x.sinceDay === report.day).map((x) => x.key),
+              requests: ev.requests.map((x) => ({ ...x })),
+              fulfilled: ev.done.filter((x) => x.day === report.day).map((x) => x.kind),
+            }
+          : {}),
+      };
     });
 
   return {
@@ -167,6 +196,15 @@ export function buildDayReview(input: ReviewInput): DayReview {
     disruptions,
     responses: { ...responses },
     airlines,
+    ...(company.goals
+      ? {
+          goals: {
+            completed: company.goals.grants.filter((g) => g.day === report.day).map((g) => ({ id: g.id, cash: g.amount })),
+            tier: company.goals.tier,
+            tierUp: company.goals.tierDay === report.day,
+          },
+        }
+      : {}),
     tomorrow: {
       flights: plan.flights.length,
       issues: analysis.issues,

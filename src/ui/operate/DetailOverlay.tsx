@@ -8,6 +8,7 @@ import { FinancePanel, PlanPanel } from '../ManagementPanels';
 import { BaggageBoard, DisruptionBoard, EventLog, GroundBoard, TerminalBoard } from '../OpsPanels';
 import { ProjectPanel } from '../ProjectPanel';
 import { AirlineScoreTable } from './cards/AirlineScoreTable';
+import { GoalsPanel } from './cards/GoalsCard';
 import { opsUi, useOpsUi, type OverlayKey } from './opsUi';
 
 const BODY: Record<OverlayKey, () => ReactNode> = {
@@ -26,6 +27,7 @@ const BODY: Record<OverlayKey, () => ReactNode> = {
   project: () => <ProjectPanel />,
   issues: () => <IssuesPanel />,
   airlines: () => <AirlineScoreTable />,
+  goals: () => <GoalsPanel />,
 };
 
 /**

@@ -98,6 +98,7 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 21 | [docs/21_save_format.md](docs/21_save_format.md) | 保存形式・バージョン管理・移行・保存先とバックアップ |
 | 23 | [docs/23_runway_design.md](docs/23_runway_design.md) | 滑走路の設計（自由方位・実寸・番号・交差の運航・参考値と出典・エディタの使い方、Phase 12） |
 | 29 | [docs/29_remote_stands_and_bus_boarding.md](docs/29_remote_stands_and_bus_boarding.md) | リモートスポット・ランプバスによるバス搭乗・独立ゲート（Phase 12B-3a Part A） |
+| 30 | [docs/30_game_models.md](docs/30_game_models.md) | 天候 5 段階・予報・難易度・航空会社の評価（不満・要望）・目標と空港の格（Phase 12B-3a Part B） |
 | 26 | [docs/26_validation_rules.md](docs/26_validation_rules.md) | 滑走路に関する検証コードと適用条件（従来 / 実寸、classic / realistic） |
 | 27 | [docs/27_migration_and_compatibility.md](docs/27_migration_and_compatibility.md) | スキーマ v1→v2→v3、版の方針、互換性、ゴールデンの戦略 |
 | 22 | [docs/22_geometry_architecture.md](docs/22_geometry_architecture.md) | 幾何基盤（座標フレーム・角度規約・許容誤差・ゴールデン基準値）とデータモデルの計画（Phase 11） |

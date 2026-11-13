@@ -35,7 +35,10 @@ import { layoutValue, scaleFactor } from './construction';
 import { advanceProjects } from './expansion';
 import { analyzeAccess, type AccessAnalysis, type AccessFeedback } from '../access/model';
 import { takeAccessStats } from '../access/runtime';
-import { isPeak, RUNWAY_HOURLY_CAPACITY } from './planning';
+import { isPeak, RUNWAY_HOURLY_CAPACITY, analyzeDayPlan, planDay } from './planning';
+import { airlineScorecard } from './airlineScore';
+import { stepAirlineEval } from './airlineEval';
+import { evaluateGoals } from './goals';
 import { airlineDef } from './registry';
 
 /**
@@ -463,7 +466,21 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   const { kpi, byAirline } = computeKpi(sim, c);
   settleAccess(sim, c, kpi);
   for (const ev of advanceProjects(c)) log(state, ev);
-  for (const ev of updateContracts(c, byAirline)) log(state, ev);
+  let evalIn: { deltas: Record<string, number>; bonus: Record<string, number> } | undefined;
+  if (c.game?.airlineEval) {
+    // 航空会社の評価要素（12B-1 の評価カードの 7 要素）→ 移動平均 → 満足度の変化・不満・要望
+    const from = e.periodStart;
+    const recs = state.analytics.records.filter((r) => {
+      const t = r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled;
+      return t >= from && t < state.now;
+    });
+    const plan = planDay(c, c.day, state.access?.factor ?? 1, ctx.types);
+    const scores = airlineScorecard({ company: c, ctx, records: recs, plan, analysis: analyzeDayPlan(plan, ctx) });
+    const r = stepAirlineEval(c, { scores, operable: new Set<string>(operableTypes(ctx)) });
+    for (const t of r.events) log(state, t);
+    evalIn = { deltas: r.deltas, bonus: r.bonus };
+  }
+  for (const ev of updateContracts(c, byAirline, evalIn)) log(state, ev);
   kpi.airlineSatisfaction = airlineSatisfaction(c);
   c.rating = nextRating(c.rating, kpi);
   kpi.rating = c.rating;
@@ -492,6 +509,18 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   if (c.reports.length > REPORT_LIMIT) c.reports.splice(0, c.reports.length - REPORT_LIMIT);
   c.today = {};
   checkBankruptcy(c);
+  if (c.game?.goals) {
+    // 目標・空港の格（日報を積んだ後、日を進める前）。報酬の現金は営業収支に入れない
+    const from = e.periodStart;
+    const recs = state.analytics.records.filter((r) => {
+      const t = r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled;
+      return t >= from && t < state.now;
+    });
+    const res = evaluateGoals(c, { report, layout: ctx.layout, records: recs, types: ctx.types, largeOperable: operableTypes(ctx).some((t) => resolveType(ctx.types, t).size === 'L') });
+    if (res.cash > 0) report.grants = res.cash;
+    for (const id of res.completed) log(state, `目標を達成しました: ${id}`);
+    if (res.tierUp !== null) log(state, `空港の格が上がりました: ${res.tierUp}`);
+  }
   log(state, `${c.day + 1}日目を締めました: 営業利益 ${report.operatingProfit.toLocaleString('ja-JP')} cr`);
   c.day++;
 
