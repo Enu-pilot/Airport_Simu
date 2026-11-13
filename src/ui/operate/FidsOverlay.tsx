@@ -157,6 +157,13 @@ export function FidsOverlay() {
                   const type = resolveType(ctx.types, ac.typeId);
                   const place = f.destinationId ? destinationDef(f.destinationId).name : '—';
                   const stand = f.standId ? displayName(ctx.layout, f.standId).replace('スポット ', '') : '';
+                  const busGate = f.pax.bus?.gateId ?? null;
+                  const busTag = f.pax.bus ? (
+                    <span className="fids-bus" title={busGate ? OPS_UI.fidsBusTitle(displayName(ctx.layout, busGate)) : undefined} data-testid={`fids-bus-${f.number}`}>
+                      {' '}
+                      {OPS_UI.fidsBus}
+                    </span>
+                  ) : null;
                   const stateText = `${AIRCRAFT_STATE_LABEL[ac.state]}${ac.holdReason ? `（${HOLD_REASON_LABEL[ac.holdReason]}）` : ''}`;
                   const rw = f.runwayId ? ctx.layout.runways[f.runwayId] : undefined;
                   return (
@@ -175,7 +182,10 @@ export function FidsOverlay() {
                           <td>{f.actual !== null ? formatClock(f.actual) : f.status === 'scheduled' || f.status === 'active' ? formatClock(f.estimated) : '—'}</td>
                           <td className={delay && delay >= 15 ? 'fids-late' : ''}>{delay ? `${delay}分` : ''}</td>
                           <td>{rw ? designatorsOf(rw, ctx.layout).text.join('/') : ''}</td>
-                          <td>{stand}</td>
+                          <td>
+                            {stand}
+                            {busTag}
+                          </td>
                           <td data-testid={`pax-${f.number}`}>{paxCell(f)}</td>
                           <td>{FLIGHT_STATUS_LABEL[f.status]}</td>
                           <td className="fids-state">{stateText}</td>
@@ -190,7 +200,10 @@ export function FidsOverlay() {
                             {place}
                           </td>
                           <td className="col-type">{type.shortLabel}</td>
-                          <td>{stand}</td>
+                          <td>
+                            {stand}
+                            {busTag}
+                          </td>
                           <td className="fids-state">{stateText}</td>
                           <td className={`col-delay ${delay && delay >= 15 ? 'fids-late' : ''}`}>{delay ? `+${delay}分` : ''}</td>
                         </>

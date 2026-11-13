@@ -1,7 +1,8 @@
 import type { CompanyState } from '../../core/economy/company';
 import type { SimContext } from '../../core/sim/context';
 import type { Disruption, DisruptionKind, SimEvent, SimState } from '../../core/sim/types';
-import { DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, WEATHER_LABEL, displayName } from '../../i18n/ja';
+import { BUS_SHORTAGE_ALERT_SEC } from '../../core/sim/busRules';
+import { DISRUPTION_KIND_LABEL, OPS_UI, HOLD_REASON_LABEL, WEATHER_LABEL, displayName } from '../../i18n/ja';
 import type { OverlayKey } from './opsUi';
 
 /**
@@ -153,6 +154,17 @@ export function deriveAlerts(sim: { state: SimState; ctx: SimContext }, company:
     const queued = (fac?.queue ?? []).reduce((s, id) => s + (state.paxGroups[id]?.count ?? 0), 0);
     const waitMin = (queued * sec) / lanes / 60;
     if (waitMin >= ALERT_QUEUE_MIN) add({ key: `queue:${a.id}`, severity: 'warning', t: state.now, title: `${displayName(layout, a.id).replace(/^\dF /, '')} の待ち 約${Math.round(waitMin)}分`, target: { kind: 'area', id: a.id }, actions: ['focus', 'openPanel'], panel: 'terminal' });
+  }
+
+  // ランプバス: 配車待ちが続く（不足）、走行中の故障（乗客が車内で救援待ち）
+  if (state.bus) {
+    let shortage = 0;
+    for (const id of state.bus.active) {
+      const t = state.bus.trips[id]!;
+      if (!t.busId && t.phase === 'waiting' && state.now - t.createdAt >= BUS_SHORTAGE_ALERT_SEC) shortage++;
+      if (t.phase === 'stalled') add({ key: `busStalled:${t.id}`, severity: 'critical', t: t.phaseSince, title: OPS_UI.alertBusStalled(t.pax), target: { kind: 'none', id: null }, actions: ['openPanel'], panel: 'ground' });
+    }
+    if (shortage > 0) add({ key: 'busShortage', severity: 'warning', t: state.now, title: OPS_UI.alertBusShortage(shortage), target: { kind: 'none', id: null }, actions: ['openPanel'], panel: 'ground' });
   }
 
   // 資金不足

@@ -1,4 +1,4 @@
-import type { Disruption, DisruptionKind, WeatherKind, AircraftState, BagState, BlockReason, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent, TaskKind, TaskState, UnitKind, UnitStatus } from '../core/sim/types';
+import type { Disruption, DisruptionKind, WeatherKind, AircraftState, BagState, BlockReason, BusTripPhase, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent, TaskKind, TaskState, UnitKind, UnitStatus } from '../core/sim/types';
 import type { BuildState, EntityType, FacilityKind, PaxZone, RoadClass, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/validation/validate';
@@ -102,8 +102,8 @@ export const PROP_LABEL: Record<string, string> = {
 /** ゲートの搭乗方式（docs/29） */
 export const BOARDING_MODE_LABEL = {
   contact: '通常（コンタクト）',
-  bus: 'バス（ランプバスでリモートスポットへ）',
-  connectAuto: '（自動: 隣接するターミナル）',
+  bus: 'バス（リモートスポット）',
+  connectAuto: '自動（隣接）',
 } as const;
 
 export const SEVERITY_LABEL: Record<Severity, string> = { error: 'エラー', warning: '警告', info: '情報' };
@@ -424,6 +424,18 @@ export const PAX_STATE_LABEL: Record<PaxState, string> = {
   onBus: 'ランプバスで移動中',
   missed: '乗り遅れ',
   cancelled: '欠航',
+};
+
+/** ランプバスの運行の段階 */
+export const BUS_PHASE_LABEL: Record<BusTripPhase, string> = {
+  waiting: '配車待ち',
+  toPickup: '乗車地へ移動',
+  loading: '乗車中',
+  driving: '走行中',
+  unloading: '降車中',
+  stalled: '故障（救援待ち）',
+  done: '完了',
+  cancelled: '取消',
 };
 
 export const MISS_REASON_LABEL: Record<MissReason, string> = {
@@ -887,6 +899,13 @@ export const OPS_UI = {
   queueText: (queued: number, avgWaitMin: number, crowd: number) => `待ち ${queued}人 · 平均 ${avgWaitMin}分 · 混雑 ${crowd}%`,
   // 地上支援・手荷物
   groundTitle: '地上支援・手荷物',
+  busTrips: 'ランプバスの運行',
+  busTripsText: (running: number, waiting: number, trips: number) => `運行中 ${running} · 配車待ち ${waiting} · 完了 ${trips}`,
+  busWait: 'バス待ちの旅客',
+  fidsBus: 'BUS',
+  fidsBusTitle: (gate: string) => `ランプバスで搭乗・降機（${gate}）`,
+  alertBusShortage: (n: number) => `ランプバス不足（${n} 件の運行が配車待ち）`,
+  alertBusStalled: (pax: number) => `ランプバス故障（乗客 ${pax} 人が車内で救援待ち）`,
   brokenBadge: (n: number) => `故障 ${n}`,
   unitText: (working: number, total: number, broken: number) => `作業中 ${working}/${total}${broken > 0 ? ` · 故障 ${broken}` : ''}`,
   blockedTasks: '止まっている作業',

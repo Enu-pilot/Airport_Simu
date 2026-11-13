@@ -29,7 +29,8 @@ export function TerminalCard() {
       })
       .sort((a, b) => b.queued - a.queued || b.avgWaitMin - a.avgWaitMin || compareIds(a.id, b.id))
       .slice(0, 4);
-    return { inTerminal, missed: state.paxStats.missed, rows };
+    const busWait = state.bus ? state.activePax.reduce((n, id) => (state.paxGroups[id]!.state === 'waitingBus' ? n + state.paxGroups[id]!.count : n), 0) : null;
+    return { inTerminal, missed: state.paxStats.missed, busWait, rows };
   });
   return (
     <Card id="terminal" title={OPS_UI.terminalTitle} open="terminal" badge={data ? OPS_UI.inTerminal(data.inTerminal) : undefined}>
@@ -38,6 +39,11 @@ export function TerminalCard() {
           <CardRow label={OPS_UI.paxMissed} tone={data.missed > 0 ? 'warn' : undefined}>
             {data.missed}
           </CardRow>
+          {data.busWait !== null && (
+            <CardRow label={OPS_UI.busWait} tone={data.busWait > 60 ? 'warn' : undefined} testid="terminal-bus-wait">
+              {data.busWait}
+            </CardRow>
+          )}
           {data.rows.length === 0 && <div className="card-sub">{OPS_UI.noTerminal}</div>}
           {data.rows.map((r) => (
             <div key={r.id} className="card-item" data-testid={`card-terminal-${r.id}`}>

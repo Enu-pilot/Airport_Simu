@@ -38,6 +38,7 @@ import {
   eventText,
   formatClock,
   formatSimTime,
+  BUS_PHASE_LABEL,
 } from '../i18n/ja';
 
 /** 運航状態（約10Hzで更新）。sim は可変オブジェクトなので uiVersion の変化で再描画する */
@@ -368,6 +369,20 @@ export function DisruptionBoard() {
   );
 }
 
+/** バス扱いの便の搭乗方式・バスゲート・運行の状況 */
+function BusRows({ state, dep, arr, layout }: { state: SimState; dep: Flight; arr: Flight; layout: AirportLayout }) {
+  const gate = (dep.pax.bus?.gateId ?? arr.pax.bus?.gateId) ?? null;
+  const trips = Object.values(state.bus!.trips).filter((t) => (t.flightId === dep.id || t.flightId === arr.id) && t.phase !== 'done' && t.phase !== 'cancelled');
+  const waiting = [...(state.flightPax[dep.id] ?? []), ...(state.flightPax[arr.id] ?? [])].map((id) => state.paxGroups[id]!).filter((g) => g.state === 'waitingBus').reduce((n, g) => n + g.count, 0);
+  const carried = (dep.pax.bus?.paxCarried ?? 0) + (arr.pax.bus?.paxCarried ?? 0);
+  return (
+    <div data-testid="aircraft-bus">
+      <Row label="搭乗方式">{`バス（${gate ? displayName(layout, gate) : 'バスゲート未定'}）`}</Row>
+      <Row label="ランプバス">{`バス待ち ${waiting}人 · 運んだ旅客 ${carried}人${trips.length > 0 ? ` · 運行中 ${trips.map((t) => `${t.id}（${BUS_PHASE_LABEL[t.phase]} ${t.pax}人）`).join('、')}` : ''}`}</Row>
+    </div>
+  );
+}
+
 export function AircraftPanel() {
   const o = useOps();
   const id = o?.selectedAircraft;
@@ -421,6 +436,7 @@ export function AircraftPanel() {
           </Row>
         )}
         {arr.pax.generated && <Row label="到着旅客">{`降機 ${arr.pax.deplaned}/${arr.pax.booked} · 退出 ${arr.pax.exited}`}</Row>}
+        {(dep.pax.bus || arr.pax.bus) && state.bus && <BusRows state={state} dep={dep} arr={arr} layout={layout} />}
       </div>
       <TurnaroundSection sim={o.sim} acId={ac.id} />
       <div className="prop-section">

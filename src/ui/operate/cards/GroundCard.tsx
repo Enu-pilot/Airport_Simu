@@ -14,6 +14,9 @@ export function GroundCard() {
   const gs = state.groundStats;
   const eqDown = Object.values(state.equipment).filter((e) => e.broken).length;
   const blocked = state.activeTasks.map((id) => state.tasks[id]!).filter((t) => t.blockedReason && t.blockedReason !== 'dependency' && t.blockedReason !== 'waitingTime').length;
+  const busTrips = state.bus ? state.bus.active.map((id) => state.bus!.trips[id]!) : [];
+  const busRunning = busTrips.filter((t) => t.busId && t.phase !== 'waiting').length;
+  const busWaiting = busTrips.filter((t) => !t.busId).length;
   return (
     <Card id="ground" title={OPS_UI.groundTitle} open="ground" badge={broken > 0 ? OPS_UI.brokenBadge(broken) : undefined}>
       {kinds.map((k) => {
@@ -26,6 +29,11 @@ export function GroundCard() {
           </CardRow>
         );
       })}
+      {state.bus && (
+        <CardRow label={OPS_UI.busTrips} tone={busWaiting > 0 ? 'warn' : undefined} testid="ground-apronBus">
+          {OPS_UI.busTripsText(busRunning, busWaiting, state.bus.stats.trips)}
+        </CardRow>
+      )}
       <CardRow label={OPS_UI.blockedTasks} tone={blocked > 0 ? 'warn' : undefined}>
         {blocked}
       </CardRow>
