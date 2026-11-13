@@ -180,6 +180,27 @@ export function checkLayout(l: unknown, where = 'レイアウト'): string[] {
     if (layout.facilities[a.terminalId]?.kind !== 'terminal') errors.push(`${where}: ターミナル内エリア ${a.id} の建物 ${a.terminalId} が見つかりません`);
   }
   errors.push(...checkRunwayFields(layout, where));
+  errors.push(...checkBusProps(layout, where));
+  return errors;
+}
+
+/** 12B-3a の新しいプロパティの形（ゲートの boardingMode・connectedTo、GSE 基地の apronBuses）。欠落は従来どおりで許す */
+function checkBusProps(layout: AirportLayout, where: string): string[] {
+  const errors: string[] = [];
+  for (const f of Object.values(layout.facilities)) {
+    const props = f.props;
+    if (!isObj(props)) continue;
+    if (f.kind === 'gate') {
+      const bm = props.boardingMode;
+      if (bm !== undefined && bm !== 'contact' && bm !== 'bus') errors.push(`${where}: ゲート ${f.id} の搭乗方式（boardingMode）が不正です`);
+      const ct = props.connectedTo;
+      if (ct !== undefined && ct !== null && (typeof ct !== 'string' || layout.facilities[ct]?.kind !== 'terminal')) errors.push(`${where}: ゲート ${f.id} の接続先（connectedTo）がターミナルではありません`);
+    }
+    if (f.kind === 'gseBase') {
+      const n = props.apronBuses;
+      if (n !== undefined && (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 30)) errors.push(`${where}: GSE 基地 ${f.id} のランプバス台数（apronBuses）が不正です`);
+    }
+  }
   return errors;
 }
 
@@ -246,10 +267,56 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
     }
     if (!state.flights[a.arrivalFlightId] || !state.flights[a.departureFlightId]) errors.push(`運航状態: 機体 ${id} の便が見つかりません`);
   }
+  errors.push(...checkBusState(state, layout));
   for (const [standId, acId] of Object.entries(state.standAssignments)) {
     if (!layout.stands[standId]) errors.push(`運航状態: スポット割り当て ${standId} がレイアウトにありません`);
     if (!state.aircraft[acId as string]) errors.push(`運航状態: スポット ${standId} に割り当てた機体 ${String(acId)} がありません`);
   }
+  return errors;
+}
+
+const BUS_PHASES = ['waiting', 'toPickup', 'loading', 'driving', 'unloading', 'stalled', 'done', 'cancelled'];
+
+/** ランプバスの運行の状態の形（state.bus・便の p.bus・バスの trip・旅客の busTrip/waitingBus/onBus）。従来の運航は何も持たない */
+function checkBusState(state: SimState, layout: AirportLayout): string[] {
+  const errors: string[] = [];
+  const raw = (state as unknown as Record<string, unknown>).bus;
+  const isGate = (id: unknown): boolean => typeof id === 'string' && layout.facilities[id]?.kind === 'gate';
+  if (raw === undefined) {
+    for (const f of Object.values(state.flights)) if (f.pax.bus !== undefined) errors.push(`運航状態: 便 ${f.id} が p.bus を持つのにバスの運行（bus）がありません`);
+    for (const u of Object.values(state.units)) if (u.trip !== undefined) errors.push(`運航状態: ユニット ${u.id} が運行 ${u.trip} を持つのにバスの運行（bus）がありません`);
+    for (const g of Object.values(state.paxGroups)) {
+      if (g.busTrip !== undefined || g.state === 'waitingBus' || g.state === 'onBus') errors.push(`運航状態: 旅客グループ ${g.id} がバスの状態なのにバスの運行（bus）がありません`);
+    }
+    return errors;
+  }
+  if (!isObj(raw) || !isObj(raw.trips) || !Array.isArray(raw.active) || !isObj(raw.stats)) return ['運航状態: バスの運行（bus）の形が不正です'];
+  const bus = raw as unknown as NonNullable<SimState['bus']>;
+  for (const k of ['trips', 'pax', 'waitSec', 'shortageSec', 'rescues'] as const) {
+    if (typeof bus.stats[k] !== 'number') errors.push(`運航状態: bus.stats.${k} が数値ではありません`);
+  }
+  for (const [id, t] of Object.entries(bus.trips)) {
+    if (!isObj(t) || t.id !== id) {
+      errors.push(`運航状態: バスの運行 ${id} の ID が一致しません`);
+      continue;
+    }
+    if (t.dir !== 'dep' && t.dir !== 'arr') errors.push(`運航状態: 運行 ${id} の方向が不正です`);
+    if (!BUS_PHASES.includes(t.phase)) errors.push(`運航状態: 運行 ${id} の段階が不正です`);
+    if (!state.flights[t.flightId]) errors.push(`運航状態: 運行 ${id} の便 ${String(t.flightId)} がありません`);
+    if (!isGate(t.gateId)) errors.push(`運航状態: 運行 ${id} のゲート ${String(t.gateId)} がレイアウトにありません`);
+    if (typeof t.standId !== 'string' || !layout.stands[t.standId]) errors.push(`運航状態: 運行 ${id} のスポット ${String(t.standId)} がレイアウトにありません`);
+    if (t.busId !== null && state.units[t.busId]?.kind !== 'apronBus') errors.push(`運航状態: 運行 ${id} のバス ${String(t.busId)} がありません`);
+    if (!Array.isArray(t.groups) || t.groups.some((g) => !state.paxGroups[g])) errors.push(`運航状態: 運行 ${id} の旅客グループが見つかりません`);
+    if (typeof t.pax !== 'number' || typeof t.createdAt !== 'number' || typeof t.phaseSince !== 'number') errors.push(`運航状態: 運行 ${id} の数値項目が不正です`);
+  }
+  for (const id of bus.active) if (!bus.trips[id]) errors.push(`運航状態: 未完了の運行 ${String(id)} がありません`);
+  for (const f of Object.values(state.flights)) {
+    const b = f.pax.bus;
+    if (b === undefined) continue;
+    if (!isObj(b) || (b.gateId !== null && !isGate(b.gateId)) || (b.gateClosedAt !== null && typeof b.gateClosedAt !== 'number')) errors.push(`運航状態: 便 ${f.id} の p.bus が不正です`);
+  }
+  for (const u of Object.values(state.units)) if (u.trip !== undefined && !bus.trips[u.trip]) errors.push(`運航状態: ユニット ${u.id} の運行 ${u.trip} がありません`);
+  for (const g of Object.values(state.paxGroups)) if (g.busTrip !== undefined && !bus.trips[g.busTrip]) errors.push(`運航状態: 旅客グループ ${g.id} の運行 ${g.busTrip} がありません`);
   return errors;
 }
 

@@ -306,3 +306,25 @@ E2E: `tests/e2e/access.spec.ts`（アクセスの画面とタクシー乗り場�
 | `tests/e2e/dayloop.spec.ts` | 7 | 0:00 の自動一時停止と振り返り（0:00 の直前まで進めた運航状態つきプロジェクトを読み込む）→ 次の日へ、締めの直後の「建設へ戻る」、設定 OFF で止まらない、途中締め（従来どおり）、1 日スキップ（進捗・所要時間を記録）、中止、履歴（一覧・壊れた履歴・削除・戻す） |
 
 合計: vitest 597 件（60 ファイル）、playwright 52 件。
+
+## 20. Phase 12B-1 の監査の修正と 12B-3a Part A で追加したテスト（バス搭乗・独立ゲート）
+
+既存のテストの期待・ゴールデンは変更しない（`git diff -- tests/golden` は新規ファイルと `sim-versions.json` の追加だけ）。
+
+| ファイル | 件数 | 内容 |
+|---|---|---|
+| `tests/unit/golden.legacyRemote.test.ts` | 1 | **A0 の特性テスト**: リモートスポットを含む従来のレイアウト（`legacy-remote.layout.json`）の 1 日の運航（出発は `noGate` で乗り遅れ・到着は `stranded`）と状態の sha256 を、実装前の現行コードの出力で新規ゴールデンに固定。実装後も 1 ビットも変わらない |
+| `tests/unit/golden.bus.test.ts` | 1 | バス搭乗・独立ゲートの空港（`bus.layout.json`）の運航の新規ゴールデン（`bus-sim.golden.json`、`SIM_MODEL_VERSION` の保護の対象） |
+| `tests/unit/projectFormat2.test.ts` | 3 | `formatVersionOf`: 従来は 1、新しい項目で 2、v2 の読み込み・v3 の拒否・再保存の版 |
+| `tests/unit/gateProps.test.ts` | 4 | `DEFAULT_PROPS` 不変、欠落 = 従来の値、更新の検証（`boardingMode`・`connectedTo`・`apronBuses`）、参照切れの除去 |
+| `tests/unit/independentGate.test.ts` | 4 | 独立ゲートの合成ノード・経路・`byTerminal` に入らない、検証コード、6 時間の運航 |
+| `tests/unit/busContext.test.ts` | 7 | `busGates`・`standGate`・基地の `apronBus`、購入費・日次費用、`checkGate`、検証コード |
+| `tests/unit/sim/apronBus.test.ts` | 10 | 出発のバス搭乗（定員・複数運行・不変条件）、バス 0 台の `noBus`、不足の遅延、従来のデータでは新しいコードに入らない、決定性、到着、故障・救援・乗車中の故障・配置換えの保護、分析 |
+| `tests/unit/sim/busSave.test.ts` | 3 | 運航中（バス走行中）の保存 → 読み込み → 継続が中断しない場合とビット単位で一致、新しい項目の厳格な形の検査、従来の保存は版 1 |
+| `tests/unit/ops12b.test.ts`（追加 1 件） | 1 | 機体・旅客グループが欠けても `computeKpi` が例外にならない |
+| `tests/e2e/busgate.spec.ts` | 4 | 搭乗方式の切り替えと警告、独立ゲートの警告、リモートスポットの便がバスで搭乗・降機（運航表の BUS・運行の完了・退出/搭乗）、バス不足のアラート |
+| `tests/e2e/opsfix.spec.ts` | 3 | 運航表の移動・コンパクト・記憶、運航モードの読み取り専用の詳細、「表示」メニュー |
+
+**高リスクのステップ（A5・A6）の回帰確認**: `npx vitest run`（A0・全ゴールデン・`passengers.test.ts`・`invariants.test.ts`・`dayloop.test.ts` を含む）と e2e の `operations`・`ground`・`terminal`・`opslayout`。
+
+合計: vitest 631 件（68 ファイル）、playwright 59 件。

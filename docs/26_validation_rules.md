@@ -47,6 +47,21 @@ issue が出るのは、少なくとも一方が自由形の組、または `rul
 - **交差する滑走路の組**（交差点ノードがある組）は、滑走路・着陸帯・RESA の相互の重なりを免除する。同一直線上の重なりと、中心線が交わらない舗装の重なりは `OVERLAP`。
 - `at`（マップ上のマーカー）は最初に重なったタイル（自由形どうしは重なりの範囲の中心を丸めたもの）。
 
+## 3b. ゲート（Phase 12B-3a）
+
+| コード | 重大度 | 条件 |
+|---|---|---|
+| `GATE_NO_STAND` | warning | スポットが紐付いていないゲート。**バスゲートは対象外** |
+| `GATE_BUS_HAS_STAND` | info | バスゲートに `standId` がある（無視される） |
+| `GATE_BUS_NO_VEHICLES` | warning | 運用中のバスゲートがあり、運用中の GSE 基地の `apronBuses` の合計が 0 |
+| `BUS_GATE_NO_REMOTE_STAND` | info | バスゲートがあるがリモートスポット（ゲートのないスポット）がない |
+| `STAND_REMOTE` | info | 文言だけ分岐（バスゲートがあれば「バスゲートのランプバスで搭乗」）。キーは従来と同じで、バスゲートがあるときだけ `params.bus` が付く |
+| `GATE_CONNECTION_INVALID` | error | `connectedTo` が存在しない・ターミナルでない |
+| `GATE_CONNECTOR_LONG` | warning | 独立ゲートの連絡通路が 60 タイル（1.5 km）超 |
+| `GATE_NOT_AT_TERMINAL` | error | ターミナルに接していない。**`connectedTo` が有効なときは出さない** |
+
+`TERMINAL_NO_GATE` は接続された独立ゲートも数える。詳細は [docs/29](29_remote_stands_and_bus_boarding.md)。
+
 ## 4. 運用可否
 
 `operability` は既存の仕組み。滑走路に error があると `HAS_ERRORS`（運用不可）。`RUNWAY_PARALLEL_*`・`RUNWAY_DESIGNATOR_CONFLICT` は警告・情報なので運用を止めない。

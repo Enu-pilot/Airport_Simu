@@ -19,6 +19,7 @@ import { footprintOf, footprintOwnerIds } from '../../src/core/layout/footprint'
 import { headingVector, runwayDesignators, runwayEnd, runwayLengthM, runwayPolygon, runwayStripPolygon } from '../../src/core/layout/runway';
 import type { AirportLayout, Heading, RunwayGrid8 } from '../../src/core/model/types';
 import { airportKpis } from '../../src/core/analytics/kpi';
+import { checkInvariants } from '../../src/core/sim/invariants';
 import { SIM_MODEL_VERSION } from '../../src/core/scenario/scenario';
 import { createSimulation, stepSimulation } from '../../src/core/sim/simulation';
 import { analyzeLayout } from '../../src/core/validation/validate';
@@ -323,6 +324,53 @@ export function captureLegacyRemote(): unknown {
       missedByReason: byReason,
       arrivalPaxByState: byState,
       remoteStands: Object.values(sim.ctx.stands).filter((s) => !s.contact).length,
+      kpis: JSON.parse(JSON.stringify(airportKpis(sim))),
+    };
+  }
+  return { simModelVersion: SIM_MODEL_VERSION, runs };
+}
+
+// ---------------------------------------------------------------- 12B-3a: バス搭乗・独立ゲート（新規）
+
+/**
+ * バス搭乗の空港（bus.layout.json = サンプル空港 + リモートスポット 5（M×4・L×1）・バスゲート 2（1 つは独立ゲート）・独立コンタクトゲート 1・ランプバス 3 台）の運航。
+ * サンドボックスの会社の 1 日と、便数の多い条件の半日。SIM_MODEL_VERSION は上げない（新しいデータがあるときだけの挙動）。
+ */
+export function captureBusSim(): unknown {
+  const layout = JSON.parse(readFileSync(resolve(goldenDir, 'fixtures', 'bus.layout.json'), 'utf8')) as AirportLayout;
+  const runs: Record<string, unknown> = {};
+  const variants: { name: string; seconds: number; make: () => ReturnType<typeof createSimulation> }[] = [
+    { name: 'sandbox', seconds: SIM_SECONDS, make: () => createSimulation(layout, { company: createSandboxCompany() }) },
+    { name: 'plain-seed', seconds: 12 * 3600, make: () => createSimulation(layout, { seed: 'bus-golden', settings: { flightsPerDay: 160 } }) },
+  ];
+  for (const v of variants) {
+    const sim = v.make();
+    let violations = 0;
+    for (let i = 0; i < v.seconds; i++) {
+      stepSimulation(sim);
+      if (i % 600 === 0) violations += checkInvariants(sim).length;
+    }
+    const json = JSON.stringify(sim.state);
+    const byReason: Record<string, number> = {};
+    const arrivalByState: Record<string, number> = {};
+    for (const g of Object.values(sim.state.paxGroups)) {
+      if (g.state === 'missed') byReason[g.reason ?? 'none'] = (byReason[g.reason ?? 'none'] ?? 0) + g.count;
+      if (g.direction === 'arrival') arrivalByState[g.state] = (arrivalByState[g.state] ?? 0) + g.count;
+    }
+    const tripsByPhase: Record<string, number> = {};
+    for (const t of Object.values(sim.state.bus!.trips)) tripsByPhase[t.phase] = (tripsByPhase[t.phase] ?? 0) + 1;
+    runs[v.name] = {
+      seconds: v.seconds,
+      stateSha256: sha256(json),
+      stateLength: json.length,
+      invariantViolations: violations,
+      stats: sim.state.stats,
+      paxStats: sim.state.paxStats,
+      missedByReason: byReason,
+      arrivalPaxByState: arrivalByState,
+      bus: sim.state.bus!.stats,
+      tripsByPhase,
+      busRecords: sim.state.analytics.records.filter((r) => r.boarding === 'bus').length,
       kpis: JSON.parse(JSON.stringify(airportKpis(sim))),
     };
   }

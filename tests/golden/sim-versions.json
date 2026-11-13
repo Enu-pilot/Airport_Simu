@@ -1,4 +1,5 @@
 {
+ "bus-sim.golden.json": "skyport-sim-10.0",
  "crossing-sim.golden.json": "skyport-sim-10.0",
  "legacy-remote-sim.golden.json": "skyport-sim-10.0",
  "project-sim.golden.json": "skyport-sim-10.0",

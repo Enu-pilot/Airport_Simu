@@ -2,7 +2,9 @@
 
 実装: `src/core/io/project.ts`（形式・検証・復元）、`src/editor/project.ts`（保存先・操作）、`src/ui/ProjectPanel.tsx`（画面）。
 
-## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`）
+## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1` または 2）
+
+**版の書き方（Phase 12B-3a）**: `formatVersionOf(p)` が、新しい項目（ゲートの `boardingMode: 'bus'`・`connectedTo`、GSE 基地の `apronBuses > 0`、運航状態の `bus`・`wx`、会社の `game`・`airlineEval`・`goals`）を **1 つでも使うときだけ 2**、使わないときは 1 のまま書く（`buildProject` と `validateProject` の作り直しの両方。`versions.format` も同じ値）。読み込みは 2 まで許可し、3 以上は拒否する（v1 → v2 は恒等）。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`。従来のファイルの内容・ゴールデン（`project.golden.json` は直列化の sha256）は変わらない。`SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない。厳格な形の検査: `checkLayout`（`boardingMode`・`connectedTo`・`apronBuses`）、`checkSim`（`bus` の運行の便・ゲート・スポット・バス・グループの参照、段階の値、`bus` がないのに `p.bus`・`trip`・`busTrip`・バス待ちのグループがある状態の拒否）、復元後の BU1〜BU4。
 
 | 項目 | 内容 |
 |---|---|

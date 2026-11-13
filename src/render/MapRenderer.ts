@@ -478,7 +478,7 @@ export class MapRenderer {
     for (const cn of analysis.terminal.connectors) {
       const gate = layout.facilities[cn.gateId];
       if (!gate) continue;
-      const from = { x: gate.origin.x + 0.5, y: gate.origin.y + 0.5 };
+      const from = worldToMap(gate.origin);
       const sel = selection === cn.gateId;
       for (const anchorId of [cn.depAnchor, cn.arrAnchor]) {
         const a = anchorId ? analysis.terminal.areas[anchorId] : undefined;
