@@ -28,6 +28,8 @@ export interface ScoreFacts {
   names?: string[];
   /** 全体の値で代用した（航空会社別の実績がない） */
   fallback?: boolean;
+  /** スポット要素: 計画の便のうちランプバスで搭乗する便の割合（0〜1。バスがなければキーなし。表示のみ） */
+  busShare?: number;
 }
 
 export interface ScoreComponent {
@@ -112,14 +114,18 @@ function standComponent(planKeys: Set<string>, analysis: PlanAnalysis, recs: rea
   if (!hasFlights && recs.length === 0) return na('stand');
   const conflict = new Set<string>();
   const noGate = new Set<string>();
+  const busKeys = new Set<string>();
   for (const i of analysis.issues) {
+    if (i.code === 'BUS_BOARDING') for (const k of i.keys) if (planKeys.has(k)) busKeys.add(k);
     if (i.code === 'STAND_CONFLICT') for (const k of i.keys) if (planKeys.has(k)) conflict.add(k);
     if (i.code === 'NO_GATE') for (const k of i.keys) if (planKeys.has(k)) noGate.add(k);
   }
   const heldNoStand = recs.filter((r) => r.causes.includes('noStand')).length;
   const level: ScoreLevel = conflict.size > 0 ? 'bad' : noGate.size > 0 || heldNoStand > 0 ? 'warn' : 'good';
   const score = clamp(100 - conflict.size * 40 - noGate.size * 15 - heldNoStand * 10);
-  return { key: 'stand', level, score: Math.round(score), facts: { value: conflict.size, target: noGate.size, n: heldNoStand } };
+  const facts: ScoreFacts = { value: conflict.size, target: noGate.size, n: heldNoStand };
+  if (busKeys.size > 0 && planKeys.size > 0) facts.busShare = busKeys.size / planKeys.size;
+  return { key: 'stand', level, score: Math.round(score), facts };
 }
 
 function feesComponent(a: AirlineDef, company: CompanyState): ScoreComponent {

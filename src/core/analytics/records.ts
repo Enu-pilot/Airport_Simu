@@ -52,6 +52,9 @@ export interface FlightRecord {
   revenue: number;
   /** 影響した障害（ID） */
   disruptions: string[];
+  /** ランプバスで搭乗した便だけ: 搭乗方式と、旅客 1 人あたりのバス待ち時間（運行の作成からバスの出発まで、秒）。従来の記録にはキーがない */
+  boarding?: 'bus';
+  busWaitSec?: number;
 }
 
 export interface AnalyticsState {
@@ -175,6 +178,7 @@ function buildRecord(sim: Simulation, ac: Aircraft): FlightRecord {
     taskBlockedSec: tasks.reduce((s, t) => s + t.blockedTotal, 0),
     revenue: Math.round(live.revenue),
     disruptions: live.disruptions,
+    ...(dep.pax.bus ? { boarding: 'bus' as const, busWaitSec: dep.pax.bus.paxCarried > 0 ? Math.round(dep.pax.bus.waitPaxSec / dep.pax.bus.paxCarried) : 0 } : {}),
   };
   delete a.live[ac.id];
   return rec;

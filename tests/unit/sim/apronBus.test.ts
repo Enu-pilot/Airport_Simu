@@ -142,3 +142,24 @@ describe('バスの故障・救援・保護', () => {
     expect(moveUnitToBase(sim, t.busId!, base)).toEqual({ ok: false, reason: 'OCCUPIED' });
   });
 });
+
+// ---------------------------------------------------------------- A7: 分析
+
+import { airportKpis } from '../../../src/core/analytics/kpi';
+
+describe('分析（ランプバス）', () => {
+  it('バス扱いの便の記録に boarding・busWaitSec が付き、KPI に apronBus が出る。従来の運航にはキーがない', { timeout: 300_000 }, () => {
+    const sim = run(busLayout({ buses: 3 }), 6);
+    const recs = sim.state.analytics.records.filter((r) => r.boarding === 'bus');
+    expect(recs.length).toBeGreaterThan(0);
+    for (const r of recs) expect(typeof r.busWaitSec).toBe('number');
+    const k = airportKpis(sim);
+    expect(k.apronBus!.trips).toBe(sim.state.bus!.stats.trips);
+    expect(k.apronBus!.pax).toBeGreaterThan(0);
+    expect(k.unitUtil.apronBus).toBeGreaterThan(0);
+    const legacy = createSimulation(busLayout({ gate: 'none', buses: 0 }), { seed: 'bus-c', settings: { flightsPerDay: 100 } });
+    for (let i = 0; i < 3 * 3600; i++) stepSimulation(legacy);
+    expect(airportKpis(legacy).apronBus).toBeUndefined();
+    expect(JSON.stringify(legacy.state.analytics.records)).not.toContain('"boarding":"bus"');
+  });
+});
