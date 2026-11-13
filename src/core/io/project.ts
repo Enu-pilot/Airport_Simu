@@ -24,7 +24,39 @@ import { migrateLayout } from './migrate';
  */
 
 export const PROJECT_FORMAT = 'skyport-project';
+/** 基本の版。新しい項目（バスゲート・独立ゲート・ランプバス・運航中のバスの状態など）を使わないファイルはこの版で書く */
 export const PROJECT_FORMAT_VERSION = 1;
+/** 新しい項目を使うファイルの版（12B-3a）。このバージョンは 2 までを読める */
+export const PROJECT_FORMAT_VERSION_2 = 2;
+export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_2;
+
+const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !== null && k in (o as Record<string, unknown>);
+
+/** レイアウトが保存形式 2 の項目（ゲートの boardingMode 'bus'・connectedTo、GSE 基地の apronBuses > 0）を使っているか */
+export function layoutUsesFormat2(l: AirportLayout): boolean {
+  for (const f of Object.values(l.facilities)) {
+    if (f.kind === 'gate' && (f.props.boardingMode === 'bus' || (f.props.connectedTo !== undefined && f.props.connectedTo !== null))) return true;
+    if (f.kind === 'gseBase' && typeof f.props.apronBuses === 'number' && f.props.apronBuses > 0) return true;
+  }
+  return false;
+}
+
+function companyUsesFormat2(c: CompanyState | null | undefined): boolean {
+  return !!c && (hasKey(c, 'game') || hasKey(c, 'airlineEval') || hasKey(c, 'goals'));
+}
+
+/**
+ * このプロジェクトを書くときの保存形式の版。新しい項目を 1 つでも使うときだけ 2（旧アプリが読み違えないため）、
+ * 使わないときは 1 のまま（従来のファイル・ゴールデンの出力が変わらない）。
+ */
+export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null }): number {
+  if (layoutUsesFormat2(p.layout) || companyUsesFormat2(p.company)) return PROJECT_FORMAT_VERSION_2;
+  for (const s of p.scenarios) if (layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) return PROJECT_FORMAT_VERSION_2;
+  if (p.sim) {
+    if (hasKey(p.sim.state, 'bus') || hasKey(p.sim.state, 'wx') || companyUsesFormat2(p.sim.company)) return PROJECT_FORMAT_VERSION_2;
+  }
+  return PROJECT_FORMAT_VERSION;
+}
 
 export interface CatalogPin {
   version: string;
@@ -85,12 +117,13 @@ export function buildProject(i: BuildInput): ProjectFile {
   const models = effectiveModels(i.pin);
   const ids = projectModelIds(company, sim, i.scenarios);
   const snap = Object.fromEntries(ids.filter((id) => models[id]).map((id) => [id, structuredClone(models[id]!)]));
+  const fv = formatVersionOf({ layout: i.layout, company, scenarios: i.scenarios, sim });
   return {
     format: PROJECT_FORMAT,
-    formatVersion: PROJECT_FORMAT_VERSION,
+    formatVersion: fv,
     name: i.name,
     savedAt: i.savedAt,
-    versions: { format: PROJECT_FORMAT_VERSION, layoutSchema: SCHEMA_VERSION, catalog: i.pin?.version ?? CATALOG_VERSION, assets: ASSET_VERSION, simModel: SIM_MODEL_VERSION },
+    versions: { format: fv, layoutSchema: SCHEMA_VERSION, catalog: i.pin?.version ?? CATALOG_VERSION, assets: ASSET_VERSION, simModel: SIM_MODEL_VERSION },
     layout: structuredClone(i.layout),
     company,
     catalog: { version: i.pin?.version ?? CATALOG_VERSION, models: snap },
@@ -287,7 +320,7 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     return fail();
   }
   if (typeof data.formatVersion !== 'number' || data.formatVersion < 1) errors.push('保存形式の版（formatVersion）が不正です');
-  else if (data.formatVersion > PROJECT_FORMAT_VERSION) errors.push(`新しい版（${data.formatVersion}）の保存形式です。このバージョンでは読み込めません`);
+  else if (data.formatVersion > PROJECT_FORMAT_MAX_READABLE) errors.push(`新しい版（${data.formatVersion}）の保存形式です。このバージョンでは読み込めません`);
   if (typeof data.name !== 'string') errors.push('name（プロジェクト名）がありません');
   if (!isObj(data.versions)) errors.push('versions（版の情報）がありません');
   const lv = isObj(data.versions) ? data.versions.layoutSchema : undefined;
@@ -381,13 +414,14 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     }
   }
 
+  const fv = formatVersionOf({ layout, company, scenarios, sim });
   const project: ProjectFile = {
     format: PROJECT_FORMAT,
-    formatVersion: PROJECT_FORMAT_VERSION,
+    formatVersion: fv,
     name: data.name as string,
     savedAt: typeof data.savedAt === 'string' ? data.savedAt : '',
     versions: {
-      format: PROJECT_FORMAT_VERSION,
+      format: fv,
       layoutSchema: SCHEMA_VERSION,
       catalog: pin?.version ?? CATALOG_VERSION,
       assets: ASSET_VERSION,
@@ -400,5 +434,5 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     scenarios,
     sim,
   };
-  return { ok: true, errors, warnings, migratedFrom: data.formatVersion !== PROJECT_FORMAT_VERSION ? `${PROJECT_FORMAT} v${String(data.formatVersion)}` : null, project };
+  return { ok: true, errors, warnings, migratedFrom: data.formatVersion !== PROJECT_FORMAT_VERSION && data.formatVersion !== PROJECT_FORMAT_VERSION_2 ? `${PROJECT_FORMAT} v${String(data.formatVersion)}` : null, project };
 }
