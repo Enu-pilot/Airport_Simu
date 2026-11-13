@@ -237,7 +237,7 @@ export function PlanPanel() {
           {analysis.issues.length > 0 && (
             <ul className="plan-issues" data-testid="plan-issues">
               {analysis.issues.map((i) => (
-                <li key={`${i.code}:${i.detail ?? ''}`} className={i.severity === 'error' ? 'ng-text' : 'warn-text'}>
+                <li key={`${i.code}:${i.detail ?? ''}`} className={i.severity === 'error' ? 'ng-text' : i.severity === 'info' ? 'muted' : 'warn-text'}>
                   {PLAN_ISSUE_LABEL[i.code]}
                   {i.detail ? `（${i.detail}）` : ''}: {i.keys.length}件
                 </li>

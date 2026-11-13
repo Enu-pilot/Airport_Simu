@@ -205,7 +205,7 @@ export function ReviewBody({ review }: { review: DayReview }) {
             <div>{DAY_LOOP.noIssues}</div>
           ) : (
             review.tomorrow.issues.slice(0, 5).map((i, n) => (
-              <div key={n} className={i.severity === 'error' ? 'ng-text' : 'warn-text'}>
+              <div key={n} className={i.severity === 'error' ? 'ng-text' : i.severity === 'info' ? 'muted' : 'warn-text'}>
                 {PLAN_ISSUE_LABEL[i.code]}
                 {i.detail ? `（${i.detail}）` : ''}
               </div>

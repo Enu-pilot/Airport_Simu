@@ -900,6 +900,7 @@ const AREA_SHORT = AREA_KIND_LABEL;
 
 /** 作業車両の色 */
 const UNIT_COLOR: Record<UnitKind, number> = {
+  apronBus: 0x2b8cff,
   staff: 0xffffff,
   engineer: 0x9575cd,
   tug: 0xffeb3b,

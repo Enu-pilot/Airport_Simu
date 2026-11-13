@@ -71,7 +71,7 @@ function withRng<T>(state: SimState, fn: (rng: Rng) => T): T {
 /** 運航開始時に、基地ごとの作業員・車両を生成する */
 export function createGroundUnits(sim: Simulation): void {
   const { state, ctx } = sim;
-  const order: UnitKind[] = ['staff', 'engineer', 'tug', 'beltLoader', 'baggageTractor', 'fuelTruck', 'cateringTruck', 'cleaningVan'];
+  const order: UnitKind[] = ['staff', 'engineer', 'tug', 'beltLoader', 'baggageTractor', 'fuelTruck', 'cateringTruck', 'cleaningVan', 'apronBus'];
   for (const base of ctx.bases) {
     for (const kind of order) {
       for (let i = 0; i < (base.units[kind] ?? 0); i++) {

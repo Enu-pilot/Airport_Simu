@@ -99,8 +99,11 @@ export function dailyFixedCosts(ctx: SimContext, access: AccessAnalysis = analyz
   for (const b of ctx.bases) {
     for (const [kind, n] of Object.entries(b.units)) {
       const s = D.salary[kind as keyof typeof D.salary];
-      if (s !== undefined) salary += s * (n ?? 0);
-      else vehicles += n ?? 0;
+      if (s !== undefined) {
+        salary += s * (n ?? 0);
+        // ランプバスは運転士の給与に加えて車両の維持費もかかる
+        if (kind === 'apronBus') vehicles += n ?? 0;
+      } else vehicles += n ?? 0;
     }
   }
   let counterStaff = 0;

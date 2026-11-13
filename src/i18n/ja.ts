@@ -189,11 +189,14 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   STAND_ROUTE_SIZE_LIMITED: (n, p) => `${n[0]}（${p.size}級）から滑走路まで、${p.size}級機が通れる誘導路・滑走路がありません`,
   STAND_ONE_WAY_TRAP: (n, p) =>
     `${n[0]} は一方通行のため${p.direction === 'arrival' ? '到着機が入れません' : '出発機が滑走路へ出られません'}`,
-  STAND_REMOTE: (n) => `${n[0]} にはゲートがありません（リモートスポット）`,
+  STAND_REMOTE: (n, p) => (p.bus ? `${n[0]} はリモートスポットです（バスゲートのランプバスで搭乗）` : `${n[0]} にはゲートがありません（リモートスポット）`),
   STAND_MULTIPLE_GATES: (n) => `${n[0]} に複数のゲートが紐付いています`,
   GATE_NOT_AT_TERMINAL: (n) => `${n[0]} がターミナルに接していません`,
   GATE_NO_STAND: (n) => `${n[0]} にスポットが紐付いていません`,
   GATE_STAND_TOO_FAR: (n, p) => `${n[0]} と ${n[1]} が離れすぎています（${p.distance}タイル）`,
+  GATE_BUS_HAS_STAND: (n) => `${n[0]} はバスゲートなので、紐付けたスポットは使われません`,
+  GATE_BUS_NO_VEHICLES: (n) => `${n[0]} はバスゲートですが、運用中の GSE 基地にランプバスがありません（旅客を運べません）`,
+  BUS_GATE_NO_REMOTE_STAND: (n) => `${n[0]} はバスゲートですが、リモートスポット（ゲートのないスポット）がありません`,
   GATE_CONNECTION_INVALID: (n) => `${n[0]} の接続先がターミナルではありません（存在しない・別の種類の施設）`,
   GATE_CONNECTOR_LONG: (n, p) => `${n[0]} と ${n[1]} をつなぐ通路が長すぎます（約 ${p.tiles} タイル。歩行に時間がかかります）`,
   NO_AIRSIDE_ACCESS: (n) => `${n[0]} がエプロン・誘導路・サービスエリア・サービス道路に接していません`,
@@ -465,6 +468,7 @@ export const BLOCK_REASON_LABEL: Record<BlockReason, string> = {
 };
 
 export const UNIT_KIND_LABEL: Record<UnitKind, string> = {
+  apronBus: 'ランプバス',
   staff: '作業員',
   engineer: '整備士',
   tug: 'トーイングカー',
@@ -560,6 +564,7 @@ export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
   SIZE_UNSUPPORTED: '運航できない機種（滑走路・スポットが未対応）',
   STAND_CONFLICT: 'スポット不足（到着時に空きスポットがない見込み）',
   NO_GATE: 'ゲートのないスポット（旅客が搭乗できない）',
+  BUS_BOARDING: 'リモートスポット（ランプバスで搭乗）',
   NO_TERMINAL: '旅客ターミナル（入口）がない',
   RUNWAY_OVERLOAD: '滑走路の処理能力の目安（30回/時・本）を超える',
   SECURITY_OVERLOAD: '保安検査の処理能力を超える見込み',
@@ -653,6 +658,7 @@ export const COMPAT_REASON_LABEL: Record<CompatReason, string> = {
   TAXIWAY_CLASS: '誘導路の幅の区分が足りない',
   TAXIWAY_CODE_F: '誘導路がコード F 対応に指定されていない',
   GATE_NO_STAND: 'ゲートにスポットが紐付いていない（判定不能）',
+  GATE_BUS: 'バスゲート（リモートスポットの便をランプバスで運ぶ）',
   GATE_STAND_NG: '紐付いたスポットが適合しない',
   GATE_UPPER_DECK: '上階への搭乗橋はモデル化していない（使用は可）',
   GSE_NONE: '必要な車両・作業員が空港に1台もいない',

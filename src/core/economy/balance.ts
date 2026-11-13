@@ -33,7 +33,7 @@ export const BALANCE = {
     } as Partial<Record<FacilityKind, number>>,
     jetBridge: 150_000,
     /** 車両の購入費（GSE基地のプロパティの台数分） */
-    vehicle: { tug: 150_000, beltLoader: 80_000, baggageTractor: 60_000, fuelTruck: 200_000, cateringTruck: 120_000, cleaningVan: 50_000 } as Partial<Record<UnitKind, number>>,
+    vehicle: { tug: 150_000, beltLoader: 80_000, baggageTractor: 60_000, fuelTruck: 200_000, cateringTruck: 120_000, cleaningVan: 50_000, apronBus: 250_000 } as Partial<Record<UnitKind, number>>,
     /** ターミナル内のエリア（設備1つあたり、またはタイルあたり） */
     areaUnit: { checkIn: 20_000, security: 120_000, baggageClaim: 150_000, restroom: 30_000, shop: 80_000, restaurant: 120_000, escalator: 200_000, elevator: 150_000 } as Partial<Record<TerminalAreaKind, number>>,
     areaPerTile: 2_000,
@@ -76,7 +76,8 @@ export const BALANCE = {
 
   // ------------------------------------------------------------ 費用（1日あたり）
   daily: {
-    salary: { staff: 1_200, engineer: 2_000 } as Partial<Record<UnitKind, number>>,
+    /** 運転士を含む（ランプバスは運転士の給与 + 車両の維持費） */
+    salary: { staff: 1_200, engineer: 2_000, apronBus: 1_500 } as Partial<Record<UnitKind, number>>,
     /** 車両の維持費（1台あたり） */
     vehicle: 300,
     /** 窓口の要員（カウンター・レーン・ゲート 1つあたり） */
@@ -93,7 +94,7 @@ export const BALANCE = {
     staffCommutePerMissing: 600,
   },
   /** 地上支援の作業ごとの運営費 */
-  taskCost: { unload: 300, load: 300, fuel: 600, clean: 400, cater: 300, inspect: 600, pushback: 200, defect: 3_000 } as Record<string, number>,
+  taskCost: { unload: 300, load: 300, fuel: 600, clean: 400, cater: 300, inspect: 600, pushback: 200, defect: 3_000, busTrip: 150 } as Record<string, number>,
   /** 補償・対応費 */
   compensation: { missedPax: 400, leftBag: 300, delayedFlight60: 5_000 },
 

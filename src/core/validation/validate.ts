@@ -25,7 +25,7 @@ import { satOverlapConvex } from '../geometry/polygon';
 import { TILE_M } from '../model/catalog';
 import type { NetNode, TerminalAreaKind } from '../model/types';
 import { CONNECTOR_DETOUR, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
-import { connectedTerminal } from '../model/gates';
+import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
 import { ACCESS_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTiles } from '../access/landside';
 
@@ -72,6 +72,9 @@ export type IssueCode =
   | 'GATE_STAND_TOO_FAR'
   | 'GATE_CONNECTION_INVALID'
   | 'GATE_CONNECTOR_LONG'
+  | 'GATE_BUS_HAS_STAND'
+  | 'GATE_BUS_NO_VEHICLES'
+  | 'BUS_GATE_NO_REMOTE_STAND'
   // 施設・道路
   | 'NO_AIRSIDE_ACCESS'
   | 'TERMINAL_NO_ROAD'
@@ -136,6 +139,9 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   GATE_STAND_TOO_FAR: 'error',
   GATE_CONNECTION_INVALID: 'error',
   GATE_CONNECTOR_LONG: 'warning',
+  GATE_BUS_HAS_STAND: 'info',
+  GATE_BUS_NO_VEHICLES: 'warning',
+  BUS_GATE_NO_REMOTE_STAND: 'info',
   NO_AIRSIDE_ACCESS: 'warning',
   TERMINAL_NO_ROAD: 'warning',
   TERMINAL_NO_GATE: 'info',
@@ -739,7 +745,10 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
       if (!connected && !touches(tiles, terminalTiles)) sink.add('GATE_NOT_AT_TERMINAL', [f.id], {}, f.origin);
       const standId = typeof f.props.standId === 'string' ? f.props.standId : null;
       const stand = standId ? layout.stands[standId] : undefined;
-      if (!stand) {
+      if (gateMode(f) === 'bus') {
+        // バスゲートはスポットに固定しない（リモートスポットの便をランプバスで運ぶ）。standId は無視される
+        if (standId) sink.add('GATE_BUS_HAS_STAND', [f.id], {}, f.origin);
+      } else if (!stand) {
         sink.add('GATE_NO_STAND', [f.id], {}, f.origin);
       } else {
         gatesByStand.set(stand.id, [...(gatesByStand.get(stand.id) ?? []), f.id]);
@@ -748,10 +757,20 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
       }
     }
   }
+  const busGates = facilities.filter((f) => f.kind === 'gate' && gateMode(f) === 'bus' && f.buildState === 'operational');
+  let remote = 0;
   for (const s of sortedValues(layout.stands)) {
     const gates = gatesByStand.get(s.id) ?? [];
-    if (gates.length === 0) sink.add('STAND_REMOTE', [s.id], {}, s.origin);
+    if (gates.length === 0) {
+      remote++;
+      sink.add('STAND_REMOTE', [s.id], busGates.length > 0 ? { bus: 1 } : {}, s.origin);
+    }
     if (gates.length > 1) sink.add('STAND_MULTIPLE_GATES', [s.id, ...gates], {}, s.origin);
+  }
+  if (busGates.length > 0) {
+    const buses = facilities.filter((f) => f.kind === 'gseBase' && f.buildState === 'operational').reduce((n, f) => n + apronBusesOf(f), 0);
+    if (buses === 0) for (const g of busGates) sink.add('GATE_BUS_NO_VEHICLES', [g.id], {}, g.origin);
+    if (remote === 0) sink.add('BUS_GATE_NO_REMOTE_STAND', [busGates[0]!.id], {}, busGates[0]!.origin);
   }
 }
 

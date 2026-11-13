@@ -196,7 +196,7 @@ export interface Flight {
 
 // ---------------------------------------------------------------- 地上支援
 
-export type UnitKind = 'staff' | 'engineer' | 'tug' | 'beltLoader' | 'baggageTractor' | 'fuelTruck' | 'cateringTruck' | 'cleaningVan';
+export type UnitKind = 'staff' | 'engineer' | 'tug' | 'beltLoader' | 'baggageTractor' | 'fuelTruck' | 'cateringTruck' | 'cleaningVan' | 'apronBus';
 export type UnitStatus = 'idle' | 'enroute' | 'working' | 'returning' | 'broken';
 
 /** 作業員・車両（1人・1台ずつ） */

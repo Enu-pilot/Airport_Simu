@@ -1,6 +1,7 @@
 import { buildAirsideNetwork, type AirsideNetwork } from '../airside/network';
 import { TILE_M } from '../model/catalog';
 import { compareIds, sortedValues } from '../model/ids';
+import { apronBusesOf, gateMode } from '../model/gates';
 import { buildTerminalModel, type TerminalModel } from '../terminal/model';
 import type { AirportLayout, SizeClass } from '../model/types';
 import { AIRCRAFT_TYPES, resolveType, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
@@ -69,8 +70,10 @@ export interface SimContext {
   runways: Record<string, RunwayInfo>;
   stands: Record<string, StandInfo>;
   terminal: TerminalModel;
-  /** スポット → 紐付けゲート */
+  /** スポット → 紐付けゲート（バスゲートは含めない） */
   standGate: Record<string, string>;
+  /** 運用中でバス搭乗（boardingMode 'bus'）のゲート（ID 順）。1 つもなければ [] で、運航にバスの状態（state.bus）を作らない */
+  busGates: string[];
   /** 出発旅客が来るターミナル（入口のある最初のターミナル） */
   paxTerminal: string | null;
   /** 作業員・車両の基地（GSE基地・整備施設）。位置はタイル番号空間 */
@@ -132,7 +135,7 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
   }
   const contactStands = new Set(
     Object.values(layout.facilities)
-      .filter((f) => f.kind === 'gate' && typeof f.props.standId === 'string')
+      .filter((f) => f.kind === 'gate' && gateMode(f) !== 'bus' && typeof f.props.standId === 'string')
       .map((f) => f.props.standId as string),
   );
   const stands: Record<string, StandInfo> = {};
@@ -150,8 +153,11 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
   const terminal = buildTerminalModel(layout);
   const standGate: Record<string, string> = {};
   for (const f of sortedValues(layout.facilities)) {
-    if (f.kind === 'gate' && typeof f.props.standId === 'string' && !standGate[f.props.standId]) standGate[f.props.standId] = f.id;
+    if (f.kind === 'gate' && gateMode(f) !== 'bus' && typeof f.props.standId === 'string' && !standGate[f.props.standId]) standGate[f.props.standId] = f.id;
   }
+  const busGates = sortedValues(layout.facilities)
+    .filter((f) => f.kind === 'gate' && gateMode(f) === 'bus' && f.buildState === 'operational')
+    .map((f) => f.id);
   const paxTerminal =
     Object.keys(terminal.byTerminal)
       .sort(compareIds)
@@ -177,12 +183,14 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
               fuelTruck: n(f, 'fuelTrucks'),
               cateringTruck: n(f, 'cateringTrucks'),
               cleaningVan: n(f, 'cleaningVans'),
+              // ランプバスは台数があるときだけキーを作る（従来の基地の units と同一にする）
+              ...(apronBusesOf(f) > 0 ? { apronBus: apronBusesOf(f) } : {}),
             }
           : { engineer: n(f, 'engineers') },
     }));
   const sorters = operational.filter((f) => f.kind === 'baggageSort').map((f) => ({ id: f.id, ...center(f), capacityPerMin: n(f, 'capacityPerMin') }));
   const hasFuelFarm = operational.some((f) => f.kind === 'fuelFarm');
-  return { layout, network, runways, stands, terminal, standGate, paxTerminal, bases, sorters, hasFuelFarm, crossings, crossingsByRunway, crossingNodeRunways, freeRunways, types: opts.types ?? AIRCRAFT_TYPES };
+  return { layout, network, runways, stands, terminal, standGate, busGates, paxTerminal, bases, sorters, hasFuelFarm, crossings, crossingsByRunway, crossingNodeRunways, freeRunways, types: opts.types ?? AIRCRAFT_TYPES };
 }
 
 /** 運用方向に並べた滑走路上ノードと、進入端からの距離 */
