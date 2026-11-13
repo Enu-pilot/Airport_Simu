@@ -58,6 +58,8 @@ test('運航モードは常設のカードと右上の運航表を出し、建�
 
 test('運航表は出発・到着を切り替えられ、折りたためる。行クリックで機体を選択する', async ({ page }) => {
   await startOps(page);
+  // 負荷が高いと「到着処理中」の間にゲーム内時間が進んで状態の文言が変わってしまうので、実時間（×1）で進めてから確かめる
+  await page.getByTestId('speed-1').click();
   await page.getByTestId('add-arrival').click();
   const rows = page.locator('table.fids-table tbody tr');
   await expect(rows.filter({ hasText: '到着処理中' }).first()).toBeVisible();
