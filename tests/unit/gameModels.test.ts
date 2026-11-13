@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { stepSimulation } from '../../src/core/sim/simulation';
 import { createCareerCompany, createSandboxCompany, importCompany } from '../../src/core/economy/company';
 import { DIFFICULTY, applyGameState, checkGameSettings, costMultiplier, defaultGame, otpAddOf } from '../../src/core/economy/game';
 import { buildProject, serializeProject, validateProject } from '../../src/core/io/project';
@@ -208,7 +209,7 @@ describe('12B-3a B4: 難易度の効果', () => {
     expect(none - sat({ earlyCancelled: 2 })).toBeCloseTo(1, 6);
   });
 
-  it('先行欠航: まだ現れていない折り返しだけ。補償なし・満足度 −1。game がなければ操作できない', () => {
+  it('先行欠航: まだ現れていない折り返しだけ。補償なし・満足度 −1（日の締めで）。game がなければ操作できない', () => {
     const c = createSandboxCompany();
     c.game = defaultGame();
     const sim = createSimulation(createSampleAirport(), { seed: 'early', company: c });
@@ -219,7 +220,8 @@ describe('12B-3a B4: 難易度の効果', () => {
     expect(cancelFlightEarly(sim, ac.id)).toEqual({ ok: true });
     expect(ac.state).toBe('cannotOperate');
     expect(sim.state.flights[ac.arrivalFlightId]!.status).toBe('cancelled');
-    expect(sim.company!.airlines[airline]!.satisfaction).toBe(sat - 1);
+    // 満足度は日の締めで 1 回だけ引く（先行欠航の時点では動かさない。二重に引かない）
+    expect(sim.company!.airlines[airline]!.satisfaction).toBe(sat);
     expect(sim.company!.today.compensation ?? 0).toBe(comp);
     expect(cancelFlightEarly(sim, ac.id)).toEqual({ ok: false, reason: 'TOO_LATE' });
     expect(checkInvariants(sim)).toEqual([]);
@@ -244,5 +246,25 @@ describe('12B-3a B4: 難易度の効果', () => {
     const expert = count('expert');
     expect(normal).toBeGreaterThan(0);
     expect(expert).toBeGreaterThan(normal * 1.5);
+  });
+});
+
+describe('先行欠航の満足度ペナルティは 1 日を通して −1（二重に引かない）', () => {
+  it('同じ空港・シードで、先行欠航した日と何もしない日の航空会社の満足度の差が 1', { timeout: 300_000 }, () => {
+    const run = (cancel: boolean) => {
+      const c = createSandboxCompany('early-day');
+      c.game = { ...defaultGame(), airlineEval: false, goals: false, weather: 'legacy' } as typeof c.game;
+      const sim = createSimulation(createSampleAirport(), { seed: 'early-day', company: c });
+      const ac = Object.values(sim.state.aircraft).find((a) => a.state === 'scheduled')!;
+      const airline = sim.state.flights[ac.departureFlightId]!.airlineId!;
+      if (cancel) expect(cancelFlightEarly(sim, ac.id)).toEqual({ ok: true });
+      const day = sim.company!.day;
+      for (let i = 0; i < 2 * 86400 && sim.company!.day === day; i++) stepSimulation(sim);
+      expect(sim.company!.day).toBe(day + 1);
+      return { sat: sim.company!.airlines[airline]!.satisfaction, rep: sim.company!.reports.at(-1)! };
+    };
+    const base = run(false);
+    const cancelled = run(true);
+    expect(base.sat - cancelled.sat).toBeCloseTo(1, 6);
   });
 });

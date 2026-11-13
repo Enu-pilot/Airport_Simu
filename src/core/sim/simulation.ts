@@ -1049,7 +1049,7 @@ function goAround(sim: Simulation, ac: Aircraft, reason?: HoldReason): void {
 /**
  * 機体がまだ現れていない折り返し（到着・出発）をまとめて欠航にする（docs/30 §1）。到着・出発の便は cancelled、機体は cannotOperate。
  * - 'weather': 天候 5 段階の欠航。補償は他の欠航と同じ（満足度のペナルティは半分。ops.ts の AirlineDayResult.weatherCancelled）。
- * - 'early': プレイヤーの先行欠航（運航表の行メニュー）。補償なし・航空会社の満足度 −1 だけ（直前の欠航より安い）。
+ * - 'early': プレイヤーの先行欠航（運航表の行メニュー）。補償なし・航空会社の満足度 −1 だけ（直前の欠航より安い。日の締めで 1 回だけ引く）。
  */
 export function cancelTurnaround(sim: Simulation, ac: Aircraft, reason: 'weather' | 'early'): void {
   const { state } = sim;
@@ -1065,8 +1065,7 @@ export function cancelTurnaround(sim: Simulation, ac: Aircraft, reason: 'weather
     onFlightLost(sim);
     logEvent(state, { t: state.now, kind: 'cannotOperate', aircraftId: ac.id, reason: 'weather' });
   } else {
-    const rel = sim.company && dep.airlineId ? sim.company.airlines[dep.airlineId] : undefined;
-    if (rel) rel.satisfaction = Math.max(0, rel.satisfaction - 1);
+    // 満足度の −1 は日の締めで引く（AirlineDayResult.earlyCancelled。ここで引くと二重になる）
     logEvent(state, { t: state.now, kind: 'cannotOperate', aircraftId: ac.id, note: 'early' });
   }
   setState(state, ac, 'cannotOperate', reason);
