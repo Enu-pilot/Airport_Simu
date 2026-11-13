@@ -229,12 +229,6 @@ function TopBar() {
           >
             サンドボックス
           </button>
-          <button onClick={() => gameSetupUi.open('new')} title={GAME_UI.setupNewTitle} data-testid="new-game-setup">
-            {GAME_UI.setupNew}
-          </button>
-          <button onClick={() => gameSetupUi.open('settings')} title={GAME_UI.setupSettingsTitle} data-testid="tab-settings">
-            {GAME_UI.setupSettings}
-          </button>
           <button onClick={actions.loadSample} data-testid="load-sample" title="現在の資金で建設（キャリアでは建設費がかかる）">サンプル空港を生成</button>
           <button onClick={actions.newEmpty} data-testid="new-empty">空の敷地</button>
           <button
@@ -245,6 +239,12 @@ function TopBar() {
           </button>
         </div>
         <div className="top-group">
+          <button onClick={() => gameSetupUi.open('new')} title={GAME_UI.setupNewTitle} data-testid="new-game-setup">
+            {GAME_UI.setupNew}
+          </button>
+          <button onClick={() => gameSetupUi.open('settings')} title={GAME_UI.setupSettingsTitle} data-testid="tab-settings">
+            {GAME_UI.setupSettings}
+          </button>
           <button onClick={download}>書き出し</button>
           <button onClick={() => fileRef.current?.click()}>読み込み</button>
           <input

@@ -75,7 +75,7 @@ test('新しいゲーム（設定）で難易度を選ぶと、資金・難易�
 
 test('標準の新しいゲーム（new-career）は従来の資金のまま。サンドボックスの初回起動は従来のルールで天候の段階・予報を出さない', async ({ page }) => {
   // 初回起動 = 従来のサンドボックス（game なし）
-  await expect(page.getByTestId('game-difficulty')).toContainText('従来のルール');
+  await expect(page.getByTestId('game-difficulty')).toContainText('従来');
   await page.getByTestId('start-ops').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await expect(page.getByTestId('card-weather')).toBeVisible();
@@ -90,15 +90,16 @@ test('標準の新しいゲーム（new-career）は従来の資金のまま。�
 });
 
 test('既存の会社に「ゲーム設定」で新しいルールを付け外しできる', async ({ page }) => {
-  await expect(page.getByTestId('game-difficulty')).toContainText('従来のルール');
+  await expect(page.getByTestId('game-difficulty')).toContainText('従来');
   await page.getByTestId('tab-settings').click();
+  await page.getByTestId('setup-legacy').uncheck();
   await page.getByTestId('setup-difficulty-expert').check();
   await page.getByTestId('setup-apply').click();
   await expect(page.getByTestId('game-difficulty')).toContainText('上級');
   await page.getByTestId('tab-settings').click();
   await page.getByTestId('setup-legacy').check();
   await page.getByTestId('setup-apply').click();
-  await expect(page.getByTestId('game-difficulty')).toContainText('従来のルール');
+  await expect(page.getByTestId('game-difficulty')).toContainText('従来');
 });
 
 test('悪天の日（段階 4）は段階が上部バー・天候カードに出て、運航表の行メニューから先行欠航できる', async ({ page }) => {

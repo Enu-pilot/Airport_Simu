@@ -1133,9 +1133,9 @@ export const DAY_LOOP = {
 
 /** ゲームのモデル（12B-3a Part B）の文言。数値はゲーム用の値で、実在の基準への適合をうたうものではない（docs/30） */
 export const GAME_UI = {
-  setupNew: '新しいゲーム（設定）',
+  setupNew: '設定して新規',
   setupNewTitle: '難易度・気候・ルールを選んで新しいゲームを始めます',
-  setupSettings: 'ゲーム設定',
+  setupSettings: 'ルール',
   setupSettingsTitle: '天候・難易度・評価・目標のルールを選びます（以後の運航から反映）',
   setupDialog: 'ゲームの設定',
   setupMode: 'モード',
@@ -1161,8 +1161,8 @@ export const GAME_UI = {
     expert: '悪天 ×2.0 / 障害 ×1.5 / 資金 ×0.5 / 建設費 ×1.2 / 定時率 +10pt / 予報 65%',
   } as Record<string, string>,
   climate: { temperate: '温帯', snowy: '雪国', humid: '多雨' } as Record<string, string>,
-  difficultyBadge: (d: string) => `難易度 ${d}`,
-  rulesLegacy: '従来のルール',
+  difficultyBadge: (d: string) => d,
+  rulesLegacy: '従来',
   // 天候（段階 0〜4。ゲーム用の区分）
   wxLevel: ['晴れ', '曇り・小雨', '雨', '荒天', '悪天'] as readonly string[],
   wxType: { clear: '晴れ', cloud: '曇り', rain: '雨', snow: '雪', fog: '霧', storm: '雷雨' } as Record<string, string>,
