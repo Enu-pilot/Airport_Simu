@@ -21,6 +21,7 @@ import { designatorsOf } from '../layout/designators';
 import { holdWalkLimitM, walkToClear, type HoldRunway } from '../layout/holdShort';
 import { resolveRunwayDims } from '../layout/runwayAreas';
 import { classifySegmentIntersection } from '../geometry/segment';
+import { rasterizeSegment } from '../geometry/vec';
 import { satOverlapConvex } from '../geometry/polygon';
 import { TILE_M } from '../model/catalog';
 import type { NetNode, TerminalAreaKind } from '../model/types';
@@ -72,6 +73,7 @@ export type IssueCode =
   | 'GATE_STAND_TOO_FAR'
   | 'GATE_CONNECTION_INVALID'
   | 'GATE_CONNECTOR_LONG'
+  | 'GATE_CONNECTOR_CROSSES_RUNWAY'
   | 'GATE_BUS_HAS_STAND'
   | 'GATE_BUS_NO_VEHICLES'
   | 'BUS_GATE_NO_REMOTE_STAND'
@@ -139,6 +141,7 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   GATE_STAND_TOO_FAR: 'error',
   GATE_CONNECTION_INVALID: 'error',
   GATE_CONNECTOR_LONG: 'warning',
+  GATE_CONNECTOR_CROSSES_RUNWAY: 'warning',
   GATE_BUS_HAS_STAND: 'info',
   GATE_BUS_NO_VEHICLES: 'warning',
   BUS_GATE_NO_REMOTE_STAND: 'info',
@@ -906,6 +909,31 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
   }
 }
 
+/** 独立ゲートの連絡通路（ゲートの中心 → 接続先のエリアの中心の直線）が滑走路の本体・着陸帯を横切る */
+function checkConnectorRunways(layout: AirportLayout, parts: FootprintPart[], model: TerminalModel, sink: IssueSink): void {
+  if (!model.connectors) return;
+  const runwayTiles = new Map<string, Set<string>>();
+  for (const p of parts) {
+    if (p.layer !== 'runway' && p.layer !== 'strip') continue;
+    let set = runwayTiles.get(p.ownerId);
+    if (!set) runwayTiles.set(p.ownerId, (set = new Set()));
+    for (const t of p.tiles) set.add(tileKey(t.x, t.y));
+  }
+  if (runwayTiles.size === 0) return;
+  const runwayIds = [...runwayTiles.keys()].sort(compareIds);
+  for (const c of model.connectors) {
+    const g = layout.facilities[c.gateId];
+    const anchor = model.areas[(c.depAnchor ?? c.arrAnchor) ?? ''];
+    if (!g || !anchor) continue;
+    const seg = rasterizeSegment({ x: g.origin.x + 0.5, y: g.origin.y + 0.5 }, anchor.center);
+    for (const rid of runwayIds) {
+      const set = runwayTiles.get(rid)!;
+      const hit = seg.find((t) => set.has(tileKey(t.x, t.y)));
+      if (hit) sink.add('GATE_CONNECTOR_CROSSES_RUNWAY', [c.gateId, rid], {}, hit);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- 全体
 
 export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
@@ -936,6 +964,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   checkRoads(layout, parts, sink);
   checkAccess(layout, sink);
   checkTerminals(layout, terminal, sink);
+  checkConnectorRunways(layout, parts, terminal, sink);
 
   const issues = sink.issues;
   const byTarget: Record<string, Issue[]> = {};

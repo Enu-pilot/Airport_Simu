@@ -76,7 +76,7 @@
 ## 8. 不変条件・検証・互換性・経済・分析
 
 - 不変条件（`checkBusInvariants`、`state.bus` があるときだけ）: BU1 乗車中のグループはちょうど 1 つの未完了の運行にいる / BU2 運行の乗車人数 = グループの合計 ≤ 定員 / BU3 配車済みの運行のバスの `trip` が一致し 1 台が 2 つの運行を持たない（故障したバスの運行の組み替えは次ティックなので、故障中のバスが運行を持つ一瞬は許す）/ BU4 バス待ち・乗車中のグループの便は `p.bus` を持つ。
-- 検証コード: `GATE_BUS_HAS_STAND`（info）・`GATE_BUS_NO_VEHICLES`（warning）・`BUS_GATE_NO_REMOTE_STAND`（info）・`GATE_CONNECTION_INVALID`（error）・`GATE_CONNECTOR_LONG`（warning、60 タイル超）。バスゲートには `GATE_NO_STAND` を出さず、`STAND_REMOTE` の文言はバスゲートがあるときだけ分岐。docs/26 §6。
+- 検証コード: `GATE_BUS_HAS_STAND`（info）・`GATE_BUS_NO_VEHICLES`（warning）・`BUS_GATE_NO_REMOTE_STAND`（info）・`GATE_CONNECTION_INVALID`（error）・`GATE_CONNECTOR_LONG`（warning、60 タイル超）・`GATE_CONNECTOR_CROSSES_RUNWAY`（warning、連絡通路が滑走路・着陸帯を横切る）。バスゲートには `GATE_NO_STAND` を出さず、`STAND_REMOTE` の文言はバスゲートがあるときだけ分岐。docs/26 §6。
 - 互換性（`checkGate`）: バスゲートは運用中なら適合（理由 `GATE_BUS`）。運航計画の分析はバスゲートがある空港のリモートスポットを `NO_GATE` の代わりに `BUS_BOARDING`（info）。
 - 経済: ランプバスの購入費 250,000 cr/台、日次は運転士 1,500 cr + 車両維持費 300 cr、運行ごと 150 cr（`groundOps`）。料金の割引は入れない。
 - 分析: `FlightRecord` に `boarding: 'bus'`・`busWaitSec`、`AirportKpis.apronBus`（運行・旅客・平均待ち・不足・救援）、遅延理由 `apronBus`、乗り遅れの理由 `noBus`。

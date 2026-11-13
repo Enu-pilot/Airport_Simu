@@ -82,6 +82,26 @@ describe('独立ゲートの接続', () => {
   });
 });
 
+describe('独立ゲートの連絡通路が滑走路を横切る', () => {
+  const codesOf = (l: AirportLayout, id: string) => (analyzeLayout(l).byTarget[id] ?? []).map((i) => i.code);
+  it('滑走路・着陸帯をまたぐ位置のゲートは GATE_CONNECTOR_CROSSES_RUNWAY（警告）、またがない位置では出ない', () => {
+    let gid = '';
+    const across = withGate((x) => {
+      gid = far(x, 60, 5);
+      x.facilities[gid]!.props.connectedTo = terminalId(x);
+    });
+    const issue = analyzeLayout(across).issues.find((i) => i.code === 'GATE_CONNECTOR_CROSSES_RUNWAY')!;
+    expect(issue.severity).toBe('warning');
+    expect(issue.targets).toEqual([gid, 'rwy_1']);
+    const side = withGate((x) => {
+      gid = far(x, 60, 42);
+      x.facilities[gid]!.props.connectedTo = terminalId(x);
+    });
+    expect(codesOf(side, gid)).not.toContain('GATE_CONNECTOR_CROSSES_RUNWAY');
+    expect(codesOf(createSampleAirport(), gateIds(createSampleAirport())[0]!)).not.toContain('GATE_CONNECTOR_CROSSES_RUNWAY');
+  });
+});
+
 describe('独立ゲートの運航', () => {
   it('接続されたゲートのスポットの便が搭乗でき、不変条件を保つ（乗り遅れ unreachable が出ない）', { timeout: 200_000 }, async () => {
     const { createSimulation, stepSimulation } = await import('../../src/core/sim/simulation');

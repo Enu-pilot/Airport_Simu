@@ -540,6 +540,9 @@ export function importCompany(json: string): CompanyState | null {
     if (c.game !== undefined && checkGameSettings(c.game) !== null) delete c.game;
     if (c.airlineEval !== undefined && checkAirlineEval(c.airlineEval).length > 0) delete c.airlineEval;
     if (c.goals !== undefined && checkGoals(c.goals).length > 0) delete c.goals;
+    // 対応するゲーム設定のフラグがない評価・目標のデータは捨てる（フラグとデータの食い違いを持ち込まない）
+    if (!c.game?.airlineEval) delete c.airlineEval;
+    if (!c.game?.goals) delete c.goals;
     // Phase 6 以前の保存データ: 保有機材の設定がないので初期設定を入れ、契約で使っている機種（旧形式の汎用機材を含む）は
     // そのまま保有機材に加える（汎用機材を実在の機種に置き換えない）
     if (!c.fleets) {

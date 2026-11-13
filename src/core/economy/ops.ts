@@ -508,7 +508,6 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   c.reports.push(report);
   if (c.reports.length > REPORT_LIMIT) c.reports.splice(0, c.reports.length - REPORT_LIMIT);
   c.today = {};
-  checkBankruptcy(c);
   if (c.game?.goals) {
     // 目標・空港の格（日報を積んだ後、日を進める前）。報酬の現金は営業収支に入れない
     const from = e.periodStart;
@@ -518,9 +517,13 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
     });
     const res = evaluateGoals(c, { report, layout: ctx.layout, records: recs, types: ctx.types, largeOperable: operableTypes(ctx).some((t) => resolveType(ctx.types, t).size === 'L') });
     if (res.cash > 0) report.grants = res.cash;
+    // 報酬の現金・評価は当日の終わりの値に含める（cashEnd(翌日) − cashEnd(当日) = 翌日の営業利益 + 建設 + 翌日の報酬）。営業利益には入れない
+    report.cashEnd = c.cash;
+    kpi.rating = c.rating;
     for (const id of res.completed) log(state, `目標を達成しました: ${id}`);
     if (res.tierUp !== null) log(state, `空港の格が上がりました: ${res.tierUp}`);
   }
+  checkBankruptcy(c);
   log(state, `${c.day + 1}日目を締めました: 営業利益 ${report.operatingProfit.toLocaleString('ja-JP')} cr`);
   c.day++;
 

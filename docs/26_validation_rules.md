@@ -58,6 +58,7 @@ issue が出るのは、少なくとも一方が自由形の組、または `rul
 | `STAND_REMOTE` | info | 文言だけ分岐（バスゲートがあれば「バスゲートのランプバスで搭乗」）。キーは従来と同じで、バスゲートがあるときだけ `params.bus` が付く |
 | `GATE_CONNECTION_INVALID` | error | `connectedTo` が存在しない・ターミナルでない |
 | `GATE_CONNECTOR_LONG` | warning | 独立ゲートの連絡通路が 60 タイル（1.5 km）超 |
+| `GATE_CONNECTOR_CROSSES_RUNWAY` | warning | 独立ゲートの連絡通路（ゲート中心から接続先エリア中心への直線）が滑走路の本体・着陸帯のタイルを通る。対象は [ゲート, 滑走路] |
 | `GATE_NOT_AT_TERMINAL` | error | ターミナルに接していない。**`connectedTo` が有効なときは出さない** |
 
 `TERMINAL_NO_GATE` は接続された独立ゲートも数える。詳細は [docs/29](29_remote_stands_and_bus_boarding.md)。

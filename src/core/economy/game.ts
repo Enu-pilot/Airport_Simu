@@ -81,9 +81,15 @@ export function checkGameFields(c: Record<string, unknown>): string[] {
     const e = checkGameSettings(c.game);
     if (e) errors.push(e);
   }
-  if (c.airlineEval !== undefined) errors.push(...checkAirlineEval(c.airlineEval));
-  if (c.goals !== undefined) errors.push(...checkGoals(c.goals));
-  return errors;
+  const flags = typeof c.game === 'object' && c.game !== null ? (c.game as Record<string, unknown>) : null;
+  if (c.airlineEval !== undefined) {
+    errors.push(...checkAirlineEval(c.airlineEval));
+    if (!flags || flags.airlineEval !== true) errors.push('会社: ゲーム設定の航空会社の評価（airlineEval）が無効なのに、評価のデータがあります');
+  }
+  if (c.goals !== undefined) {
+    errors.push(...checkGoals(c.goals));
+    if (!flags || flags.goals !== true) errors.push('会社: ゲーム設定の目標（goals）が無効なのに、目標のデータがあります');
+  }  return errors;
 }
 
 /** 設定に合わせて会社の評価・目標の状態を整える（無効な項目は消す。有効な項目の初期状態は各モジュールが遅延して作る） */
