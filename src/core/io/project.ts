@@ -495,6 +495,11 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
   }
 
   const fv = formatVersionOf({ layout, company, scenarios, sim });
+  // 版 1 を名乗るのに 12B-3a の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）がある: 旧アプリが誤読しないための版の取り決めに反するので拒否する
+  if (data.formatVersion === PROJECT_FORMAT_VERSION && fv >= PROJECT_FORMAT_VERSION_2) {
+    errors.push('保存形式の版（formatVersion）が 1 ですが、版 2 の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）を含んでいます。ファイルが壊れているか、手で編集された可能性があります');
+    return fail();
+  }
   const project: ProjectFile = {
     format: PROJECT_FORMAT,
     formatVersion: fv,
