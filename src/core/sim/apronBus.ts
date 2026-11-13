@@ -349,13 +349,11 @@ function createRequests(sim: Simulation): void {
   const bus = state.bus!;
   for (const f of Object.values(state.flights)) {
     const b = f.pax.bus;
-    if (!b?.gateId || !isBusGate(sim, b.gateId)) continue;
+    if (!b) continue;
     const dir = f.direction === 'departure' ? 'dep' : 'arr';
-    if (dir === 'dep' && f.pax.boarding !== 'open') continue;
-    const ac = state.aircraft[f.aircraftId];
-    if (!ac?.standId) continue;
     const groups = groupsOfFlight(state, f.id);
-    // バスが一台もない・来ない到着旅客は、1 時間でスポットから動けないまま到達不能にする（従来のリモートスポットと同じ扱い）
+    // バスが一台もない・全部故障・来ない到着旅客は、1 時間でスポットから動けないまま到達不能にする（従来のリモートスポットと同じ扱い）。
+    // 配車の条件（ゲート・機体の駐機）より前に判定する（機体が出発したあとでも旅客を残さない）
     if (dir === 'arr') {
       for (const g of groups) {
         if (g.state === 'waitingBus' && !g.busTrip && state.now - g.appearAt >= 3600) {
@@ -365,6 +363,10 @@ function createRequests(sim: Simulation): void {
         }
       }
     }
+    if (!b.gateId || !isBusGate(sim, b.gateId)) continue;
+    if (dir === 'dep' && f.pax.boarding !== 'open') continue;
+    const ac = state.aircraft[f.aircraftId];
+    if (!ac?.standId) continue;
     if (!groups.some((g) => g.state === 'waitingBus' && !g.busTrip)) continue;
     const accepting = bus.active.some((id) => {
       const t = bus.trips[id]!;

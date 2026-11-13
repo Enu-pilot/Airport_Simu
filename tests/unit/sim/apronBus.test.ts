@@ -163,3 +163,31 @@ describe('分析（ランプバス）', () => {
     expect(JSON.stringify(legacy.state.analytics.records)).not.toContain('"boarding":"bus"');
   });
 });
+
+describe('バス 0 台・全台故障のときの到着旅客（12B-3a 監査の指摘）', () => {
+  /** 到着旅客がバス待ちのまま 1 時間を超えて残っていないこと（機体が出発したあとも含む） */
+  function expectNoStaleWaiters(sim: Simulation): number {
+    const stale = Object.values(sim.state.paxGroups).filter((g) => g.direction === 'arrival' && g.state === 'waitingBus' && !g.busTrip && sim.state.now - g.appearAt > 3600 + 60);
+    expect(stale.map((g) => `${g.id}@${g.appearAt}`)).toEqual([]);
+    return Object.values(sim.state.paxGroups).filter((g) => g.direction === 'arrival' && g.state === 'stranded' && g.reason === 'unreachable').length;
+  }
+
+  it('バスのユニットが 0 台でも、到着旅客は 1 時間で stranded（unreachable）になり waitingBus に残らない', { timeout: 300_000 }, () => {
+    const sim = run(busLayout({ buses: 0 }), 4, 's8');
+    expect(Object.values(sim.state.units).some((u) => u.kind === 'apronBus')).toBe(false);
+    expect(expectNoStaleWaiters(sim)).toBeGreaterThan(0);
+  });
+
+  it('全台が故障していても、到着旅客は 1 時間で stranded になる', { timeout: 300_000 }, () => {
+    const sim = createSimulation(busLayout({ buses: 2 }), { seed: 's8', settings: { flightsPerDay: 160 } });
+    stepSimulation(sim);
+    expect(Object.values(sim.state.units).filter((u) => u.kind === 'apronBus')).toHaveLength(2);
+    for (const u of Object.values(sim.state.units)) if (u.kind === 'apronBus') addDisruption(sim, { kind: 'vehicleFailure', targetId: u.id, end: sim.state.now + 5 * 3600 });
+    stepSimulation(sim);
+    expect(Object.values(sim.state.units).filter((u) => u.kind === 'apronBus').every((u) => u.status === 'broken')).toBe(true);
+    for (let i = 0; i < 4 * 3600; i++) stepSimulation(sim);
+    expect(Object.values(sim.state.units).filter((u) => u.kind === 'apronBus').every((u) => u.status === 'broken')).toBe(true);
+    expect(expectNoStaleWaiters(sim)).toBeGreaterThan(0);
+    expect(checkInvariants(sim)).toEqual([]);
+  });
+});
