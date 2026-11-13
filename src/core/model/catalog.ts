@@ -174,6 +174,8 @@ export const STRIP_END_EXTENSION = 2.5;
 
 /** ゲートと紐付けスポットの最大距離（チェビシェフ距離、タイル） */
 export const GATE_MAX_STAND_DISTANCE = 3;
+/** 独立ゲートの連絡通路の長さの警告しきい値（タイル。1.5 km） */
+export const GATE_CONNECTOR_MAX_TILES = 60;
 
 // ---------------------------------------------------------------- ターミナル内部
 
