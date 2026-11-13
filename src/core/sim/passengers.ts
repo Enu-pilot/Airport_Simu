@@ -6,6 +6,9 @@ import { resolveType } from './aircraftTypes';
 import { demandFactorAt } from './disruptions';
 import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt } from './baggage';
 import { boardingAllowed } from './ground';
+import { applyBusArrival, applyBusDeparture, stepBusBoarding } from './apronBus';
+import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './busRules';
+import { gateMode } from '../model/gates';
 import { BALANCE } from '../economy/balance';
 import { onPaxDeplaned, onPaxMissed, onShopDone } from '../economy/ops';
 import { accessArrival, accessDeparture } from '../access/runtime';
@@ -139,11 +142,14 @@ const STEP_KIND: Partial<Record<PaxStep, AreaNode['kind']>> = {
 
 function boardingLeadSec(sim: Simulation, f: Flight): number {
   const ac = sim.state.aircraft[f.aircraftId]!;
-  return BOARDING_LEAD_MIN[resolveType(sim.ctx.types, ac.typeId).size] * 60;
+  // バス扱いの便は、バスの移動・乗降の分だけ早く搭乗を始める
+  return BOARDING_LEAD_MIN[resolveType(sim.ctx.types, ac.typeId).size] * 60 + (f.pax.bus ? BUS_EXTRA_LEAD_MIN * 60 : 0);
 }
 
 function hasBridge(sim: Simulation, gateId: string | null): boolean {
-  return !!gateId && !!sim.ctx.layout.facilities[gateId]?.props.jetBridge;
+  const g = gateId ? sim.ctx.layout.facilities[gateId] : undefined;
+  // バスゲートはボーディングブリッジを使わない（jetBridge は無視）
+  return !!g && !!g.props.jetBridge && gateMode(g) !== 'bus';
 }
 
 // ---------------------------------------------------------------- 1ティック
@@ -188,7 +194,11 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
   // 旅客の生成（出発3時間前）
   if (!p.generated && state.now >= f.scheduled - PAX_GENERATE_LEAD_SEC) generateDeparturePax(sim, f);
   // 搭乗ゲートは機体のスポットで決まる
-  if (ac.standId && p.boarding !== 'closed') p.gateId = ctx.standGate[ac.standId] ?? null;
+  if (ac.standId && p.boarding !== 'closed') {
+    p.gateId = ctx.standGate[ac.standId] ?? null;
+    // バスゲートがある運航: ゲートのないスポットの便はバスゲートで搭乗し、ランプバスで運ぶ（sim/apronBus.ts）
+    if (state.bus) applyBusDeparture(sim, f, ac);
+  }
 
   if (p.boarding === 'notStarted') {
     const atStand = ac.state === 'turnaround' || ac.state === 'readyForPushback';
@@ -200,7 +210,11 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
     }
   }
   if (p.boarding === 'open') {
-    p.deadline = Math.max(f.estimated - DEADLINE_BEFORE_SEC, p.boardingOpenedAt! + MIN_BOARDING_WINDOW_SEC);
+    p.deadline = Math.max(f.estimated - DEADLINE_BEFORE_SEC, p.boardingOpenedAt! + (p.bus ? BUS_MIN_WINDOW_SEC : MIN_BOARDING_WINDOW_SEC));
+    if (p.bus) {
+      stepBusBoarding(sim, f, closeBoarding);
+      return;
+    }
     const groups = groupsOf(state, f.id);
     // 搭乗処理中は締め切らない（ただし故障中のゲートは処理が進まないので締め切る）
     const gateClosed = !!p.gateId && state.closures.gates.includes(p.gateId);
@@ -221,13 +235,18 @@ function groupsOf(state: SimState, flightId: string): PaxGroup[] {
   return (state.flightPax[flightId] ?? []).map((id) => state.paxGroups[id]!);
 }
 
-/** 搭乗締切: 搭乗していない旅客は乗り遅れとして記録する */
-function closeBoarding(sim: Simulation, f: Flight, forced: MissReason | null): void {
+export { groupsOf as groupsOfFlight };
+
+/**
+ * 条件に合う未完了のグループを乗り遅れ（または欠航）にして、乗り遅れ人数を返す。補償は onPaxMissed。
+ * forced が null のときの理由は従来どおり（ゲートなし・到達不能・施設閉鎖・間に合わず）
+ */
+export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null, pred: (g: PaxGroup) => boolean = () => true): number {
   const { state } = sim;
   const p = f.pax;
   let missed = 0;
   for (const g of groupsOf(state, f.id)) {
-    if (PAX_FINAL_STATES.includes(g.state)) continue;
+    if (PAX_FINAL_STATES.includes(g.state) || !pred(g)) continue;
     const reason: MissReason =
       forced ?? (!p.gateId ? 'noGate' : g.state === 'stranded' ? 'unreachable' : g.state === 'waitingFacility' ? 'facilityClosed' : 'late');
     leaveFacility(state, g);
@@ -236,6 +255,7 @@ function closeBoarding(sim: Simulation, f: Flight, forced: MissReason | null): v
     g.finishedAt = state.now;
     g.area = null;
     g.route = [];
+    delete g.busTrip;
     if (reason !== 'cancelled') {
       p.missed += g.count;
       state.paxStats.missed += g.count;
@@ -243,6 +263,14 @@ function closeBoarding(sim: Simulation, f: Flight, forced: MissReason | null): v
     }
   }
   if (missed > 0) onPaxMissed(sim, f, missed);
+  return missed;
+}
+
+/** 搭乗締切: 搭乗していない旅客は乗り遅れとして記録する */
+function closeBoarding(sim: Simulation, f: Flight, forced: MissReason | null): void {
+  const { state } = sim;
+  const p = f.pax;
+  const missed = missGroups(sim, f, forced);
   p.boarding = 'closed';
   log(state, { t: state.now, kind: 'boardingClosed', aircraftId: f.aircraftId, note: `${f.number} 搭乗 ${p.boarded} / 乗り遅れ ${p.missed}` });
   if (missed > 0) log(state, { t: state.now, kind: 'paxMissed', aircraftId: f.aircraftId, note: `${f.number} ${missed}人` });
@@ -335,7 +363,12 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
   const p = f.pax;
   if (f.block === null) return;
   const ac = state.aircraft[f.aircraftId]!;
-  const gateId = ac.standId ? (ctx.standGate[ac.standId] ?? null) : null;
+  let gateId = ac.standId ? (ctx.standGate[ac.standId] ?? null) : null;
+  // バスゲートがある運航: ゲートのないスポットの到着旅客は、スポットでランプバスを待ち、バスゲートの降機口へ運ばれる
+  if (state.bus && ac.standId) {
+    const busGate = applyBusArrival(sim, f, ac);
+    if (busGate !== undefined) gateId = busGate;
+  }
   if (!p.generated) {
     p.generated = true;
     const seats = f.seats ?? resolveType(ctx.types, ac.typeId).seats;
@@ -398,7 +431,11 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
       };
       registerGroup(state, g);
       arrivalBags(sim, g, ac.id);
-      if (!g.area) {
+      if (p.bus && gateId && access?.deplane) {
+        // スポットでランプバスを待つ（降機口へはバスが運ぶ）
+        g.state = 'waitingBus';
+        g.area = null;
+      } else if (!g.area) {
         // 降機口がない（ゲートなし・到着通路なし）: 到達不能として記録する
         g.state = 'stranded';
         g.reason = 'unreachable';
@@ -445,6 +482,8 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
     case 'queuing':
     case 'boardingQueue':
     case 'waitingTransport':
+    case 'waitingBus':
+    case 'onBus':
       g.waitSec++;
       return;
     case 'waitingBaggage': {
@@ -720,6 +759,12 @@ function stepFacility(sim: Simulation, key: string): void {
     fac.inService = fac.inService.filter((x) => x !== id);
     g.facility = null;
     g.serviceUntil = null;
+    if (key.startsWith('gate:') && state.flights[g.flightId]!.pax.bus) {
+      // バスゲート: 搭乗券の確認を終えたらランプバスを待つ（搭乗済みになるのはスポットで降車したとき）
+      g.state = 'waitingBus';
+      g.boardedGate = key.slice('gate:'.length);
+      continue;
+    }
     if (key.startsWith('gate:')) {
       const f = state.flights[g.flightId]!;
       g.state = 'boarded';
@@ -776,6 +821,7 @@ function stepFacility(sim: Simulation, key: string): void {
 
 function serviceSec(sim: Simulation, key: string, g: PaxGroup): number {
   if (key.startsWith('gate:')) {
+    if (sim.state.flights[g.flightId]!.pax.bus) return Math.max(1, Math.round(BUS_GATE_SEC_PER_PAX * g.count));
     const per = hasBridge(sim, key.slice('gate:'.length)) ? BOARD_SEC_PER_PAX.bridge : BOARD_SEC_PER_PAX.stairs;
     return Math.max(1, Math.round(per * g.count));
   }
@@ -784,6 +830,43 @@ function serviceSec(sim: Simulation, key: string, g: PaxGroup): number {
   if (a.kind === 'shop') return BALANCE.retail.shopSec;
   if (a.kind === 'restaurant') return BALANCE.retail.restaurantSec;
   return withRng(sim.state, (rng) => Math.max(1, Math.round(g.count * perPaxSec(sim, key) * (0.8 + rng.next() * 0.4))));
+}
+
+// ---------------------------------------------------------------- ランプバス（sim/apronBus.ts から呼ぶ）
+
+/** 出発旅客がスポットでバスを降りて搭乗済みになる */
+export function finishBusBoarded(sim: Simulation, g: PaxGroup): void {
+  const { state } = sim;
+  const f = state.flights[g.flightId]!;
+  g.state = 'boarded';
+  g.finishedAt = state.now;
+  g.area = null;
+  delete g.busTrip;
+  f.pax.boarded += g.count;
+  state.paxStats.boarded += g.count;
+  finish(state, g);
+}
+
+/** 到着旅客がバスを降りて、降機口から手荷物受取・出口へ歩き出す */
+export function releaseBusArrival(sim: Simulation, g: PaxGroup, gateId: string): void {
+  delete g.busTrip;
+  const area = sim.ctx.terminal.gates[gateId]?.deplane ?? null;
+  if (!area) {
+    g.state = 'stranded';
+    g.reason = 'unreachable';
+    g.area = null;
+    return;
+  }
+  g.area = area;
+  g.state = 'walking';
+  planStep(sim, g);
+}
+
+/** 乗車中・乗車待ちだった旅客を乗車待ちに戻す（バスの故障・配車のやり直し）。出発はバスゲートの搭乗口、到着はスポット */
+export function returnToBusQueue(sim: Simulation, g: PaxGroup, depGateId: string | null): void {
+  delete g.busTrip;
+  g.state = 'waitingBus';
+  g.area = depGateId ? (sim.ctx.terminal.gates[depGateId]?.boarding ?? null) : null;
 }
 
 // ---------------------------------------------------------------- 施設の閉鎖

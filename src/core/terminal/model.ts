@@ -2,6 +2,7 @@ import { TILE_M } from '../model/catalog';
 import { compareIds, sortedValues } from '../model/ids';
 import type { AirportLayout, PaxZone, TerminalArea, TerminalAreaKind } from '../model/types';
 import { facilityTiles } from '../layout/footprint';
+import { connectedTerminal } from '../model/gates';
 import { tileKey, type Vec2 } from '../geometry/vec';
 
 /**
@@ -28,6 +29,8 @@ export interface AreaNode {
   center: Vec2;
   /** 同時に滞在できる目安の人数（混雑度の分母） */
   capacity: number;
+  /** 独立ゲートの搭乗待合・降機口として合成したノード（layout.terminalAreas には無い派生データ。ID は `<gateId>:dep` / `<gateId>:arr`） */
+  synthetic?: true;
 }
 
 export interface AreaLink {
@@ -47,13 +50,31 @@ export interface GateAccess {
   deplane: string | null;
 }
 
+/** 独立ゲート（ターミナルに隣接せず、連絡通路でつながるゲート）の接続 */
+export interface GateConnector {
+  gateId: string;
+  terminalId: string;
+  /** つなぎ先の出発区域・到着区域のエリア（アンカー）。無ければ null */
+  depAnchor: string | null;
+  arrAnchor: string | null;
+  /** 通路の長さ（m）。直線距離 × CONNECTOR_DETOUR */
+  lengthM: number;
+}
+
 export interface TerminalModel {
   areas: Record<string, AreaNode>;
   links: Record<string, AreaLink[]>;
   gates: Record<string, GateAccess>;
   /** ターミナルID → エリアID（ID 順） */
   byTerminal: Record<string, string[]>;
+  /** 独立ゲートの接続。独立ゲートがなければキー自体を持たない（従来の結果の形を変えない）。描画・検証・将来の拡張（サテライト・ピープルムーバー）用 */
+  connectors?: GateConnector[];
 }
+
+/** 独立ゲートの搭乗待合の混雑の目安人数 */
+export const GATE_LOUNGE_CAPACITY = 150;
+/** 連絡通路の曲がりの係数（直線距離に掛ける） */
+export const CONNECTOR_DETOUR = 1.25;
 
 /** 1タイル（25m四方）あたりの混雑の目安人数 */
 export const PAX_PER_TILE = 40;
@@ -102,6 +123,7 @@ export function buildTerminalModel(layout: AirportLayout): TerminalModel {
 
   // ゲート: 隣接するターミナルタイルを含むエリア
   const gates: Record<string, GateAccess> = {};
+  const connectors: GateConnector[] = [];
   for (const g of sortedValues(layout.facilities).filter((f) => f.kind === 'gate')) {
     const near = new Set([
       tileKey(g.origin.x + 1, g.origin.y),
@@ -112,6 +134,12 @@ export function buildTerminalModel(layout: AirportLayout): TerminalModel {
     const terminal = sortedValues(layout.facilities).find(
       (f) => f.kind === 'terminal' && facilityTiles(f).some((t) => near.has(tileKey(t.x, t.y))),
     );
+    // 明示の接続先があり、隣接していなければ独立ゲート（連絡通路でつなぐ）。隣接していれば従来どおり
+    const wanted = connectedTerminal(g, layout);
+    if (wanted && terminal?.id !== wanted) {
+      gates[g.id] = connectIndependentGate(layout, areas, links, byTerminal, g.id, wanted, connectors);
+      continue;
+    }
     const access: GateAccess = { terminalId: terminal?.id ?? null, boarding: null, deplane: null };
     if (terminal) {
       const touching = (byTerminal[terminal.id] ?? [])
@@ -132,7 +160,78 @@ export function buildTerminalModel(layout: AirportLayout): TerminalModel {
     }
     gates[g.id] = access;
   }
-  return { areas, links, gates, byTerminal };
+  for (const list of Object.values(links)) list.sort((p, q) => compareIds(p.to, q.to));
+  return connectors.length > 0 ? { areas, links, gates, byTerminal, connectors } : { areas, links, gates, byTerminal };
+}
+
+/**
+ * 独立ゲートの接続。ゲートのタイルに合成ノード 2 つ（搭乗待合 `<id>:dep`・降機口 `<id>:arr`）を作り、
+ * 接続先ターミナルの 出発区域・到着区域のエリア（保安検査・上下移動を除く、ゲートに最も近いもの。階は問わない）へ歩行リンクでつなぐ。
+ * 合成ノードは byTerminal に入れない（ゲート未定の旅客の待合・施設の選択の候補にしない）。
+ */
+function connectIndependentGate(
+  layout: AirportLayout,
+  areas: Record<string, AreaNode>,
+  links: Record<string, AreaLink[]>,
+  byTerminal: Record<string, string[]>,
+  gateId: string,
+  terminalId: string,
+  connectors: GateConnector[],
+): GateAccess {
+  const g = layout.facilities[gateId]!;
+  const center: Vec2 = { x: g.origin.x + 0.5, y: g.origin.y + 0.5 };
+  const nearest = (zone: PaxZone): AreaNode | null => {
+    let best: AreaNode | null = null;
+    let bestD = Infinity;
+    for (const id of byTerminal[terminalId] ?? []) {
+      const a = areas[id]!;
+      if (a.zone !== zone || a.kind === 'security' || isLift(a.kind)) continue;
+      const d = Math.hypot(a.center.x - center.x, a.center.y - center.y);
+      if (d < bestD - 1e-9 || (Math.abs(d - bestD) <= 1e-9 && best && compareIds(a.id, best.id) < 0)) {
+        best = a;
+        bestD = d;
+      }
+    }
+    return best;
+  };
+  const depAnchor = nearest('departure');
+  const arrAnchor = nearest('arrival');
+  const make = (suffix: 'dep' | 'arr', anchor: AreaNode | null): string | null => {
+    if (!anchor) return null;
+    const id = `${gateId}:${suffix}`;
+    const node: AreaNode = {
+      id,
+      terminalId,
+      level: anchor.level,
+      kind: suffix === 'dep' ? 'waiting' : 'arrivalCorridor',
+      zone: suffix === 'dep' ? 'departure' : 'arrival',
+      x: g.origin.x,
+      y: g.origin.y,
+      w: 1,
+      h: 1,
+      center,
+      capacity: GATE_LOUNGE_CAPACITY,
+      synthetic: true,
+    };
+    areas[id] = node;
+    links[id] = [];
+    const lengthM = Math.hypot(anchor.center.x - center.x, anchor.center.y - center.y) * TILE_M * CONNECTOR_DETOUR;
+    const via = { x: (anchor.center.x + center.x) / 2, y: (anchor.center.y + center.y) / 2 };
+    links[id]!.push({ to: anchor.id, lengthM, travelSec: 0, via });
+    links[anchor.id]!.push({ to: id, lengthM, travelSec: 0, via });
+    return id;
+  };
+  const boarding = make('dep', depAnchor);
+  const deplane = make('arr', arrAnchor);
+  const anchor = depAnchor ?? arrAnchor;
+  connectors.push({
+    gateId,
+    terminalId,
+    depAnchor: depAnchor?.id ?? null,
+    arrAnchor: arrAnchor?.id ?? null,
+    lengthM: anchor ? Math.hypot(anchor.center.x - center.x, anchor.center.y - center.y) * TILE_M * CONNECTOR_DETOUR : 0,
+  });
+  return { terminalId, boarding, deplane };
 }
 
 const isLift = (k: TerminalAreaKind): boolean => k === 'escalator' || k === 'elevator';

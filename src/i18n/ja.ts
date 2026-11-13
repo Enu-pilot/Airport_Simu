@@ -1,4 +1,4 @@
-import type { Disruption, DisruptionKind, WeatherKind, AircraftState, BagState, BlockReason, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent, TaskKind, TaskState, UnitKind, UnitStatus } from '../core/sim/types';
+import type { Disruption, DisruptionKind, WeatherKind, AircraftState, BagState, BlockReason, BusTripPhase, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent, TaskKind, TaskState, UnitKind, UnitStatus } from '../core/sim/types';
 import type { BuildState, EntityType, FacilityKind, PaxZone, RoadClass, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/validation/validate';
@@ -14,6 +14,9 @@ import type { CompatReason, CompatStatus } from '../core/aircraft/compat';
 import type { FleetResult } from '../core/economy/company';
 import type { ResponseResult } from '../core/sim/disruptions';
 import type { PlanIssueCode } from '../core/economy/planning';
+import type { AirlineScore, ScoreComponent, ScoreKey, ScoreLevel } from '../core/economy/airlineScore';
+import type { ReviewMetric } from '../core/analytics/review';
+import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 
 export const FACILITY_LABEL: Record<FacilityKind, string> = {
   apron: 'エプロン',
@@ -70,6 +73,9 @@ export const PROP_LABEL: Record<string, string> = {
   securityLanes: '保安検査レーン数',
   standId: '紐付けスポット',
   jetBridge: 'ボーディングブリッジ',
+  boardingMode: '搭乗方式',
+  connectedTo: '接続先ターミナル',
+  apronBuses: 'ランプバス',
   maxSize: '収容可能な最大機体',
   level: 'レベル',
   bays: '整備ベイ数',
@@ -92,6 +98,13 @@ export const PROP_LABEL: Record<string, string> = {
   trainsPerHour: '列車本数（毎時）',
   rooms: '客室数',
 };
+
+/** ゲートの搭乗方式（docs/29） */
+export const BOARDING_MODE_LABEL = {
+  contact: '通常（コンタクト）',
+  bus: 'バス（リモートスポット）',
+  connectAuto: '自動（隣接）',
+} as const;
 
 export const SEVERITY_LABEL: Record<Severity, string> = { error: 'エラー', warning: '警告', info: '情報' };
 
@@ -176,11 +189,17 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   STAND_ROUTE_SIZE_LIMITED: (n, p) => `${n[0]}（${p.size}級）から滑走路まで、${p.size}級機が通れる誘導路・滑走路がありません`,
   STAND_ONE_WAY_TRAP: (n, p) =>
     `${n[0]} は一方通行のため${p.direction === 'arrival' ? '到着機が入れません' : '出発機が滑走路へ出られません'}`,
-  STAND_REMOTE: (n) => `${n[0]} にはゲートがありません（リモートスポット）`,
+  STAND_REMOTE: (n, p) => (p.bus ? `${n[0]} はリモートスポットです（バスゲートのランプバスで搭乗）` : `${n[0]} にはゲートがありません（リモートスポット）`),
   STAND_MULTIPLE_GATES: (n) => `${n[0]} に複数のゲートが紐付いています`,
   GATE_NOT_AT_TERMINAL: (n) => `${n[0]} がターミナルに接していません`,
   GATE_NO_STAND: (n) => `${n[0]} にスポットが紐付いていません`,
   GATE_STAND_TOO_FAR: (n, p) => `${n[0]} と ${n[1]} が離れすぎています（${p.distance}タイル）`,
+  GATE_BUS_HAS_STAND: (n) => `${n[0]} はバスゲートなので、紐付けたスポットは使われません`,
+  GATE_BUS_NO_VEHICLES: (n) => `${n[0]} はバスゲートですが、運用中の GSE 基地にランプバスがありません（旅客を運べません）`,
+  BUS_GATE_NO_REMOTE_STAND: (n) => `${n[0]} はバスゲートですが、リモートスポット（ゲートのないスポット）がありません`,
+  GATE_CONNECTION_INVALID: (n) => `${n[0]} の接続先がターミナルではありません（存在しない・別の種類の施設）`,
+  GATE_CONNECTOR_CROSSES_RUNWAY: (n) => `${n[0]} の連絡通路が滑走路 ${n[1]} の滑走路・着陸帯を横切っています（旅客が滑走路を歩くことになります）`,
+  GATE_CONNECTOR_LONG: (n, p) => `${n[0]} と ${n[1]} をつなぐ通路が長すぎます（約 ${p.tiles} タイル。歩行に時間がかかります）`,
   NO_AIRSIDE_ACCESS: (n) => `${n[0]} がエプロン・誘導路・サービスエリア・サービス道路に接していません`,
   TERMINAL_NO_ROAD: (n) => `${n[0]} が一般道路に接していません`,
   TERMINAL_NO_GATE: (n) => `${n[0]} に搭乗ゲートがありません`,
@@ -257,6 +276,7 @@ export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
   goAround: '着陸復行',
   boarding: '搭乗手続き中',
   groundCrew: 'トーイングカー・作業員待ち',
+  weather: '天候',
 };
 
 export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
@@ -268,6 +288,8 @@ export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
   noRoute: '経路なし',
   boarding: '搭乗手続き',
   groundHandling: '地上支援作業',
+  apronBus: 'ランプバス待ち',
+  weather: '天候',
 };
 
 export const FLIGHT_STATUS_LABEL: Record<FlightStatus, string> = {
@@ -311,7 +333,7 @@ export function eventText(e: SimEvent, callsign: (id: string) => string): string
     case 'hold':
       return `${who} 待機: ${HOLD_REASON_LABEL[e.reason!]}`;
     case 'goAround':
-      return `${who} 着陸復行（滑走路が空いていない）`;
+      return e.reason === 'weather' ? `${who} 着陸復行（天候）` : `${who} 着陸復行（滑走路が空いていない）`;
     case 'diverted':
       return `${who} ダイバート（${e.reason ? HOLD_REASON_LABEL[e.reason] : '待機上限'}）`;
     case 'cannotOperate':
@@ -344,6 +366,8 @@ export function eventText(e: SimEvent, callsign: (id: string) => string): string
       return `⚠ 積み残し: ${e.note}`;
     case 'finance':
       return `💴 ${e.note}`;
+    case 'busRescue':
+      return `ランプバスの救援: ${e.note}`;
     case 'disruption':
       return `⚠ ${e.note}`;
   }
@@ -399,8 +423,22 @@ export const PAX_STATE_LABEL: Record<PaxState, string> = {
   stranded: '到達不能',
   waitingFacility: '施設閉鎖で待機',
   waitingTransport: '交通機関を待機',
+  waitingBus: 'ランプバス待ち',
+  onBus: 'ランプバスで移動中',
   missed: '乗り遅れ',
   cancelled: '欠航',
+};
+
+/** ランプバスの運行の段階 */
+export const BUS_PHASE_LABEL: Record<BusTripPhase, string> = {
+  waiting: '配車待ち',
+  toPickup: '乗車地へ移動',
+  loading: '乗車中',
+  driving: '走行中',
+  unloading: '降車中',
+  stalled: '故障（救援待ち）',
+  done: '完了',
+  cancelled: '取消',
 };
 
 export const MISS_REASON_LABEL: Record<MissReason, string> = {
@@ -408,6 +446,7 @@ export const MISS_REASON_LABEL: Record<MissReason, string> = {
   unreachable: 'ゲートに到達できず',
   facilityClosed: '施設閉鎖で未処理',
   noGate: 'ゲートなし',
+  noBus: 'ランプバスが来ず',
   cancelled: '欠航',
 };
 
@@ -450,6 +489,7 @@ export const BLOCK_REASON_LABEL: Record<BlockReason, string> = {
 };
 
 export const UNIT_KIND_LABEL: Record<UnitKind, string> = {
+  apronBus: 'ランプバス',
   staff: '作業員',
   engineer: '整備士',
   tug: 'トーイングカー',
@@ -545,6 +585,7 @@ export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
   SIZE_UNSUPPORTED: '運航できない機種（滑走路・スポットが未対応）',
   STAND_CONFLICT: 'スポット不足（到着時に空きスポットがない見込み）',
   NO_GATE: 'ゲートのないスポット（旅客が搭乗できない）',
+  BUS_BOARDING: 'リモートスポット（ランプバスで搭乗）',
   NO_TERMINAL: '旅客ターミナル（入口）がない',
   RUNWAY_OVERLOAD: '滑走路の処理能力の目安（30回/時・本）を超える',
   SECURITY_OVERLOAD: '保安検査の処理能力を超える見込み',
@@ -638,6 +679,7 @@ export const COMPAT_REASON_LABEL: Record<CompatReason, string> = {
   TAXIWAY_CLASS: '誘導路の幅の区分が足りない',
   TAXIWAY_CODE_F: '誘導路がコード F 対応に指定されていない',
   GATE_NO_STAND: 'ゲートにスポットが紐付いていない（判定不能）',
+  GATE_BUS: 'バスゲート（リモートスポットの便をランプバスで運ぶ）',
   GATE_STAND_NG: '紐付いたスポットが適合しない',
   GATE_UPPER_DECK: '上階への搭乗橋はモデル化していない（使用は可）',
   GSE_NONE: '必要な車両・作業員が空港に1台もいない',
@@ -805,3 +847,372 @@ export const RUNWAY_UI = {
 } as const;
 
 export const MAG_VAR_LABEL = (v: number): string => (v === 0 ? '0°' : v > 0 ? `${v}°E` : `${-v}°W`);
+
+// ---------------------------------------------------------------- 運航モードの画面（12B-1）
+
+/** 運航モードの上部のボタン列（キーは従来のタブと同じ） */
+export const OPS_NAV: readonly (readonly [string, string])[] = [
+  ['flights', '運航表（全列）'],
+  ['terminal', 'ターミナル'],
+  ['ground', '地上支援'],
+  ['baggage', '手荷物'],
+  ['plan', '運航計画'],
+  ['finance', '経営'],
+  ['disruptions', '天候・障害'],
+  ['analytics', '分析'],
+  ['scenarios', 'シナリオ'],
+  ['access', 'アクセス'],
+  ['expansion', '拡張計画'],
+  ['catalog', '機種カタログ'],
+  ['project', 'プロジェクト'],
+  ['events', 'イベント'],
+  ['issues', '配置チェック'],
+  ['airlines', '航空会社'],
+  ['goals', '目標'],
+];
+
+/** 運航モードの常設カード・運航表・アラートの文言 */
+export const OPS_UI = {
+  dayUnit: '日目',
+  jump: 'クリックでその場所へ移動',
+  repair: '修理',
+  closed: '閉鎖',
+  // KPI
+  kpiTitle: '本日の KPI（暫定）',
+  kpiMovements: '完了した便',
+  kpiOtp: '定時率',
+  kpiDelay: '平均遅延',
+  kpiPax: '旅客（出発＋到着）',
+  kpiMissed: '乗り遅れ',
+  kpiRevenue: '収入（本日）',
+  kpiCost: '費用（本日）',
+  kpiProfit: '営業利益（本日）',
+  kpiNote: '日締め前の暫定値。詳細は「経営」',
+  kpiNone: '経営の集計がありません',
+  // 天候・障害
+  weatherTitle: '天候・障害',
+  weatherNow: '天候',
+  closures: '閉鎖中',
+  closuresText: (t: number, s: number, g: number) => `誘導路 ${t} · スポット ${s} · ゲート ${g}`,
+  noDisruption: '発生中の障害はありません',
+  // ターミナル
+  terminalTitle: 'ターミナル',
+  inTerminal: (n: number) => `館内 ${n}人`,
+  paxMissed: '乗り遅れ',
+  noTerminal: '処理施設がありません',
+  queueText: (queued: number, avgWaitMin: number, crowd: number) => `待ち ${queued}人 · 平均 ${avgWaitMin}分 · 混雑 ${crowd}%`,
+  // 地上支援・手荷物
+  groundTitle: '地上支援・手荷物',
+  busTrips: 'ランプバスの運行',
+  busTripsText: (running: number, waiting: number, trips: number) => `運行中 ${running} · 配車待ち ${waiting} · 完了 ${trips}`,
+  busWait: 'バス待ちの旅客',
+  fidsBus: 'BUS',
+  fidsBusTitle: (gate: string) => `ランプバスで搭乗・降機（${gate}）`,
+  alertBusShortage: (n: number) => `ランプバス不足（${n} 件の運行が配車待ち）`,
+  alertBusStalled: (pax: number) => `ランプバス故障（乗客 ${pax} 人が車内で救援待ち）`,
+  brokenBadge: (n: number) => `故障 ${n}`,
+  unitText: (working: number, total: number, broken: number) => `作業中 ${working}/${total}${broken > 0 ? ` · 故障 ${broken}` : ''}`,
+  blockedTasks: '止まっている作業',
+  bagsActive: '手荷物（処理中）',
+  bagsLeft: '積み残し',
+  equipment: '仕分け・ベルト',
+  equipmentDown: (n: number) => `停止 ${n}`,
+  equipmentOk: (n: number) => (n > 0 ? '稼働' : '—'),
+  // アクセス
+  accessTitle: 'アクセス',
+  accessNone: 'アクセスの集計がありません',
+  accessNoPax: 'まだ旅客が来ていません',
+  paxCount: (n: number) => `${n}人`,
+  waiting: (n: number) => `待ち ${n}人`,
+  parking: '駐車場',
+  parkingText: (used: number, spaces: number) => `${used} / ${spaces}台`,
+  parkingFull: '満車で断った車',
+  transitWait: '乗り場の待ち',
+  // 工事
+  constructionTitle: '工事',
+  noProjects: '工事中の施設はありません',
+  projectsCount: (n: number) => `${n}件`,
+  remainingDays: (n: number) => `残り ${n}日`,
+  // イベント
+  eventsTitle: 'イベント（新しい順）',
+  noEvents: '重要なイベントはありません',
+  // 運航表（案内板風）
+  fidsTitle: '運航表 FLIGHTS',
+  fidsFilter: { all: 'すべて', departure: '出発', arrival: '到着' },
+  fidsHideDone: '完了を隠す',
+  fidsDrag: '見出しをドラッグして移動できます（位置はこのブラウザに記憶します）',
+  fidsCompactLabel: (n: number) => `直近${n}便`,
+  fidsAllLabel: '全件',
+  fidsCompactOn: (n: number) => `直近 ${n} 便だけ表示します（クリックで全件）`,
+  fidsCompactOff: '全件を表示中（クリックで直近の便だけ）',
+  fidsOpen: '運航表を開く',
+  fidsFold: '運航表を畳む',
+  fidsCols: ['予定', '便名', '行先・出発地', '機種', 'スポット', '状態', '遅延'],
+  fidsColsFull: ['便名', '区分', '機種', '予定', '予想/実績', '遅延', '滑走路', 'スポット', '旅客', '便の状態', '機体の状態', '遅延理由'],
+  fidsFrom: 'FROM ',
+  fidsTo: 'TO ',
+  fidsActions: 'この便への操作',
+  fidsEmpty: '表示する便はありません',
+  delay15: '+15分',
+  delay30: '+30分',
+  reassign: 'スポット変更',
+  apply: '変更',
+  prio: '優先',
+  cancelEarly: '先行欠航',
+  cancelEarlyTitle: 'まだ現れていない折り返しを欠航にします（補償なし・航空会社の満足度 −1。悪天の前に使います）',
+  cancelEarlyConfirm: (n: string) => `${n} の折り返しを先行欠航にしますか？（元には戻せません）`,
+  prioOff: '優先を解除',
+  goto: '機体へ移動',
+  close: '閉じる',
+  // アラート
+  airlineTitle: '航空会社の評価',
+  airlineNone: '契約している航空会社がありません',
+  airlineNote: '既存のデータからの導出（表示のみ）。点数は 0〜100 のゲーム用の指標で、満足度の計算には使いません',
+  satisfaction: '満足度',
+  lackingNone: '足りないもの: 特になし',
+  noContract: '契約なし',
+  alertCritical: '重大',
+  alertWarning: '注意',
+  alertAction: { focus: '移動', repair: '修理', delay15: '+15分', reassign: 'スポット変更', openPanel: '詳細' } as Record<string, string>,
+  alertMore: (n: number) => `他 ${n} 件を表示`,
+  alertLess: '畳む',
+  alertOpenEvents: 'イベントを開く',
+} as const;
+
+// ---------------------------------------------------------------- 航空会社の評価カード（12B-1）
+
+export const SCORE_LABEL: Record<ScoreKey, string> = {
+  otp: '定時性',
+  turnaround: '折り返し',
+  stand: 'スポット・ゲート',
+  fees: '料金',
+  slots: '枠（時間帯）',
+  aircraft: '機材の対応',
+  pax: '旅客体験',
+};
+
+export const SCORE_LEVEL_LABEL: Record<ScoreLevel, string> = { good: '良好', warn: '注意', bad: '不足', 'n/a': '—' };
+
+const pctText = (v: number) => `${Math.round(v * 1000) / 10}%`;
+const typeNames = (ids: string[] | undefined) => (ids ?? []).map((id) => resolveType(AIRCRAFT_TYPES, id).label).join('、');
+
+/** 要素の一文の説明（良好なときは状況、注意・不足のときは足りないもの） */
+export function scoreText(c: ScoreComponent): string {
+  const f = c.facts;
+  if (c.level === 'n/a') return 'まだ判定できません（実績・契約がありません）';
+  switch (c.key) {
+    case 'otp': {
+      const cause = f.names?.[0] ? `。主な遅延理由: ${DELAY_CAUSE_LABEL[f.names[0] as DelayCause] ?? f.names[0]}` : '';
+      return `定時率 ${pctText(f.value ?? 0)}（要求 ${pctText(f.target ?? 0)}）${f.fallback ? '・空港全体の値' : ''}${c.level === 'good' ? '' : cause}`;
+    }
+    case 'turnaround':
+      return (f.value ?? 0) <= 0 ? `折り返しは標準（${f.target}分）以内` : `折り返しが標準（${f.target}分）より ${f.value}分長い`;
+    case 'stand':
+      if ((f.value ?? 0) > 0) return `明日 ${f.value}便でスポットが不足`;
+      if ((f.target ?? 0) > 0) return `ゲートのないスポットに ${f.target}便が割り当てられる`;
+      if ((f.n ?? 0) > 0) return `スポット待ちの遅れが ${f.n}便`;
+      return 'スポット・ゲートは足りている';
+    case 'fees':
+      return `${c.level === 'good' ? '料金は許容範囲' : '料金が高いと感じている'}（倍率 ×${(f.value ?? 1).toFixed(2)}${f.target !== undefined && Math.abs((f.target ?? 0) - (f.value ?? 0)) > 0.005 ? `、割引後 ×${f.target.toFixed(2)}` : ''}）`;
+    case 'slots':
+      if ((f.n ?? 0) > 0) return `運用時間・時間帯に入らない契約が ${f.n}件`;
+      if ((f.value ?? 0) > 0) return `希望の時間帯の枠に入らない便が ${f.value}便`;
+      return '希望の枠に収まっている';
+    case 'aircraft':
+      if ((f.value ?? 0) > 0) return `${typeNames(f.names)} に対応するスポット・滑走路がない`;
+      if ((f.target ?? 0) > 0) return `保有機材のうち ${typeNames(f.names)} は運航できない`;
+      return '契約の機材はすべて運航できる';
+    case 'pax':
+      return `乗り遅れ ${pctText(f.value ?? 0)}・手荷物の積み残し ${pctText(f.target ?? 0)}`;
+  }
+}
+
+/** 「足りないもの」の一行（なければ不足なし） */
+export function lackingText(s: AirlineScore): string {
+  if (s.lacking.length === 0) return '足りないもの: 特になし';
+  return `足りないもの: ${s.lacking.map((c) => `${SCORE_LABEL[c.key]}（${scoreText(c)}）`).join(' / ')}`;
+}
+
+// ---------------------------------------------------------------- 1 日のループ（12B-2）
+
+export const REVIEW_METRIC_LABEL: Record<ReviewMetric, string> = {
+  totalRevenue: '収入',
+  totalCost: '費用',
+  operatingProfit: '営業利益',
+  otp: '定時率',
+  avgDelayMin: '平均遅延（分）',
+  pax: '旅客数（出発＋到着）',
+  paxSatisfaction: '旅客満足度',
+  airlineSatisfaction: '航空会社満足度',
+  rating: '空港評価',
+  flights: '便数',
+  missedPax: '乗り遅れ旅客',
+  leftBags: '積み残し手荷物',
+  diverted: 'ダイバート',
+  cancelled: '欠航',
+};
+
+export const DAY_LOOP = {
+  skipDay: '▶▶ 1日スキップ',
+  skipDayTitle: '残りの 1 日を画面を進めずに一気に進め、締めの振り返りを表示します（結果は画面で進めた場合と同じです）',
+  prefPause: '0:00 で一時停止して振り返る',
+  prefPauseTitle: '日付が変わる 0:00 に運航を止めて「1日の振り返り」を表示します（切ると止まらずに続きます）',
+  prefAutoStop: 'スキップを重大な障害で止める',
+  prefAutoStopTitle: '1 日スキップ中に滑走路の閉鎖・整備やダイバートが起きたら止めます',
+  openReview: '前日の振り返り',
+  openHistory: '履歴',
+  // スキップ
+  skipTitleDay: '1 日をスキップしています',
+  skipTitleNight: '夜間を進めています（次の便の少し前まで）',
+  skipHint: '画面は止めて計算だけを進めています。結果は画面で進めた場合と同じです',
+  skipCancel: '中止',
+  // 振り返り
+  reviewTitle: (day: number) => `${day + 1}日目の振り返り`,
+  reviewSub: '0:00 に日次の締めを行いました',
+  reviewNext: '次の日へ（運航を続ける）',
+  reviewBuild: '建設モードに戻る（次の日の準備）',
+  reviewClose: '閉じる',
+  reviewHistory: '履歴を見る',
+  reviewArchive: '（履歴の振り返り。読み取り専用）',
+  money: '収入と費用',
+  revenue: '収入',
+  cost: '費用',
+  construction: '建設費（別枠）',
+  profit: '営業利益',
+  cashEnd: '締めの時点の資金',
+  punctuality: '定時運航と遅延',
+  otp: '定時率',
+  avgDelay: '平均遅延',
+  flights: '便数',
+  causes: '主な遅延の理由',
+  noCauses: '遅延の理由の記録はありません',
+  flightsN: (n: number) => `${n}便`,
+  paxTitle: '旅客と満足度',
+  pax: '旅客（出発＋到着）',
+  missed: '乗り遅れ',
+  bags: '積み残し手荷物',
+  paxSat: '旅客満足度',
+  airSat: '航空会社満足度',
+  rating: '空港評価',
+  disruptionsTitle: '障害と対応',
+  noDisruptions: 'この日は障害・天候の変化はありませんでした',
+  resolvedByTime: '時間経過で復旧',
+  resolvedByPlayer: '対応で復旧',
+  unresolved: '続いています',
+  responses: (r: { delays: number; reassigns: number; priorities: number; repairs: number }) =>
+    `あなたの対応: 修理・解除 ${r.repairs}回 / スポット変更 ${r.reassigns}回 / 遅らせる ${r.delays}回 / 優先 ${r.priorities}回`,
+  compareTitle: '前日との比較',
+  noPrev: '前日の記録がないため比較できません（最初の日です）',
+  improved: '改善',
+  worse: '悪化',
+  same: '変化なし',
+  na: '—',
+  airlinesTitle: '航空会社の評価の変化',
+  noAirlines: '有効な契約のある航空会社はありません',
+  lacking: '足りないもの',
+  tomorrowTitle: '明日の見通し',
+  tomorrowFlights: (n: number) => `運航計画: ${n}便`,
+  tomorrowIssues: '計画の問題',
+  noIssues: '計画の問題はありません',
+  completing: '明日完成する工事',
+  noCompleting: '明日完成する工事はありません',
+  weather: '天候予報',
+  weatherNone: '予報なし（天候予報は今後追加されます）',
+  projectKind: { build: '新設工事', renovation: '改修工事' } as Record<string, string>,
+  // 履歴
+  historyTitle: '日ごとの履歴（その日の朝に戻れます）',
+  historyEmpty: '履歴はまだありません。1 日を締めると、その日の朝の状態が自動で残ります',
+  historyNote: '直近 7 日はすべて、それより古いものは週に 1 件（最大 8 件）残します。運航の途中の状態は含みません。シナリオは戻っても現在のものを保ちます',
+  historyMemory: '履歴はこのタブを閉じると消えます（IndexedDB を使えない環境）',
+  historyRestore: 'この日の朝に戻る',
+  historyRestoreConfirm: (d: number) => `${d + 1}日目の朝に戻しますか？（現在の空港と経営の状態はこの日の朝のもので置き換わります。元には戻せません）`,
+  historyDelete: '削除',
+  historyView: '振り返り',
+  historyRestoreBlocked: '運航中は戻れません。建設モードに戻ってから行ってください',
+  historyDay: (d: number) => `${d + 1}日目の朝`,
+};
+
+/** ゲームのモデル（12B-3a Part B）の文言。数値はゲーム用の値で、実在の基準への適合をうたうものではない（docs/30） */
+export const GAME_UI = {
+  setupNew: '設定して新規',
+  setupNewTitle: '難易度・気候・ルールを選んで新しいゲームを始めます',
+  setupSettings: 'ルール',
+  setupSettingsTitle: '天候・難易度・評価・目標のルールを選びます（以後の運航から反映）',
+  setupDialog: 'ゲームの設定',
+  setupMode: 'モード',
+  setupModeCareer: 'キャリア（小さな飛行場から）',
+  setupModeSandbox: 'サンドボックス（サンプル空港・潤沢な資金）',
+  setupDifficulty: '難易度',
+  setupClimate: '気候（天候の出方の傾向）',
+  setupRules: '使うルール',
+  setupWeather: '天候 5 段階・予報（オフ = 従来の 4 種の天候の障害）',
+  setupEval: '航空会社の評価要素・不満・要望',
+  setupGoals: '目標・空港の格',
+  setupLegacy: '新しいルールを使わない（従来のルールのまま）',
+  setupStart: 'この設定で始める',
+  setupApply: '設定を反映',
+  setupCancel: '閉じる',
+  setupConfirm: '新しいゲームを始めますか？（現在の空港と経営データは失われます）',
+  setupApplyConfirm: 'ルールを変更しますか？（運航の結果が変わります）',
+  setupNote: '数値はすべてゲーム用の値です。難易度は初期資金・建設費・悪天の頻度・求める定時率・予報の的中率を変えます',
+  difficulty: { normal: '標準', hard: '難しい', expert: '上級' } as Record<string, string>,
+  difficultyHint: {
+    normal: '悪天 ×1.0 / 障害 ×0.6 / 資金 ×1.0 / 建設費 ×1.0 / 予報 90%',
+    hard: '悪天 ×1.5 / 障害 ×1.0 / 資金 ×0.75 / 建設費 ×1.1 / 定時率 +5pt / 予報 80%',
+    expert: '悪天 ×2.0 / 障害 ×1.5 / 資金 ×0.5 / 建設費 ×1.2 / 定時率 +10pt / 予報 65%',
+  } as Record<string, string>,
+  climate: { temperate: '温帯', snowy: '雪国', humid: '多雨' } as Record<string, string>,
+  difficultyBadge: (d: string) => d,
+  rulesLegacy: '従来',
+  // 天候（段階 0〜4。ゲーム用の区分）
+  wxLevel: ['晴れ', '曇り・小雨', '雨', '荒天', '悪天'] as readonly string[],
+  wxType: { clear: '晴れ', cloud: '曇り', rain: '雨', snow: '雪', fog: '霧', storm: '雷雨' } as Record<string, string>,
+  wxTitle: '天候の段階',
+  wxNow: '現在',
+  wxForecast: '明日の予報',
+  wxForecastToday: '今日の予報',
+  wxForecastNote: (acc: number) => `予報の的中率 ${Math.round(acc * 100)}%（区間ごと。外れると段階が 1 ずれる）`,
+  wxBlock: (a: number, b: number) => `${a}〜${b}時`,
+  wxHourly: '今日の残りの時間',
+  wxEffectNote: '段階が高いほど離着陸の間隔が広がり、走行が遅くなり、着陸復行・欠航が増えます（ゲーム用の値）',
+  wxNoForecast: '予報なし（天候 5 段階を使っていません）',
+  // 航空会社の評価（不満・要望）
+  complaintTitle: '不満',
+  complaintOf: (label: string) => `${label}への不満`,
+  requestTitle: '要望',
+  requestText: (kind: string, arg?: string) =>
+    kind === 'standFor' ? `${arg ?? ''} に対応するスポット・滑走路がほしい` : kind === 'slot' ? '希望の時間帯に便を収めてほしい（枠の問題を解消）' : kind === 'contactGate' ? 'ゲート（ボーディングブリッジ）で搭乗できるようにしてほしい' : '定時率を要求の水準に戻してほしい',
+  requestDue: (d: number) => `${d + 1}日目まで`,
+  emaCol: '傾向（移動平均）',
+  trendUp: '▲',
+  trendDown: '▼',
+  noComplaint: '不満はありません',
+  newComplaint: (n: string, l: string) => `${n}: ${l}への不満が生じました`,
+  fulfilled: '達成した要望',
+  // 目標・空港の格
+  goalsTitle: '目標',
+  goalsNext: '次の目標',
+  goalsAllDone: 'すべての目標を達成しました',
+  goalsDone: (day: number) => `達成（${day + 1}日目）`,
+  goalsOverlayNote: '報酬の現金は営業収支に入らず、別枠で資金に加わります（ゲーム用の値）',
+  tier: ['飛行場', '地方空港', '拠点空港', '国際ハブ'] as readonly string[],
+  tierLabel: (t: string) => `空港の格: ${t}`,
+  tierUp: (t: string) => `空港の格が上がりました: ${t}`,
+  goalCompleted: (t: string) => `目標を達成しました: ${t}`,
+  reviewGoals: '達成した目標',
+  reviewNoGoals: 'この日に達成した目標はありません',
+  goal: {
+    flights10: { title: '1 日 10 便を完了', reward: '30 万 cr' },
+    otp85x3: { title: '定時率 85% を 3 日連続', reward: '評価 +2' },
+    mov50: { title: '1 日 50 発着', reward: '100 万 cr' },
+    firstHeavy: { title: '大型機（L 区分）の初就航', reward: '30 日間 提案が増える' },
+    firstBus: { title: 'バス搭乗の便を初めて完了', reward: '20 万 cr' },
+    rail: { title: '鉄道駅が運用中', reward: '評価 +2' },
+    noMiss: { title: '20 便以上で乗り遅れ 0', reward: '評価 +1' },
+    pax10k: { title: '旅客 1 万人/日', reward: '200 万 cr' },
+    mov200: { title: '1 日 200 発着', reward: '500 万 cr' },
+    rating80: { title: '空港評価 80 以上', reward: '30 日間 提案が増える' },
+    mov500: { title: '1 日 500 発着', reward: '1,000 万 cr' },
+    otp95x7: { title: '定時率 95% を 7 日連続', reward: '300 万 cr・評価 +2' },
+  } as Record<string, { title: string; reward: string }>,
+};

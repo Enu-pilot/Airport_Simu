@@ -45,6 +45,7 @@ const FACILITY_HEIGHT: Partial<Record<FacilityKind, number>> = {
 };
 
 const UNIT_COLOR3D: Record<UnitKind, number> = {
+  apronBus: 0x2b8cff,
   staff: 0xffffff,
   engineer: 0xfacc15,
   tug: 0xf59e0b,

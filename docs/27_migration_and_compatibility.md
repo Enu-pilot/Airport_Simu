@@ -37,6 +37,10 @@
 | 旧アプリで v3 の **プロジェクトファイル** を開く | **拒否されない可能性がある**。旧アプリは `versions.layoutSchema` を見ていないため、自由形の滑走路は未知の項目（`heading` / `length` が無い）として壊れたまま読めてしまう。旧アプリは直せないので既知の制限 |
 | 新アプリ（Phase 12 以降）で、より新しい版のプロジェクト | `versions.layoutSchema > SCHEMA_VERSION` はエラー（今後の版のための検査を追加済み） |
 
+## 3b. 保存形式 v2（Phase 12B-3a）
+
+新しい項目（バスゲート・独立ゲート・ランプバス・運航中のバスの状態）を使うプロジェクトだけ `formatVersion: 2` で書き、使わなければ 1 のまま（`project.golden.json` は不変）。旧アプリ（`PROJECT_FORMAT_VERSION = 1` まで）は v2 のプロジェクトを「新しい版」として拒否するので、バスゲートを知らないまま誤って読むことがない。**レイアウトだけの旧形式（`SAVE_FORMAT`）は版を持たない**ため、旧アプリはバスゲートを「スポットのない通常ゲート」として読む（プロジェクト形式での書き出しを推奨）。docs/21。
+
 ## 4. 保存・読込の検査（`checkLayout`）
 
 追加したのは **新しい項目だけを対象とする検査**（従来形の滑走路に新しい検査を足すと、今まで読めたファイルが読めなくなるため足さない）。
@@ -54,3 +58,5 @@
 - **S1 以降はゴールデンを変えない**。Phase 12 の自由形のゴールデンは **新しいファイルだけ** を追加した: `free-runways.golden.json`（ネットワーク・検証・runwayAreas・番号）、`crossing-sim.golden.json`（運航の状態ハッシュ、交差・平行 × 2 シード × 3 時間）、
   入力のフィクスチャ `fixtures/free-crossing.layout.json` / `free-parallel.layout.json`。運航のゴールデンの台帳（`sim-versions.json`）に新しい行を 1 つ足した。既存のゴールデンファイルは変更していない。その後の不具合修正 M1（自由形の停止位置）で交差のレイアウトの運航が変わったため、**この新しいファイル `crossing-sim.golden.json` だけ** を再採取した（台帳の版は同じ。既存のゴールデンは不変）。
 - 再採取: `GOLDEN_UPDATE=1 npx vitest run tests/unit/golden.free.test.ts`。入力フィクスチャの再生成: `GOLDEN_FIXTURES_UPDATE=1 npx vitest run tests/unit/golden.free.test.ts`（ゴールデン全体の再採取が必要になる）。
+
+- Phase 12B-3a Part B: `SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない（新しい挙動は会社の `game` があるときだけ）。新規ゴールデン `game-weather.golden.json`・`game-models.golden.json` を `sim-versions.json` に追加（既存の項目は不変）。旧アプリは `formatVersion 2` を読み込まない。

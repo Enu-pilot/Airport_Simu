@@ -152,6 +152,11 @@ export function AnalyticsPanel() {
             <div className="muted small">
               稼働率: {Object.entries(k.unitUtil).map(([u, v]) => `${u} ${pct(v ?? 0)}`).join(' ／ ')}
             </div>
+            {k.apronBus && (
+              <div className="muted small" data-testid="analysis-apronBus">
+                ランプバス: 運行 {k.apronBus.trips}回 ／ 旅客 {k.apronBus.pax}人 ／ 平均バス待ち {num(k.apronBus.avgWaitMin, '分')} ／ 不足 {k.apronBus.shortageMin}分 ／ 救援 {k.apronBus.rescues}回
+              </div>
+            )}
             <div className="muted small">
               時間帯別旅客（出発/到着）: {k.hourlyPax.map((h) => `${h.hour}時 ${h.dep}/${h.arr}`).join('、')}
             </div>

@@ -146,6 +146,8 @@ export interface AirportKpis {
   avgTaxiOutMin: number | null;
   avgGroundDistM: number | null;
   avgAirborneHoldMin: number | null;
+  /** ランプバス（バスゲートがある運航だけ。従来の運航にはキーがない） */
+  apronBus?: { trips: number; pax: number; avgWaitMin: number | null; shortageMin: number; rescues: number };
 }
 
 export function airportKpis(sim: Simulation): AirportKpis {
@@ -218,6 +220,17 @@ export function airportKpis(sim: Simulation): AirportKpis {
     avgTaxiOutMin: r1(avg(done.map((r) => r.taxiOutSec / 60))),
     avgGroundDistM: r1(avg(done.map((r) => r.groundDistM))),
     avgAirborneHoldMin: r1(avg(recs.map((r) => r.airborneHoldSec / 60))),
+    ...(state.bus
+      ? {
+          apronBus: {
+            trips: state.bus.stats.trips,
+            pax: state.bus.stats.pax,
+            avgWaitMin: state.bus.stats.pax > 0 ? r1(state.bus.stats.waitSec / state.bus.stats.pax / 60) : null,
+            shortageMin: Math.round(state.bus.stats.shortageSec / 60),
+            rescues: state.bus.stats.rescues,
+          },
+        }
+      : {}),
   };
 }
 

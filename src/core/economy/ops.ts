@@ -35,7 +35,10 @@ import { layoutValue, scaleFactor } from './construction';
 import { advanceProjects } from './expansion';
 import { analyzeAccess, type AccessAnalysis, type AccessFeedback } from '../access/model';
 import { takeAccessStats } from '../access/runtime';
-import { isPeak, RUNWAY_HOURLY_CAPACITY } from './planning';
+import { isPeak, RUNWAY_HOURLY_CAPACITY, analyzeDayPlan, planDay } from './planning';
+import { airlineScorecard } from './airlineScore';
+import { stepAirlineEval } from './airlineEval';
+import { evaluateGoals } from './goals';
 import { airlineDef } from './registry';
 
 /**
@@ -99,8 +102,11 @@ export function dailyFixedCosts(ctx: SimContext, access: AccessAnalysis = analyz
   for (const b of ctx.bases) {
     for (const [kind, n] of Object.entries(b.units)) {
       const s = D.salary[kind as keyof typeof D.salary];
-      if (s !== undefined) salary += s * (n ?? 0);
-      else vehicles += n ?? 0;
+      if (s !== undefined) {
+        salary += s * (n ?? 0);
+        // ランプバスは運転士の給与に加えて車両の維持費もかかる
+        if (kind === 'apronBus') vehicles += n ?? 0;
+      } else vehicles += n ?? 0;
     }
   }
   let counterStaff = 0;
@@ -237,6 +243,12 @@ export function onTaskDone(sim: Simulation, t: GroundTask): void {
   post(sim.company, 'groundOps', -cost);
 }
 
+/** ランプバスの運行ごとの運営費 */
+export function onBusTrip(sim: Simulation): void {
+  if (!enabled(sim)) return;
+  post(sim.company, 'groundOps', -(BALANCE.taskCost.busTrip ?? 0));
+}
+
 /** 店舗・飲食店の売上（人数 × 1人あたりの売上） */
 export function onShopDone(sim: Simulation, g: PaxGroup, kind: 'shop' | 'restaurant'): void {
   if (!enabled(sim)) return;
@@ -308,8 +320,8 @@ function legsInPeriod(sim: Simulation, from: number, to: number): Leg[] {
   const inP = (t: number | null) => t !== null && t >= from && t < to;
   for (const f of Object.values(state.flights)) {
     if (f.status === 'diverted' || f.status === 'cancelled') {
-      const ac = state.aircraft[f.aircraftId]!;
-      if ((ac.state === 'diverted' || ac.state === 'cannotOperate') && inP(ac.stateSince)) legs.push({ f, at: ac.stateSince, lost: true, delaySec: 0 });
+      const ac = state.aircraft[f.aircraftId];
+      if (ac && (ac.state === 'diverted' || ac.state === 'cannotOperate') && inP(ac.stateSince)) legs.push({ f, at: ac.stateSince, lost: true, delaySec: 0 });
       continue;
     }
     const ref = f.direction === 'arrival' ? f.actual : f.block;
@@ -351,13 +363,15 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
   const ground: number[] = [];
   for (const f of Object.values(state.flights)) {
     if (f.direction !== 'departure' || f.readyAt === null || f.readyAt < from || f.readyAt >= state.now) continue;
-    const arr = state.flights[state.aircraft[f.aircraftId]!.arrivalFlightId]!;
-    if (arr.block !== null) ground.push(f.readyAt - arr.block);
+    const acf = state.aircraft[f.aircraftId];
+    const arr = acf ? state.flights[acf.arrivalFlightId] : undefined;
+    if (arr && arr.block !== null) ground.push(f.readyAt - arr.block);
   }
   const runways = Object.values(ctx.runways).filter((r) => r.operational).length;
   const stands = Object.values(ctx.stands).filter((s) => s.operational).length;
   const unprocessed = state.activePax.reduce((s, id) => {
-    const g = state.paxGroups[id]!;
+    const g = state.paxGroups[id];
+    if (!g) return s;
     return s + (g.state !== 'toAirport' && !PAX_FINAL_STATES.includes(g.state) ? g.count : 0);
   }, 0);
   const paxTotal = dPax.boarded + dPax.missed;
@@ -375,6 +389,10 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
     const r = (byAirline[id] ??= { flights: 0, onTime: 0, paxBoarded: 0, missedPax: 0, leftBags: 0, cancelled: 0 });
     if (l.lost) {
       r.cancelled++;
+      const lostAc = state.aircraft[l.f.aircraftId];
+      const note = lostAc?.state === 'cannotOperate' ? lostAc.history[lostAc.history.length - 1]?.note : undefined;
+      if (state.wx && note === 'weather') r.weatherCancelled = (r.weatherCancelled ?? 0) + 1;
+      if (c.game && note === 'early') r.earlyCancelled = (r.earlyCancelled ?? 0) + 1;
       continue;
     }
     r.flights++;
@@ -383,7 +401,8 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
       r.paxBoarded += l.f.pax.boarded;
       r.missedPax += l.f.pax.missed;
       r.leftBags += (state.flightBags[l.f.id] ?? []).filter((bid) => {
-        const bag = state.bags[bid]!;
+        const bag = state.bags[bid];
+        if (!bag) return false;
         const g = state.paxGroups[bag.paxGroupId];
         return bag.state === 'leftBehind' && g?.state !== 'missed' && g?.state !== 'cancelled';
       }).length;
@@ -447,7 +466,21 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   const { kpi, byAirline } = computeKpi(sim, c);
   settleAccess(sim, c, kpi);
   for (const ev of advanceProjects(c)) log(state, ev);
-  for (const ev of updateContracts(c, byAirline)) log(state, ev);
+  let evalIn: { deltas: Record<string, number>; bonus: Record<string, number> } | undefined;
+  if (c.game?.airlineEval) {
+    // 航空会社の評価要素（12B-1 の評価カードの 7 要素）→ 移動平均 → 満足度の変化・不満・要望
+    const from = e.periodStart;
+    const recs = state.analytics.records.filter((r) => {
+      const t = r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled;
+      return t >= from && t < state.now;
+    });
+    const plan = planDay(c, c.day, state.access?.factor ?? 1, ctx.types);
+    const scores = airlineScorecard({ company: c, ctx, records: recs, plan, analysis: analyzeDayPlan(plan, ctx) });
+    const r = stepAirlineEval(c, { scores, operable: new Set<string>(operableTypes(ctx)) });
+    for (const t of r.events) log(state, t);
+    evalIn = { deltas: r.deltas, bonus: r.bonus };
+  }
+  for (const ev of updateContracts(c, byAirline, evalIn)) log(state, ev);
   kpi.airlineSatisfaction = airlineSatisfaction(c);
   c.rating = nextRating(c.rating, kpi);
   kpi.rating = c.rating;
@@ -475,6 +508,21 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   c.reports.push(report);
   if (c.reports.length > REPORT_LIMIT) c.reports.splice(0, c.reports.length - REPORT_LIMIT);
   c.today = {};
+  if (c.game?.goals) {
+    // 目標・空港の格（日報を積んだ後、日を進める前）。報酬の現金は営業収支に入れない
+    const from = e.periodStart;
+    const recs = state.analytics.records.filter((r) => {
+      const t = r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled;
+      return t >= from && t < state.now;
+    });
+    const res = evaluateGoals(c, { report, layout: ctx.layout, records: recs, types: ctx.types, largeOperable: operableTypes(ctx).some((t) => resolveType(ctx.types, t).size === 'L') });
+    if (res.cash > 0) report.grants = res.cash;
+    // 報酬の現金・評価は当日の終わりの値に含める（cashEnd(翌日) − cashEnd(当日) = 翌日の営業利益 + 建設 + 翌日の報酬）。営業利益には入れない
+    report.cashEnd = c.cash;
+    kpi.rating = c.rating;
+    for (const id of res.completed) log(state, `目標を達成しました: ${id}`);
+    if (res.tierUp !== null) log(state, `空港の格が上がりました: ${res.tierUp}`);
+  }
   checkBankruptcy(c);
   log(state, `${c.day + 1}日目を締めました: 営業利益 ${report.operatingProfit.toLocaleString('ja-JP')} cr`);
   c.day++;

@@ -1,3 +1,4 @@
+import { apronBusesOf, gateMode } from '../model/gates';
 import { sortedValues } from '../model/ids';
 import { sizeAtLeast, type AirportLayout, type Facility, type Runway, type Stand } from '../model/types';
 import { canAircraftUse, type AirsideNetwork } from '../airside/network';
@@ -31,6 +32,7 @@ export type CompatReason =
   | 'TAXIWAY_CLASS' // 誘導路の幅の区分が足りない
   | 'TAXIWAY_CODE_F' // コード F 対応の指定がない誘導路
   | 'GATE_NO_STAND' // ゲートにスポットが紐付いていない（判定不能）
+  | 'GATE_BUS' // バスゲート: スポットに固定せず、リモートスポットの便をランプバスで運ぶ（情報）
   | 'GATE_STAND_NG' // 紐付いたスポットが使えない
   | 'GATE_UPPER_DECK' // 2階建て機の上階への搭乗橋はモデル化していない（情報）
   | 'GSE_NONE' // 必要な車両・作業員が空港に1台もいない
@@ -88,6 +90,10 @@ export function checkTaxiway(type: AircraftType, e: AirportLayout['taxiways'][st
 
 export function checkGate(type: AircraftType, gate: Facility, layout: AirportLayout, net?: AirsideNetwork): Check {
   if (type.unresolved) return unresolved(gate.id);
+  // バスゲートはスポットを持たない（プール方式）。運用中なら適合、理由として情報を付ける
+  if (gateMode(gate) === 'bus') {
+    return gate.buildState === 'operational' ? { id: gate.id, status: 'ok', reasons: ['GATE_BUS'] } : { id: gate.id, status: 'ng', reasons: ['NOT_OPERATIONAL'] };
+  }
   const standId = typeof gate.props.standId === 'string' ? gate.props.standId : null;
   const stand = standId ? layout.stands[standId] : undefined;
   if (!stand) return { id: gate.id, status: 'unknown', reasons: ['GATE_NO_STAND'] };
@@ -115,6 +121,7 @@ export function airportUnits(layout: AirportLayout): Partial<Record<UnitKind, nu
       add('fuelTruck', n(f, 'fuelTrucks'));
       add('cateringTruck', n(f, 'cateringTrucks'));
       add('cleaningVan', n(f, 'cleaningVans'));
+      if (apronBusesOf(f) > 0) add('apronBus', apronBusesOf(f));
     }
     if (f.kind === 'maintenance') add('engineer', n(f, 'engineers'));
   }

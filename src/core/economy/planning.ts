@@ -139,6 +139,7 @@ export type PlanIssueCode =
   | 'SIZE_UNSUPPORTED' // 運航できない機種（滑走路・スポットが対応していない）
   | 'STAND_CONFLICT' // 到着時に空きスポットがない
   | 'NO_GATE' // ゲートのないスポットに割り当て（旅客が搭乗できない）
+  | 'BUS_BOARDING' // バスゲートがある空港のリモートスポット（ランプバスで搭乗。情報）
   | 'NO_TERMINAL' // 旅客ターミナル（入口）がない
   | 'RUNWAY_OVERLOAD' // 1時間の離着陸回数が滑走路の処理能力の目安を超える
   | 'SECURITY_OVERLOAD' // 保安検査の処理能力を超える時間帯がある
@@ -148,7 +149,7 @@ export type PlanIssueCode =
 
 export interface PlanIssue {
   code: PlanIssueCode;
-  severity: 'error' | 'warning';
+  severity: 'error' | 'warning' | 'info';
   /** 対象の便（PlannedFlight.key）または契約ID */
   keys: string[];
   /** 該当する時間（時）など */
@@ -225,7 +226,10 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
     freeAt.set(s.id, f.departureAt + STAND_GAP_SEC);
     const gateId = ctx.standGate[s.id] ?? null;
     assignments[f.key] = { standId: s.id, gateId };
-    if (!gateId) add('NO_GATE', 'warning', f.key);
+    if (!gateId) {
+      if (ctx.busGates.length > 0) add('BUS_BOARDING', 'info', f.key);
+      else add('NO_GATE', 'warning', f.key);
+    }
   }
   if (plan.flights.length > 0 && !ctx.paxTerminal) add('NO_TERMINAL', 'error', plan.flights[0]!.key);
 

@@ -22,6 +22,7 @@ const VEHICLE_PROPS: [string, UnitKind][] = [
   ['fuelTrucks', 'fuelTruck'],
   ['cateringTrucks', 'cateringTruck'],
   ['cleaningVans', 'cleaningVan'],
+  ['apronBuses', 'apronBus'],
 ];
 
 const num = (v: unknown): number => Math.max(0, Number(v ?? 0) || 0);

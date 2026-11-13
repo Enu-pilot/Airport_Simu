@@ -19,10 +19,14 @@ import { footprintOf, footprintOwnerIds } from '../../src/core/layout/footprint'
 import { headingVector, runwayDesignators, runwayEnd, runwayLengthM, runwayPolygon, runwayStripPolygon } from '../../src/core/layout/runway';
 import type { AirportLayout, Heading, RunwayGrid8 } from '../../src/core/model/types';
 import { airportKpis } from '../../src/core/analytics/kpi';
+import { checkInvariants } from '../../src/core/sim/invariants';
 import { SIM_MODEL_VERSION } from '../../src/core/scenario/scenario';
 import { createSimulation, stepSimulation } from '../../src/core/sim/simulation';
+import { forecastForDay } from '../../src/core/sim/weather';
 import { analyzeLayout } from '../../src/core/validation/validate';
-import { loadFixture } from './io';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { goldenDir, loadFixture } from './io';
 
 export const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 
@@ -286,4 +290,173 @@ export function captureProjectWithSim(): { length: number; sha256: string; norma
     buildProject({ name: 'golden-midrun', savedAt: '2026-11-10T00:00:00Z', layout: sim.ctx.layout, company, pin: null, scenarios: [], sim }),
   );
   return { simModelVersion: SIM_MODEL_VERSION, now: sim.state.now, length: json.length, sha256: sha256(json), normalizedSha256: sha256(normalizedProjectJson(json)) };
+}
+
+// ---------------------------------------------------------------- 12B-3a A0: リモートスポットの従来の挙動（特性テスト）
+
+/**
+ * ゲートのないスポット（リモート）を含む従来のレイアウト（legacy-remote.layout.json = サンプルからゲート 2 つを外したもの）の 1 日の運航。
+ * 12B-3a（バス搭乗・独立ゲート）を入れる前の現行コードの出力で、バスゲートのないデータでは 1 ビットも変わらないことを固定する。
+ * 出発旅客は「ゲートなし」で乗り遅れ（noGate）、到着旅客は到達不能で降機口のないまま留まる（stranded）のが従来の挙動。
+ */
+/** 特性テストの運航時間（日の途中。6 時間で 出発の ゲートなし・到着の到達不能 が十分に出る。24 時間だと単独で約 180 秒かかり負荷で時間切れになる） */
+export const LEGACY_REMOTE_SECONDS = 6 * 3600;
+
+export function captureLegacyRemote(): unknown {
+  const layout = JSON.parse(readFileSync(resolve(goldenDir, 'fixtures', 'legacy-remote.layout.json'), 'utf8')) as AirportLayout;
+  const runs: Record<string, unknown> = {};
+  const variants: { name: string; make: () => ReturnType<typeof createSimulation> }[] = [
+    { name: 'sandbox', make: () => createSimulation(layout, { company: createSandboxCompany() }) },
+    { name: 'plain-seed', make: () => createSimulation(layout, { seed: 'legacy-remote', settings: { flightsPerDay: 160 } }) },
+  ];
+  for (const v of variants) {
+    const sim = v.make();
+    for (let i = 0; i < LEGACY_REMOTE_SECONDS; i++) stepSimulation(sim);
+    const json = JSON.stringify(sim.state);
+    const byReason: Record<string, number> = {};
+    const byState: Record<string, number> = {};
+    for (const g of Object.values(sim.state.paxGroups)) {
+      if (g.state === 'missed') byReason[g.reason ?? 'none'] = (byReason[g.reason ?? 'none'] ?? 0) + g.count;
+      if (g.direction === 'arrival') byState[g.state] = (byState[g.state] ?? 0) + g.count;
+    }
+    runs[v.name] = {
+      seconds: LEGACY_REMOTE_SECONDS,
+      stateSha256: sha256(json),
+      stateLength: json.length,
+      stats: sim.state.stats,
+      paxStats: sim.state.paxStats,
+      missedByReason: byReason,
+      arrivalPaxByState: byState,
+      remoteStands: Object.values(sim.ctx.stands).filter((s) => !s.contact).length,
+      kpis: JSON.parse(JSON.stringify(airportKpis(sim))),
+    };
+  }
+  return { simModelVersion: SIM_MODEL_VERSION, runs };
+}
+
+// ---------------------------------------------------------------- 12B-3a: バス搭乗・独立ゲート（新規）
+
+/**
+ * バス搭乗の空港（bus.layout.json = サンプル空港 + リモートスポット 5（M×4・L×1）・バスゲート 2（1 つは独立ゲート）・独立コンタクトゲート 1・ランプバス 3 台）の運航。
+ * サンドボックスの会社の 1 日と、便数の多い条件の半日。SIM_MODEL_VERSION は上げない（新しいデータがあるときだけの挙動）。
+ */
+export function captureBusSim(): unknown {
+  const layout = JSON.parse(readFileSync(resolve(goldenDir, 'fixtures', 'bus.layout.json'), 'utf8')) as AirportLayout;
+  const runs: Record<string, unknown> = {};
+  const variants: { name: string; seconds: number; make: () => ReturnType<typeof createSimulation> }[] = [
+    { name: 'sandbox', seconds: SIM_SECONDS, make: () => createSimulation(layout, { company: createSandboxCompany() }) },
+    { name: 'plain-seed', seconds: 12 * 3600, make: () => createSimulation(layout, { seed: 'bus-golden', settings: { flightsPerDay: 160 } }) },
+  ];
+  for (const v of variants) {
+    const sim = v.make();
+    let violations = 0;
+    for (let i = 0; i < v.seconds; i++) {
+      stepSimulation(sim);
+      if (i % 600 === 0) violations += checkInvariants(sim).length;
+    }
+    const json = JSON.stringify(sim.state);
+    const byReason: Record<string, number> = {};
+    const arrivalByState: Record<string, number> = {};
+    for (const g of Object.values(sim.state.paxGroups)) {
+      if (g.state === 'missed') byReason[g.reason ?? 'none'] = (byReason[g.reason ?? 'none'] ?? 0) + g.count;
+      if (g.direction === 'arrival') arrivalByState[g.state] = (arrivalByState[g.state] ?? 0) + g.count;
+    }
+    const tripsByPhase: Record<string, number> = {};
+    for (const t of Object.values(sim.state.bus!.trips)) tripsByPhase[t.phase] = (tripsByPhase[t.phase] ?? 0) + 1;
+    runs[v.name] = {
+      seconds: v.seconds,
+      stateSha256: sha256(json),
+      stateLength: json.length,
+      invariantViolations: violations,
+      stats: sim.state.stats,
+      paxStats: sim.state.paxStats,
+      missedByReason: byReason,
+      arrivalPaxByState: arrivalByState,
+      bus: sim.state.bus!.stats,
+      tripsByPhase,
+      busRecords: sim.state.analytics.records.filter((r) => r.boarding === 'bus').length,
+      kpis: JSON.parse(JSON.stringify(airportKpis(sim))),
+    };
+  }
+  return { simModelVersion: SIM_MODEL_VERSION, runs };
+}
+
+/**
+ * 天候 5 段階・難易度の運航（12B-3a B3。docs/30）。サンプル空港・サンドボックスの会社（game: weather levels・評価と目標は無効）で、
+ * 最初の日の晴れと、悪天の日（冬の段階 4・夏の雷雨）を 1 日締めまで運航する。SIM_MODEL_VERSION は上げない（game のある会社だけの挙動）。
+ */
+export function captureGameWeather(): unknown {
+  const variants: { name: string; day: number; difficulty: 'normal' | 'hard' | 'expert'; climate: 'temperate' | 'snowy' | 'humid' }[] = [
+    { name: 'day0-normal', day: 0, difficulty: 'normal', climate: 'temperate' },
+    { name: 'bad-winter-normal', day: 108, difficulty: 'normal', climate: 'temperate' },
+    { name: 'bad-humid-expert', day: 10, difficulty: 'expert', climate: 'humid' },
+  ];
+  const runs: Record<string, unknown> = {};
+  for (const v of variants) {
+    const c = createSandboxCompany();
+    c.day = v.day;
+    c.game = { version: 1, difficulty: v.difficulty, weather: 'levels', airlineEval: false, goals: false, climate: v.climate };
+    const sim = createSimulation(loadFixture('sample'), { seed: `game-weather:${v.name}`, company: c });
+    const plan = sim.state.wx!.hours.map((h) => h.level).join('');
+    const types = sim.state.wx!.hours.map((h) => h.type[0]).join('');
+    let violations = 0;
+    let i = 0;
+    while (sim.company!.day === v.day) {
+      stepSimulation(sim);
+      if (++i % 1200 === 0) violations += checkInvariants(sim).length;
+    }
+    const report = sim.company!.reports[sim.company!.reports.length - 1]!;
+    const json = JSON.stringify(sim.state);
+    const weatherCancels = sim.state.events.filter((e) => e.kind === 'cannotOperate' && e.reason === 'weather').length;
+    const weatherGoArounds = sim.state.events.filter((e) => e.kind === 'goAround' && e.reason === 'weather').length;
+    runs[v.name] = {
+      day: v.day,
+      difficulty: v.difficulty,
+      plan,
+      types,
+      forecast: forecastForDay(c.seed, v.day, c.game),
+      ticks: i,
+      invariantViolations: violations,
+      stats: sim.state.stats,
+      weatherCancels,
+      weatherGoArounds,
+      randomDisruptions: sim.state.disruptions.filter((d) => d.origin === 'random').map((d) => d.kind),
+      kpi: report.kpi,
+      airlineSatisfaction: Object.fromEntries(Object.entries(sim.company!.airlines).map(([id, a]) => [id, Math.round(a.satisfaction * 100) / 100])),
+      stateSha256: sha256(json),
+      stateLength: json.length,
+    };
+  }
+  return { simModelVersion: SIM_MODEL_VERSION, runs };
+}
+
+/**
+ * ゲームのモデル全体（12B-3a B5・B6。docs/30）: 天候 5 段階・航空会社の評価・目標を有効にした会社の、締めまでの 1 日。
+ * 評価の移動平均・満足度・不満・要望・目標の達成・報酬・空港の格を固定する。SIM_MODEL_VERSION は上げない（game のある会社だけの挙動）。
+ */
+export function captureGameModels(): unknown {
+  const runs: Record<string, unknown> = {};
+  for (const v of [{ name: 'day0-normal', day: 0, difficulty: 'normal' as const }, { name: 'bad-winter-hard', day: 108, difficulty: 'hard' as const }]) {
+    const c = createSandboxCompany();
+    c.day = v.day;
+    c.game = { version: 1, difficulty: v.difficulty, weather: 'levels', airlineEval: true, goals: true, climate: 'temperate' };
+    c.airlineEval = {};
+    c.goals = { done: {}, streaks: {}, tier: 0, grants: [], boostUntil: 0 };
+    const sim = createSimulation(loadFixture('sample'), { seed: `game-models:${v.name}`, company: c });
+    while (sim.company!.day === v.day) stepSimulation(sim);
+    const co = sim.company!;
+    const report = co.reports[co.reports.length - 1]!;
+    runs[v.name] = {
+      day: v.day,
+      kpi: report.kpi,
+      grants: report.grants ?? 0,
+      airlines: Object.fromEntries(Object.entries(co.airlines).map(([id, a]) => [id, Math.round(a.satisfaction * 100) / 100])),
+      airlineEval: co.airlineEval,
+      goals: co.goals,
+      cash: co.cash,
+      rating: co.rating,
+      weatherCancels: sim.state.events.filter((e) => e.kind === 'cannotOperate' && e.reason === 'weather').length,
+    };
+  }
+  return { simModelVersion: SIM_MODEL_VERSION, runs };
 }

@@ -283,3 +283,54 @@ E2E: `tests/e2e/access.spec.ts`（アクセスの画面とタクシー乗り場�
 | 単体・統合 `vitest run` | 54 ファイル / 564 件すべて合格（Phase 11 完了時は 38 ファイル / 395 件）。負荷の高い環境で 1 件のタイムアウトが再現しない形で 2 度出たが、再実行は常に全件合格 |
 | E2E `playwright test --trace off` | 35 件すべて合格（既存 28 + 新規 `runway.spec.ts` 7） |
 | ゴールデン | 既存のゴールデンは S1 の 1 回だけの再採取（版に敏感なキーのみ。[27](27_migration_and_compatibility.md) §5）以外は 1 バイトも変更なし。追加: `free-runways` / `crossing-sim` と入力フィクスチャ 2 件。台帳 `sim-versions.json` に 1 行追加 |
+
+### Phase 12B-1（運航モードの画面の作り直し）
+
+| ファイル | 件数 | 内容 |
+|---|---|---|
+| `tests/unit/ops12b.test.ts` | 10 | `computeKpi`・`airlineScorecard`・`deriveAlerts` が状態を変えない、アラートのまとめ・重大度・閉じた key・復旧・古いイベントの除外、評価の判定（料金倍率・非対応機材・計画のスポット不足/枠・記録からの定時性/折り返し/旅客体験・他社の記録を混ぜない）、イベントカードの絞り込み |
+| `tests/e2e/opslayout.spec.ts` | 10 | 常設カードと運航表（`table.board` は 1 つだけ）、出発/到着の切り替え・折りたたみ・行クリックで選択・全列表示、行メニューの遅延・優先、滑走路閉鎖のアラート → 移動 → 修理、オーバーレイの開閉（×・Esc・同じボタン、左列は覆わない）、航空会社の評価と「足りないもの」、建設モードの画面が従来どおり、1400/1600/1920px で画面内に収まる |
+
+実行結果（12B-1 完了時）: `tsc` エラー 0 / `eslint --max-warnings=0` 0 / `vitest run` 56 ファイル・578 件合格 / `playwright test --trace off` 45 件合格（既存 35 は無変更で合格 + 新規 10）/ `git diff -- tests/golden` 空。
+
+## 19. Phase 12B-2 で追加したテスト（1 日のループ）
+
+シミュレーションの結果は変えない（既存のゴールデンは byte 単位で不変、既存の e2e は変更なし）。
+
+| ファイル | 件数 | 内容 |
+|---|---|---|
+| `tests/unit/dayloop.test.ts` | 7 | `stepTicks`: ランダムなチャンク（1〜5000）・一括・停止条件つきで、締めの時点の状態 JSON が連続実行と一致（サンプル空港＋サンドボックス会社・キャリア初期・ランダム障害 ON）。締めの tick の直後で止まる、`stopWhen` の挙動（状態を変えない）、重大な障害の検出 |
+| `tests/unit/review.test.ts` | 5 | 前日比の判定方向（`KPI_DIRECTION` と同じ向き）、遅延理由の集計、1 日運航後の振り返りが既存データと一致し状態を変えない、翌日完成する工事 |
+| `tests/unit/historyPolicy.test.ts` | 4 | 保持規則: 直近 7 日・週ごと最大 8 件（計 15）・現在より先は捨てる・重複 |
+| `tests/unit/dayflow.test.ts` | 3 | editor 層: スキップの結果が連続実行と一致、夜間の早送りが通常の進行と一致、締めの直後に建設へ戻っても日報 1 件、履歴の復元（検証経由）と壊れた履歴で不変、スキップの中止 |
+| `tests/e2e/dayloop.spec.ts` | 7 | 0:00 の自動一時停止と振り返り（0:00 の直前まで進めた運航状態つきプロジェクトを読み込む）→ 次の日へ、締めの直後の「建設へ戻る」、設定 OFF で止まらない、途中締め（従来どおり）、1 日スキップ（進捗・所要時間を記録）、中止、履歴（一覧・壊れた履歴・削除・戻す） |
+
+合計: vitest 597 件（60 ファイル）、playwright 52 件。
+
+## 20. Phase 12B-1 の監査の修正と 12B-3a Part A で追加したテスト（バス搭乗・独立ゲート）
+
+既存のテストの期待・ゴールデンは変更しない（`git diff -- tests/golden` は新規ファイルと `sim-versions.json` の追加だけ）。
+
+| ファイル | 件数 | 内容 |
+|---|---|---|
+| `tests/unit/golden.legacyRemote.test.ts` | 1 | **A0 の特性テスト**: リモートスポットを含む従来のレイアウト（`legacy-remote.layout.json`）の 1 日の運航（出発は `noGate` で乗り遅れ・到着は `stranded`）と状態の sha256 を、実装前の現行コードの出力で新規ゴールデンに固定。実装後も 1 ビットも変わらない |
+| `tests/unit/golden.bus.test.ts` | 1 | バス搭乗・独立ゲートの空港（`bus.layout.json`）の運航の新規ゴールデン（`bus-sim.golden.json`、`SIM_MODEL_VERSION` の保護の対象） |
+| `tests/unit/projectFormat2.test.ts` | 3 | `formatVersionOf`: 従来は 1、新しい項目で 2、v2 の読み込み・v3 の拒否・再保存の版 |
+| `tests/unit/gateProps.test.ts` | 4 | `DEFAULT_PROPS` 不変、欠落 = 従来の値、更新の検証（`boardingMode`・`connectedTo`・`apronBuses`）、参照切れの除去 |
+| `tests/unit/independentGate.test.ts` | 4 | 独立ゲートの合成ノード・経路・`byTerminal` に入らない、検証コード、6 時間の運航 |
+| `tests/unit/busContext.test.ts` | 7 | `busGates`・`standGate`・基地の `apronBus`、購入費・日次費用、`checkGate`、検証コード |
+| `tests/unit/sim/apronBus.test.ts` | 10 | 出発のバス搭乗（定員・複数運行・不変条件）、バス 0 台の `noBus`、不足の遅延、従来のデータでは新しいコードに入らない、決定性、到着、故障・救援・乗車中の故障・配置換えの保護、分析 |
+| `tests/unit/sim/busSave.test.ts` | 3 | 運航中（バス走行中）の保存 → 読み込み → 継続が中断しない場合とビット単位で一致、新しい項目の厳格な形の検査、従来の保存は版 1 |
+| `tests/unit/ops12b.test.ts`（追加 1 件） | 1 | 機体・旅客グループが欠けても `computeKpi` が例外にならない |
+| `tests/e2e/busgate.spec.ts` | 4 | 搭乗方式の切り替えと警告、独立ゲートの警告、リモートスポットの便がバスで搭乗・降機（運航表の BUS・運行の完了・退出/搭乗）、バス不足のアラート |
+| `tests/e2e/opsfix.spec.ts` | 3 | 運航表の移動・コンパクト・記憶、運航モードの読み取り専用の詳細、「表示」メニュー |
+
+**高リスクのステップ（A5・A6）の回帰確認**: `npx vitest run`（A0・全ゴールデン・`passengers.test.ts`・`invariants.test.ts`・`dayloop.test.ts` を含む）と e2e の `operations`・`ground`・`terminal`・`opslayout`。
+
+合計: vitest 631 件（68 ファイル）、playwright 59 件。
+
+## ゲームのモデル（Phase 12B-3a Part B）
+
+`gameModels` / `weatherSim` / `airlineEvalGoals` / `gameSave` の単体テスト、`golden.gameWeather` / `golden.gameModels`、e2e `gamemodels.spec.ts`。実測（Phase 12B-3a Part B 完了時）: Vitest 74 ファイル・674 テスト、Playwright 67 テスト（すべて通過）。
+
+実測（PR #5 の最終確認、監査・レビューの修正後。2026-11-13）: 型チェック・Lint エラー 0、Vitest 74 ファイル・683 テスト、Playwright 67 テスト（いずれも全件通過）。

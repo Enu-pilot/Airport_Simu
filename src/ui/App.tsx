@@ -1,25 +1,34 @@
 import { useEffect, useRef } from 'react';
 import { Viewport } from '../render/MapView';
-import { actions, editorStore, formatCr, newGame, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { actions, editorStore, formatCr, newGame, setOpsPrefs, useEditor, useLayout } from '../editor/store';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
 import { CatalogPanel } from './CatalogPanel';
-import { AnalyticsPanel, ScenarioPanel } from './AnalysisPanels';
-import { computePreview } from '../editor/tools';
-import { constructionCost } from '../core/economy/construction';
-import { MODE_LABEL } from '../i18n/ja';
+import { ScenarioPanel } from './AnalysisPanels';
+import { DAY_LOOP, GAME_UI, MODE_LABEL } from '../i18n/ja';
+import { DayReviewOverlay } from './DayReview';
+import { GameSetupDialog, gameSetupUi } from './GameSetup';
+import { HistoryOverlay } from './HistoryPanel';
+import { SkipDayOverlay } from './SkipDayOverlay';
+import { dayFlowActions } from '../editor/dayFlowActions';
 import { onKeyDown, onKeyUp } from '../editor/input';
 import { projectActions } from '../editor/project';
 import { downloadText, ProjectPanel } from './ProjectPanel';
 import { setBuildState } from '../core/layout/operations';
 import { applyOp } from '../editor/store';
-import { Toolbox, toolHint } from './Toolbox';
+import { Toolbox } from './Toolbox';
 import { FacilityList } from './FacilityList';
 import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
 import type { Overlays } from '../editor/store';
 import { ops } from '../editor/simRunner';
-import { AircraftPanel, BaggageBoard, DisruptionBoard, EventLog, FlightBoard, GroundBoard, OpsControls, TerminalBoard } from './OpsPanels';
+import { OperateLayout } from './operate/OperateLayout';
+import { OpsNav } from './operate/OpsNav';
+import { opsUi } from './operate/opsUi';
+import { useSecondly } from './operate/Card';
+import { LevelChip } from './operate/WxView';
+import { effectiveWx } from '../core/sim/weather';
+import { StatusBar, Toast } from './StatusBar';
 import { useState } from 'react';
 
 const OVERLAY_LABEL: Record<keyof Overlays, string> = {
@@ -38,6 +47,12 @@ export function App() {
       t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA');
     const down = (e: KeyboardEvent) => {
       if (isEditable(e.target)) return;
+      // 運航モードの大きなオーバーレイは Esc で閉じる（他のキー処理より先）
+      if (e.key === 'Escape' && opsUi.get().overlay) {
+        opsUi.closeOverlay();
+        e.preventDefault();
+        return;
+      }
       if (onKeyDown({ key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })) e.preventDefault();
     };
     const up = (e: KeyboardEvent) => onKeyUp({ key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
@@ -50,12 +65,24 @@ export function App() {
   }, []);
 
   const mode = useEditor((s) => s.mode);
-  const hasAircraft = useEditor((s) => !!s.ops?.selectedAircraft);
   return (
     <div className={`app mode-${mode}`}>
       <TopBar />
+      {mode === 'build' ? <BuildLayout /> : <OperateLayout />}
+      <DayReviewOverlay />
+      <SkipDayOverlay />
+      <HistoryOverlay />
+      <GameSetupDialog />
+    </div>
+  );
+}
+
+/** 建設モードの画面（従来のまま: 左にツールボックスと一覧、右にプロパティ、下にタブ） */
+function BuildLayout() {
+  return (
+    <>
       <aside className="left">
-        {mode === 'build' ? <Toolbox /> : <OpsControls />}
+        <Toolbox />
         <FacilityList />
       </aside>
       <main className="center">
@@ -63,13 +90,17 @@ export function App() {
         <StatusBar />
         <Toast />
       </main>
-      <aside className="right">{mode === 'operate' && hasAircraft ? <AircraftPanel /> : <PropertiesPanel />}</aside>
-      <footer className="bottom">{mode === 'build' ? <BuildBottom /> : <OpsBottom />}</footer>
-    </div>
+      <aside className="right">
+        <PropertiesPanel />
+      </aside>
+      <footer className="bottom">
+        <BuildBottom />
+      </footer>
+    </>
   );
 }
 
-type BottomTab = 'flights' | 'terminal' | 'ground' | 'baggage' | 'events' | 'issues' | 'plan' | 'finance' | 'access' | 'expansion' | 'catalog' | 'disruptions' | 'analytics' | 'scenarios' | 'project';
+type BottomTab = 'issues' | 'plan' | 'finance' | 'access' | 'expansion' | 'catalog' | 'scenarios' | 'project';
 
 function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
   return (
@@ -124,66 +155,6 @@ function BuildBottom() {
   );
 }
 
-function OpsBottom() {
-  const [tab, setTab] = useState<BottomTab>('flights');
-  return (
-    <div className="tabbed">
-      <Tabs
-        tabs={[
-          ['flights', '運航表'],
-          ['terminal', 'ターミナル'],
-          ['ground', '地上支援'],
-          ['baggage', '手荷物'],
-          ['plan', '運航計画'],
-          ['finance', '経営'],
-          ['disruptions', '天候・障害'],
-          ['analytics', '分析'],
-          ['scenarios', 'シナリオ'],
-          ['access', 'アクセス'],
-          ['expansion', '拡張計画'],
-          ['catalog', '機種カタログ'],
-          ['project', 'プロジェクト'],
-          ['events', 'イベント'],
-          ['issues', '配置チェック'],
-        ]}
-        tab={tab}
-        setTab={setTab}
-      />
-      <div className="tab-body">{tab === 'flights' ? (
-          <FlightBoard />
-        ) : tab === 'terminal' ? (
-          <TerminalBoard />
-        ) : tab === 'ground' ? (
-          <GroundBoard />
-        ) : tab === 'baggage' ? (
-          <BaggageBoard />
-        ) : tab === 'plan' ? (
-          <PlanPanel />
-        ) : tab === 'finance' ? (
-          <FinancePanel />
-        ) : tab === 'access' ? (
-          <AccessPanel />
-        ) : tab === 'expansion' ? (
-          <ExpansionPanel />
-        ) : tab === 'catalog' ? (
-          <CatalogPanel />
-        ) : tab === 'disruptions' ? (
-          <DisruptionBoard />
-        ) : tab === 'analytics' ? (
-          <AnalyticsPanel />
-        ) : tab === 'scenarios' ? (
-          <ScenarioPanel />
-        ) : tab === 'project' ? (
-          <ProjectPanel />
-        ) : tab === 'events' ? (
-          <EventLog />
-        ) : (
-          <IssuesPanel />
-        )}</div>
-    </div>
-  );
-}
-
 function TopBar() {
   const canUndo = useEditor((s) => s.history.past.length > 0);
   const canRedo = useEditor((s) => s.history.future.length > 0);
@@ -193,6 +164,9 @@ function TopBar() {
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = useEditor((s) => s.mode);
   const career = useEditor((s) => s.company.mode === 'career');
+  const prefs = useEditor((s) => s.opsPrefs);
+  const hasReview = useEditor((s) => s.dayFlow.review !== null);
+  const skipping = useEditor((s) => s.dayFlow.phase === 'skipping');
 
   // 書き出し・読み込みはプロジェクト単位（レイアウト・会社・機種データ・シナリオ）。旧形式のレイアウトファイルも読める
   const download = () => {
@@ -208,6 +182,7 @@ function TopBar() {
       <span className="brand">✈ SkyPort</span>
       <span className="subtitle">{mode === 'build' ? '建設モード' : '運航モード'}</span>
       <CompanyBadge />
+      {mode === 'operate' && <WxBadge />}
       <div className="top-group">
         {mode === 'build' ? (
           <button className="primary" onClick={() => ops.start()} data-testid="start-ops">
@@ -215,11 +190,14 @@ function TopBar() {
           </button>
         ) : (
           <>
-            <button onClick={() => ops.restart()} data-testid="restart-ops">最初から</button>
+            <button onClick={() => ops.restart()} title="今日を締めて（結果を日報に記録して）次の日を 0:00 から始めます。同じ日をやり直すものではありません" data-testid="restart-ops">
+              今日を締めて次の日へ
+            </button>
             <button
               className="primary"
               onClick={() => {
-                if (window.confirm('運航を終了して建設モードに戻りますか？（その日を途中で締め、運航の状態は破棄されます）')) ops.stop();
+                const closed = editorStore.getState().dayFlow.atClose;
+                if (window.confirm(closed ? '運航を終了して建設モードに戻りますか？（締めは済んでいます。運航の状態は破棄されます）' : '運航を終了して建設モードに戻りますか？（その日を途中で締め、運航の状態は破棄されます）')) ops.stop();
               }}
               data-testid="stop-ops"
             >
@@ -261,6 +239,12 @@ function TopBar() {
           </button>
         </div>
         <div className="top-group">
+          <button onClick={() => gameSetupUi.open('new')} title={GAME_UI.setupNewTitle} data-testid="new-game-setup">
+            {GAME_UI.setupNew}
+          </button>
+          <button onClick={() => gameSetupUi.open('settings')} title={GAME_UI.setupSettingsTitle} data-testid="tab-settings">
+            {GAME_UI.setupSettings}
+          </button>
           <button onClick={download}>書き出し</button>
           <button onClick={() => fileRef.current?.click()}>読み込み</button>
           <input
@@ -282,16 +266,64 @@ function TopBar() {
           {viewMode === '3d' ? '2D表示へ' : '3D表示へ'}
         </button>
       </div>
-      <div className="top-group overlays">
-        {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
-          <label key={k}>
-            <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
-            {OVERLAY_LABEL[k]}
+      {mode === 'operate' ? (
+        <details className="overlays-pop" data-testid="overlays-pop">
+          <summary title="マップの表示切り替え">表示</summary>
+          <div className="overlays-menu">
+            {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
+              <label key={k}>
+                <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
+                {OVERLAY_LABEL[k]}
+              </label>
+            ))}
+          </div>
+        </details>
+      ) : (
+        <div className="top-group overlays">
+          {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
+            <label key={k}>
+              <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
+              {OVERLAY_LABEL[k]}
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="top-group">
+        <button className="small day-btn" onClick={() => ops.skipDay()} disabled={skipping} title={DAY_LOOP.skipDayTitle} data-testid="skip-day">
+          {DAY_LOOP.skipDay}
+        </button>
+        {hasReview && (
+          <button className="small day-btn" onClick={() => ops.openReview()} data-testid="open-review">
+            {DAY_LOOP.openReview}
+          </button>
+        )}
+        <button className="small day-btn" onClick={() => dayFlowActions.openHistory(true)} data-testid="open-history">
+          {DAY_LOOP.openHistory}
+        </button>
+        <details className="day-prefs-pop">
+          <summary title="1 日のループの設定">⚙ 日の設定</summary>
+          <div className="day-prefs">
+          <label title={DAY_LOOP.prefPauseTitle}>
+            <input type="checkbox" checked={prefs.pauseAtDayClose} onChange={(e) => setOpsPrefs({ pauseAtDayClose: e.target.checked })} data-testid="pref-pause-at-close" />
+            {DAY_LOOP.prefPause}
           </label>
-        ))}
+          <label title={DAY_LOOP.prefAutoStopTitle}>
+            <input type="checkbox" checked={prefs.skipAutoStop} onChange={(e) => setOpsPrefs({ skipAutoStop: e.target.checked })} data-testid="pref-skip-autostop" />
+            {DAY_LOOP.prefAutoStop}
+          </label>
+          </div>
+        </details>
       </div>
+      {mode === 'operate' && <OpsNav />}
     </header>
   );
+}
+
+/** 運航中の天候の段階（天候 5 段階の運航だけ） */
+function WxBadge() {
+  const eff = useSecondly((o) => (o.sim.state.wx ? effectiveWx(o.sim.state.wx) : null));
+  if (!eff) return null;
+  return <LevelChip level={eff.level} type={eff.type} testId="weather-level-top" />;
 }
 
 /** 資金・日・評価 */
@@ -302,57 +334,12 @@ function CompanyBadge() {
       <span>{MODE_LABEL[c.mode]}</span>
       <b data-testid="cash">💴 {formatCr(c.cash)}</b>
       <span data-testid="company-day">{c.day + 1}日目</span>
+      {c.goals && <span data-testid="airport-tier" title={GAME_UI.goalsTitle}>{GAME_UI.tier[c.goals.tier]}</span>}
+      <span className="muted" data-testid="game-difficulty" title={c.game ? GAME_UI.difficultyHint[c.game.difficulty] : GAME_UI.rulesLegacy}>
+        {c.game ? GAME_UI.difficultyBadge(GAME_UI.difficulty[c.game.difficulty]!) : GAME_UI.rulesLegacy}
+      </span>
       <span title="空港評価（旅客満足度・航空会社満足度・定時率から）">評価 {c.rating.toFixed(1)}</span>
       {c.bankrupt && <b className="ng-text">経営破綻</b>}
     </span>
-  );
-}
-
-function StatusBar() {
-  const hover = useEditor((s) => s.hover);
-  const zoom = useEditor((s) => s.camera.zoom);
-  const tool = useEditor((s) => s.tool);
-  const draft = useEditor((s) => s.draft);
-  const analysis = useAnalysis();
-  const layout = useLayout();
-  const mode = useEditor((s) => s.mode);
-  const cash = useEditor((s) => s.company.cash);
-  // 配置・移動・土地購入のプレビューの建設費（確定時と同じ計算）
-  const estimate = (() => {
-    if (mode !== 'build' || (tool === 'select' && draft?.kind !== 'move')) return null;
-    const p = computePreview(editorStore.getState());
-    if (!p?.result.ok) return null;
-    const cost = constructionCost(layout, p.result.layout);
-    return cost === 0 ? null : cost;
-  })();
-  return (
-    <div className="status" data-testid="status">
-      <span data-testid="status-tile">{hover ? `タイル (${hover.x}, ${hover.y})` : 'タイル —'}</span>
-      <span>ズーム {zoom.toFixed(1)} px/タイル</span>
-      <span>
-        滑走路 {Object.keys(layout.runways).length} / 誘導路 {Object.keys(layout.taxiways).length} / スポット {Object.keys(layout.stands).length} / 施設{' '}
-        {Object.keys(layout.facilities).length}
-      </span>
-      <span>
-        エラー {analysis.counts.error} · 警告 {analysis.counts.warning}
-      </span>
-      {estimate !== null && (
-        <span className={estimate > cash ? 'ng-text' : ''} data-testid="cost-estimate">
-          {estimate >= 0 ? `建設費 ${formatCr(estimate)}` : `払い戻し ${formatCr(-estimate)}`}
-          {estimate > cash ? '（資金不足）' : ''}
-        </span>
-      )}
-      <span className="hint">{mode === 'operate' ? '機体をクリックで選択 / Space: 一時停止 / 1〜5: 時間倍率 / 右ドラッグ: パン' : draft?.kind === 'path' ? `頂点 ${draft.points.length} — ダブルクリック/Enter/右クリックで確定、Esc で取り消し` : toolHint(tool)}</span>
-    </div>
-  );
-}
-
-function Toast() {
-  const toast = useEditor((s) => s.toast);
-  if (!toast) return null;
-  return (
-    <div className={`toast ${toast.kind}`} data-testid="toast">
-      {toast.text}
-    </div>
   );
 }

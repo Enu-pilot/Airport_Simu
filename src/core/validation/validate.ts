@@ -1,4 +1,4 @@
-import { FACILITY_SPECS, GATE_MAX_STAND_DISTANCE, type FootprintLayer } from '../model/catalog';
+import { FACILITY_SPECS, GATE_CONNECTOR_MAX_TILES, GATE_MAX_STAND_DISTANCE, type FootprintLayer } from '../model/catalog';
 import { compareIds, sortedValues } from '../model/ids';
 import { inSite, isBuildable, isSiteEdge } from '../model/site';
 import { isFreeRunway, sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
@@ -21,10 +21,12 @@ import { designatorsOf } from '../layout/designators';
 import { holdWalkLimitM, walkToClear, type HoldRunway } from '../layout/holdShort';
 import { resolveRunwayDims } from '../layout/runwayAreas';
 import { classifySegmentIntersection } from '../geometry/segment';
+import { rasterizeSegment } from '../geometry/vec';
 import { satOverlapConvex } from '../geometry/polygon';
 import { TILE_M } from '../model/catalog';
 import type { NetNode, TerminalAreaKind } from '../model/types';
-import { areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
+import { CONNECTOR_DETOUR, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
+import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
 import { ACCESS_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTiles } from '../access/landside';
 
@@ -69,6 +71,12 @@ export type IssueCode =
   | 'GATE_NOT_AT_TERMINAL'
   | 'GATE_NO_STAND'
   | 'GATE_STAND_TOO_FAR'
+  | 'GATE_CONNECTION_INVALID'
+  | 'GATE_CONNECTOR_LONG'
+  | 'GATE_CONNECTOR_CROSSES_RUNWAY'
+  | 'GATE_BUS_HAS_STAND'
+  | 'GATE_BUS_NO_VEHICLES'
+  | 'BUS_GATE_NO_REMOTE_STAND'
   // 施設・道路
   | 'NO_AIRSIDE_ACCESS'
   | 'TERMINAL_NO_ROAD'
@@ -131,6 +139,12 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   GATE_NOT_AT_TERMINAL: 'error',
   GATE_NO_STAND: 'warning',
   GATE_STAND_TOO_FAR: 'error',
+  GATE_CONNECTION_INVALID: 'error',
+  GATE_CONNECTOR_LONG: 'warning',
+  GATE_CONNECTOR_CROSSES_RUNWAY: 'warning',
+  GATE_BUS_HAS_STAND: 'info',
+  GATE_BUS_NO_VEHICLES: 'warning',
+  BUS_GATE_NO_REMOTE_STAND: 'info',
   NO_AIRSIDE_ACCESS: 'warning',
   TERMINAL_NO_ROAD: 'warning',
   TERMINAL_NO_GATE: 'info',
@@ -723,16 +737,21 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
       if (!touches(tiles, publicRoad)) sink.add('TERMINAL_NO_ROAD', [f.id], {}, f.origin);
       const own = new Set(tiles.map((t) => tileKey(t.x, t.y)));
       const hasGate = facilities.some(
-        (g) => g.kind === 'gate' && neighborTiles(facilityTiles(g)).some((t) => own.has(tileKey(t.x, t.y))),
+        (g) => g.kind === 'gate' && (neighborTiles(facilityTiles(g)).some((t) => own.has(tileKey(t.x, t.y))) || connectedTerminal(g, layout) === f.id),
       );
       if (!hasGate) sink.add('TERMINAL_NO_GATE', [f.id], {}, f.origin);
     }
     if (f.kind === 'parking' && !touches(tiles, anyRoad, true)) sink.add('PARKING_NO_ROAD', [f.id], {}, f.origin);
     if (f.kind === 'gate') {
-      if (!touches(tiles, terminalTiles)) sink.add('GATE_NOT_AT_TERMINAL', [f.id], {}, f.origin);
+      const connected = connectedTerminal(f, layout);
+      if (typeof f.props.connectedTo === 'string' && !connected) sink.add('GATE_CONNECTION_INVALID', [f.id], {}, f.origin);
+      if (!connected && !touches(tiles, terminalTiles)) sink.add('GATE_NOT_AT_TERMINAL', [f.id], {}, f.origin);
       const standId = typeof f.props.standId === 'string' ? f.props.standId : null;
       const stand = standId ? layout.stands[standId] : undefined;
-      if (!stand) {
+      if (gateMode(f) === 'bus') {
+        // バスゲートはスポットに固定しない（リモートスポットの便をランプバスで運ぶ）。standId は無視される
+        if (standId) sink.add('GATE_BUS_HAS_STAND', [f.id], {}, f.origin);
+      } else if (!stand) {
         sink.add('GATE_NO_STAND', [f.id], {}, f.origin);
       } else {
         gatesByStand.set(stand.id, [...(gatesByStand.get(stand.id) ?? []), f.id]);
@@ -741,10 +760,20 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
       }
     }
   }
+  const busGates = facilities.filter((f) => f.kind === 'gate' && gateMode(f) === 'bus' && f.buildState === 'operational');
+  let remote = 0;
   for (const s of sortedValues(layout.stands)) {
     const gates = gatesByStand.get(s.id) ?? [];
-    if (gates.length === 0) sink.add('STAND_REMOTE', [s.id], {}, s.origin);
+    if (gates.length === 0) {
+      remote++;
+      sink.add('STAND_REMOTE', [s.id], busGates.length > 0 ? { bus: 1 } : {}, s.origin);
+    }
     if (gates.length > 1) sink.add('STAND_MULTIPLE_GATES', [s.id, ...gates], {}, s.origin);
+  }
+  if (busGates.length > 0) {
+    const buses = facilities.filter((f) => f.kind === 'gseBase' && f.buildState === 'operational').reduce((n, f) => n + apronBusesOf(f), 0);
+    if (buses === 0) for (const g of busGates) sink.add('GATE_BUS_NO_VEHICLES', [g.id], {}, g.origin);
+    if (remote === 0) sink.add('BUS_GATE_NO_REMOTE_STAND', [busGates[0]!.id], {}, busGates[0]!.origin);
   }
 }
 
@@ -846,6 +875,12 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     }
   }
 
+  // 独立ゲートの連絡通路が長すぎる（1.5 km 超）
+  for (const c of model.connectors ?? []) {
+    const tiles = c.lengthM / CONNECTOR_DETOUR / TILE_M;
+    if (tiles > GATE_CONNECTOR_MAX_TILES) sink.add('GATE_CONNECTOR_LONG', [c.gateId, c.terminalId], { tiles: Math.round(tiles) }, layout.facilities[c.gateId]?.origin);
+  }
+
   // ゲート: 搭乗口・降機口があり、入口から保安検査を経て到達でき、降機口から出口へ出られる
   for (const g of sortedValues(layout.facilities).filter((f) => f.kind === 'gate')) {
     const access = model.gates[g.id];
@@ -870,6 +905,31 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     } else {
       const exits = new Map(ofKind('exit').map((id) => [id, 0] as const));
       if (!findPaxRoute(model, { from: access.deplane, goals: exits })) sink.add('GATE_ARRIVAL_NO_EXIT', [g.id], {}, g.origin);
+    }
+  }
+}
+
+/** 独立ゲートの連絡通路（ゲートの中心 → 接続先のエリアの中心の直線）が滑走路の本体・着陸帯を横切る */
+function checkConnectorRunways(layout: AirportLayout, parts: FootprintPart[], model: TerminalModel, sink: IssueSink): void {
+  if (!model.connectors) return;
+  const runwayTiles = new Map<string, Set<string>>();
+  for (const p of parts) {
+    if (p.layer !== 'runway' && p.layer !== 'strip') continue;
+    let set = runwayTiles.get(p.ownerId);
+    if (!set) runwayTiles.set(p.ownerId, (set = new Set()));
+    for (const t of p.tiles) set.add(tileKey(t.x, t.y));
+  }
+  if (runwayTiles.size === 0) return;
+  const runwayIds = [...runwayTiles.keys()].sort(compareIds);
+  for (const c of model.connectors) {
+    const g = layout.facilities[c.gateId];
+    const anchor = model.areas[(c.depAnchor ?? c.arrAnchor) ?? ''];
+    if (!g || !anchor) continue;
+    const seg = rasterizeSegment({ x: g.origin.x + 0.5, y: g.origin.y + 0.5 }, anchor.center);
+    for (const rid of runwayIds) {
+      const set = runwayTiles.get(rid)!;
+      const hit = seg.find((t) => set.has(tileKey(t.x, t.y)));
+      if (hit) sink.add('GATE_CONNECTOR_CROSSES_RUNWAY', [c.gateId, rid], {}, hit);
     }
   }
 }
@@ -904,6 +964,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   checkRoads(layout, parts, sink);
   checkAccess(layout, sink);
   checkTerminals(layout, terminal, sink);
+  checkConnectorRunways(layout, parts, terminal, sink);
 
   const issues = sink.issues;
   const byTarget: Record<string, Issue[]> = {};

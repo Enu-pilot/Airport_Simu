@@ -9,7 +9,10 @@ import {
   type ValidationReport,
 } from '../core/io/project';
 import { createHistory } from '../core/editor/history';
-import { editorStore, newGame, replaceLayout, showToast } from './store';
+import { editorStore, initialDayFlow, newGame, replaceLayout, showToast } from './store';
+import { getHistoryStore, UNSAVED_KEY } from './dayHistoryStore';
+import { historyKey, notifyHistoryChanged } from './dayHistory';
+import type { Scenario } from '../core/scenario/scenario';
 import { SAVE_FORMAT } from '../core/io/serialize';
 import { ops } from './simRunner';
 
@@ -89,15 +92,16 @@ function writeSlot(id: string, p: ProjectFile): boolean {
  * 検証済みのプロジェクトを開く。運航中なら運航を終えてから置き換える。
  * 運航状態を含むプロジェクトは、一時停止した運航モードで再開する。
  */
-function applyProject(p: ProjectFile, id: string | null): void {
+function applyProject(p: ProjectFile, id: string | null, keepScenarios?: Scenario[]): void {
   if (get().mode === 'operate') ops.stop();
   const pin = { version: p.catalog.version, models: p.catalog.models };
   set({
     history: createHistory(p.layout),
     company: p.company,
     charges: { past: [], future: [] },
-    scenarios: p.scenarios,
+    scenarios: keepScenarios ?? p.scenarios,
     scenarioRun: null,
+    dayFlow: initialDayFlow(),
     selection: null,
     draft: null,
     tool: 'select',
@@ -122,6 +126,7 @@ export const projectActions = {
     const s = get();
     const id = s.projectId ?? newSlotId();
     if (writeSlot(id, currentProject())) {
+      if (!s.projectId) void getHistoryStore().then((h) => h.rekey(UNSAVED_KEY, id)).then(notifyHistoryChanged).catch(() => undefined);
       set({ projectId: id });
       showToast(`「${s.projectName}」を保存しました${s.ops ? '（運航状態を含む）' : ''}`);
     }
@@ -130,6 +135,7 @@ export const projectActions = {
     const n = name.trim() || '無題のプロジェクト';
     const id = newSlotId();
     if (writeSlot(id, currentProject(n))) {
+      if (!get().projectId) void getHistoryStore().then((h) => h.rekey(UNSAVED_KEY, id)).then(notifyHistoryChanged).catch(() => undefined);
       set({ projectId: id, projectName: n });
       showToast(`「${n}」として保存しました`);
     }
@@ -161,6 +167,7 @@ export const projectActions = {
       // 削除できなくても続けられる
     }
     if (get().projectId === id) set({ projectId: null });
+    void getHistoryStore().then((h) => h.clear(id)).then(notifyHistoryChanged).catch(() => undefined);
   },
   /** JSON ファイルとして書き出す内容 */
   exportJson(): { fileName: string; json: string } {
@@ -184,6 +191,7 @@ export const projectActions = {
       replaceLayout(r.project.layout, `${fileName} を読み込みました（旧形式のレイアウトファイル）`);
     } else if (r.ok && r.project) {
       applyProject(r.project, null);
+      void getHistoryStore().then((h) => h.clear(UNSAVED_KEY)).catch(() => undefined);
       showToast(`${fileName} を読み込みました${r.migratedFrom ? '（旧形式から移行）' : ''}${r.warnings.length ? `（注意 ${r.warnings.length} 件）` : ''}`);
     } else showToast(`${fileName} は読み込めません: ${r.errors[0]}（開いているプロジェクトは変更していません）`, 'error');
     return r;
@@ -196,6 +204,33 @@ export const projectActions = {
     }
     set({ catalogPin: null });
     showToast(`最新の機種カタログ（${CATALOG_VERSION}）を使うようにしました。次に保存するとこの版で固定されます`);
+  },
+  /**
+   * 履歴の「その日の朝」に戻る（建設モードのみ）。検証（validateProject）に通ったときだけ適用し、失敗したら何も変えない。
+   * シナリオは履歴に含めないので、現在のシナリオを保つ。
+   */
+  async restoreHistory(day: number): Promise<ValidationReport> {
+    const fail = (msg: string): ValidationReport => ({ ok: false, errors: [msg], warnings: [], migratedFrom: null, project: null });
+    if (get().mode === 'operate') {
+      showToast('運航中は日ごとの履歴に戻れません。建設モードに戻ってから行ってください', 'error');
+      return fail('運航中は使えません');
+    }
+    let json: string | null;
+    try {
+      json = (await (await getHistoryStore()).get(historyKey(), day))?.projectJson ?? null;
+    } catch {
+      json = null;
+    }
+    if (json === null) {
+      showToast('履歴が見つかりません', 'error');
+      return fail('履歴が見つかりません');
+    }
+    const r = validateProject(json, { fallbackCompany: get().company });
+    if (r.ok && r.project) {
+      applyProject(r.project, get().projectId, get().scenarios);
+      showToast(`${r.project.company.day + 1}日目の朝に戻しました`);
+    } else showToast(`戻せませんでした: ${r.errors[0]}（開いているプロジェクトは変更していません）`, 'error');
+    return r;
   },
   newProject(mode: 'career' | 'sandbox'): void {
     newGame(mode);

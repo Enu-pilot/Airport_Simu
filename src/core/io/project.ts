@@ -1,6 +1,7 @@
 import { CATALOG, CATALOG_VERSION, type AircraftModel } from '../aircraft/catalog';
 import { AIRCRAFT_ASSETS, ASSET_VERSION } from '../assets/registry';
 import { importCompany, type CompanyState } from '../economy/company';
+import { checkGameFields } from '../economy/game';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
 import { SIM_MODEL_VERSION, modelsUsed, type Scenario } from '../scenario/scenario';
 import { buildTypeTable } from '../sim/aircraftTypes';
@@ -8,6 +9,7 @@ import { createContext } from '../sim/context';
 import { checkInvariants, repairCrossingState } from '../sim/invariants';
 import type { Simulation } from '../sim/simulation';
 import type { SimState } from '../sim/types';
+import { checkWxState } from '../sim/weather';
 import { SAVE_FORMAT, checkRunwayFields, validateLayoutData } from './serialize';
 import { migrateLayout } from './migrate';
 
@@ -24,7 +26,39 @@ import { migrateLayout } from './migrate';
  */
 
 export const PROJECT_FORMAT = 'skyport-project';
+/** 基本の版。新しい項目（バスゲート・独立ゲート・ランプバス・運航中のバスの状態など）を使わないファイルはこの版で書く */
 export const PROJECT_FORMAT_VERSION = 1;
+/** 新しい項目を使うファイルの版（12B-3a）。このバージョンは 2 までを読める */
+export const PROJECT_FORMAT_VERSION_2 = 2;
+export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_2;
+
+const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !== null && k in (o as Record<string, unknown>);
+
+/** レイアウトが保存形式 2 の項目（ゲートの boardingMode 'bus'・connectedTo、GSE 基地の apronBuses > 0）を使っているか */
+export function layoutUsesFormat2(l: AirportLayout): boolean {
+  for (const f of Object.values(l.facilities)) {
+    if (f.kind === 'gate' && (f.props.boardingMode === 'bus' || (f.props.connectedTo !== undefined && f.props.connectedTo !== null))) return true;
+    if (f.kind === 'gseBase' && typeof f.props.apronBuses === 'number' && f.props.apronBuses > 0) return true;
+  }
+  return false;
+}
+
+function companyUsesFormat2(c: CompanyState | null | undefined): boolean {
+  return !!c && (hasKey(c, 'game') || hasKey(c, 'airlineEval') || hasKey(c, 'goals'));
+}
+
+/**
+ * このプロジェクトを書くときの保存形式の版。新しい項目を 1 つでも使うときだけ 2（旧アプリが読み違えないため）、
+ * 使わないときは 1 のまま（従来のファイル・ゴールデンの出力が変わらない）。
+ */
+export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null }): number {
+  if (layoutUsesFormat2(p.layout) || companyUsesFormat2(p.company)) return PROJECT_FORMAT_VERSION_2;
+  for (const s of p.scenarios) if (layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) return PROJECT_FORMAT_VERSION_2;
+  if (p.sim) {
+    if (hasKey(p.sim.state, 'bus') || hasKey(p.sim.state, 'wx') || companyUsesFormat2(p.sim.company)) return PROJECT_FORMAT_VERSION_2;
+  }
+  return PROJECT_FORMAT_VERSION;
+}
 
 export interface CatalogPin {
   version: string;
@@ -85,12 +119,13 @@ export function buildProject(i: BuildInput): ProjectFile {
   const models = effectiveModels(i.pin);
   const ids = projectModelIds(company, sim, i.scenarios);
   const snap = Object.fromEntries(ids.filter((id) => models[id]).map((id) => [id, structuredClone(models[id]!)]));
+  const fv = formatVersionOf({ layout: i.layout, company, scenarios: i.scenarios, sim });
   return {
     format: PROJECT_FORMAT,
-    formatVersion: PROJECT_FORMAT_VERSION,
+    formatVersion: fv,
     name: i.name,
     savedAt: i.savedAt,
-    versions: { format: PROJECT_FORMAT_VERSION, layoutSchema: SCHEMA_VERSION, catalog: i.pin?.version ?? CATALOG_VERSION, assets: ASSET_VERSION, simModel: SIM_MODEL_VERSION },
+    versions: { format: fv, layoutSchema: SCHEMA_VERSION, catalog: i.pin?.version ?? CATALOG_VERSION, assets: ASSET_VERSION, simModel: SIM_MODEL_VERSION },
     layout: structuredClone(i.layout),
     company,
     catalog: { version: i.pin?.version ?? CATALOG_VERSION, models: snap },
@@ -147,6 +182,27 @@ export function checkLayout(l: unknown, where = 'レイアウト'): string[] {
     if (layout.facilities[a.terminalId]?.kind !== 'terminal') errors.push(`${where}: ターミナル内エリア ${a.id} の建物 ${a.terminalId} が見つかりません`);
   }
   errors.push(...checkRunwayFields(layout, where));
+  errors.push(...checkBusProps(layout, where));
+  return errors;
+}
+
+/** 12B-3a の新しいプロパティの形（ゲートの boardingMode・connectedTo、GSE 基地の apronBuses）。欠落は従来どおりで許す */
+function checkBusProps(layout: AirportLayout, where: string): string[] {
+  const errors: string[] = [];
+  for (const f of Object.values(layout.facilities)) {
+    const props = f.props;
+    if (!isObj(props)) continue;
+    if (f.kind === 'gate') {
+      const bm = props.boardingMode;
+      if (bm !== undefined && bm !== 'contact' && bm !== 'bus') errors.push(`${where}: ゲート ${f.id} の搭乗方式（boardingMode）が不正です`);
+      const ct = props.connectedTo;
+      if (ct !== undefined && ct !== null && (typeof ct !== 'string' || layout.facilities[ct]?.kind !== 'terminal')) errors.push(`${where}: ゲート ${f.id} の接続先（connectedTo）がターミナルではありません`);
+    }
+    if (f.kind === 'gseBase') {
+      const n = props.apronBuses;
+      if (n !== undefined && (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 30)) errors.push(`${where}: GSE 基地 ${f.id} のランプバス台数（apronBuses）が不正です`);
+    }
+  }
   return errors;
 }
 
@@ -154,7 +210,7 @@ function checkCompany(c: unknown, where: string): { errors: string[]; company: C
   if (!isObj(c)) return { errors: [`${where}: 会社のデータがありません`], company: null };
   const company = importCompany(JSON.stringify(c));
   if (!company) return { errors: [`${where}: 会社のデータが不正です（版・資金・契約）`], company: null };
-  const errors: string[] = [];
+  const errors: string[] = checkGameFields(c).map((e) => `${where}: ${e}`);
   for (const [key, k] of Object.entries(company.contracts)) {
     if (!isObj(k) || k.id !== key) errors.push(`${where}: 契約 ${key} の ID が一致しません`);
     else if (typeof k.typeId !== 'string' || typeof k.airlineId !== 'string') errors.push(`${where}: 契約 ${key} の機種・航空会社が不正です`);
@@ -213,10 +269,67 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
     }
     if (!state.flights[a.arrivalFlightId] || !state.flights[a.departureFlightId]) errors.push(`運航状態: 機体 ${id} の便が見つかりません`);
   }
+  errors.push(...checkBusState(state, layout));
+  errors.push(...checkWeatherState(state, sim.company));
   for (const [standId, acId] of Object.entries(state.standAssignments)) {
     if (!layout.stands[standId]) errors.push(`運航状態: スポット割り当て ${standId} がレイアウトにありません`);
     if (!state.aircraft[acId as string]) errors.push(`運航状態: スポット ${standId} に割り当てた機体 ${String(acId)} がありません`);
   }
+  return errors;
+}
+
+/** 天候 5 段階の運航状態（state.wx）の形。会社の game.weather === 'levels' のときだけ持つ（従来の運航は持たない） */
+function checkWeatherState(state: SimState, company: unknown): string[] {
+  const raw = (state as unknown as Record<string, unknown>).wx;
+  const game = isObj(company) && isObj(company.game) ? company.game : null;
+  const levels = game !== null && game.weather === 'levels';
+  if (raw === undefined) return levels ? ['運航状態: 会社の設定は天候 5 段階ですが、運航状態の天候（wx）がありません'] : [];
+  if (!levels) return ['運航状態: 天候（wx）があるのに、会社の設定は天候 5 段階ではありません'];
+  return checkWxState(raw);
+}
+
+const BUS_PHASES = ['waiting', 'toPickup', 'loading', 'driving', 'unloading', 'stalled', 'done', 'cancelled'];
+
+/** ランプバスの運行の状態の形（state.bus・便の p.bus・バスの trip・旅客の busTrip/waitingBus/onBus）。従来の運航は何も持たない */
+function checkBusState(state: SimState, layout: AirportLayout): string[] {
+  const errors: string[] = [];
+  const raw = (state as unknown as Record<string, unknown>).bus;
+  const isGate = (id: unknown): boolean => typeof id === 'string' && layout.facilities[id]?.kind === 'gate';
+  if (raw === undefined) {
+    for (const f of Object.values(state.flights)) if (f.pax.bus !== undefined) errors.push(`運航状態: 便 ${f.id} が p.bus を持つのにバスの運行（bus）がありません`);
+    for (const u of Object.values(state.units)) if (u.trip !== undefined) errors.push(`運航状態: ユニット ${u.id} が運行 ${u.trip} を持つのにバスの運行（bus）がありません`);
+    for (const g of Object.values(state.paxGroups)) {
+      if (g.busTrip !== undefined || g.state === 'waitingBus' || g.state === 'onBus') errors.push(`運航状態: 旅客グループ ${g.id} がバスの状態なのにバスの運行（bus）がありません`);
+    }
+    return errors;
+  }
+  if (!isObj(raw) || !isObj(raw.trips) || !Array.isArray(raw.active) || !isObj(raw.stats)) return ['運航状態: バスの運行（bus）の形が不正です'];
+  const bus = raw as unknown as NonNullable<SimState['bus']>;
+  for (const k of ['trips', 'pax', 'waitSec', 'shortageSec', 'rescues'] as const) {
+    if (typeof bus.stats[k] !== 'number') errors.push(`運航状態: bus.stats.${k} が数値ではありません`);
+  }
+  for (const [id, t] of Object.entries(bus.trips)) {
+    if (!isObj(t) || t.id !== id) {
+      errors.push(`運航状態: バスの運行 ${id} の ID が一致しません`);
+      continue;
+    }
+    if (t.dir !== 'dep' && t.dir !== 'arr') errors.push(`運航状態: 運行 ${id} の方向が不正です`);
+    if (!BUS_PHASES.includes(t.phase)) errors.push(`運航状態: 運行 ${id} の段階が不正です`);
+    if (!state.flights[t.flightId]) errors.push(`運航状態: 運行 ${id} の便 ${String(t.flightId)} がありません`);
+    if (!isGate(t.gateId)) errors.push(`運航状態: 運行 ${id} のゲート ${String(t.gateId)} がレイアウトにありません`);
+    if (typeof t.standId !== 'string' || !layout.stands[t.standId]) errors.push(`運航状態: 運行 ${id} のスポット ${String(t.standId)} がレイアウトにありません`);
+    if (t.busId !== null && state.units[t.busId]?.kind !== 'apronBus') errors.push(`運航状態: 運行 ${id} のバス ${String(t.busId)} がありません`);
+    if (!Array.isArray(t.groups) || t.groups.some((g) => !state.paxGroups[g])) errors.push(`運航状態: 運行 ${id} の旅客グループが見つかりません`);
+    if (typeof t.pax !== 'number' || typeof t.createdAt !== 'number' || typeof t.phaseSince !== 'number') errors.push(`運航状態: 運行 ${id} の数値項目が不正です`);
+  }
+  for (const id of bus.active) if (!bus.trips[id]) errors.push(`運航状態: 未完了の運行 ${String(id)} がありません`);
+  for (const f of Object.values(state.flights)) {
+    const b = f.pax.bus;
+    if (b === undefined) continue;
+    if (!isObj(b) || (b.gateId !== null && !isGate(b.gateId)) || (b.gateClosedAt !== null && typeof b.gateClosedAt !== 'number')) errors.push(`運航状態: 便 ${f.id} の p.bus が不正です`);
+  }
+  for (const u of Object.values(state.units)) if (u.trip !== undefined && !bus.trips[u.trip]) errors.push(`運航状態: ユニット ${u.id} の運行 ${u.trip} がありません`);
+  for (const g of Object.values(state.paxGroups)) if (g.busTrip !== undefined && !bus.trips[g.busTrip]) errors.push(`運航状態: 旅客グループ ${g.id} の運行 ${g.busTrip} がありません`);
   return errors;
 }
 
@@ -287,7 +400,7 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     return fail();
   }
   if (typeof data.formatVersion !== 'number' || data.formatVersion < 1) errors.push('保存形式の版（formatVersion）が不正です');
-  else if (data.formatVersion > PROJECT_FORMAT_VERSION) errors.push(`新しい版（${data.formatVersion}）の保存形式です。このバージョンでは読み込めません`);
+  else if (data.formatVersion > PROJECT_FORMAT_MAX_READABLE) errors.push(`新しい版（${data.formatVersion}）の保存形式です。このバージョンでは読み込めません`);
   if (typeof data.name !== 'string') errors.push('name（プロジェクト名）がありません');
   if (!isObj(data.versions)) errors.push('versions（版の情報）がありません');
   const lv = isObj(data.versions) ? data.versions.layoutSchema : undefined;
@@ -381,13 +494,19 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     }
   }
 
+  const fv = formatVersionOf({ layout, company, scenarios, sim });
+  // 版 1 を名乗るのに 12B-3a の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）がある: 旧アプリが誤読しないための版の取り決めに反するので拒否する
+  if (data.formatVersion === PROJECT_FORMAT_VERSION && fv >= PROJECT_FORMAT_VERSION_2) {
+    errors.push('保存形式の版（formatVersion）が 1 ですが、版 2 の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）を含んでいます。ファイルが壊れているか、手で編集された可能性があります');
+    return fail();
+  }
   const project: ProjectFile = {
     format: PROJECT_FORMAT,
-    formatVersion: PROJECT_FORMAT_VERSION,
+    formatVersion: fv,
     name: data.name as string,
     savedAt: typeof data.savedAt === 'string' ? data.savedAt : '',
     versions: {
-      format: PROJECT_FORMAT_VERSION,
+      format: fv,
       layoutSchema: SCHEMA_VERSION,
       catalog: pin?.version ?? CATALOG_VERSION,
       assets: ASSET_VERSION,
@@ -400,5 +519,5 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     scenarios,
     sim,
   };
-  return { ok: true, errors, warnings, migratedFrom: data.formatVersion !== PROJECT_FORMAT_VERSION ? `${PROJECT_FORMAT} v${String(data.formatVersion)}` : null, project };
+  return { ok: true, errors, warnings, migratedFrom: data.formatVersion !== PROJECT_FORMAT_VERSION && data.formatVersion !== PROJECT_FORMAT_VERSION_2 ? `${PROJECT_FORMAT} v${String(data.formatVersion)}` : null, project };
 }

@@ -3,6 +3,7 @@ import { compareIds } from '../model/ids';
 import { TILE_M } from '../model/catalog';
 import { mapToWorld } from '../geometry/frames';
 import { resolveType } from './aircraftTypes';
+import { lightningStop } from './weather';
 import { TASK_DEFS, TURNAROUND_TASKS, taskNeeds, taskWorkSec } from './tasks';
 import {
   BAG_CUTOFF_AFTER_BOARDING_SEC,
@@ -71,7 +72,7 @@ function withRng<T>(state: SimState, fn: (rng: Rng) => T): T {
 /** 運航開始時に、基地ごとの作業員・車両を生成する */
 export function createGroundUnits(sim: Simulation): void {
   const { state, ctx } = sim;
-  const order: UnitKind[] = ['staff', 'engineer', 'tug', 'beltLoader', 'baggageTractor', 'fuelTruck', 'cateringTruck', 'cleaningVan'];
+  const order: UnitKind[] = ['staff', 'engineer', 'tug', 'beltLoader', 'baggageTractor', 'fuelTruck', 'cateringTruck', 'cleaningVan', 'apronBus'];
   for (const base of ctx.bases) {
     for (const kind of order) {
       for (let i = 0; i < (base.units[kind] ?? 0); i++) {
@@ -104,11 +105,11 @@ function standPos(sim: Simulation, ac: Aircraft): { x: number; y: number } {
   return node ? { x: node.pos.x, y: node.pos.y } : { x: ac.x, y: ac.y };
 }
 
-function travelSec(a: { x: number; y: number }, b: { x: number; y: number }): number {
+export function travelSec(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.round((Math.hypot(a.x - b.x, a.y - b.y) * TILE_M) / VEHICLE_SPEED) + VEHICLE_SETUP_SEC;
 }
 
-function sendUnit(state: SimState, u: GroundUnit, to: { x: number; y: number }, status: 'enroute' | 'returning'): void {
+export function sendUnit(state: SimState, u: GroundUnit, to: { x: number; y: number }, status: 'enroute' | 'returning'): void {
   u.fromX = u.x;
   u.fromY = u.y;
   u.toX = to.x;
@@ -118,7 +119,7 @@ function sendUnit(state: SimState, u: GroundUnit, to: { x: number; y: number }, 
   u.status = status;
 }
 
-function basePos(sim: Simulation, u: GroundUnit): { x: number; y: number } {
+export function basePos(sim: Simulation, u: GroundUnit): { x: number; y: number } {
   const b = sim.ctx.bases.find((x) => x.id === u.baseId);
   return b ? { x: b.x, y: b.y } : { x: u.x, y: u.y };
 }
@@ -424,6 +425,8 @@ function stepTask(sim: Simulation, t: GroundTask, starved: Set<UnitKind>): void 
       // 機体側（プッシュバック完了）で終了する
       return;
     default:
+      // 雷雨（天候 5 段階の段階 4）の間は、屋外の地上作業を 20 分ごとに 5 分止める
+      if (state.wx && lightningStop(state)) return;
       t.doneSec++;
       if (t.doneSec >= t.workSec) finishTask(sim, t);
   }

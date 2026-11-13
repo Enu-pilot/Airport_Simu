@@ -2,7 +2,9 @@
 
 実装: `src/core/io/project.ts`（形式・検証・復元）、`src/editor/project.ts`（保存先・操作）、`src/ui/ProjectPanel.tsx`（画面）。
 
-## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`）
+## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1` または 2）
+
+**版の書き方（Phase 12B-3a）**: `formatVersionOf(p)` が、新しい項目（ゲートの `boardingMode: 'bus'`・`connectedTo`、GSE 基地の `apronBuses > 0`、運航状態の `bus`・`wx`、会社の `game`・`airlineEval`・`goals`）を **1 つでも使うときだけ 2**、使わないときは 1 のまま書く（`buildProject` と `validateProject` の作り直しの両方。`versions.format` も同じ値）。読み込みは 2 まで許可し、3 以上は拒否する（v1 → v2 は恒等）。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`。従来のファイルの内容・ゴールデン（`project.golden.json` は直列化の sha256）は変わらない。`SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない。厳格な形の検査: `checkLayout`（`boardingMode`・`connectedTo`・`apronBuses`）、`checkSim`（`bus` の運行の便・ゲート・スポット・バス・グループの参照、段階の値、`bus` がないのに `p.bus`・`trip`・`busTrip`・バス待ちのグループがある状態の拒否）、復元後の BU1〜BU4。
 
 | 項目 | 内容 |
 |---|---|
@@ -91,3 +93,14 @@
 - バックアップ・別端末への移動は「JSON に書き出し」。ファイル名は `skyport-<名前の英数字>-<日時>.skyport.json`（日本語の名前はファイルの中に残る）。
 - サンプル空港・運航中の保存データは 1 件あたり数百 KB（運航 5 時間で約 660 KB を計測）。localStorage の容量（ブラウザにより約 5 MB）を
   超えると保存に失敗し、その旨を表示する。
+
+## 日ごとの履歴（Phase 12B-2。保存形式の版は変えない）
+
+- 日次の締めのたびに、**その日の朝（締めの直後）の建設モードの復元点**を IndexedDB に残す（DB `skyport`・ストア `dayHistory`・キー `<プロジェクトのスロット ID | "unsaved">:<締めた後の会社の日>`）。値 = `{ day, savedAt, cash, rating, operatingProfit, review（振り返りのデータ）, projectJson }`。`projectJson` は通常のプロジェクトファイル（`formatVersion` は 1。ゲーム設定・バス搭乗など版 2 の項目を使う会社・レイアウトでは 2）で、`sim: null`・`scenarios: []`（運航状態とシナリオは入れない）。完了した工事は、運航を終えたときと同じようにレイアウトへ反映済み。
+- localStorage は小さい（約 5 MB。運航状態入りの 1 件が数百 KB）ため IndexedDB を使う。使えない環境（`indexedDB` がない・開けない）ではメモリに置き、1 回だけ「履歴はこのタブを閉じると消えます」と表示する。`DayHistoryStore` 抽象（`IndexedDbHistoryStore` / `MemoryHistoryStore`）は `src/editor/dayHistoryStore.ts`、IndexedDB は editor / ui 層のみ（core には置かない）。
+- **保持規則**（`core/io/historyPolicy.ts` の純関数 `retainHistoryDays`、書き込みのたびに整理）: 現在の日より先の履歴は捨てる（戻ってやり直した別の経過の残り）／直近 7 日はすべて／それより古いものは 7 日ごとの区間につき 1 件（区間で最も新しい日）で新しい区間から最大 8 件。1 プロジェクトあたり最大 15 件。
+- **戻す**: 「この日の朝に戻る」→ `validateProject`（読み込みと同じ検証）に通ったときだけ適用（レイアウト・会社・機種データの固定）し、失敗したら開いているプロジェクトは変えない。建設モードのみ。**現在のシナリオは保つ**（履歴に含めないため）。
+- 未保存のプロジェクトは `unsaved` に残り、保存すると新しいスロット ID に付け替える。新しいゲーム・JSON の読み込みで `unsaved` は消す。スロットを削除するとそのスロットの履歴も消す。
+- **書き出し（JSON）に履歴は含めない**（端末・ブラウザごと）。サイズ（計測: サンプル空港＋サンドボックス会社、2 日分）: `projectJson` は 1 件あたり約 77〜78 KB、振り返りのデータは約 2〜3 KB。15 件でも約 1.2 MB で、IndexedDB の容量には十分収まる。
+
+**Phase 12B-3a Part B**: 会社の `game`・`airlineEval`・`goals`、運航状態の `wx` を使うファイルは `formatVersion 2`。`checkGameFields`（game の値・airlineEval の要素名と範囲・goals の目標 ID と格）と `checkWxState`（24 時間・段階 0〜4・乱数）で厳格に検査し、`state.wx` と `game.weather === 'levels'` の対応も検査する。`importCompany` は不正な任意項目を捨てる。詳細は [docs/30](30_game_models.md)。

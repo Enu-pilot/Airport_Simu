@@ -102,6 +102,7 @@ export class MapRenderer {
 
     if (s.overlays.grid) this.drawGrid(cam, s.viewSize, layout.site);
     this.drawLayout(layout, analysis, s);
+    this.drawConnectors(layout, analysis, s.selection);
     if (s.overlays.interior) this.drawInterior(layout, s, cam);
     if (s.overlays.network) this.drawNetwork(analysis);
     if (s.overlays.issues) this.drawIssues(layout, analysis);
@@ -471,6 +472,30 @@ export class MapRenderer {
     }
   }
 
+  /** 独立ゲート（connectedTo で接続されたゲート）から接続先の区域のエリアへの連絡通路を破線で描く（選択中は太く） */
+  private drawConnectors(layout: AirportLayout, analysis: LayoutAnalysis, selection: string | null): void {
+    const o = this.overlay;
+    for (const cn of analysis.terminal.connectors ?? []) {
+      const gate = layout.facilities[cn.gateId];
+      if (!gate) continue;
+      const from = worldToMap(gate.origin);
+      const sel = selection === cn.gateId;
+      for (const anchorId of [cn.depAnchor, cn.arrAnchor]) {
+        const a = anchorId ? analysis.terminal.areas[anchorId] : undefined;
+        if (!a) continue;
+        const dx = a.center.x - from.x;
+        const dy = a.center.y - from.y;
+        const len = Math.hypot(dx, dy);
+        const dash = 0.6;
+        for (let t = 0; t < len; t += dash * 2) {
+          const t2 = Math.min(len, t + dash);
+          o.moveTo(from.x + (dx * t) / len, from.y + (dy * t) / len).lineTo(from.x + (dx * t2) / len, from.y + (dy * t2) / len);
+        }
+        o.stroke({ width: this.px(sel ? 3 : 1.5), color: anchorId === cn.depAnchor ? 0x7fdbff : 0xffd166, alpha: sel ? 0.95 : 0.7 });
+      }
+    }
+  }
+
   private drawNetwork(analysis: LayoutAnalysis): void {
     const o = this.overlay;
     for (const e of Object.values(analysis.network.edges)) {
@@ -805,6 +830,13 @@ export class MapRenderer {
       if (u.kind === 'staff' || u.status === 'idle') continue;
       const { x, y } = worldToMap(u);
       const color = u.status === 'broken' ? 0xff4d4f : UNIT_COLOR[u.kind];
+      // ランプバスは他の車両の 2 倍の長さ。乗車中の人数を表示
+      if (u.kind === 'apronBus') {
+        o.rect(x - 0.56, y - 0.2, 1.12, 0.4).fill({ color }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.7 });
+        const trip = u.trip ? sim.state.bus?.trips[u.trip] : undefined;
+        if (trip && trip.pax > 0 && this.zoom >= 8) this.label(`bus:${u.id}`, `🚌${trip.pax}`, { x, y: y - 0.7 }, cam, { size: 10, color: 0xbfe1ff });
+        continue;
+      }
       o.rect(x - 0.28, y - 0.18, 0.56, 0.36).fill({ color }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.7 });
       const n = cartBags.get(u.id);
       if (n && this.zoom >= 8) this.label(`cart:${u.id}`, `🧳${n}`, { x, y: y - 0.6 }, cam, { size: 10, color: 0xffe082 });
@@ -900,6 +932,7 @@ const AREA_SHORT = AREA_KIND_LABEL;
 
 /** 作業車両の色 */
 const UNIT_COLOR: Record<UnitKind, number> = {
+  apronBus: 0x2b8cff,
   staff: 0xffffff,
   engineer: 0x9575cd,
   tug: 0xffeb3b,

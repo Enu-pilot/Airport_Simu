@@ -108,6 +108,11 @@ function finalize(d: AirportLayout): AirportLayout {
     if (f.kind === 'gate' && typeof f.props.standId === 'string' && !d.stands[f.props.standId]) {
       f.props.standId = null;
     }
+    // 削除済み（またはターミナルでなくなった）施設を指す connectedTo はキーごと消す（従来のゲートはキーがないので不変）
+    if (f.kind === 'gate' && f.props.connectedTo !== undefined && f.props.connectedTo !== null) {
+      const t = d.facilities[String(f.props.connectedTo)];
+      if (!t || t.kind !== 'terminal') delete f.props.connectedTo;
+    }
   }
   return d;
 }
@@ -948,7 +953,9 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
                   ? typeof pv === 'boolean'
                   : def.type === 'enum'
                     ? def.options.includes(pv as string)
-                    : pv === null || (typeof pv === 'string' && !!d.stands[pv]);
+                    : def.type === 'facilityRef'
+                      ? pv === null || (typeof pv === 'string' && d.facilities[pv]?.kind === def.of)
+                      : pv === null || (typeof pv === 'string' && !!d.stands[pv]);
             if (!valid) return fail('INVALID_VALUE');
           }
         } else {
