@@ -299,6 +299,9 @@ export function captureProjectWithSim(): { length: number; sha256: string; norma
  * 12B-3a（バス搭乗・独立ゲート）を入れる前の現行コードの出力で、バスゲートのないデータでは 1 ビットも変わらないことを固定する。
  * 出発旅客は「ゲートなし」で乗り遅れ（noGate）、到着旅客は到達不能で降機口のないまま留まる（stranded）のが従来の挙動。
  */
+/** 特性テストの運航時間（日の途中。6 時間で 出発の ゲートなし・到着の到達不能 が十分に出る。24 時間だと単独で約 180 秒かかり負荷で時間切れになる） */
+export const LEGACY_REMOTE_SECONDS = 6 * 3600;
+
 export function captureLegacyRemote(): unknown {
   const layout = JSON.parse(readFileSync(resolve(goldenDir, 'fixtures', 'legacy-remote.layout.json'), 'utf8')) as AirportLayout;
   const runs: Record<string, unknown> = {};
@@ -308,7 +311,7 @@ export function captureLegacyRemote(): unknown {
   ];
   for (const v of variants) {
     const sim = v.make();
-    for (let i = 0; i < SIM_SECONDS; i++) stepSimulation(sim);
+    for (let i = 0; i < LEGACY_REMOTE_SECONDS; i++) stepSimulation(sim);
     const json = JSON.stringify(sim.state);
     const byReason: Record<string, number> = {};
     const byState: Record<string, number> = {};
@@ -317,7 +320,7 @@ export function captureLegacyRemote(): unknown {
       if (g.direction === 'arrival') byState[g.state] = (byState[g.state] ?? 0) + g.count;
     }
     runs[v.name] = {
-      seconds: SIM_SECONDS,
+      seconds: LEGACY_REMOTE_SECONDS,
       stateSha256: sha256(json),
       stateLength: json.length,
       stats: sim.state.stats,
