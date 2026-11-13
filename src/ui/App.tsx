@@ -1,11 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { Viewport } from '../render/MapView';
-import { actions, formatCr, newGame, useEditor, useLayout } from '../editor/store';
+import { actions, editorStore, formatCr, newGame, setOpsPrefs, useEditor, useLayout } from '../editor/store';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
 import { CatalogPanel } from './CatalogPanel';
 import { ScenarioPanel } from './AnalysisPanels';
-import { MODE_LABEL } from '../i18n/ja';
+import { DAY_LOOP, MODE_LABEL } from '../i18n/ja';
+import { DayReviewOverlay } from './DayReview';
+import { HistoryOverlay } from './HistoryPanel';
+import { SkipDayOverlay } from './SkipDayOverlay';
+import { dayFlowActions } from '../editor/dayFlowActions';
 import { onKeyDown, onKeyUp } from '../editor/input';
 import { projectActions } from '../editor/project';
 import { downloadText, ProjectPanel } from './ProjectPanel';
@@ -61,6 +65,9 @@ export function App() {
     <div className={`app mode-${mode}`}>
       <TopBar />
       {mode === 'build' ? <BuildLayout /> : <OperateLayout />}
+      <DayReviewOverlay />
+      <SkipDayOverlay />
+      <HistoryOverlay />
     </div>
   );
 }
@@ -152,6 +159,9 @@ function TopBar() {
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = useEditor((s) => s.mode);
   const career = useEditor((s) => s.company.mode === 'career');
+  const prefs = useEditor((s) => s.opsPrefs);
+  const hasReview = useEditor((s) => s.dayFlow.review !== null);
+  const skipping = useEditor((s) => s.dayFlow.phase === 'skipping');
 
   // 書き出し・読み込みはプロジェクト単位（レイアウト・会社・機種データ・シナリオ）。旧形式のレイアウトファイルも読める
   const download = () => {
@@ -178,7 +188,8 @@ function TopBar() {
             <button
               className="primary"
               onClick={() => {
-                if (window.confirm('運航を終了して建設モードに戻りますか？（その日を途中で締め、運航の状態は破棄されます）')) ops.stop();
+                const closed = editorStore.getState().dayFlow.atClose;
+                if (window.confirm(closed ? '運航を終了して建設モードに戻りますか？（締めは済んでいます。運航の状態は破棄されます）' : '運航を終了して建設モードに戻りますか？（その日を途中で締め、運航の状態は破棄されます）')) ops.stop();
               }}
               data-testid="stop-ops"
             >
@@ -186,6 +197,29 @@ function TopBar() {
             </button>
           </>
         )}
+      </div>
+      <div className="top-group">
+        <button onClick={() => ops.skipDay()} disabled={skipping} title={DAY_LOOP.skipDayTitle} data-testid="skip-day">
+          {DAY_LOOP.skipDay}
+        </button>
+        {hasReview && (
+          <button onClick={() => ops.openReview()} data-testid="open-review">
+            {DAY_LOOP.openReview}
+          </button>
+        )}
+        <button onClick={() => dayFlowActions.openHistory(true)} data-testid="open-history">
+          {DAY_LOOP.openHistory}
+        </button>
+        <span className="day-prefs">
+          <label title={DAY_LOOP.prefPauseTitle}>
+            <input type="checkbox" checked={prefs.pauseAtDayClose} onChange={(e) => setOpsPrefs({ pauseAtDayClose: e.target.checked })} data-testid="pref-pause-at-close" />
+            {DAY_LOOP.prefPause}
+          </label>
+          <label title={DAY_LOOP.prefAutoStopTitle}>
+            <input type="checkbox" checked={prefs.skipAutoStop} onChange={(e) => setOpsPrefs({ skipAutoStop: e.target.checked })} data-testid="pref-skip-autostop" />
+            {DAY_LOOP.prefAutoStop}
+          </label>
+        </span>
       </div>
       {mode === 'build' && (
         <>

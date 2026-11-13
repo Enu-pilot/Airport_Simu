@@ -1,4 +1,4 @@
-import { DAY_SEC } from './rules';
+import { DAY_SEC, INBOUND_LEAD_SEC } from './rules';
 import { stepSimulation, type Simulation } from './simulation';
 
 /**
@@ -66,4 +66,20 @@ export function majorDisruptionWatcher(sim: Simulation): (sim: Simulation) => bo
     }
     return false;
   };
+}
+
+/**
+ * 締めの直後の夜間を早送りする終点（ゲーム内の秒）。次の到着機が現れる 10 分前（到着の 15 分前に現れる）、
+ * 便がなければ開場の 30 分前。次の締めを越えない。夜間は便がなく何も起きないが、早送りも通常と同じ stepSimulation の繰り返しで、
+ * 画面で待つ時間を省くだけ（結果は同じ）。
+ */
+export function nightEndAt(sim: Simulation): number {
+  const { state } = sim;
+  const close = nextCloseAt(sim);
+  let t = Number.POSITIVE_INFINITY;
+  for (const f of Object.values(state.flights)) {
+    if (f.direction === 'arrival' && f.status === 'scheduled' && f.estimated > state.now) t = Math.min(t, f.estimated - INBOUND_LEAD_SEC - 600);
+  }
+  if (!Number.isFinite(t)) t = (close - DAY_SEC) + (sim.company?.hours.openMin ?? 360) * 60 - 1800;
+  return Math.max(state.now, Math.min(t, close));
 }

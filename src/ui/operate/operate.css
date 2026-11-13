@@ -128,3 +128,33 @@
 .score-row.bad .score-level { color: var(--error); }
 .score-row.n\/a .bar > span { background: transparent; }
 .score-lacking { margin-top: 4px; font-size: 12px; border-top: 1px dashed var(--border); padding-top: 3px; }
+
+/* ---------------------------------------------------------------- 1 日のループ（12B-2）: 振り返り・スキップ・履歴
+   上部バーを残して、その下の全体を覆う（建設・運航のどちらのグリッドでも 2 行目以降） */
+.day-review, .day-skip, .day-history { grid-column: 1 / -1; grid-row: 2 / -1; z-index: 30; min-height: 0; min-width: 0; }
+.day-review { background: var(--panel); display: flex; flex-direction: column; border-top: 2px solid var(--accent); }
+.day-review-head { display: flex; align-items: baseline; gap: 14px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.day-review-head h2 { margin: 0; font-size: 18px; }
+.day-review-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 16px; }
+.day-review-foot { display: flex; gap: 10px; justify-content: center; padding: 10px; border-top: 1px solid var(--border); background: var(--panel-2); }
+.day-review-foot button { padding: 8px 18px; font-size: 14px; }
+.review-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 10px; align-items: start; }
+.review-sec { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+.review-sec h3 { margin: 0 0 4px; font-size: 13px; color: var(--accent); }
+.review-sec h4 { margin: 0 0 3px; font-size: 12px; }
+.review-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+.review-sec .card-sub { margin-top: 6px; }
+.review-sec .num { text-align: right; font-variant-numeric: tabular-nums; }
+.verdict.v-improved { color: var(--ok); }
+.verdict.v-worse { color: var(--error); }
+.verdict.v-same, .verdict.v-n\/a { color: var(--muted); }
+.day-skip { background: #000a; display: flex; align-items: center; justify-content: center; }
+.day-skip-card { background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 18px 28px; width: min(460px, 90%); display: flex; flex-direction: column; gap: 8px; align-items: stretch; box-shadow: 0 8px 32px #000a; }
+.day-skip-card h3 { margin: 0; }
+.day-skip-card button { align-self: center; }
+.skip-bar { height: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.skip-bar > span { display: block; height: 100%; background: var(--accent); }
+.skip-pct { text-align: center; font-variant-numeric: tabular-nums; }
+.day-history { background: var(--panel); display: flex; flex-direction: column; z-index: 40; border-top: 2px solid var(--accent); }
+.top .day-prefs { display: flex; gap: 8px; align-items: center; color: var(--muted); }
+.top .day-prefs label { display: flex; align-items: center; gap: 3px; }

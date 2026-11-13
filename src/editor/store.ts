@@ -18,6 +18,8 @@ import { createCareerCompany, createSandboxCompany, importCompany, post, type Co
 import { constructionCost } from '../core/economy/construction';
 import { applyCompletedProjects, prepareCareerEdit, startClosure, syncProjects } from '../core/economy/expansion';
 import { createStarterAirfield } from '../core/sample/starterAirfield';
+import type { DayReview } from '../core/analytics/review';
+import { clearUnsavedHistory } from './dayHistoryStore';
 import { CURRENCY } from '../core/economy/balance';
 import {
   changeScenarioAircraft,
@@ -124,6 +126,70 @@ export interface EditorState {
   projectName: string;
   /** 保存時の機種データ（プロジェクトを開いたときに固定。null なら現在のカタログ） */
   catalogPin: CatalogPin | null;
+  /** 1 日のループの UI の状態（保存しない。docs/06 §9）。phase: 通常 / スキップ中 / 振り返りを表示中 */
+  dayFlow: DayFlow;
+  /** 運航の設定（localStorage に保存。表示・進め方だけで、シミュレーションの結果には関係しない） */
+  opsPrefs: OpsPrefs;
+}
+
+export interface DayFlow {
+  phase: 'none' | 'skipping' | 'review';
+  /** 直近に締めた日の振り返り（運航を始めるか締めを行うと更新。「前日の振り返り」から見直せる） */
+  review: DayReview | null;
+  /** 履歴から開いた過去の振り返り（読み取り専用。運航とは無関係） */
+  viewing: DayReview | null;
+  /** 締めの直後で運航を止めている（次の日へ進める・建設へ戻る前の状態） */
+  atClose: boolean;
+  skip: { progress: number; label: 'day' | 'night'; stopReason: string | null } | null;
+  /** 履歴のオーバーレイを開いている */
+  historyOpen: boolean;
+}
+
+export interface OpsPrefs {
+  /** 0:00 の締めで運航を止めて振り返りを表示する（既定 ON） */
+  pauseAtDayClose: boolean;
+  /** 1 日スキップを重大な障害（滑走路の閉鎖・整備、ダイバート）で止める（既定 ON） */
+  skipAutoStop: boolean;
+}
+
+export const initialDayFlow = (): DayFlow => ({ phase: 'none', review: null, viewing: null, atClose: false, skip: null, historyOpen: false });
+
+const PREFS_KEY = 'skyport.opsPrefs.v1';
+function loadPrefs(): OpsPrefs {
+  const d: OpsPrefs = { pauseAtDayClose: true, skipAutoStop: true };
+  try {
+    const raw = globalThis.localStorage?.getItem(PREFS_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<OpsPrefs>;
+      return { pauseAtDayClose: typeof p.pauseAtDayClose === 'boolean' ? p.pauseAtDayClose : d.pauseAtDayClose, skipAutoStop: typeof p.skipAutoStop === 'boolean' ? p.skipAutoStop : d.skipAutoStop };
+    }
+  } catch {
+    // 既定値を使う
+  }
+  return d;
+}
+
+/** 運航の設定を変えて保存する */
+export function setOpsPrefs(patch: Partial<OpsPrefs>): void {
+  const next = { ...editorStore.getState().opsPrefs, ...patch };
+  editorStore.setState({ opsPrefs: next });
+  try {
+    globalThis.localStorage?.setItem(PREFS_KEY, JSON.stringify(next));
+  } catch {
+    // 保存できなくても設定は今の画面では有効
+  }
+}
+
+/**
+ * 日次の締めのオートセーブ: 運航中の会社（最新）を、ストアの会社を変えずに保存先のキーにだけ書く。
+ * 別のタブ・再読み込みで、締めた日までの経営が残る。
+ */
+export function saveCompanyAutosave(company: CompanyState): void {
+  try {
+    globalThis.localStorage?.setItem(COMPANY_KEY, JSON.stringify(company));
+  } catch {
+    // 保存できなくても続けられる
+  }
 }
 
 /**
@@ -216,6 +282,8 @@ export const editorStore = createStore<EditorState>(() => ({
   scenarios: [],
   scenarioRun: null,
   viewMode: '2d',
+  dayFlow: initialDayFlow(),
+  opsPrefs: loadPrefs(),
   ...loadInitialMeta(),
 }));
 
@@ -416,7 +484,8 @@ export function newGame(mode: CompanyState['mode']): void {
   if (get().mode === 'operate') return;
   const layout = mode === 'career' ? createStarterAirfield() : createSampleAirport();
   const company = mode === 'career' ? createCareerCompany() : createSandboxCompany();
-  set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select', scenarios: [], projectId: null, projectName: '無題のプロジェクト', catalogPin: null });
+  set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select', scenarios: [], projectId: null, projectName: '無題のプロジェクト', catalogPin: null, dayFlow: initialDayFlow() });
+  void clearUnsavedHistory();
   showToast(mode === 'career' ? `新しいゲーム: 小さな飛行場から（資金 ${formatCr(company.cash)}）` : 'サンドボックス: サンプル空港と潤沢な資金で始めます');
 }
 

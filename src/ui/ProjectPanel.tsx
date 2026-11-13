@@ -1,3 +1,4 @@
+import { HistoryList } from './HistoryPanel';
 import { useRef, useState } from 'react';
 import { CATALOG_VERSION } from '../core/aircraft/catalog';
 import { ASSET_VERSION } from '../core/assets/registry';
@@ -185,6 +186,10 @@ export function ProjectPanel() {
             </div>
           )}
         </section>
+        <section data-testid="project-history">
+          <h4>日ごとの履歴</h4>
+          <HistoryList />
+        </section>
         <section>
           <h4>読み込みの検証結果</h4>
           {!report ? (
@@ -216,7 +221,7 @@ export function ProjectPanel() {
             </div>
           )}
           <div className="muted small">
-            保存先はこのブラウザ（localStorage）です。別の端末へ移すには JSON に書き出してください。旧形式のレイアウトファイル（以前の「書き出し」）も読み込めます。
+            保存先はこのブラウザ（プロジェクトは localStorage、日ごとの履歴は IndexedDB）です。履歴は書き出しの JSON に含まれません。別の端末へ移すには JSON に書き出してください。旧形式のレイアウトファイル（以前の「書き出し」）も読み込めます。
           </div>
         </section>
       </div>

@@ -15,6 +15,7 @@ import type { FleetResult } from '../core/economy/company';
 import type { ResponseResult } from '../core/sim/disruptions';
 import type { PlanIssueCode } from '../core/economy/planning';
 import type { AirlineScore, ScoreComponent, ScoreKey, ScoreLevel } from '../core/economy/airlineScore';
+import type { ReviewMetric } from '../core/analytics/review';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 
 export const FACILITY_LABEL: Record<FacilityKind, string> = {
@@ -974,3 +975,102 @@ export function lackingText(s: AirlineScore): string {
   if (s.lacking.length === 0) return '足りないもの: 特になし';
   return `足りないもの: ${s.lacking.map((c) => `${SCORE_LABEL[c.key]}（${scoreText(c)}）`).join(' / ')}`;
 }
+
+// ---------------------------------------------------------------- 1 日のループ（12B-2）
+
+export const REVIEW_METRIC_LABEL: Record<ReviewMetric, string> = {
+  totalRevenue: '収入',
+  totalCost: '費用',
+  operatingProfit: '営業利益',
+  otp: '定時率',
+  avgDelayMin: '平均遅延（分）',
+  pax: '旅客数（出発＋到着）',
+  paxSatisfaction: '旅客満足度',
+  airlineSatisfaction: '航空会社満足度',
+  rating: '空港評価',
+  flights: '便数',
+  missedPax: '乗り遅れ旅客',
+  leftBags: '積み残し手荷物',
+  diverted: 'ダイバート',
+  cancelled: '欠航',
+};
+
+export const DAY_LOOP = {
+  skipDay: '▶▶ 1日スキップ',
+  skipDayTitle: '残りの 1 日を画面を進めずに一気に進め、締めの振り返りを表示します（結果は画面で進めた場合と同じです）',
+  prefPause: '0:00 で一時停止して振り返る',
+  prefPauseTitle: '日付が変わる 0:00 に運航を止めて「1日の振り返り」を表示します（切ると止まらずに続きます）',
+  prefAutoStop: 'スキップを重大な障害で止める',
+  prefAutoStopTitle: '1 日スキップ中に滑走路の閉鎖・整備やダイバートが起きたら止めます',
+  openReview: '前日の振り返り',
+  openHistory: '履歴',
+  // スキップ
+  skipTitleDay: '1 日をスキップしています',
+  skipTitleNight: '夜間を進めています（次の便の少し前まで）',
+  skipHint: '画面は止めて計算だけを進めています。結果は画面で進めた場合と同じです',
+  skipCancel: '中止',
+  // 振り返り
+  reviewTitle: (day: number) => `${day + 1}日目の振り返り`,
+  reviewSub: '0:00 に日次の締めを行いました',
+  reviewNext: '次の日へ（運航を続ける）',
+  reviewBuild: '建設モードに戻る（次の日の準備）',
+  reviewClose: '閉じる',
+  reviewHistory: '履歴を見る',
+  reviewArchive: '（履歴の振り返り。読み取り専用）',
+  money: '収入と費用',
+  revenue: '収入',
+  cost: '費用',
+  construction: '建設費（別枠）',
+  profit: '営業利益',
+  cashEnd: '締めの時点の資金',
+  punctuality: '定時運航と遅延',
+  otp: '定時率',
+  avgDelay: '平均遅延',
+  flights: '便数',
+  causes: '主な遅延の理由',
+  noCauses: '遅延の理由の記録はありません',
+  flightsN: (n: number) => `${n}便`,
+  paxTitle: '旅客と満足度',
+  pax: '旅客（出発＋到着）',
+  missed: '乗り遅れ',
+  bags: '積み残し手荷物',
+  paxSat: '旅客満足度',
+  airSat: '航空会社満足度',
+  rating: '空港評価',
+  disruptionsTitle: '障害と対応',
+  noDisruptions: 'この日は障害・天候の変化はありませんでした',
+  resolvedByTime: '時間経過で復旧',
+  resolvedByPlayer: '対応で復旧',
+  unresolved: '続いています',
+  responses: (r: { delays: number; reassigns: number; priorities: number; repairs: number }) =>
+    `あなたの対応: 修理・解除 ${r.repairs}回 / スポット変更 ${r.reassigns}回 / 遅らせる ${r.delays}回 / 優先 ${r.priorities}回`,
+  compareTitle: '前日との比較',
+  noPrev: '前日の記録がないため比較できません（最初の日です）',
+  improved: '改善',
+  worse: '悪化',
+  same: '変化なし',
+  na: '—',
+  airlinesTitle: '航空会社の評価の変化',
+  noAirlines: '有効な契約のある航空会社はありません',
+  lacking: '足りないもの',
+  tomorrowTitle: '明日の見通し',
+  tomorrowFlights: (n: number) => `運航計画: ${n}便`,
+  tomorrowIssues: '計画の問題',
+  noIssues: '計画の問題はありません',
+  completing: '明日完成する工事',
+  noCompleting: '明日完成する工事はありません',
+  weather: '天候予報',
+  weatherNone: '予報なし（天候予報は今後追加されます）',
+  projectKind: { build: '新設工事', renovation: '改修工事' } as Record<string, string>,
+  // 履歴
+  historyTitle: '日ごとの履歴（その日の朝に戻れます）',
+  historyEmpty: '履歴はまだありません。1 日を締めると、その日の朝の状態が自動で残ります',
+  historyNote: '直近 7 日はすべて、それより古いものは週に 1 件（最大 8 件）残します。運航の途中の状態は含みません。シナリオは戻っても現在のものを保ちます',
+  historyMemory: '履歴はこのタブを閉じると消えます（IndexedDB を使えない環境）',
+  historyRestore: 'この日の朝に戻る',
+  historyRestoreConfirm: (d: number) => `${d + 1}日目の朝に戻しますか？（現在の空港と経営の状態はこの日の朝のもので置き換わります。元には戻せません）`,
+  historyDelete: '削除',
+  historyView: '振り返り',
+  historyRestoreBlocked: '運航中は戻れません。建設モードに戻ってから行ってください',
+  historyDay: (d: number) => `${d + 1}日目の朝`,
+};
