@@ -76,6 +76,7 @@
 .fids-table tr.selected { background: #1d3a4a; }
 .fids-table .fids-num { color: #ffb400; font-weight: 700; }
 .fids-table .fids-place { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.fids-table .col-type { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
 .fids-dir { color: #6f7d8c; font-size: 10px; margin-right: 4px; }
 .fids-table .fids-state { white-space: normal; min-width: 90px; }
 .fids-table tr.tone-delay .fids-state { color: #ffb020; }
@@ -90,7 +91,8 @@
 .fids-menu button, .fids-menu select { font-size: 11px; background: #0b1118; border-color: #3a4658; color: #e8eef5; }
 .fids-menu button.on { background: #ffb400; color: #1a1200; }
 .fids-stand { display: inline-flex; gap: 3px; }
-@media (max-width: 1599px) { .fids { width: min(420px, 100% - 16px); } .fids .col-type, .fids .col-delay { display: none; } .fids.full { width: min(calc(100% - 16px), 1100px); } .fids.full .col-type, .fids.full .col-delay { display: table-cell; } }
+@media (max-width: 1759px) { .fids .col-type { display: none; } }
+@media (max-width: 1599px) { .fids { width: min(420px, 100% - 16px); } .fids .col-delay { display: none; } .fids.full { width: min(calc(100% - 16px), 1100px); } .fids.full .col-type, .fids.full .col-delay { display: table-cell; } }
 
 /* アラート（マップ左上。運航表は右上なので重ならない） */
 .alert-stack { position: absolute; top: 34px; left: 8px; z-index: 12; display: flex; flex-direction: column; gap: 4px; width: min(380px, 100% - 520px); min-width: 300px; }

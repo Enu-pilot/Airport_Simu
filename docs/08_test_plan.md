@@ -283,3 +283,12 @@ E2E: `tests/e2e/access.spec.ts`（アクセスの画面とタクシー乗り場�
 | 単体・統合 `vitest run` | 54 ファイル / 564 件すべて合格（Phase 11 完了時は 38 ファイル / 395 件）。負荷の高い環境で 1 件のタイムアウトが再現しない形で 2 度出たが、再実行は常に全件合格 |
 | E2E `playwright test --trace off` | 35 件すべて合格（既存 28 + 新規 `runway.spec.ts` 7） |
 | ゴールデン | 既存のゴールデンは S1 の 1 回だけの再採取（版に敏感なキーのみ。[27](27_migration_and_compatibility.md) §5）以外は 1 バイトも変更なし。追加: `free-runways` / `crossing-sim` と入力フィクスチャ 2 件。台帳 `sim-versions.json` に 1 行追加 |
+
+### Phase 12B-1（運航モードの画面の作り直し）
+
+| ファイル | 件数 | 内容 |
+|---|---|---|
+| `tests/unit/ops12b.test.ts` | 10 | `computeKpi`・`airlineScorecard`・`deriveAlerts` が状態を変えない、アラートのまとめ・重大度・閉じた key・復旧・古いイベントの除外、評価の判定（料金倍率・非対応機材・計画のスポット不足/枠・記録からの定時性/折り返し/旅客体験・他社の記録を混ぜない）、イベントカードの絞り込み |
+| `tests/e2e/opslayout.spec.ts` | 10 | 常設カードと運航表（`table.board` は 1 つだけ）、出発/到着の切り替え・折りたたみ・行クリックで選択・全列表示、行メニューの遅延・優先、滑走路閉鎖のアラート → 移動 → 修理、オーバーレイの開閉（×・Esc・同じボタン、左列は覆わない）、航空会社の評価と「足りないもの」、建設モードの画面が従来どおり、1400/1600/1920px で画面内に収まる |
+
+実行結果（12B-1 完了時）: `tsc` エラー 0 / `eslint --max-warnings=0` 0 / `vitest run` 56 ファイル・578 件合格 / `playwright test --trace off` 45 件合格（既存 35 は無変更で合格 + 新規 10）/ `git diff -- tests/golden` 空。
