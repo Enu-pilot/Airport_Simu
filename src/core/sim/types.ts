@@ -68,7 +68,7 @@ export type HoldReason =
   | 'boarding' // 搭乗手続きの完了待ち
   | 'groundCrew'; // プッシュバックの車両・作業員待ち
 
-export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling';
+export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling' | 'apronBus';
 
 export interface Route {
   kind: 'landing' | 'taxiIn' | 'pushback' | 'taxiOut' | 'takeoff';
@@ -157,6 +157,8 @@ export interface FlightPax {
   deplaneAcc: number;
   claimAreaId: string | null;
   bagsReadyAt: number | null;
+  /** ランプバスで搭乗・降機する便（バスゲートがあり、スポットがコンタクトでない便）だけが持つ。従来の便にはキーがない */
+  bus?: { gateId: string | null; gateClosedAt: number | null; /** バスで運んだ旅客数と、その待ち時間の合計（人・秒。運行の作成からバスの出発まで） */ paxCarried: number; waitPaxSec: number };
 }
 
 export interface Flight {
@@ -219,6 +221,8 @@ export interface GroundUnit {
   repairUntil: number | null;
   /** 作業に割り当てられていた累計時間（稼働率用） */
   busySec: number;
+  /** ランプバスが担当している運行の ID（バスだけ。欠落 = なし） */
+  trip?: string;
 }
 
 export type TaskKind = 'deplane' | 'unload' | 'fuel' | 'clean' | 'cater' | 'inspect' | 'board' | 'load' | 'pushback';
@@ -332,13 +336,15 @@ export type PaxState =
   | 'stranded'
   | 'waitingFacility'
   | 'waitingTransport'
+  | 'waitingBus'
+  | 'onBus'
   | 'missed'
   | 'cancelled';
 
 export const PAX_FINAL_STATES: readonly PaxState[] = ['boarded', 'exited', 'missed', 'cancelled'];
 
 export type PaxStep = 'checkIn' | 'security' | 'shop' | 'restroom' | 'gate' | 'claim' | 'exit';
-export type MissReason = 'late' | 'unreachable' | 'facilityClosed' | 'noGate' | 'cancelled';
+export type MissReason = 'late' | 'unreachable' | 'facilityClosed' | 'noGate' | 'noBus' | 'cancelled';
 
 export interface PaxGroup {
   id: string;
@@ -370,6 +376,8 @@ export interface PaxGroup {
   walkSec: number;
   reason: MissReason | null;
   retryAt: number;
+  /** 乗車待ち・乗車中のランプバスの運行（バス扱いの旅客だけ） */
+  busTrip?: string;
   /** 空港アクセスの手段（アクセスを扱う運航のみ）と、到着時のアクセス処理を済ませたか */
   mode?: AccessMode | null;
   accessDone?: boolean;
@@ -439,6 +447,7 @@ export type SimEventKind =
   | 'equipmentUp'
   | 'bagsLeftBehind'
   | 'finance'
+  | 'busRescue'
   | 'disruption';
 
 export interface SimEvent {
@@ -532,6 +541,39 @@ export interface SimState {
   closures: { taxiways: string[]; stands: string[]; gates: string[] };
   /** 分析用の運航記録（analytics/records.ts） */
   analytics: AnalyticsState;
+  /** ランプバスの運行（バスゲートがある運航だけ。従来の運航にはキーがない） */
+  bus?: ApronBusRuntime;
+}
+
+/** ランプバスの運行の状態（sim/apronBus.ts） */
+export interface ApronBusRuntime {
+  /** ID `bt_n`（counters.bt） */
+  trips: Record<string, BusTrip>;
+  /** 未完了の運行（発行順） */
+  active: string[];
+  stats: { trips: number; pax: number; waitSec: number; shortageSec: number; rescues: number };
+}
+
+export type BusTripPhase = 'waiting' | 'toPickup' | 'loading' | 'driving' | 'unloading' | 'stalled' | 'done' | 'cancelled';
+
+export interface BusTrip {
+  id: string;
+  /** dep: ゲート → スポット（出発旅客） / arr: スポット → ゲート（到着旅客） */
+  dir: 'dep' | 'arr';
+  flightId: string;
+  gateId: string;
+  standId: string;
+  /** 配車されたバス（未配車・救援待ち = null） */
+  busId: string | null;
+  phase: BusTripPhase;
+  phaseSince: number;
+  phaseUntil: number | null;
+  groups: string[];
+  pax: number;
+  createdAt: number;
+  /** 故障したバスの位置（救援の合流点）と、乗り換え後に再開する段階 */
+  stallAt?: { x: number; y: number };
+  resume?: 'driving' | 'unloading';
 }
 
 export type WeatherKind = 'clear' | 'rain' | 'snow' | 'fog';

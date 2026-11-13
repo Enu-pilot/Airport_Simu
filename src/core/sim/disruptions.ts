@@ -347,7 +347,7 @@ export function moveUnitToBase(sim: Simulation, unitId: string, baseId: string):
   const u = sim.state.units[unitId];
   const base = sim.ctx.bases.find((b) => b.id === baseId);
   if (!u || !base) return { ok: false, reason: 'NOT_FOUND' };
-  if (u.taskId || u.status === 'broken') return { ok: false, reason: 'OCCUPIED' };
+  if (u.taskId || u.trip || u.status === 'broken') return { ok: false, reason: 'OCCUPIED' };
   u.baseId = baseId;
   u.fromX = u.x;
   u.fromY = u.y;

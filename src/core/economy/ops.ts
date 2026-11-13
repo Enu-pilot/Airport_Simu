@@ -240,6 +240,12 @@ export function onTaskDone(sim: Simulation, t: GroundTask): void {
   post(sim.company, 'groundOps', -cost);
 }
 
+/** ランプバスの運行ごとの運営費 */
+export function onBusTrip(sim: Simulation): void {
+  if (!enabled(sim)) return;
+  post(sim.company, 'groundOps', -(BALANCE.taskCost.busTrip ?? 0));
+}
+
 /** 店舗・飲食店の売上（人数 × 1人あたりの売上） */
 export function onShopDone(sim: Simulation, g: PaxGroup, kind: 'shop' | 'restaurant'): void {
   if (!enabled(sim)) return;

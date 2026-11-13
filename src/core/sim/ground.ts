@@ -104,11 +104,11 @@ function standPos(sim: Simulation, ac: Aircraft): { x: number; y: number } {
   return node ? { x: node.pos.x, y: node.pos.y } : { x: ac.x, y: ac.y };
 }
 
-function travelSec(a: { x: number; y: number }, b: { x: number; y: number }): number {
+export function travelSec(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.round((Math.hypot(a.x - b.x, a.y - b.y) * TILE_M) / VEHICLE_SPEED) + VEHICLE_SETUP_SEC;
 }
 
-function sendUnit(state: SimState, u: GroundUnit, to: { x: number; y: number }, status: 'enroute' | 'returning'): void {
+export function sendUnit(state: SimState, u: GroundUnit, to: { x: number; y: number }, status: 'enroute' | 'returning'): void {
   u.fromX = u.x;
   u.fromY = u.y;
   u.toX = to.x;
@@ -118,7 +118,7 @@ function sendUnit(state: SimState, u: GroundUnit, to: { x: number; y: number }, 
   u.status = status;
 }
 
-function basePos(sim: Simulation, u: GroundUnit): { x: number; y: number } {
+export function basePos(sim: Simulation, u: GroundUnit): { x: number; y: number } {
   const b = sim.ctx.bases.find((x) => x.id === u.baseId);
   return b ? { x: b.x, y: b.y } : { x: u.x, y: u.y };
 }

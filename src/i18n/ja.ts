@@ -286,6 +286,7 @@ export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
   noRoute: '経路なし',
   boarding: '搭乗手続き',
   groundHandling: '地上支援作業',
+  apronBus: 'ランプバス待ち',
 };
 
 export const FLIGHT_STATUS_LABEL: Record<FlightStatus, string> = {
@@ -362,6 +363,8 @@ export function eventText(e: SimEvent, callsign: (id: string) => string): string
       return `⚠ 積み残し: ${e.note}`;
     case 'finance':
       return `💴 ${e.note}`;
+    case 'busRescue':
+      return `ランプバスの救援: ${e.note}`;
     case 'disruption':
       return `⚠ ${e.note}`;
   }
@@ -417,6 +420,8 @@ export const PAX_STATE_LABEL: Record<PaxState, string> = {
   stranded: '到達不能',
   waitingFacility: '施設閉鎖で待機',
   waitingTransport: '交通機関を待機',
+  waitingBus: 'ランプバス待ち',
+  onBus: 'ランプバスで移動中',
   missed: '乗り遅れ',
   cancelled: '欠航',
 };
@@ -426,6 +431,7 @@ export const MISS_REASON_LABEL: Record<MissReason, string> = {
   unreachable: 'ゲートに到達できず',
   facilityClosed: '施設閉鎖で未処理',
   noGate: 'ゲートなし',
+  noBus: 'ランプバスが来ず',
   cancelled: '欠航',
 };
 

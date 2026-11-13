@@ -70,6 +70,7 @@ import type { CompanyState } from '../economy/company';
 import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
 import { analyzeDayPlan, planDay } from '../economy/planning';
 import { stepBaggage } from './baggage';
+import { createApronBusRuntime, stepApronBuses } from './apronBus';
 import {
   allTurnaroundDone,
   cancelTasks,
@@ -178,6 +179,8 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     state.access = createAccessRuntime(sim, sim.company);
   }
   createGroundUnits(sim);
+  // バスゲートがある運航だけランプバスの運行の状態を持つ（従来の運航にはキー自体を作らない）
+  if (ctx.busGates.length > 0) state.bus = createApronBusRuntime();
   if (state.settings.autoSchedule) generateDaySchedule(sim, Math.floor(state.now / DAY_SEC));
   return sim;
 }
@@ -620,6 +623,7 @@ export function stepSimulation(sim: Simulation): void {
   runwayControl(sim);
   for (const ac of all) stepAircraft(sim, ac);
   stepPassengers(sim);
+  if (state.bus) stepApronBuses(sim);
   for (const g of stepAccess(sim)) completeExit(sim, g);
   stepBaggage(sim);
   stepGround(sim);
@@ -1061,6 +1065,7 @@ function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
   if (dep.pax.boarding !== 'closed') {
     setHold(state, ac, 'boarding');
     addDelayCause(dep, 'boarding');
+    if (dep.pax.bus) addDelayCause(dep, 'apronBus');
     return;
   }
   // トーイングカーと作業員が機体に着いていること

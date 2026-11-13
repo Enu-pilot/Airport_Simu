@@ -5,6 +5,7 @@ import { resolveType } from './aircraftTypes';
 import { checkStand } from '../aircraft/compat';
 import { edgeIndexAt } from './routes';
 import { MIN_GROUND_SEPARATION_M, TICK_SEC } from './rules';
+import { APRON_BUS_CAPACITY } from './busRules';
 import type { Simulation } from './simulation';
 import { GROUND_MOVING_STATES, TERMINAL_STATES, type Aircraft, type AircraftState, type CrossingGrant, type SimState } from './types';
 
@@ -190,6 +191,66 @@ export function checkInvariants(sim: Simulation): string[] {
   }
   out.push(...checkPaxInvariants(sim, false));
   out.push(...checkGroundInvariants(sim, false));
+  if (state.bus) out.push(...checkBusInvariants(sim));
+  return out;
+}
+
+/**
+ * ランプバスの整合性（state.bus があるときだけ）。
+ * BU1 乗車中（onBus）のグループは、ちょうど 1 つの未完了の運行の groups にいて busTrip が一致 /
+ * BU2 運行の乗車人数 = グループの人数の合計 ≤ 定員 /
+ * BU3 配車済みの運行のバスの trip が運行 ID と一致し、1 台が 2 つの運行を持たない /
+ * BU4 バス待ち・乗車中のグループの便は p.bus を持ち、到着便の p.gateId はバスゲート
+ * （故障したバスの運行の組み替えは次のティックの stepApronBuses が行うので、故障中のバスが運行を持つ一瞬は許す）
+ */
+export function checkBusInvariants(sim: Simulation): string[] {
+  const { state, ctx } = sim;
+  const bus = state.bus!;
+  const out: string[] = [];
+  const owner = new Map<string, string>();
+  const busOwner = new Map<string, string>();
+  for (const id of bus.active) {
+    const t = bus.trips[id];
+    if (!t) {
+      out.push(`BU1 運行 ${id} が存在しない`);
+      continue;
+    }
+    let sum = 0;
+    for (const gid of t.groups) {
+      const g = state.paxGroups[gid];
+      if (!g) {
+        out.push(`BU1 運行 ${t.id} のグループ ${gid} が存在しない`);
+        continue;
+      }
+      sum += g.count;
+      if (g.busTrip !== t.id) out.push(`BU1 ${gid} の busTrip（${g.busTrip ?? '-'}）が運行 ${t.id} と不一致`);
+      if (g.state === 'onBus') {
+        if (owner.has(gid)) out.push(`BU1 ${gid} が運行 ${owner.get(gid)} と ${t.id} に同時に乗車`);
+        owner.set(gid, t.id);
+      }
+    }
+    if (sum !== t.pax) out.push(`BU2 運行 ${t.id} の乗車人数 ${t.pax} ≠ グループ合計 ${sum}`);
+    if (t.pax > APRON_BUS_CAPACITY) out.push(`BU2 運行 ${t.id} の乗車人数 ${t.pax} > 定員 ${APRON_BUS_CAPACITY}`);
+    if (t.busId) {
+      const u = state.units[t.busId];
+      if (!u || u.trip !== t.id) out.push(`BU3 運行 ${t.id} のバス ${t.busId} の trip が不一致`);
+      if (busOwner.has(t.busId)) out.push(`BU3 バス ${t.busId} が運行 ${busOwner.get(t.busId)} と ${t.id} を同時に担当`);
+      busOwner.set(t.busId, t.id);
+    } else if (t.phase === 'toPickup' || t.phase === 'loading' || t.phase === 'driving' || t.phase === 'unloading') {
+      out.push(`BU3 運行 ${t.id}（${t.phase}）にバスが割り当てられていない`);
+    }
+  }
+  for (const u of Object.values(state.units)) {
+    if (u.kind === 'apronBus' && u.trip && !bus.active.includes(u.trip)) out.push(`BU3 バス ${u.id} が終了した運行 ${u.trip} を持っている`);
+  }
+  for (const gid of state.activePax) {
+    const g = state.paxGroups[gid]!;
+    if (g.state === 'onBus' && !owner.has(gid)) out.push(`BU1 ${gid} は乗車中だがどの運行にも含まれない`);
+    if (g.state !== 'waitingBus' && g.state !== 'onBus') continue;
+    const f = state.flights[g.flightId];
+    if (!f?.pax.bus) out.push(`BU4 ${gid} はバス待ちだが便 ${g.flightId} が p.bus を持たない`);
+    else if (g.direction === 'arrival' && !ctx.busGates.includes(f.pax.gateId ?? '')) out.push(`BU4 到着便 ${f.number} の p.gateId がバスゲートでない`);
+  }
   return out;
 }
 
