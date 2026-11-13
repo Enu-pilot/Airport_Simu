@@ -70,3 +70,75 @@ describe('従来のデータでは新しいコードに入らない', () => {
     expect(JSON.stringify(a.state)).toBe(JSON.stringify(b.state));
   });
 });
+
+// ---------------------------------------------------------------- A6: 到着・故障・救援
+
+import { addDisruption, moveUnitToBase } from '../../../src/core/sim/disruptions';
+
+function stepUntil(sim: Simulation, pred: () => boolean, maxSec: number): boolean {
+  for (let i = 0; i < maxSec; i++) {
+    stepSimulation(sim);
+    if (pred()) return true;
+  }
+  return false;
+}
+const tripIn = (sim: Simulation, phase: string, dir?: 'dep' | 'arr') => Object.values(sim.state.bus!.trips).find((t) => t.phase === phase && (!dir || t.dir === dir));
+
+describe('バス搭乗（到着）', () => {
+  it('到着旅客はスポットでバスに乗り、降機口から手荷物受取所・出口へ着く（到達不能にならない）', { timeout: 300_000 }, () => {
+    const sim = run(busLayout({ buses: 3 }), 6);
+    const arr = busFlights(sim).filter((f) => f.direction === 'arrival');
+    expect(arr.length).toBeGreaterThan(2);
+    const exited = arr.reduce((s, f) => s + f.pax.exited, 0);
+    expect(exited).toBeGreaterThan(0);
+    for (const f of arr) expect(f.pax.gateId).toBe('fac_6');
+    const stranded = Object.values(sim.state.paxGroups).filter((g) => g.state === 'stranded' && arr.some((f) => f.id === g.flightId));
+    expect(stranded.length).toBe(0);
+    // 手荷物のある旅客は受取所へ着き、荷物を受け取れる
+    expect(sim.state.groundStats.bagsCollected).toBeGreaterThan(0);
+    expect(Object.values(sim.state.bus!.trips).some((t) => t.dir === 'arr' && t.phase === 'done')).toBe(true);
+  });
+});
+
+describe('バスの故障・救援・保護', () => {
+  it('走行中のバスが故障すると運行は stalled になり、別のバスの救援で目的地へ着く。不変条件を保つ', { timeout: 300_000 }, () => {
+    const sim = createSimulation(busLayout({ buses: 3 }), { seed: 'bus-a', settings: { flightsPerDay: 160 } });
+    expect(stepUntil(sim, () => !!tripIn(sim, 'driving'), 8 * 3600)).toBe(true);
+    const t = tripIn(sim, 'driving')!;
+    const busId = t.busId!;
+    addDisruption(sim, { kind: 'vehicleFailure', targetId: busId, end: sim.state.now + 3600 });
+    stepSimulation(sim);
+    expect(sim.state.bus!.trips[t.id]!.phase).toBe('stalled');
+    expect(checkInvariants(sim)).toEqual([]);
+    expect(stepUntil(sim, () => sim.state.bus!.trips[t.id]!.phase === 'done', 3600)).toBe(true);
+    expect(sim.state.bus!.stats.rescues).toBeGreaterThanOrEqual(1);
+    for (let i = 0; i < 600; i++) stepSimulation(sim);
+    expect(checkInvariants(sim)).toEqual([]);
+  });
+
+  it('乗車中のバスが故障すると、旅客は乗車待ちに戻り、別のバスで運ばれる', { timeout: 300_000 }, () => {
+    const sim = createSimulation(busLayout({ buses: 3 }), { seed: 'bus-a', settings: { flightsPerDay: 160 } });
+    expect(stepUntil(sim, () => !!tripIn(sim, 'loading', 'dep') && tripIn(sim, 'loading', 'dep')!.pax > 0, 8 * 3600)).toBe(true);
+    const t = tripIn(sim, 'loading', 'dep')!;
+    const groups = [...t.groups];
+    const oldBus = t.busId!;
+    addDisruption(sim, { kind: 'vehicleFailure', targetId: oldBus, end: sim.state.now + 3 * 3600 });
+    stepSimulation(sim);
+    const after = sim.state.bus!.trips[t.id]!;
+    // 故障したバスの運行は未配車に戻り、同じティックに別のバスが空いていれば配車し直される
+    expect(['waiting', 'toPickup']).toContain(after.phase);
+    expect(after.busId).not.toBe(oldBus);
+    expect(after.groups).toEqual([]);
+    for (const id of groups) expect(sim.state.paxGroups[id]!.state).toBe('waitingBus');
+    expect(checkInvariants(sim)).toEqual([]);
+    expect(stepUntil(sim, () => groups.every((id) => ['onBus', 'boarded', 'missed'].includes(sim.state.paxGroups[id]!.state)), 1800)).toBe(true);
+  });
+
+  it('運行中のバスは配置換えできない（OCCUPIED）', { timeout: 300_000 }, () => {
+    const sim = createSimulation(busLayout({ buses: 3 }), { seed: 'bus-a', settings: { flightsPerDay: 160 } });
+    expect(stepUntil(sim, () => !!tripIn(sim, 'toPickup') || !!tripIn(sim, 'loading'), 8 * 3600)).toBe(true);
+    const t = tripIn(sim, 'toPickup') ?? tripIn(sim, 'loading')!;
+    const base = sim.ctx.bases[0]!.id;
+    expect(moveUnitToBase(sim, t.busId!, base)).toEqual({ ok: false, reason: 'OCCUPIED' });
+  });
+});
