@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findTerminalTransferRoute } from '../../src/core/terminal/interTerminal';
+import { terminalTransitStatus } from '../../src/core/terminal/transitStatus';
 import { addTerminalTransitLink, placeFacility, placeTerminalArea } from '../../src/core/layout/operations';
 import { exportLayout, importLayout } from '../../src/core/io/serialize';
 import { emptyLayout, must } from './helpers';
@@ -20,6 +21,35 @@ function twoTerminals() {
 }
 
 describe('ターミナル間連絡設備', () => {
+  it('運行画面向けに今時間帯の予約人数と能力待ち人数を集計する', () => {
+    const { layout: base, a1, a2 } = twoTerminals();
+    const layout = must(addTerminalTransitLink(base, {
+      kind: 'movingWalkway',
+      fromAreaId: a1,
+      toAreaId: a2,
+      distanceM: 240,
+      travelSec: 90,
+      capacityPerHour: 1200,
+      bidirectional: true,
+      allowedZones: ['departure'],
+    })).layout;
+    const linkId = Object.keys(layout.terminalLinks!)[0]!;
+    const status = terminalTransitStatus(
+      layout,
+      { hour: 3, passengersByLink: { [linkId]: 900 } },
+      { [linkId]: 12 },
+    );
+    expect(status).toEqual([expect.objectContaining({
+      id: linkId,
+      fromTerminalId: Object.values(layout.terminalAreas).find((area) => area.id === a1)!.terminalId,
+      toTerminalId: Object.values(layout.terminalAreas).find((area) => area.id === a2)!.terminalId,
+      capacityPerHour: 1200,
+      reservedThisHour: 900,
+      waitingPax: 12,
+      buildState: 'operational',
+    })]);
+  });
+
   it('既存のエリア間を双方向・片方向の徒歩経路として探索し、利用区域を守る', () => {
     const { layout: base, a1, a2 } = twoTerminals();
     const layout = must(addTerminalTransitLink(base, {

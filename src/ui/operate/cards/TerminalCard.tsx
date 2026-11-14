@@ -1,6 +1,7 @@
 import { compareIds } from '../../../core/model/ids';
 import { areaOccupancy, facilityLoad, serversOf } from '../../../core/sim/passengers';
 import { serviceSecPerPax } from '../../../core/terminal/capacity';
+import { terminalTransitStatus } from '../../../core/terminal/transitStatus';
 import { OPS_UI, displayName } from '../../../i18n/ja';
 import { Card, CardRow, useSecondly } from '../Card';
 import { focusTarget } from '../focus';
@@ -56,7 +57,18 @@ export function TerminalCard() {
       .sort((a, b) => b.queued - a.queued || b.avgWaitMin - a.avgWaitMin || compareIds(a.id, b.id))
       .slice(0, 4);
     const busWait = state.bus ? state.activePax.reduce((n, id) => (state.paxGroups[id]!.state === 'waitingBus' ? n + state.paxGroups[id]!.count : n), 0) : null;
-    return { inTerminal, missed: state.paxStats.missed, busWait, rows, terminals };
+    const waitingByLink: Record<string, number> = {};
+    for (const group of Object.values(state.paxGroups)) {
+      if (group.state === 'waitingTransport' && group.terminalLinkWaitingId) {
+        waitingByLink[group.terminalLinkWaitingId] = (waitingByLink[group.terminalLinkWaitingId] ?? 0) + group.count;
+      }
+    }
+    const transitLinks = terminalTransitStatus(ctx.layout, state.terminalTransit, waitingByLink).map((link) => ({
+      ...link,
+      fromTerminalName: displayName(ctx.layout, link.fromTerminalId),
+      toTerminalName: displayName(ctx.layout, link.toTerminalId),
+    }));
+    return { inTerminal, missed: state.paxStats.missed, busWait, rows, terminals, transitLinks };
   });
   return (
     <Card id="terminal" title={OPS_UI.terminalTitle} open="terminal" badge={data ? OPS_UI.inTerminal(data.inTerminal) : undefined}>
@@ -76,6 +88,23 @@ export function TerminalCard() {
               <span className="muted">館内 {t.occupants}人 · 保安 {t.securityPerHour}/時 · チェックイン {t.checkInPerHour}/時 · 平均待ち {t.avgWaitMin}分</span>
             </div>
           ))}
+          {data.transitLinks.length > 0 && (
+            <div data-testid="terminal-transit-status">
+              <div className="card-sub">ターミナル間連絡設備 · 今時間帯</div>
+              {data.transitLinks.map((link) => (
+                <div key={link.id} className="card-item" data-testid={`terminal-link-status-${link.id}`}>
+                  <span>{link.name || `${link.fromTerminalId} → ${link.toTerminalId}`}</span>
+                  <span className={link.waitingPax > 0 ? 'warn-text' : 'muted'}>
+                    {link.fromTerminalName} · {link.fromAreaName}
+                    {' → '}{link.toTerminalName} · {link.toAreaName}
+                    {' · '}予約 {link.reservedThisHour}/{link.capacityPerHour}人
+                    {' · '}待機 {link.waitingPax}人
+                    {link.buildState !== 'operational' ? ' · 運用外' : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {data.rows.length === 0 && <div className="card-sub">{OPS_UI.noTerminal}</div>}
           {data.rows.map((r) => (
             <div key={r.id} className="card-item" data-testid={`card-terminal-${r.id}`}>
