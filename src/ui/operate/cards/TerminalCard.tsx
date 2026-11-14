@@ -63,7 +63,7 @@ export function TerminalCard() {
         waitingByLink[group.terminalLinkWaitingId] = (waitingByLink[group.terminalLinkWaitingId] ?? 0) + group.count;
       }
     }
-    const transitLinks = terminalTransitStatus(ctx.layout, state.terminalTransit, waitingByLink).map((link) => ({
+    const transitLinks = terminalTransitStatus(ctx.layout, ctx.terminal, state.terminalTransit, waitingByLink).map((link) => ({
       ...link,
       fromTerminalName: displayName(ctx.layout, link.fromTerminalId),
       toTerminalName: displayName(ctx.layout, link.toTerminalId),

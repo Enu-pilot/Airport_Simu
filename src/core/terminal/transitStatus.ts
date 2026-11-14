@@ -1,6 +1,6 @@
 import type { AirportLayout } from '../model/types';
 import type { TerminalTransitRuntime } from '../sim/types';
-import { buildTerminalModel, terminalLinkCapacityPerHour } from './model';
+import { terminalLinkCapacityPerHour, type TerminalModel } from './model';
 
 export interface TerminalTransitStatus {
   id: string;
@@ -20,6 +20,7 @@ export interface TerminalTransitStatus {
 /** Snapshot of explicit terminal links; reservations are current-hour usage, not completed-trip history. */
 export function terminalTransitStatus(
   layout: AirportLayout,
+  model: TerminalModel,
   runtime: TerminalTransitRuntime | undefined,
   waitingByLink: Readonly<Record<string, number>>,
 ): TerminalTransitStatus[] {
@@ -42,7 +43,6 @@ export function terminalTransitStatus(
       waitingPax: waitingByLink[link.id] ?? 0,
     });
   }
-  const model = buildTerminalModel(layout);
   for (const [fromId, links] of Object.entries(model.links)) {
     for (const link of links) {
       if (!link.verticalTransportId) continue;

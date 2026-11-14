@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { findTerminalTransferRoute } from '../../src/core/terminal/interTerminal';
 import { terminalTransitStatus } from '../../src/core/terminal/transitStatus';
+import { buildTerminalModel } from '../../src/core/terminal/model';
 import { addTerminalTransitLink, placeFacility, placeTerminalArea } from '../../src/core/layout/operations';
 import { exportLayout, importLayout } from '../../src/core/io/serialize';
 import { emptyLayout, must } from './helpers';
@@ -36,6 +37,7 @@ describe('ターミナル間連絡設備', () => {
     const linkId = Object.keys(layout.terminalLinks!)[0]!;
     const status = terminalTransitStatus(
       layout,
+      buildTerminalModel(layout),
       { hour: 3, passengersByLink: { [linkId]: 900 } },
       { [linkId]: 12 },
     );
@@ -65,6 +67,7 @@ describe('ターミナル間連絡設備', () => {
     const transportId = `vertical:${elevator.id}`;
     const status = terminalTransitStatus(
       layout,
+      buildTerminalModel(layout),
       { hour: 3, passengersByLink: { [transportId]: 70 } },
       { [transportId]: 5 },
     );
