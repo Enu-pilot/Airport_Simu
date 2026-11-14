@@ -394,6 +394,7 @@ export interface PaxGroup {
   accessDone?: boolean;
   /** Active elevated/inter-terminal link; the group finishes this segment before rerouting after a gate change. */
   terminalLinkId?: string;
+  terminalLinkReservedHour?: number;
   terminalLinkWaitingId?: string;
   replanAfterTerminalLink?: boolean;
 }

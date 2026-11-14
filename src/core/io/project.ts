@@ -294,6 +294,9 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
     if (!isObj(group) || (group.stepFree !== undefined && typeof group.stepFree !== 'boolean')) {
       errors.push(`運航状態: 旅客グループ ${id} の段差なし経路設定が不正です`);
     }
+    if (isObj(group) && group.terminalLinkReservedHour !== undefined && (!Number.isInteger(group.terminalLinkReservedHour) || group.terminalLinkReservedHour < 0)) {
+      errors.push(`運航状態: 旅客グループ ${id} の連絡設備予約時刻が不正です`);
+    }
   }
   if (s.airlineStandHomes !== undefined) {
     const homes = s.airlineStandHomes;

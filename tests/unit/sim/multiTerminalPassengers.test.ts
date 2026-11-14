@@ -355,6 +355,47 @@ describe('複数ターミナルの旅客処理', () => {
     expect(checkPaxInvariants(sim, true)).toEqual([]);
   });
 
+  it('通路へ入る前に経路が閉鎖された場合は未使用の能力予約を戻す', { timeout: 300_000 }, () => {
+    const { layout: initial, first, second, standA, standB } = twoTerminalAirport();
+    const departureArea = (terminalId: string) =>
+      Object.values(initial.terminalAreas).find((area) => area.terminalId === terminalId && area.kind === 'waiting')!;
+    const layout = must(addTerminalTransitLink(initial, {
+      kind: 'walkway',
+      fromAreaId: departureArea(second).id,
+      toAreaId: departureArea(first).id,
+      distanceM: 250,
+      travelSec: 120,
+      capacityPerHour: 40,
+      bidirectional: true,
+      allowedZones: ['departure'],
+    })).layout;
+    const sim = createSimulation(layout, { seed: 'terminal-link-cancel-reservation', settings: manual });
+    const start = sim.state.now;
+    const ac = addTurnaround(sim, 'narrow180', start + 20 * 60, { departureAt: start + 5 * 3600, plan: contractPlan(standB) });
+    const dep = sim.state.flights[ac.departureFlightId]!;
+    runUntil(sim, () => dep.pax.gateId !== null, 60);
+    const group = addDepartureGroup(sim, dep.id, 30, sim.state.now)!;
+    group.steps = ['gate'];
+    group.stepIndex = 0;
+    group.securityCleared = true;
+    group.area = departureArea(second).id;
+    group.state = 'dwelling';
+    group.retryAt = sim.state.now;
+
+    expect(reassignStand(sim, ac.id, standA)).toEqual({ ok: true });
+    runUntil(sim, () => group.terminalLinkId !== undefined, 20 * 60);
+    const linkId = Object.keys(layout.terminalLinks!)[0]!;
+    group.legProgress = 0;
+    expect(group.legProgress).toBe(0);
+    expect(sim.state.terminalTransit?.passengersByLink[linkId]).toBe(30);
+
+    sim.state.closedAreas.push(departureArea(first).id);
+    runUntil(sim, () => group.terminalLinkId === undefined, 60);
+    expect(sim.state.terminalTransit?.passengersByLink[linkId]).toBeUndefined();
+    expect(group.replanAfterTerminalLink).toBeUndefined();
+    expect(checkPaxInvariants(sim, true)).toEqual([]);
+  });
+
   it('上下移動設備の時間帯能力を超えた旅客は待機し、次の時間帯に移動する', { timeout: 300_000 }, () => {
     let layout = createSampleAirport();
     const terminalId = Object.values(layout.facilities).find((facility) => facility.kind === 'terminal')!.id;

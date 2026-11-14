@@ -354,10 +354,11 @@ function reconcileDepartureGate(sim: Simulation, f: Flight, gateId: string | nul
     if (!g.targetTerminalId) delete g.targetTerminalId;
     if (g.steps[g.stepIndex] !== 'gate') continue;
     if (g.facility?.startsWith('gate:')) leaveFacility(sim.state, g);
-    if (g.terminalLinkId && g.route.length > 0) {
+    if (g.terminalLinkId && g.route.length > 0 && g.legProgress > 0) {
       g.replanAfterTerminalLink = true;
       continue;
     }
+    releaseUnstartedTransportReservation(sim, g);
     delete g.terminalLinkWaitingId;
     delete g.replanAfterTerminalLink;
     g.route = [];
@@ -668,6 +669,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
 function planStep(sim: Simulation, g: PaxGroup): void {
   const { state, ctx } = sim;
   const model = ctx.terminal;
+  releaseUnstartedTransportReservation(sim, g);
   const step = g.steps[g.stepIndex];
   const closed = new Set(state.closedAreas);
   g.route = [];
@@ -804,6 +806,7 @@ function startLeg(sim: Simulation, g: PaxGroup): void {
   const transportId = transferLinkId ?? (link?.verticalTransportId ? `vertical:${link.verticalTransportId}` : undefined);
   if (!transportId) {
     delete g.terminalLinkId;
+    delete g.terminalLinkReservedHour;
     delete g.terminalLinkWaitingId;
     return;
   }
@@ -832,7 +835,21 @@ function startLeg(sim: Simulation, g: PaxGroup): void {
   }
   usage[transportId] = used + g.count;
   g.terminalLinkId = transportId;
+  g.terminalLinkReservedHour = hour;
   delete g.terminalLinkWaitingId;
+}
+
+function releaseUnstartedTransportReservation(sim: Simulation, g: PaxGroup): void {
+  if (!g.terminalLinkId || g.legProgress > 0) return;
+  const runtime = sim.state.terminalTransit;
+  if (runtime && runtime.hour === g.terminalLinkReservedHour) {
+    const used = runtime.passengersByLink[g.terminalLinkId] ?? 0;
+    const remaining = Math.max(0, used - g.count);
+    if (remaining > 0) runtime.passengersByLink[g.terminalLinkId] = remaining;
+    else delete runtime.passengersByLink[g.terminalLinkId];
+  }
+  delete g.terminalLinkId;
+  delete g.terminalLinkReservedHour;
 }
 
 function walk(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): void {
@@ -866,7 +883,10 @@ function walk(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): voi
       if (g.targetTerminalId === nextTerminal) delete g.targetTerminalId;
     }
     g.route.shift();
-    if (completedTransfer) delete g.terminalLinkId;
+    if (completedTransfer) {
+      delete g.terminalLinkId;
+      delete g.terminalLinkReservedHour;
+    }
     if (completedTransfer && g.replanAfterTerminalLink) {
       delete g.replanAfterTerminalLink;
       g.route = [];
