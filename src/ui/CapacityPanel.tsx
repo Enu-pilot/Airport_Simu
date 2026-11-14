@@ -12,7 +12,7 @@ import { useCompany } from './ManagementPanels';
 const statusLabel: Record<CapacityStatus, string> = { adequate: '余裕あり', warning: '注意', shortage: '能力不足', uncomputed: '未算出' };
 const statusClass: Record<CapacityStatus, string> = { adequate: 'ok-text', warning: 'warning-text', shortage: 'ng-text', uncomputed: 'muted' };
 const fmt = (n: number | null, digits = 0) => n === null ? '未算出' : n.toLocaleString('ja-JP', { maximumFractionDigits: digits });
-const unitLabel: Record<CapacityMetric['unit'], string> = { 'movements/h': '回/時', 'movements/day': '回/日', aircraft: '機', pax: '人', 'pax/h': '人/時', 'pax/day': '人/日', 'aircraft/day': '機/日', units: '台・人', 'pax/trip': '人/便' };
+const unitLabel: Record<CapacityMetric['unit'], string> = { 'movements/h': '回/時', 'movements/day': '回/日', aircraft: '機', pax: '人', 'pax/h': '人/時', 'pax/day': '人/日', 'aircraft/day': '機/日', units: '台・人', 'pax/trip': '人/便', 'vehicles/h': '台/時', 'trains/h': '本/時', 'fuel/h': '単位/時' };
 
 function MetricCard({ item }: { item: CapacityMetric }) {
   return <article className={`capacity-card capacity-${item.status}`} title={item.basis}>

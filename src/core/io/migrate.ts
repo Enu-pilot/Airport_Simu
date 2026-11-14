@@ -5,7 +5,7 @@
 
 /**
  * 現行の版は SCHEMA_VERSION（model/types.ts）。
- * 構造的な移行は v1 → v2 のみ。v2 → v3 は任意項目の追加だけなので書き換えない（layout.schemaVersion も触らない）。
+ * 構造的な移行は v1 → v2 のみ。v2 → v3 は任意項目の追加だけなので書き換えない（level 欠落は地上）。
  */
 export function migrateLayout(raw: unknown, fromVersion: number): void {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return;
@@ -15,6 +15,6 @@ export function migrateLayout(raw: unknown, fromVersion: number): void {
     l.terminalAreas = {};
     l.schemaVersion = 2;
   }
-  // v2 → v3: 任意項目の追加のみ（自由形の滑走路・磁気偏差・ルール切替など）。書き換えなし
+  // v2 → v3: 任意項目のみ（自由形滑走路・磁気偏差・ルール切替・多層交通）。書き換えなし。
 
 }

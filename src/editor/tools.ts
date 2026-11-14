@@ -283,7 +283,7 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
       points.push(next);
       return tool === 'taxiway'
         ? wrap(addTaxiwayPath(layout, points, { widthClass: options.taxiWidth, oneWay: options.oneWay, buildState: options.buildState }))
-        : wrap(addRoadPath(layout, points, { roadClass: options.roadClass, oneWay: options.oneWay, buildState: options.buildState }));
+        : wrap(addRoadPath(layout, points, { roadClass: options.roadClass, oneWay: options.oneWay, buildState: options.buildState, level: options.roadLevel, capacityPerHour: options.roadCapacityPerHour }));
     }
     case 'land': {
       // 土地購入: ドラッグした矩形（クリックは1タイル）の未取得地
@@ -316,6 +316,7 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
             w: Math.max(r.w, spec.minW),
             h: Math.max(r.h, spec.minH),
             buildState: options.buildState,
+            ...(kind === 'railStation' ? { props: { level: options.roadLevel } } : {}),
           }),
         );
       }
@@ -324,6 +325,7 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
         placeFacility(layout, kind, centeredOrigin(hover, dims.w, dims.h), {
           rotation: options.rotation,
           buildState: options.buildState,
+          ...(kind === 'railStation' ? { props: { level: options.roadLevel } } : {}),
         }),
       );
     }

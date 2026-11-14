@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createSandboxCompany } from '../../src/core/economy/company';
-import { buildProject, formatVersionOf, serializeProject, validateProject, PROJECT_FORMAT_VERSION, PROJECT_FORMAT_VERSION_2 } from '../../src/core/io/project';
+import { buildProject, formatVersionOf, serializeProject, validateProject, PROJECT_FORMAT_VERSION, PROJECT_FORMAT_VERSION_2, PROJECT_FORMAT_VERSION_3 } from '../../src/core/io/project';
+import { addRoadPath } from '../../src/core/layout/operations';
+import { must } from './helpers';
 import { defaultGame, startGame } from '../../src/core/economy/game';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 
@@ -44,11 +46,22 @@ describe('12B-3a A1: 保存形式の版は新しい項目を使うときだけ 2
     const r1 = validateProject(serializeProject(p1), opts);
     expect(r1.project!.formatVersion).toBe(1);
     expect(r1.migratedFrom).toBeNull();
-    const r3 = validateProject(JSON.stringify({ ...p2, formatVersion: 3 }), opts);
-    expect(r3.ok).toBe(false);
+    const r4 = validateProject(JSON.stringify({ ...p2, formatVersion: 4 }), opts);
+    expect(r4.ok).toBe(false);
     // v2 を名乗るが新しい項目を使わないファイルは、再保存で 1 に戻る
     const r2plain = validateProject(JSON.stringify({ ...p1, formatVersion: 2 }), opts);
     expect(r2plain.project!.formatVersion).toBe(1);
+  });
+});
+
+describe('Phase U: 多層交通は保存形式 v3 を使う', () => {
+  it('階層道路を含むレイアウトを v3 で保存・復元し、v2 を名乗る不整合は拒否する', () => {
+    const layout = must(addRoadPath(createSampleAirport(), [{ x: 12, y: 12 }, { x: 18, y: 12 }], { roadClass: 'walkway', level: -1, capacityPerHour: 500 })).layout;
+    const project = build(layout);
+    expect(project.formatVersion).toBe(PROJECT_FORMAT_VERSION_3);
+    expect(formatVersionOf(project)).toBe(PROJECT_FORMAT_VERSION_3);
+    expect(validateProject(serializeProject(project), opts).project?.layout.roads).toEqual(layout.roads);
+    expect(validateProject(JSON.stringify({ ...project, formatVersion: PROJECT_FORMAT_VERSION_2 }), opts).ok).toBe(false);
   });
 });
 

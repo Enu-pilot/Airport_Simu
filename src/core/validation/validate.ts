@@ -28,7 +28,9 @@ import type { NetNode, TerminalAreaKind } from '../model/types';
 import { CONNECTOR_DETOUR, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
-import { ACCESS_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTiles } from '../access/landside';
+import { ACCESS_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTilesAtLevel } from '../access/landside';
+import { connectorFits, facilityLevel, roadEdgeLevelValid } from '../model/levels';
+import { findPedestrianRoute } from '../access/verticalWalk';
 import { busGateStatus } from '../terminal/busGateAssignment';
 
 /**
@@ -88,9 +90,11 @@ export type IssueCode =
   | 'PARKING_NO_ROAD'
   | 'ROAD_NO_ENTRANCE'
   | 'ROAD_CROSSING_NO_JUNCTION'
+  | 'ROAD_LAYER_CONNECTION_INVALID'
   // 空港アクセス
   | 'ACCESS_NOT_CONNECTED'
   | 'STATION_NO_RAIL'
+  | 'ACCESS_ROUTE_UNREACHABLE'
   | 'ACCESS_FAR_FROM_TERMINAL'
   // ターミナル内部
   | 'TERMINAL_AREA_OUTSIDE'
@@ -160,8 +164,10 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   PARKING_NO_ROAD: 'warning',
   ROAD_NO_ENTRANCE: 'warning',
   ROAD_CROSSING_NO_JUNCTION: 'warning',
+  ROAD_LAYER_CONNECTION_INVALID: 'error',
   ACCESS_NOT_CONNECTED: 'warning',
   STATION_NO_RAIL: 'warning',
+  ACCESS_ROUTE_UNREACHABLE: 'warning',
   ACCESS_FAR_FROM_TERMINAL: 'warning',
   TERMINAL_AREA_OUTSIDE: 'error',
   TERMINAL_AREA_OVERLAP: 'error',
@@ -307,10 +313,12 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
     // 多角形で判定する部分（自由形）は下の多角形の判定で扱う
     if (p.poly) continue;
     for (const t of p.tiles) {
-      const k = tileKey(t.x, t.y);
-      let list = occ.get(k);
-      if (!list) occ.set(k, (list = []));
-      list.push({ ownerId: p.ownerId, layer: p.layer });
+      for (const level of p.levels ?? [p.level ?? 0]) {
+        const k = `${level}|${tileKey(t.x, t.y)}`;
+        let list = occ.get(k);
+        if (!list) occ.set(k, (list = []));
+        list.push({ ownerId: p.ownerId, layer: p.layer });
+      }
     }
   }
 
@@ -361,7 +369,7 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
 
   for (const [k, list] of occ) {
     if (list.length < 2) continue;
-    const [x, y] = k.split(',').map(Number) as [number, number];
+    const [x, y] = k.slice(k.lastIndexOf('|') + 1).split(',').map(Number) as [number, number];
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) judge(list[i]!, list[j]!, { x, y }, false);
     }
@@ -371,7 +379,9 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
   const polys = parts.filter((p) => p.poly);
   for (const p of polys) {
     for (const t of p.tiles) {
-      for (const o of occ.get(tileKey(t.x, t.y)) ?? []) judge({ ownerId: p.ownerId, layer: p.layer }, o, t, true);
+      for (const level of p.levels ?? [p.level ?? 0]) {
+        for (const o of occ.get(`${level}|${tileKey(t.x, t.y)}`) ?? []) judge({ ownerId: p.ownerId, layer: p.layer }, o, t, true);
+      }
     }
   }
   const boxes = polys.map((p) => polyBBox(p.poly!));
@@ -380,6 +390,7 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
       const A = polys[i]!;
       const B = polys[j]!;
       if (A.ownerId === B.ownerId) continue;
+      if (!(A.levels ?? [A.level ?? 0]).some((level) => (B.levels ?? [B.level ?? 0]).includes(level))) continue;
       const a = boxes[i]!;
       const b = boxes[j]!;
       if (a.x1 < b.x0 || b.x1 < a.x0 || a.y1 < b.y0 || b.y1 < a.y0) continue;
@@ -394,7 +405,7 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
 
   // スポットはエプロン上に置く
   for (const s of sortedValues(layout.stands)) {
-    const off = standTiles(s).find((t) => !(occ.get(tileKey(t.x, t.y)) ?? []).some((o) => o.layer === 'apron'));
+    const off = standTiles(s).find((t) => !(occ.get(`0|${tileKey(t.x, t.y)}`) ?? []).some((o) => o.layer === 'apron'));
     if (off) sink.add('STAND_NOT_ON_APRON', [s.id], {}, off);
   }
 }
@@ -411,7 +422,7 @@ function checkNetworkGeometry(
   // 同位置のノード
   const byPos = new Map<string, string[]>();
   for (const n of sortedValues(nodes)) {
-    const k = tileKey(n.pos.x, n.pos.y);
+    const k = `${n.level ?? 0}|${tileKey(n.pos.x, n.pos.y)}`;
     byPos.set(k, [...(byPos.get(k) ?? []), n.id]);
   }
   for (const ids of byPos.values()) {
@@ -427,6 +438,9 @@ function checkNetworkGeometry(
       const c = nodes[f.from]?.pos;
       const d = nodes[f.to]?.pos;
       if (!c || !d) continue;
+      const eLevels = [nodes[e.from]?.level ?? 0, nodes[e.to]?.level ?? 0];
+      const fLevels = [nodes[f.from]?.level ?? 0, nodes[f.to]?.level ?? 0];
+      if (!eLevels.some((level) => fLevels.includes(level))) continue;
       const shared = [e.from, e.to].filter((n) => n === f.from || n === f.to).length;
       if (shared === 2) {
         sink.add('DUPLICATE_EDGE', [e.id, f.id], {}, a);
@@ -790,7 +804,7 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
 
 function checkRoads(layout: AirportLayout, parts: FootprintPart[], sink: IssueSink): void {
   const uf = new UnionFind();
-  for (const e of Object.values(layout.roads)) if (e.roadClass !== 'rail') uf.union(e.from, e.to);
+  for (const e of Object.values(layout.roads)) if (e.roadClass === 'public' || e.roadClass === 'service') uf.union(e.from, e.to);
   const comps = new Map<string, string[]>();
   for (const e of sortedValues(layout.roads)) {
     if (e.roadClass !== 'public') continue;
@@ -803,7 +817,7 @@ function checkRoads(layout: AirportLayout, parts: FootprintPart[], sink: IssueSi
       .some((p) => p.tiles.some((t) => isSiteEdge(layout.site, t.x, t.y)));
     // 同じ連結成分のサービス道路が出口に届いていても可
     const viaService = Object.values(layout.roads)
-      .filter((e) => e.roadClass !== 'rail' && uf.find(e.from) === uf.find(layout.roads[ids[0]!]!.from))
+      .filter((e) => (e.roadClass === 'public' || e.roadClass === 'service') && uf.find(e.from) === uf.find(layout.roads[ids[0]!]!.from))
       .some((e) => {
         const a = layout.roadNodes[e.from]?.pos;
         const b = layout.roadNodes[e.to]?.pos;
@@ -811,6 +825,35 @@ function checkRoads(layout: AirportLayout, parts: FootprintPart[], sink: IssueSi
       });
     if (!reachesEdge && !viaService) {
       sink.add('ROAD_NO_ENTRANCE', ids, { count: ids.length }, layout.roadNodes[layout.roads[ids[0]!]!.from]?.pos);
+    }
+  }
+}
+
+function checkRoadLayers(layout: AirportLayout, sink: IssueSink): void {
+  for (const n of Object.values(layout.roadNodes)) {
+    if (n.level !== undefined && (!Number.isInteger(n.level) || n.level < -5 || n.level > 10)) sink.add('ROAD_LAYER_CONNECTION_INVALID', [n.id], { reason: '階層値が範囲外' }, n.pos);
+    if (n.elevationM !== undefined && !Number.isFinite(n.elevationM)) sink.add('ROAD_LAYER_CONNECTION_INVALID', [n.id], { reason: '標高が不正' }, n.pos);
+  }
+  for (const e of sortedValues(layout.roads)) {
+    const a = layout.roadNodes[e.from];
+    const b = layout.roadNodes[e.to];
+    if (!a || !b) continue;
+    const la = a.level ?? 0;
+    const lb = b.level ?? 0;
+    const at = { x: Math.round((a.pos.x + b.pos.x) / 2), y: Math.round((a.pos.y + b.pos.y) / 2) };
+    const invalid = !roadEdgeLevelValid(e, a, b);
+    if (invalid) {
+      const reason = la === lb
+        ? '同じ階層の区間に階層接続設備が設定されているか、端点標高が一致していません'
+        : !connectorFits(e.roadClass, e.connectorKind)
+          ? '階層差に合う階段・昇降機・ランプ・配管接続がありません'
+          : '勾配または垂直接続設備の配置距離が条件を満たしません';
+      sink.add('ROAD_LAYER_CONNECTION_INVALID', [e.id], { reason }, at);
+      continue;
+    }
+    if (e.capacityPerHour !== undefined && (!Number.isFinite(e.capacityPerHour) || e.capacityPerHour <= 0)) {
+      sink.add('ROAD_LAYER_CONNECTION_INVALID', [e.id], { reason: '能力値は正の有限値が必要' }, at);
+      continue;
     }
   }
 }
@@ -823,8 +866,12 @@ function checkAccess(layout: AirportLayout, sink: IssueSink): void {
   const net = buildLandsideNetwork(layout);
   for (const f of facilities) {
     if (f.kind === 'railStation') {
-      if (!touchesTiles(f, net.railTiles)) sink.add('STATION_NO_RAIL', [f.id], {}, f.origin);
-    } else if (!touchesTiles(f, f.kind === 'staffParking' ? net.anyRoadTiles : net.publicTiles)) {
+      if (!touchesTilesAtLevel(f, net.railTilesByLevel, facilityLevel(f))) sink.add('STATION_NO_RAIL', [f.id], {}, f.origin);
+      else if (Object.values(layout.roads).some((e) => e.roadClass === 'walkway' && e.buildState === 'operational')) {
+        const terminals = facilities.filter((x) => x.kind === 'terminal' && x.buildState === 'operational');
+        if (!terminals.some((t) => findPedestrianRoute(layout, f, t))) sink.add('ACCESS_ROUTE_UNREACHABLE', [f.id], { mode: 'rail' }, f.origin);
+      } else if (facilityLevel(f) !== 0) sink.add('ACCESS_ROUTE_UNREACHABLE', [f.id], { mode: 'rail' }, f.origin);
+    } else if (!touchesTilesAtLevel(f, f.kind === 'staffParking' ? net.anyRoadTilesByLevel : net.publicTilesByLevel, facilityLevel(f))) {
       sink.add('ACCESS_NOT_CONNECTED', [f.id], {}, f.origin);
     }
     if (f.kind !== 'staffParking') {
@@ -1026,6 +1073,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   checkPlacement(layout, parts, sink, network);
   checkNetworkGeometry(layout.taxiNodes, layout.taxiways, 'TAXIWAY_CROSSING_NO_JUNCTION', sink);
   checkNetworkGeometry(layout.roadNodes, layout.roads, 'ROAD_CROSSING_NO_JUNCTION', sink);
+  checkRoadLayers(layout, sink);
   checkAirside(layout, network, sink, isolatedEdges);
   checkRunwayRules(layout, sink);
   checkHoldShort(layout, network, sink);

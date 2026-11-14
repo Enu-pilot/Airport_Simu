@@ -21,7 +21,10 @@ export function taxiwayDrawWidthM(e: { widthClass: SizeClass; codeF?: boolean })
 
 /** 道路・鉄道の描画幅（m） */
 export function roadDrawWidthM(e: { roadClass: string }): number {
-  return e.roadClass === 'rail' ? ROAD_DRAW_WIDTH_M.rail : ROAD_DRAW_WIDTH_M.road;
+  if (e.roadClass === 'rail') return ROAD_DRAW_WIDTH_M.rail;
+  if (e.roadClass === 'walkway') return ROAD_DRAW_WIDTH_M.walkway;
+  if (e.roadClass === 'fuel') return ROAD_DRAW_WIDTH_M.fuel;
+  return ROAD_DRAW_WIDTH_M.road;
 }
 
 /** 滑走路の舗装面（World フレーム、4 頂点） */

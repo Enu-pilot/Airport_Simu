@@ -14,6 +14,7 @@ import {
   type Heading,
   type PropValue,
   type RoadClass,
+  type RoadEdge,
   type Rotation,
   type RunwayDims,
   type RunwayFree,
@@ -25,6 +26,7 @@ import {
   type PaxZone,
   type TerminalArea,
   type TerminalAreaKind,
+  type TerminalTransitKind,
   Terrain,
 } from '../model/types';
 import { add, distance, sameTile, type Tile } from '../geometry/vec';
@@ -45,6 +47,7 @@ import {
   type NetKind,
 } from './network';
 import { headingVector, runwayAxis, runwayEnd, runwayMidpoint } from './runway';
+import { roadEdgeLevelValid } from '../model/levels';
 
 /**
  * 編集操作。すべて純粋関数で、入力レイアウトを変更せず新しいレイアウトを返す。
@@ -59,6 +62,8 @@ export type OpFailure =
   | 'EMPTY_PATH'
   | 'NO_CHANGE'
   | 'LAND_NOT_ADJACENT'
+  | 'LEVEL_MISMATCH'
+  | 'INVALID_CONNECTOR'
   /** 自由形をグリッドに合わせたとき、長さが従来形の最大（MAX_RUNWAY_LENGTH ステップ）を超える */
   | 'TOO_LONG_FOR_GRID';
 
@@ -116,6 +121,9 @@ function finalize(d: AirportLayout): AirportLayout {
   }
   for (const s of Object.values(d.stands)) {
     if (s.busGateId && (d.facilities[s.busGateId]?.kind !== 'gate' || d.facilities[s.busGateId]?.props.boardingMode !== 'bus')) s.busGateId = null;
+  }
+  for (const [id, link] of Object.entries(d.terminalLinks ?? {})) {
+    if (!d.terminalAreas[link.fromAreaId] || !d.terminalAreas[link.toAreaId]) delete d.terminalLinks![id];
   }
   return d;
 }
@@ -424,6 +432,56 @@ export function placeTerminalArea(
   return ok(finalize(d), [id]);
 }
 
+export interface TerminalTransitOptions {
+  name?: string;
+  kind: TerminalTransitKind;
+  fromAreaId: string;
+  toAreaId: string;
+  distanceM: number;
+  travelSec: number;
+  capacityPerHour?: number;
+  bidirectional?: boolean;
+  buildState?: BuildState;
+  allowedZones: PaxZone[];
+}
+
+/** Add an explicit, zone-restricted passenger link between areas in different terminals. */
+export function addTerminalTransitLink(layout: AirportLayout, opts: TerminalTransitOptions): OpResult {
+  const from = layout.terminalAreas[opts.fromAreaId];
+  const to = layout.terminalAreas[opts.toAreaId];
+  if (!from || !to) return fail('NOT_FOUND');
+  if (from.terminalId === to.terminalId) return fail('INVALID_VALUE');
+  if (opts.kind !== 'walkway' && opts.kind !== 'movingWalkway') return fail('INVALID_VALUE');
+  if (!Number.isFinite(opts.distanceM) || opts.distanceM <= 0 || !Number.isFinite(opts.travelSec) || opts.travelSec <= 0) return fail('INVALID_VALUE');
+  if (opts.capacityPerHour !== undefined && (!Number.isFinite(opts.capacityPerHour) || opts.capacityPerHour <= 0)) return fail('INVALID_VALUE');
+  const zones = [...new Set(opts.allowedZones)];
+  if (!zones.length || zones.some((zone) => zone !== from.zone || zone !== to.zone)) return fail('INVALID_VALUE');
+  const d = cloneLayout(layout);
+  d.terminalLinks ??= {};
+  const id = allocId(d, 'tlk');
+  d.terminalLinks[id] = {
+    id,
+    name: opts.name ?? '',
+    kind: opts.kind,
+    fromAreaId: from.id,
+    toAreaId: to.id,
+    distanceM: opts.distanceM,
+    travelSec: opts.travelSec,
+    ...(opts.capacityPerHour === undefined ? {} : { capacityPerHour: opts.capacityPerHour }),
+    bidirectional: opts.bidirectional ?? true,
+    buildState: opts.buildState ?? 'operational',
+    allowedZones: zones,
+  };
+  return ok(finalize(d), [id]);
+}
+
+export function deleteTerminalTransitLink(layout: AirportLayout, id: string): OpResult {
+  if (!layout.terminalLinks?.[id]) return fail('NOT_FOUND');
+  const d = cloneLayout(layout);
+  delete d.terminalLinks![id];
+  return ok(finalize(d));
+}
+
 /** ターミナルに属するエリア（ID 順） */
 export function areasOf(layout: AirportLayout, terminalId: string): TerminalArea[] {
   return sortedValues(layout.terminalAreas).filter((a) => a.terminalId === terminalId);
@@ -454,19 +512,56 @@ export interface RoadOptions {
   oneWay?: boolean;
   buildState?: BuildState;
   name?: string;
+  level?: number;
+  capacityPerHour?: number;
 }
 
 export function addRoadPath(layout: AirportLayout, points: readonly Tile[], opts: RoadOptions = {}): OpResult {
   if (points.length < 2) return fail('EMPTY_PATH');
+  const level = opts.level ?? 0;
+  if (!Number.isInteger(level) || level < -5 || level > 10) return fail('INVALID_VALUE');
+  if (opts.capacityPerHour !== undefined && (!Number.isFinite(opts.capacityPerHour) || opts.capacityPerHour <= 0)) return fail('INVALID_VALUE');
   const d = cloneLayout(layout);
   const { edgeIds } = addPath(d, 'road', points, {
     name: opts.name ?? '',
     roadClass: opts.roadClass ?? 'public',
     oneWay: opts.oneWay ?? false,
     buildState: opts.buildState ?? 'operational',
-  });
+    ...(Number.isFinite(opts.capacityPerHour) && opts.capacityPerHour! > 0 ? { capacityPerHour: opts.capacityPerHour } : {}),
+  }, level);
   if (edgeIds.length === 0) return fail('NO_CHANGE');
   return ok(finalize(d), edgeIds);
+}
+
+export interface RoadConnectorOptions {
+  roadClass: RoadClass;
+  connectorKind: import('../model/types').RoadConnectorKind;
+  capacityPerHour?: number;
+  travelSec?: number;
+  buildState?: BuildState;
+}
+
+/** 異なる階層の道路ノードを、種別に合った明示的な接続設備で結ぶ。 */
+export function connectRoadLevels(layout: AirportLayout, from: string, to: string, opts: RoadConnectorOptions): OpResult {
+  const a = layout.roadNodes[from];
+  const b = layout.roadNodes[to];
+  if (!a || !b || from === to) return fail('NOT_FOUND');
+  const la = a.level ?? 0;
+  const lb = b.level ?? 0;
+  if (la === lb) return fail('LEVEL_MISMATCH');
+  if ((opts.capacityPerHour !== undefined && (!Number.isFinite(opts.capacityPerHour) || opts.capacityPerHour <= 0)) || (opts.travelSec !== undefined && (!Number.isFinite(opts.travelSec) || opts.travelSec <= 0))) return fail('INVALID_VALUE');
+  const candidate: RoadEdge = { id: 'preview', from, to, name: '', roadClass: opts.roadClass, oneWay: false, buildState: opts.buildState ?? 'operational', connectorKind: opts.connectorKind };
+  if (!roadEdgeLevelValid(candidate, a, b)) return fail('INVALID_CONNECTOR');
+  if (Object.values(layout.roads).some((e) => (e.from === from && e.to === to) || (e.from === to && e.to === from))) return fail('NO_CHANGE');
+  const d = cloneLayout(layout);
+  const id = allocId(d, 'rd');
+  d.roads[id] = {
+    id, from, to, name: opts.connectorKind, roadClass: opts.roadClass, oneWay: false,
+    buildState: opts.buildState ?? 'operational', connectorKind: opts.connectorKind,
+    ...(Number.isFinite(opts.capacityPerHour) && opts.capacityPerHour! > 0 ? { capacityPerHour: opts.capacityPerHour } : {}),
+    ...(Number.isFinite(opts.travelSec) && opts.travelSec! > 0 ? { travelSec: opts.travelSec } : {}),
+  };
+  return ok(finalize(d), [id]);
 }
 
 // ---------------------------------------------------------------- 土地
@@ -520,7 +615,7 @@ function moveNodes(d: AirportLayout, net: NetKind, ids: readonly string[], delta
     const n = nodes[id];
     if (!n) return 'NOT_FOUND';
     const target = add(n.pos, delta);
-    const clash = Object.values(nodes).find((m) => !moving.has(m.id) && sameTile(m.pos, target));
+    const clash = Object.values(nodes).find((m) => !moving.has(m.id) && (m.level ?? 0) === (n.level ?? 0) && sameTile(m.pos, target));
     if (clash) return 'NODE_EXISTS';
   }
   for (const id of ids) nodes[id]!.pos = add(nodes[id]!.pos, delta);
@@ -882,9 +977,12 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
     case 'road':
       err = apply(d.roads[id], {
         name: str,
-        roadClass: (v) => v === 'public' || v === 'service' || v === 'rail',
+        roadClass: (v) => v === 'public' || v === 'service' || v === 'rail' || v === 'walkway' || v === 'fuel',
         oneWay: bool,
         buildState: isBuildState,
+        connectorKind: (v) => v === 'stairs' || v === 'escalator' || v === 'elevator' || v === 'ramp' || v === 'railRamp' || v === 'pipeRiser',
+        capacityPerHour: (v) => Number.isFinite(v) && Number(v) > 0,
+        travelSec: (v) => Number.isFinite(v) && Number(v) > 0,
       });
       break;
     case 'stand': {

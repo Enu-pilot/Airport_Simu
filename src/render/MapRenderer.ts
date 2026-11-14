@@ -105,6 +105,7 @@ export class MapRenderer {
     if (s.overlays.grid) this.drawGrid(cam, s.viewSize, layout.site);
     this.drawLayout(layout, analysis, s);
     this.drawConnectors(layout, analysis, s.selection);
+    this.drawTerminalTransit(layout, s.selection);
     if (s.overlays.interior) this.drawInterior(layout, s, cam);
     if (s.overlays.network) this.drawNetwork(analysis);
     if (s.overlays.issues) this.drawIssues(layout, analysis);
@@ -226,7 +227,7 @@ export class MapRenderer {
 
   private drawLayout(layout: AirportLayout, analysis: LayoutAnalysis, s: EditorState): void {
     const g = this.g;
-    const facilities = Object.values(layout.facilities);
+    const facilities = Object.values(layout.facilities).filter((f) => f.kind !== 'railStation' || s.mapLevel === 'all' || Number(f.props.level ?? 0) === s.mapLevel);
     const byLayer = (layer: string) => facilities.filter((f) => FACILITY_SPECS[f.kind].layer === layer);
 
     // 滑走路保護区域
@@ -253,7 +254,10 @@ export class MapRenderer {
       const a = layout.roadNodes[e.from];
       const b = layout.roadNodes[e.to];
       if (!a || !b) continue;
-      const alpha = BUILD_ALPHA[e.buildState];
+      const fromLevel = a.level ?? 0;
+      const toLevel = b.level ?? 0;
+      if (s.mapLevel !== 'all' && fromLevel !== s.mapLevel && toLevel !== s.mapLevel) continue;
+      const alpha = BUILD_ALPHA[e.buildState] * (s.mapLevel === 'all' && fromLevel !== toLevel ? 0.65 : 1);
       if (e.roadClass === 'rail') {
         // 鉄道: 細い道床と枕木
         g.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ width: mToTiles(roadDrawWidthM(e)), color: COLOR.rail, alpha, cap: 'round' });
@@ -261,8 +265,12 @@ export class MapRenderer {
         if (e.buildState !== 'operational') this.edgeStateMarks(g, c(a.pos), c(b.pos), e.buildState);
         continue;
       }
-      const color = e.roadClass === 'public' ? COLOR.roadPublic : COLOR.roadService;
+      const color = e.roadClass === 'public' ? COLOR.roadPublic : e.roadClass === 'service' ? COLOR.roadService : e.roadClass === 'walkway' ? COLOR.walkway : COLOR.fuelPipe;
       g.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ width: mToTiles(roadDrawWidthM(e)), color, alpha, cap: 'round' });
+      if (e.connectorKind) {
+        const mid = c({ x: (a.pos.x + b.pos.x) / 2, y: (a.pos.y + b.pos.y) / 2 });
+        g.circle(mid.x, mid.y, 0.35).stroke({ width: this.px(1.4), color: COLOR.selection, alpha });
+      }
       if (e.roadClass === 'public') {
         this.dashed(g, c(a.pos), c(b.pos), 0.6, 0.6, { width: this.px(1), color: COLOR.roadMarking, alpha: 0.6 * alpha });
       }
@@ -336,6 +344,7 @@ export class MapRenderer {
         g.circle(c(n.pos).x, c(n.pos).y, r).fill({ color: NODE_COLOR[kind] }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.6 });
       }
       for (const n of Object.values(layout.roadNodes)) {
+        if (s.mapLevel !== 'all' && (n.level ?? 0) !== s.mapLevel) continue;
         g.circle(c(n.pos).x, c(n.pos).y, 0.14).fill({ color: 0xd7ccc8 }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.6 });
       }
     }
@@ -531,6 +540,24 @@ export class MapRenderer {
         }
         o.stroke({ width: this.px(sel ? 3 : 1.5), color: anchorId === cn.depAnchor ? 0x7fdbff : 0xffd166, alpha: sel ? 0.95 : 0.7 });
       }
+    }
+  }
+
+  /** Explicitly configured walkways between distinct terminal area graphs. */
+  private drawTerminalTransit(layout: AirportLayout, selection: string | null): void {
+    const g = this.overlay;
+    for (const link of Object.values(layout.terminalLinks ?? {})) {
+      const from = layout.terminalAreas[link.fromAreaId];
+      const to = layout.terminalAreas[link.toAreaId];
+      if (!from || !to) continue;
+      const a = c({ x: from.origin.x + from.w / 2, y: from.origin.y + from.h / 2 });
+      const b = c({ x: to.origin.x + to.w / 2, y: to.origin.y + to.h / 2 });
+      const selected = selection === from.id || selection === to.id;
+      const color = link.kind === 'movingWalkway' ? COLOR.selection : COLOR.walkway;
+      const alpha = BUILD_ALPHA[link.buildState];
+      this.dashed(g, a, b, 0.65, 0.4, { width: this.px(selected ? 3 : 1.7), color, alpha });
+      if (!link.bidirectional) this.arrow(g, a, b, color, alpha);
+      for (const p of [a, b]) g.circle(p.x, p.y, this.px(selected ? 4 : 2.5)).fill({ color, alpha });
     }
   }
 

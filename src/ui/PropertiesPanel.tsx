@@ -12,13 +12,19 @@ import {
   isFreeRunway,
   type AirportLayout,
   type BuildState,
+  type RoadClass,
+  type RoadConnectorKind,
   type Rotation,
+  type TerminalTransitKind,
 } from '../core/model/types';
 import { distance } from '../core/geometry/vec';
 import { facilityDims, standEntry } from '../core/layout/footprint';
 import { edgesOfNode } from '../core/layout/network';
 import {
   deleteEntity,
+  connectRoadLevels,
+  addTerminalTransitLink,
+  deleteTerminalTransitLink,
   duplicateEntity,
   reverseEdge,
   rotateEntity,
@@ -200,6 +206,8 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
         {readOnly && type === 'terminalArea' && <AreaOpsSection id={id} />}
       </Section>
 
+      {type === 'terminalArea' && <TerminalTransitControls layout={layout} areaId={id} readOnly={readOnly} />}
+
       {issues.length > 0 && (
         <Section title={`問題（${issues.length}）`}>
           {issues.map((iss) => (
@@ -212,6 +220,49 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
       )}
     </>
   );
+}
+
+function TerminalTransitControls({ layout, areaId, readOnly }: { layout: AirportLayout; areaId: string; readOnly: boolean }) {
+  const area = layout.terminalAreas[areaId];
+  const [targetId, setTargetId] = useState('');
+  const [kind, setKind] = useState<TerminalTransitKind>('walkway');
+  const [distanceM, setDistanceM] = useState(250);
+  const [travelSec, setTravelSec] = useState(190);
+  const [capacity, setCapacity] = useState(0);
+  const [bidirectional, setBidirectional] = useState(true);
+  if (!area) return null;
+  const candidates = Object.values(layout.terminalAreas)
+    .filter((other) => other.terminalId !== area.terminalId && other.zone === area.zone)
+    .sort((a, b) => a.terminalId.localeCompare(b.terminalId) || a.id.localeCompare(b.id));
+  const links = Object.values(layout.terminalLinks ?? {}).filter((link) => link.fromAreaId === areaId || link.toAreaId === areaId);
+  return <Section title="ターミナル間連絡設備" testid="terminal-transit-controls">
+    <p className="muted small">選択エリアを、別ターミナルの同じ旅客区域に接続します。旅客生成は行わず、明示された連絡経路だけを探索します。</p>
+    {links.map((link) => {
+      const from = layout.terminalAreas[link.fromAreaId];
+      const to = layout.terminalAreas[link.toAreaId];
+      return <div key={link.id} className="operability" data-testid={`terminal-link-${link.id}`}>
+        <strong>{link.kind === 'movingWalkway' ? '動く歩道' : '徒歩連絡通路'} · {from?.terminalId ?? '?'} → {to?.terminalId ?? '?'}</strong>
+        <div>{link.distanceM} m · {link.travelSec} 秒 · {link.bidirectional ? '双方向' : '片方向'} · {link.capacityPerHour ?? '未設定'} 人/時</div>
+        <div className="muted small">利用区域: {link.allowedZones.map((zone) => ZONE_LABEL[zone]).join('、')} · {BUILD_STATE_LABEL[link.buildState]}</div>
+        {!readOnly && <button className="danger" onClick={() => applyOp(deleteTerminalTransitLink(layout, link.id))}>連絡設備を撤去</button>}
+      </div>;
+    })}
+    {!readOnly && <div className="terminal-transit-form">
+      <Field label="接続先エリア">
+        <select value={targetId} onChange={(e) => setTargetId(e.target.value)} data-testid="terminal-link-target">
+          <option value="">選択してください</option>
+          {candidates.map((target) => <option key={target.id} value={target.id}>{layout.facilities[target.terminalId]?.name ?? target.terminalId} · {target.name || target.id} ({ZONE_LABEL[target.zone]})</option>)}
+        </select>
+      </Field>
+      <Field label="設備"><select value={kind} onChange={(e) => setKind(e.target.value as TerminalTransitKind)}><option value="walkway">徒歩連絡通路</option><option value="movingWalkway">動く歩道</option></select></Field>
+      <Field label="距離 (m)"><NumberInput value={distanceM} min={1} max={100000} onCommit={setDistanceM} /></Field>
+      <Field label="移動時間 (秒)"><NumberInput value={travelSec} min={1} max={86400} onCommit={setTravelSec} /></Field>
+      <Field label="能力 (人/時、0=未算出)"><NumberInput value={capacity} min={0} max={1000000} onCommit={setCapacity} /></Field>
+      <label className="prop-field"><span className="prop-label">方向</span><select value={bidirectional ? 'both' : 'oneWay'} onChange={(e) => setBidirectional(e.target.value === 'both')}><option value="both">双方向</option><option value="oneWay">選択元から片方向</option></select></label>
+      <button className="primary" disabled={!targetId} onClick={() => applyOp(addTerminalTransitLink(layout, { kind, fromAreaId: areaId, toAreaId: targetId, distanceM, travelSec, ...(capacity > 0 ? { capacityPerHour: capacity } : {}), bidirectional, allowedZones: [area.zone], name: kind === 'movingWalkway' ? '動く歩道' : '連絡通路' }))} data-testid="terminal-link-create">連絡設備を建設</button>
+    </div>}
+    {!candidates.length && <div className="muted">接続できる別ターミナルの同一区域エリアがありません。対象側のエリアを先に配置してください。</div>}
+  </Section>;
 }
 
 function ResourceClosureControl({ id, type }: { id: string; type: ReturnType<typeof entityTypeOf> }) {
@@ -243,6 +294,42 @@ function ResourceClosureControl({ id, type }: { id: string; type: ReturnType<typ
       </button>
     </section>
   );
+}
+
+function RoadNodeLayerControl({ layout, nodeId }: { layout: AirportLayout; nodeId: string }) {
+  const node = layout.roadNodes[nodeId];
+  const [targetId, setTargetId] = useState('');
+  const [roadClass, setRoadClass] = useState<RoadClass>('walkway');
+  const [connectorKind, setConnectorKind] = useState<RoadConnectorKind>('stairs');
+  const [capacity, setCapacity] = useState(0);
+  const [travelSec, setTravelSec] = useState(0);
+  if (!node) return null;
+  const candidates = Object.values(layout.roadNodes)
+    .filter((other) => other.id !== nodeId && (other.level ?? 0) !== (node.level ?? 0))
+    .sort((a, b) => Math.hypot(a.pos.x - node.pos.x, a.pos.y - node.pos.y) - Math.hypot(b.pos.x - node.pos.x, b.pos.y - node.pos.y) || a.id.localeCompare(b.id));
+  const kinds: Record<RoadClass, RoadConnectorKind[]> = {
+    walkway: ['stairs', 'escalator', 'elevator'], public: ['ramp'], service: ['ramp'], rail: ['railRamp'], fuel: ['pipeRiser'],
+  };
+  const setClass = (value: RoadClass) => { setRoadClass(value); setConnectorKind(kinds[value][0]!); };
+  return <section className="operability road-layer-connect" data-testid="road-layer-connect">
+    <strong>階層接続設備</strong>
+    <p className="muted small">階層の違う交通ノードを、移動種別に合う設備で結びます。階段・昇降機は近接、道路・鉄道ランプは階高に応じた勾配長が必要です。</p>
+    {candidates.length === 0 ? <div className="muted">別階層に接続候補ノードがありません。</div> : <>
+      <label className="prop-field"><span className="prop-label">接続先ノード</span><select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+        <option value="">選択してください</option>
+        {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.id} · 階層 {candidate.level ?? 0} · ({candidate.pos.x}, {candidate.pos.y})</option>)}
+      </select></label>
+      <label className="prop-field"><span className="prop-label">移動種別</span><select value={roadClass} onChange={(e) => setClass(e.target.value as RoadClass)}>
+        {(Object.keys(kinds) as RoadClass[]).map((kind) => <option key={kind} value={kind}>{ROAD_CLASS_LABEL[kind]}</option>)}
+      </select></label>
+      <label className="prop-field"><span className="prop-label">接続設備</span><select value={connectorKind} onChange={(e) => setConnectorKind(e.target.value as RoadConnectorKind)}>
+        {kinds[roadClass].map((kind) => <option key={kind}>{kind}</option>)}
+      </select></label>
+      <label className="prop-field"><span className="prop-label">能力 / 時（0=未算出）</span><input type="number" min="0" value={capacity} onChange={(e) => setCapacity(Math.max(0, Number(e.target.value) || 0))} /></label>
+      {['elevator', 'escalator', 'stairs'].includes(connectorKind) && <label className="prop-field"><span className="prop-label">所要時間（秒、0=距離から）</span><input type="number" min="0" value={travelSec} onChange={(e) => setTravelSec(Math.max(0, Number(e.target.value) || 0))} /></label>}
+      <button className="primary" disabled={!targetId} onClick={() => applyOp(connectRoadLevels(layout, nodeId, targetId, { roadClass, connectorKind, ...(capacity > 0 ? { capacityPerHour: capacity } : {}), ...(travelSec > 0 ? { travelSec } : {}) }))} data-testid="connect-road-levels">接続設備を建設</button>
+    </>}
+  </section>;
 }
 
 /** 運航モードだけ、入力を一括で無効にする fieldset で包む（建設モードの DOM は従来どおり） */
@@ -362,6 +449,8 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
 
   if (type === 'road') {
     const e = layout.roads[id]!;
+    const from = layout.roadNodes[e.from];
+    const to = layout.roadNodes[e.to];
     return (
       <>
         <NameField layout={layout} id={id} value={e.name} />
@@ -370,11 +459,17 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             <option value="public">{ROAD_CLASS_LABEL.public}</option>
             <option value="service">{ROAD_CLASS_LABEL.service}</option>
             <option value="rail">{ROAD_CLASS_LABEL.rail}</option>
+            <option value="walkway">{ROAD_CLASS_LABEL.walkway}</option>
+            <option value="fuel">{ROAD_CLASS_LABEL.fuel}</option>
           </select>
         </Field>
         <Field label="一方通行">
           <input type="checkbox" checked={e.oneWay} onChange={(ev) => update(layout, id, { oneWay: ev.target.checked })} />
         </Field>
+        <Info label="階層">{`${from?.level ?? 0} → ${to?.level ?? 0}`}</Info>
+        {e.connectorKind && <Info label="階層接続">{e.connectorKind}</Info>}
+        <Info label="明示能力">{e.capacityPerHour ? `${e.capacityPerHour.toLocaleString()} /時` : '未算出'}</Info>
+        {e.travelSec && <Info label="移動時間">{`${e.travelSec} 秒`}</Info>}
       </>
     );
   }
@@ -387,6 +482,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
       <>
         <NameField layout={layout} id={id} value={n.name} />
         <Info label="位置">{`(${n.pos.x}, ${n.pos.y})`}</Info>
+        {type === 'roadNode' && <Info label="交通階層">{`${n.level ?? 0}（標高 ${n.elevationM ?? (n.level ?? 0) * 6} m）`}</Info>}
         {an && <Info label="種類">{NODE_KIND_LABEL[an.kind]}</Info>}
         {an?.kind === 'runwayEntry' && (
           <Field label="停止義務（ホールディングポイント）">
@@ -405,6 +501,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             <EntityLink key={e.id} layout={layout} id={e.id} />
           ))}
         </Info>
+        {type === 'roadNode' && <RoadNodeLayerControl layout={layout} nodeId={id} />}
         {an && an.standIds.length > 0 && (
           <Info label="スポット">
             {an.standIds.map((s) => (

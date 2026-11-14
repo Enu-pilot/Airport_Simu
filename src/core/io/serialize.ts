@@ -40,6 +40,8 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 const SUFFIXES = ['L', 'C', 'R', 'none'];
 const RUNWAY_WIDTHS_M = [30, 45, 60];
 const isFin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const ROAD_CLASSES = ['public', 'service', 'rail', 'walkway', 'fuel'];
+const CONNECTORS = ['stairs', 'escalator', 'elevator', 'ramp', 'railRamp', 'pipeRiser'];
 
 /**
  * Phase 12 の新しい項目だけの検査（従来形の滑走路には新しい検査を足さない。今まで読めたファイルを読めなくしないため）。
@@ -75,6 +77,33 @@ export function checkRunwayFields(layout: AirportLayout, where: string): string[
   if (mv !== undefined && (!isFin(mv) || mv < -180 || mv > 180)) errors.push(`${where}: 磁気偏角が不正です`);
   const rs = (layout as { ruleSet?: unknown }).ruleSet;
   if (rs !== undefined && rs !== 'classic' && rs !== 'realistic') errors.push(`${where}: ruleSet が不正です`);
+  for (const [id, n] of Object.entries(layout.roadNodes)) {
+    if (n.level !== undefined && (!Number.isInteger(n.level) || n.level < -5 || n.level > 10)) errors.push(`${where}: 道路ノード ${id} の level が不正です`);
+    if (n.elevationM !== undefined && !isFin(n.elevationM)) errors.push(`${where}: 道路ノード ${id} の elevationM が不正です`);
+  }
+  for (const [id, e] of Object.entries(layout.roads)) {
+    if (!ROAD_CLASSES.includes(e.roadClass)) errors.push(`${where}: 道路 ${id} の roadClass が不正です`);
+    if (e.connectorKind !== undefined && !CONNECTORS.includes(e.connectorKind)) errors.push(`${where}: 道路 ${id} の connectorKind が不正です`);
+    if (e.capacityPerHour !== undefined && (!isFin(e.capacityPerHour) || e.capacityPerHour <= 0)) errors.push(`${where}: 道路 ${id} の capacityPerHour は正の有限値が必要です`);
+    if (e.travelSec !== undefined && (!isFin(e.travelSec) || e.travelSec <= 0)) errors.push(`${where}: 道路 ${id} の travelSec は正の有限値が必要です`);
+  }
+  for (const f of Object.values(layout.facilities)) {
+    const level = f.props?.level;
+    if (level !== undefined && (!Number.isInteger(level) || Number(level) < -5 || Number(level) > 10)) errors.push(`${where}: 施設 ${f.id} の level が不正です`);
+  }
+  const transitLinks = layout.terminalLinks === undefined ? {} : isObj(layout.terminalLinks) ? layout.terminalLinks : {};
+  if (layout.terminalLinks !== undefined && !isObj(layout.terminalLinks)) errors.push(`${where}: terminalLinks が不正です`);
+  for (const [id, raw] of Object.entries(transitLinks)) {
+    if (!isObj(raw)) { errors.push(`${where}: ターミナル連絡設備 ${id} が不正です`); continue; }
+    const link = raw as Record<string, unknown>;
+    if (link.id !== id) errors.push(`${where}: ターミナル連絡設備 ${id} の ID が一致しません`);
+    if (link.kind !== 'walkway' && link.kind !== 'movingWalkway') errors.push(`${where}: ターミナル連絡設備 ${id} の kind が不正です`);
+    if (typeof link.fromAreaId !== 'string' || typeof link.toAreaId !== 'string' || link.fromAreaId === link.toAreaId) errors.push(`${where}: ターミナル連絡設備 ${id} の接続エリアが不正です`);
+    if (!isFin(link.distanceM) || link.distanceM <= 0 || !isFin(link.travelSec) || link.travelSec <= 0) errors.push(`${where}: ターミナル連絡設備 ${id} の距離・所要時間が不正です`);
+    if (link.capacityPerHour !== undefined && (!isFin(link.capacityPerHour) || link.capacityPerHour <= 0)) errors.push(`${where}: ターミナル連絡設備 ${id} の capacityPerHour が不正です`);
+    if (typeof link.bidirectional !== 'boolean' || !['operational', 'underConstruction', 'planned'].includes(String(link.buildState))) errors.push(`${where}: ターミナル連絡設備 ${id} の状態が不正です`);
+    if (!Array.isArray(link.allowedZones) || !link.allowedZones.length || link.allowedZones.some((zone) => zone !== 'landside' && zone !== 'departure' && zone !== 'arrival')) errors.push(`${where}: ターミナル連絡設備 ${id} の利用区域が不正です`);
+  }
   return errors;
 }
 

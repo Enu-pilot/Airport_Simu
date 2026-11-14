@@ -223,7 +223,7 @@ type EdgeGeometry =
 
 | 版 | Phase 11 | 上げる時点（計画） | 移行 |
 |---|---|---|---|
-| `SCHEMA_VERSION` | 2 のまま（**Phase 12 で 3 に更新済み**。[27](27_migration_and_compatibility.md)） | Phase 12（`alignment` / `dims` / `magneticVariationDeg` を保存できる時）→ 3。Phase 13 の `geometry` は任意項目なので同じ 3 に含める案（推奨）か 4 | v2 → v3 は恒等（`schemaVersion` のみ更新）。移行は `io/migrate.ts` の 1 か所。旧アプリは v3 を「未対応の版」として拒否（既存の処理） |
+| `SCHEMA_VERSION` | 3（Phase U の階層・連絡設備も任意項目として追加） | Phase 13 の `geometry` も任意項目として同じ版に含める | v2 → v3 は恒等（`schemaVersion` のみ更新）。移行は `io/migrate.ts` の 1 か所。旧アプリは v3 を「未対応の版」として拒否（既存の処理） |
 | `PROJECT_FORMAT_VERSION` | 1 | ファイル構造が変わるときだけ（Phase 11〜15 では予定なし） | — |
 | `CATALOG_VERSION` | 不変 | Phase 14（脚配置・操向角などを機種に追加） | 保存済みの機種データに新項目が無い場合は `status: 'unset'` + ゲーム推定値で補う |
 | `ASSET_VERSION` | 不変 | Phase 16（表示のみ） | — |

@@ -77,7 +77,7 @@ export function finishPath(): void {
     const o = s.options;
     applyOp(
       s.tool === 'road'
-        ? addRoadPath(s.history.present, pts, { roadClass: o.roadClass, oneWay: o.oneWay, buildState: o.buildState })
+        ? addRoadPath(s.history.present, pts, { roadClass: o.roadClass, oneWay: o.oneWay, buildState: o.buildState, level: o.roadLevel, capacityPerHour: o.roadCapacityPerHour })
         : addTaxiwayPath(s.history.present, pts, { widthClass: o.taxiWidth, oneWay: o.oneWay, buildState: o.buildState }),
       { quietNoChange: true },
     );

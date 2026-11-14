@@ -45,6 +45,8 @@ export interface ToolOptions {
   taxiWidth: SizeClass;
   oneWay: boolean;
   roadClass: RoadClass;
+  roadLevel: number;
+  roadCapacityPerHour: number;
   runwayWidth: 30 | 45 | 60;
   buildState: BuildState;
   /** 滑走路ツールの方式。既定は従来形（8 方向のグリッド）。自由形は任意方位・実寸（Phase 12） */
@@ -109,6 +111,8 @@ export interface EditorState {
   overlays: Overlays;
   /** ターミナル内部の表示・編集中の階（0 = 1F） */
   interiorLevel: number;
+  /** 2D/3D の交通レイヤ表示。地上=0、地下<0、高架>0。 */
+  mapLevel: number | 'all';
   toast: Toast | null;
   /** build: 建設（編集）モード / operate: 運航モード（レイアウトの編集は不可） */
   mode: 'build' | 'operate';
@@ -263,6 +267,8 @@ export const editorStore = createStore<EditorState>(() => ({
     taxiWidth: 'M',
     oneWay: false,
     roadClass: 'public',
+    roadLevel: 0,
+    roadCapacityPerHour: 0,
     runwayWidth: 45,
     buildState: 'operational',
     runwayAlignment: 'grid8',
@@ -281,6 +287,7 @@ export const editorStore = createStore<EditorState>(() => ({
   draft: null,
   overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true, congestion: false, daylight: true },
   interiorLevel: 1,
+  mapLevel: 0,
   toast: null,
   mode: 'build',
   ops: null,
@@ -628,6 +635,9 @@ export const actions = {
   },
   setInteriorLevel(level: number): void {
     set((s) => ({ interiorLevel: level, overlays: { ...s.overlays, interior: true } }));
+  },
+  setMapLevel(level: number | 'all'): void {
+    set((s) => ({ mapLevel: level, options: { ...s.options, roadLevel: level === 'all' ? 0 : level } }));
   },
   setViewMode(viewMode: '2d' | '3d'): void {
     set({ viewMode });

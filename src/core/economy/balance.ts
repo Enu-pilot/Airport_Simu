@@ -18,6 +18,11 @@ export const BALANCE = {
     runwayPerTile: 40_000,
     taxiwayPerTile: { S: 4_000, M: 6_000, L: 8_000 } as Record<SizeClass, number>,
     roadPerTile: 1_500,
+    tunnelMultiplier: 10,
+    elevatedMultiplier: 2,
+    fuelPipePerTile: 1_500,
+    terminalWalkwayPerTile: 4_500,
+    movingWalkwayPerTile: 12_000,
     stand: { S: 60_000, M: 100_000, L: 180_000 } as Record<SizeClass, number>,
     /** 面積型の施設（タイルあたり、ターミナルは階ごと） */
     perTile: { apron: 1_500, terminal: 20_000, serviceArea: 500, parking: 800 } as Partial<Record<FacilityKind, number>>,

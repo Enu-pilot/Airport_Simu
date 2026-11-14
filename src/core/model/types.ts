@@ -113,6 +113,10 @@ export interface NetNode {
   id: string;
   pos: Tile;
   name: string;
+  /** 交通レイヤ。0=地上、負数=地下、正数=高架階。欠落は地上。 */
+  level?: number;
+  /** 階層標高（m）。欠落時は level × 6m のゲーム表示値を使う。 */
+  elevationM?: number;
   /**
    * 滑走路入口ノードでの停止義務（ホールディングポイント）。
    * 滑走路上にあるノードでのみ意味を持つ。
@@ -135,7 +139,8 @@ export interface TaxiwayEdge {
 }
 
 /** public: 一般道路 / service: 構内サービス道路（業務用）/ rail: 鉄道（空港連絡線） */
-export type RoadClass = 'public' | 'service' | 'rail';
+export type RoadClass = 'public' | 'service' | 'rail' | 'walkway' | 'fuel';
+export type RoadConnectorKind = 'stairs' | 'escalator' | 'elevator' | 'ramp' | 'railRamp' | 'pipeRiser';
 
 export interface RoadEdge {
   id: string;
@@ -146,6 +151,12 @@ export interface RoadEdge {
   roadClass: RoadClass;
   oneWay: boolean;
   buildState: BuildState;
+  /** 階層をまたぐ場合は必須。通常区間では両端ノードの level が一致する。 */
+  connectorKind?: RoadConnectorKind;
+  /** 任意の明示能力（道路は台/時、歩行路は人/時、鉄道は列車/時、燃料管は単位/時）。未設定は未算出。 */
+  capacityPerHour?: number;
+  /** 上下移動設備の所要時間。未設定時は距離/歩速から計算。 */
+  travelSec?: number;
 }
 
 export interface Stand {
@@ -240,10 +251,28 @@ export interface TerminalArea {
   props: Record<string, PropValue>;
 }
 
+export type TerminalTransitKind = 'walkway' | 'movingWalkway';
+/** Explicit passenger transport between area nodes in distinct terminals (separate from GateConnector). */
+export interface TerminalTransitLink {
+  id: string;
+  name: string;
+  kind: TerminalTransitKind;
+  fromAreaId: string;
+  toAreaId: string;
+  distanceM: number;
+  /** End-to-end seconds for this connection segment. */
+  travelSec: number;
+  capacityPerHour?: number;
+  bidirectional: boolean;
+  buildState: BuildState;
+  /** Passenger/security zones permitted to use this link. */
+  allowedZones: PaxZone[];
+}
+
 /**
  * レイアウトの保存形式の版。
- * 3（Phase 12）: 自由形の滑走路・磁気偏角・ルール切替・TaxiwayEdge.geometry（Phase 13）など、任意項目の追加のみ。
- * v2 のデータはそのまま妥当な v3 なので、移行は何も書き換えない（`layout.schemaVersion` も 2 のまま。docs/21）。
+ * v3: 任意項目として階層/標高、交通エッジ、ターミナル間連絡設備を追加。
+ * 欠落した階層は地上として扱う。新しい交通情報を含むプロジェクトは外側の形式版で識別する（docs/21）。
  */
 export const SCHEMA_VERSION = 3;
 
@@ -261,6 +290,8 @@ export interface AirportLayout {
   stands: Record<string, Stand>;
   facilities: Record<string, Facility>;
   terminalAreas: Record<string, TerminalArea>;
+  /** Optional in old layouts. Explicit inter-terminal passenger links; independent of road and gate graphs. */
+  terminalLinks?: Record<string, TerminalTransitLink>;
   /** 磁気偏角（度、東偏差を正、[-180, 180]）。欠落 = 0（手入力のみ） */
   magneticVariationDeg?: number;
   /** 判定ルール。欠落 = 'classic' */

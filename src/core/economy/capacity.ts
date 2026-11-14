@@ -1,6 +1,7 @@
 import type { AirportLayout } from '../model/types';
 import { compareIds } from '../model/ids';
 import { serviceSecPerPax } from '../terminal/capacity';
+import { analyzeAccess } from '../access/model';
 import { APRON_BUS_CAPACITY } from '../sim/busRules';
 import type { SimContext } from '../sim/context';
 import { operableTypes } from '../sim/context';
@@ -19,7 +20,7 @@ import {
 export type CapacityStatus = 'adequate' | 'warning' | 'shortage' | 'uncomputed';
 export interface CapacityMetric {
   name: string;
-  unit: 'movements/h' | 'movements/day' | 'aircraft' | 'pax' | 'pax/h' | 'pax/day' | 'aircraft/day' | 'units' | 'pax/trip';
+  unit: 'movements/h' | 'movements/day' | 'aircraft' | 'pax' | 'pax/h' | 'pax/day' | 'aircraft/day' | 'units' | 'pax/trip' | 'vehicles/h' | 'trains/h' | 'fuel/h';
   capacity: number | null;
   demand: number | null;
   utilization: number | null;
@@ -111,6 +112,7 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
   const terminalOccupancyCapacity = terminalIds.reduce((sum, id) => sum + (ctx.terminal.byTerminal[id] ?? []).reduce((areaSum, areaId) => areaSum + (ctx.terminal.areas[areaId]?.capacity ?? 0), 0), 0);
   const currentOccupancy = currentPaxByTerminal ? Object.values(currentPaxByTerminal).reduce((sum, count) => sum + count, 0) : null;
   const peakTurns = analysis.peakTurnarounds;
+  const access = analyzeAccess(ctx.layout, { city: company.city, day: company.day });
   const turns = turnaroundCapacity(ctx);
   const standDemand = peakConcurrentStands(plan, analysis);
   const assignedStandDemand = standDemand.byStand;
@@ -140,6 +142,7 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
     metric('プッシュバック', 'aircraft', null, null, '実際のタスク所要時間・車両の共有予約を統合した処理率が未モデル化'),
     metric('誘導路', 'movements/h', null, null, '地上走行経路の競合・占有を時間当たり能力へ換算するモデルが未実装'),
     metric('搭乗バス', 'pax/h', null, null, `運用中バス ${buses} 台、1便あたりの定員 ${APRON_BUS_CAPACITY} 人。往復経路時間と運行便ごとの競合を含む時間能力は未算出`),
+    metric('駅からターミナルへの連絡通路', 'pax/h', access.railWalkCapacityPerHour, null, access.railWalkCapacityPerHour === null ? '歩行路の実経路は接続確認するが、全区間に明示能力がないため処理人数は未算出' : '地下・地上・高架の運用歩行路の最小明示能力。乗客実績の需要は未算出'),
     metric('1日総処理（滑走路・理論値）', 'movements/day', runwayHourly > 0 ? runwayHourly * operatingHours : 0, plan.flights.length * 2, `滑走路の時間能力 × 運用時間 ${operatingHours.toFixed(1)} h。ピーク偏在や滑走路構成・閉鎖は別途確認が必要`),
     metric('1日旅客処理（理論値）', 'pax/day', totalTerminalThroughput > 0 ? totalTerminalThroughput * operatingHours : null, plan.flights.reduce((sum, f) => sum + f.arrPax + f.depPax, 0), `ターミナル工程ボトルネック × 運用時間 ${operatingHours.toFixed(1)} h。便の集中を反映しない理論値`),
   ];
@@ -148,6 +151,14 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
     facilities.push({ id: r.id, name: r.name, kind: '滑走路', state: stateOf(r.buildState), capacity: r.buildState === 'operational' ? RUNWAY_HOURLY_CAPACITY : 0, demand: null, unit: 'movements/h', status: r.buildState === 'operational' ? 'uncomputed' : 'shortage', basis: r.buildState === 'operational' ? `計画基準 ${RUNWAY_HOURLY_CAPACITY} 回/時。便ごとの滑走路割当需要は未算出` : '運用状態ではない' });
   }
   for (const e of Object.values(ctx.layout.taxiways).sort((a, b) => compareIds(a.id, b.id))) facilities.push({ id: e.id, name: e.name, kind: '誘導路', state: stateOf(e.buildState), capacity: null, demand: null, unit: 'movements/h', status: 'uncomputed', basis: e.buildState === 'operational' ? '経路・閉鎖状態はシミュレーションで判定。時間当たり能力は未算出' : '運用状態ではない' });
+  for (const e of Object.values(ctx.layout.roads).sort((a, b) => compareIds(a.id, b.id))) {
+    const a = ctx.layout.roadNodes[e.from];
+    const b = ctx.layout.roadNodes[e.to];
+    const levels = [...new Set([a?.level ?? 0, b?.level ?? 0])].sort((x, y) => x - y).join(' ↔ ');
+    const unit: CapacityMetric['unit'] = e.roadClass === 'walkway' ? 'pax/h' : e.roadClass === 'rail' ? 'trains/h' : e.roadClass === 'fuel' ? 'fuel/h' : 'vehicles/h';
+    const label = e.roadClass === 'walkway' ? '歩行通路' : e.roadClass === 'rail' ? '鉄道線路' : e.roadClass === 'fuel' ? '燃料管' : e.roadClass === 'service' ? '構内道路' : '一般道路';
+    facilities.push({ id: e.id, name: e.name || e.id, kind: label, state: stateOf(e.buildState), capacity: e.capacityPerHour ?? null, demand: null, unit, status: 'uncomputed', basis: `階層 ${levels}${e.connectorKind ? `・接続 ${e.connectorKind}` : ''}。${e.capacityPerHour === undefined ? '明示能力なし' : `設定能力 ${e.capacityPerHour} ${unitLabelFor(unit)}`}。${e.roadClass === 'walkway' ? '旅客の駅接続経路検証に使用' : e.roadClass === 'fuel' ? '到達可能なスポットでは燃料車を使わない作業として反映' : '個別の車両・列車走行需要と占有は未モデル化'}。需要・稼働率は未算出` });
+  }
   for (const s of Object.values(ctx.layout.stands).sort((a, b) => compareIds(a.id, b.id))) {
     const operational = ctx.stands[s.id]?.operational && !!ctx.stands[s.id]?.entry;
     facilities.push({ id: s.id, name: s.name, kind: ctx.stands[s.id]?.contact ? '直結スポット' : 'リモートスポット', state: stateOf(s.buildState), capacity: operational ? 1 : 0, demand: assignedStandDemand.get(s.id) ?? 0, unit: 'aircraft', status: statusFor(operational ? 1 : 0, assignedStandDemand.get(s.id) ?? 0), basis: operational ? '同時駐機 1 機。リモートスポットは搭乗バスの時間能力を別途算出できない' : '閉鎖・未接続・建設中のため計画上利用不可' });
@@ -159,11 +170,19 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
     const cap = Math.round(servers * 3600 / serviceSecPerPax(a.kind, a.props));
     facilities.push({ id: a.id, name: a.name, kind: a.kind === 'checkIn' ? 'チェックインカウンター' : '保安検査場', state: stateOf(ctx.layout.facilities[a.terminalId]?.buildState ?? 'planned'), terminalId: a.terminalId, capacity: cap, demand: null, unit: 'pax/h', status: cap > 0 ? 'uncomputed' : 'shortage', basis: `${servers} レーン/カウンター × 3600 ÷ ${serviceSecPerPax(a.kind, a.props)} 秒/人。施設別の時間帯割当需要は未算出` });
   }
+  for (const link of Object.values(ctx.layout.terminalLinks ?? {}).sort((a, b) => compareIds(a.id, b.id))) {
+    const from = ctx.layout.terminalAreas[link.fromAreaId];
+    const to = ctx.layout.terminalAreas[link.toAreaId];
+    facilities.push({ id: link.id, name: link.name || link.id, kind: link.kind === 'movingWalkway' ? '動く歩道' : 'ターミナル間通路', state: stateOf(link.buildState), terminalId: from?.terminalId, capacity: link.capacityPerHour ?? null, demand: null, unit: 'pax/h', status: 'uncomputed', basis: `${from?.terminalId ?? '?'} → ${to?.terminalId ?? '?'}・${link.bidirectional ? '双方向' : '片方向'}・${link.travelSec} 秒 / ${link.distanceM} m・対象区域 ${link.allowedZones.join(', ')}。明示容量 ${link.capacityPerHour ?? '未設定'} 人/時。利用人数は現行旅客シミュレーションで記録していないため未算出` });
+  }
   for (const f of Object.values(ctx.layout.facilities).sort((a, b) => compareIds(a.id, b.id))) {
     if (f.kind === 'gate') {
       const gate = ctx.terminal.gates[f.id];
       const demand = peak(gateDemand.get(f.id) ?? []);
       facilities.push({ id: f.id, name: f.name, kind: f.props.boardingMode === 'bus' ? 'バスゲート' : '搭乗ゲート', state: stateOf(f.buildState), terminalId: gate?.terminalId ?? undefined, capacity: null, demand, unit: 'pax/h', status: 'uncomputed', basis: `ターミナル接続: ${gate?.terminalId ?? '未接続'}。時間帯別の計画割当需要は表示するが、ゲート処理率は未モデル化` });
+    } else if (f.kind === 'railStation') {
+      const trainsPerHour = Number(f.props.trainsPerHour ?? 0);
+      facilities.push({ id: f.id, name: f.name, kind: '鉄道駅', state: stateOf(f.buildState), capacity: trainsPerHour > 0 ? trainsPerHour : null, demand: null, unit: 'trains/h', status: 'uncomputed', basis: `階層 ${Number(f.props.level ?? 0)}。設定された運行頻度 ${trainsPerHour || '未設定'} 本/時であり、線路・ホームの実処理能力や乗客実績は未算出` });
     } else if (f.kind === 'gseBase' || f.kind === 'maintenance') {
       const counts = Object.entries(f.props).filter(([k, v]) => ['staff', 'tugs', 'beltLoaders', 'baggageTractors', 'fuelTrucks', 'cateringTrucks', 'cleaningVans', 'apronBuses', 'engineers'].includes(k) && typeof v === 'number').map(([k, v]) => `${k} ${v}`).join(' / ') || '設備数なし';
       facilities.push({ id: f.id, name: f.name, kind: f.kind === 'gseBase' ? '地上支援設備' : '整備設備', state: stateOf(f.buildState), capacity: null, demand: null, unit: 'units', status: 'uncomputed', basis: `${counts}。ターン能力は空港全体で共有リソースの最小値から算出し、施設単位には配賦しない` });
@@ -173,6 +192,8 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
   const bottlenecks = summary.filter((m) => m.status === 'shortage' || m.status === 'warning').sort((a, b) => (b.utilization ?? 0) - (a.utilization ?? 0));
   return { plan, analysis, operatingHours, summary, bottlenecks, facilities, peakHour, terminalRows };
 }
+
+const unitLabelFor = (unit: CapacityMetric['unit']): string => ({ 'movements/h': '回/時', 'movements/day': '回/日', aircraft: '機', pax: '人', 'pax/h': '人/時', 'pax/day': '人/日', 'aircraft/day': '機/日', units: '台・人', 'pax/trip': '人/便', 'vehicles/h': '台/時', 'trains/h': '本/時', 'fuel/h': '単位/時' })[unit];
 
 export interface CapacityPreviewInput {
   airlineId: string;

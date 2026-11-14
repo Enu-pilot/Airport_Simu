@@ -4,6 +4,7 @@ import { isFreeRunway, type AirportLayout, type Facility, type TerminalArea } fr
 import type { UnitKind } from '../sim/types';
 import { BALANCE } from './balance';
 import { post, type CompanyState } from './company';
+import { elevationOf, levelOf } from '../model/levels';
 
 /**
  * 建設費（docs/14_management_rules.md §2）。
@@ -73,7 +74,18 @@ export function layoutItems(layout: AirportLayout): Record<string, number> {
     const a = layout.roadNodes[e.from];
     const b = layout.roadNodes[e.to];
     if (!a || !b) continue;
-    out[e.id] = Math.round(distance(a.pos, b.pos) * (e.roadClass === 'rail' ? C.access.railPerTile : C.roadPerTile));
+    const levelA = levelOf(a);
+    const levelB = levelOf(b);
+    const verticalTiles = Math.abs(elevationOf(a) - elevationOf(b)) / TILE_M;
+    const lengthTiles = Math.hypot(distance(a.pos, b.pos), verticalTiles);
+    const unitCost = e.roadClass === 'fuel' ? C.fuelPipePerTile : e.roadClass === 'rail' ? C.access.railPerTile : C.roadPerTile;
+    const multiplier = e.roadClass === 'fuel' ? 1 : Math.min(levelA, levelB) < 0 ? C.tunnelMultiplier : Math.max(levelA, levelB) > 0 ? C.elevatedMultiplier : 1;
+    out[e.id] = Math.round(lengthTiles * unitCost * multiplier);
+  }
+  for (const link of Object.values(layout.terminalLinks ?? {})) {
+    if (link.buildState === 'planned') continue;
+    const perTile = link.kind === 'movingWalkway' ? C.movingWalkwayPerTile : C.terminalWalkwayPerTile;
+    out[link.id] = Math.round((link.distanceM / TILE_M) * perTile);
   }
   // 購入した土地
   if (layout.site.purchased) out['land'] = layout.site.purchased * C.landPerTile;

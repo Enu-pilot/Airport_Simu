@@ -170,6 +170,11 @@ export function createTurnaroundTasks(sim: Simulation, ac: Aircraft): void {
     // 機種ごとの作業時間・必要なユニット。空港に必要数より少なければ、ある台数で時間をかけて行う（docs/16 §4）
     task.needs = taskNeeds(type, kind);
     task.workSec = taskWorkSec(type, kind);
+    if (kind === 'fuel' && ac.standId && sim.ctx.hydrantStands.has(ac.standId)) {
+      delete task.needs.fuelTruck;
+      task.workSec = Math.round(task.workSec * 0.6);
+      task.note = '燃料ハイドラント配管を使用（給油車不要・作業時間 0.6 倍）';
+    }
     // 機種固有の追加分だけを減らせる。作業の基本の必要数（TASK_DEFS）を下回ってそろわない場合は従来どおり停止して待つ
     let slow = 1;
     const base = TASK_DEFS[kind].needs;

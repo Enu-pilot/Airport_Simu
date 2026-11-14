@@ -66,7 +66,7 @@ export const BUILD_STATE_LABEL: Record<BuildState, string> = {
 };
 
 export const SIZE_LABEL: Record<SizeClass, string> = { S: 'S（小型）', M: 'M（中型）', L: 'L（大型）' };
-export const ROAD_CLASS_LABEL: Record<RoadClass, string> = { public: '一般道路', service: 'サービス道路（業務用）', rail: '鉄道（空港連絡線）' };
+export const ROAD_CLASS_LABEL: Record<RoadClass, string> = { public: '一般道路', service: 'サービス道路（業務用）', rail: '鉄道（空港連絡線）', walkway: '旅客連絡通路', fuel: '燃料ハイドラント配管' };
 
 export const PROP_LABEL: Record<string, string> = {
   checkInCounters: 'チェックインカウンター数',
@@ -77,7 +77,7 @@ export const PROP_LABEL: Record<string, string> = {
   connectedTo: '接続先ターミナル',
   apronBuses: 'ランプバス',
   maxSize: '収容可能な最大機体',
-  level: 'レベル',
+  level: '階層（地上0・地下負数・高架正数）',
   bays: '整備ベイ数',
   capacityKL: '貯蔵量（kL）',
   category: '消防カテゴリー',
@@ -127,6 +127,8 @@ export const OP_FAILURE_LABEL: Record<OpFailure, string> = {
   EMPTY_PATH: '2点以上を指定してください',
   NO_CHANGE: '変更はありません',
   LAND_NOT_ADJACENT: '取得済みの敷地に隣接する土地だけ購入できます',
+  LEVEL_MISMATCH: '異なる階層のノードを選択してください',
+  INVALID_CONNECTOR: '移動種別に合った接続設備を選び、勾配・端点距離を確認してください',
 };
 
 /** エンティティの表示名（名前が無ければ種別名 + 番号） */
@@ -227,8 +229,10 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   PARKING_NO_ROAD: (n) => `${n[0]} が道路に接していません`,
   ROAD_NO_ENTRANCE: (n, p) => `敷地の出入口につながらない道路があります（${n[0]} ほか計${p.count}区間）`,
   ROAD_CROSSING_NO_JUNCTION: (n) => `${n[0]} と ${n[1]} が交差点なしで交差しています`,
+  ROAD_LAYER_CONNECTION_INVALID: (n, p) => `${n[0]} の立体接続が成立していません（${p.reason ?? '接続種別・階層・勾配を確認してください'}）。同じ移動種別の接続設備で端点を結んでください`,
   ACCESS_NOT_CONNECTED: (n) => `${n[0]} が外部（敷地の出入口）につながる道路に接していません。利用されません`,
   STATION_NO_RAIL: (n) => `${n[0]} が敷地の外へつながる鉄道線に接続されていません。列車は来ません`,
+  ACCESS_ROUTE_UNREACHABLE: (n) => `${n[0]} からターミナルへ旅客が移動できる連絡通路がありません。階層の一致と通路・階段・エレベーターの接続を確認してください`,
   ACCESS_FAR_FROM_TERMINAL: (n, p) =>
     Number(p.distance) < 0 ? `${n[0]} から歩いて行ける運用中のターミナルがありません` : `${n[0]} がターミナルから遠すぎます（${p.distance}タイル、上限16）`,
   TERMINAL_AREA_OUTSIDE: (n) => `${n[0]} がターミナルの範囲（敷地・階数）からはみ出しています`,

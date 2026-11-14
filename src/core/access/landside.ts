@@ -4,6 +4,7 @@ import { isSiteEdge } from '../model/site';
 import type { AirportLayout, Facility, RoadClass } from '../model/types';
 import { chebyshevDistance, tileKey, type Tile } from '../geometry/vec';
 import { facilityTiles, footprintOf } from '../layout/footprint';
+import { levelOf, roadEdgeLevelValid } from '../model/levels';
 
 /**
  * ランドサイド（空港の外から施設まで）の接続（docs/15_access_rules.md §2）。
@@ -27,6 +28,10 @@ export interface LandsideNetwork {
   anyRoadTiles: Set<string>;
   /** 外部につながった鉄道のタイル */
   railTiles: Set<string>;
+  publicTilesByLevel: Record<number, Set<string>>;
+  anyRoadTilesByLevel: Record<number, Set<string>>;
+  railTilesByLevel: Record<number, Set<string>>;
+  walkwayTilesByLevel: Record<number, Set<string>>;
   /** 一般車の出入口（敷地外周で一般道路が出入りするタイル）と、出入口になっている道路区間 */
   entrances: Tile[];
   entryRoads: string[];
@@ -50,8 +55,9 @@ class UnionFind {
 }
 
 /** 指定の種別の道路のうち、外周に届く連結成分のタイル */
-function connected(layout: AirportLayout, classes: readonly RoadClass[], entrances?: Tile[], entryRoads?: string[]): Set<string> {
-  const edges = sortedValues(layout.roads).filter((e) => classes.includes(e.roadClass) && e.buildState === 'operational');
+interface ConnectedTiles { all: Set<string>; byLevel: Record<number, Set<string>> }
+function connected(layout: AirportLayout, classes: readonly RoadClass[], entrances?: Tile[], entryRoads?: string[], boundary: 'ground' | 'any' | 'none' = 'ground'): ConnectedTiles {
+  const edges = sortedValues(layout.roads).filter((e) => classes.includes(e.roadClass) && e.buildState === 'operational' && roadEdgeLevelValid(e, layout.roadNodes[e.from], layout.roadNodes[e.to]));
   const uf = new UnionFind();
   for (const e of edges) uf.union(e.from, e.to);
   const tiles = new Map<string, Tile[]>();
@@ -59,28 +65,51 @@ function connected(layout: AirportLayout, classes: readonly RoadClass[], entranc
   for (const e of edges) {
     const t = footprintOf(layout, e.id).flatMap((p) => p.tiles);
     tiles.set(e.id, t);
-    const edge = t.filter((p) => isSiteEdge(layout.site, p.x, p.y));
+    const nodeA = layout.roadNodes[e.from];
+    const nodeB = layout.roadNodes[e.to];
+    const edge = t.filter((p) => isSiteEdge(layout.site, p.x, p.y) && (boundary === 'any' || (boundary === 'ground' && (levelOf(nodeA) === 0 || levelOf(nodeB) === 0))));
     if (edge.length > 0) {
       roots.add(uf.find(e.from));
       entrances?.push(...edge);
       entryRoads?.push(e.id);
     }
+    if (boundary === 'none') roots.add(uf.find(e.from));
   }
-  const out = new Set<string>();
-  for (const e of edges) if (roots.has(uf.find(e.from))) for (const t of tiles.get(e.id)!) out.add(tileKey(t.x, t.y));
-  return out;
+  const all = new Set<string>();
+  const byLevel: Record<number, Set<string>> = {};
+  for (const e of edges) if (roots.has(uf.find(e.from))) {
+    const a = levelOf(layout.roadNodes[e.from]);
+    const b = levelOf(layout.roadNodes[e.to]);
+    const levels = a === b ? [a] : [a, b];
+    for (const level of levels) {
+      const set = (byLevel[level] ??= new Set<string>());
+      for (const t of tiles.get(e.id)!) {
+        const k = tileKey(t.x, t.y);
+        set.add(k);
+        all.add(k);
+      }
+    }
+  }
+  return { all, byLevel };
 }
 
 export function buildLandsideNetwork(layout: AirportLayout): LandsideNetwork {
   const entrances: Tile[] = [];
   const entryRoads: string[] = [];
-  const publicTiles = connected(layout, ['public'], entrances, entryRoads);
+  const publicNet = connected(layout, ['public'], entrances, entryRoads, 'ground');
+  const anyRoadNet = connected(layout, ['public', 'service'], undefined, undefined, 'ground');
+  const railNet = connected(layout, ['rail'], undefined, undefined, 'any');
+  const walkwayNet = connected(layout, ['walkway'], undefined, undefined, 'none');
   const seen = new Set<string>();
   return {
     entryRoads,
-    publicTiles,
-    anyRoadTiles: connected(layout, ['public', 'service']),
-    railTiles: connected(layout, ['rail']),
+    publicTiles: publicNet.all,
+    anyRoadTiles: anyRoadNet.all,
+    railTiles: railNet.all,
+    publicTilesByLevel: publicNet.byLevel,
+    anyRoadTilesByLevel: anyRoadNet.byLevel,
+    railTilesByLevel: railNet.byLevel,
+    walkwayTilesByLevel: walkwayNet.byLevel,
     entrances: entrances.filter((t) => {
       const k = tileKey(t.x, t.y);
       if (seen.has(k)) return false;
@@ -98,6 +127,10 @@ export function touchesTiles(f: Facility, set: Set<string>): boolean {
     }
   }
   return false;
+}
+
+export function touchesTilesAtLevel(f: Facility, byLevel: Record<number, Set<string>>, level = 0): boolean {
+  return touchesTiles(f, byLevel[level] ?? new Set<string>());
 }
 
 /** 施設からいちばん近い運用中ターミナルまでの距離（タイル）。ターミナルが無ければ Infinity */

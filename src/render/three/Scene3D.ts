@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { bearingToSceneYawRad, tilesToM, worldPolyToScene, worldToScene } from '../../core/geometry/frames';
 import { type AirportLayout, type Facility, type FacilityKind } from '../../core/model/types';
+import { elevationOf, facilityLevel, levelOf } from '../../core/model/levels';
 import { facilityDims, standDims } from '../../core/layout/footprint';
-import { bandSurface, roadBandSurface, runwaySurfaces, taxiwayBandSurface } from '../../core/layout/surfaces';
+import { bandSurface, roadBandSurface, roadDrawWidthM, runwaySurfaces, taxiwayBandSurface } from '../../core/layout/surfaces';
 import { resolveType, type AircraftType } from '../../core/sim/aircraftTypes';
 import { isVisible } from '../../core/sim/query';
 import type { Aircraft, UnitKind } from '../../core/sim/types';
@@ -167,10 +168,11 @@ export class Scene3D {
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(w(site.width), w(site.height)), new THREE.MeshBasicMaterial({ map: tex }));
     ground.rotateX(-Math.PI / 2);
     ground.position.set(w(site.width) / 2, 0, w(site.height) / 2);
+    ground.userData.terrain = true;
     this.staticGroup.add(ground);
 
     /** pts は Map フレーム（タイル）。metres = true のときは変換済み（m）の Scene の (x, z) */
-    const flat = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string, metres = false, depthBias = 0) => {
+    const flat = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string, metres = false, depthBias = 0, level = 0) => {
       const shape = new THREE.Shape(pts.map((p) => (metres ? new THREE.Vector2(p.x, p.y) : new THREE.Vector2(w(p.x), w(p.y)))));
       const g = new THREE.ShapeGeometry(shape);
       g.rotateX(Math.PI / 2);
@@ -187,12 +189,38 @@ export class Scene3D {
       );
       m.position.y = y;
       if (entityId) m.userData.entityId = entityId;
+      m.userData.layerLevels = [level];
       this.staticGroup.add(m);
     };
 
     // World フレームの形状は frames の worldPolyToScene 経由で描く（滑走路・誘導路・道路で同じ位置規約）
-    const flatWorld = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string, depthBias = 0) => {
-      if (pts.length > 0) flat(worldPolyToScene(pts).map((p) => ({ x: p.x, y: p.z })), y, color, opacity, entityId, true, depthBias);
+    const flatWorld = (pts: { x: number; y: number }[], y: number, color: number, opacity = 1, entityId?: string, depthBias = 0, level = 0) => {
+      if (pts.length > 0) flat(worldPolyToScene(pts).map((p) => ({ x: p.x, y: p.z })), y, color, opacity, entityId, true, depthBias, level);
+    };
+    const slopedRoad = (a: { x: number; y: number }, b: { x: number; y: number }, widthM: number, y0: number, y1: number, color: number, entityId: string, level0: number, level1: number) => {
+      const p = worldToScene(a);
+      const q = worldToScene(b);
+      const dx = q.x - p.x;
+      const dz = q.z - p.z;
+      const len = Math.hypot(dx, dz);
+      if (len < 0.01) {
+        const pad = Math.max(1, widthM / 2);
+        flat([{ x: p.x - pad, y: p.z - pad }, { x: p.x + pad, y: p.z - pad }, { x: p.x + pad, y: p.z + pad }, { x: p.x - pad, y: p.z + pad }], (y0 + y1) / 2, color, 0.9, entityId, true);
+        return;
+      }
+      const nx = (-dz / len) * widthM / 2;
+      const nz = (dx / len) * widthM / 2;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute([
+        p.x + nx, y0, p.z + nz, p.x - nx, y0, p.z - nz,
+        q.x - nx, y1, q.z - nz, q.x + nx, y1, q.z + nz,
+      ], 3));
+      g.setIndex([0, 1, 2, 0, 2, 3]);
+      g.computeVertexNormals();
+      const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide }));
+      mesh.userData.entityId = entityId;
+      mesh.userData.layerLevels = [...new Set([level0, level1])];
+      this.staticGroup.add(mesh);
     };
     for (const r of Object.values(layout.runways)) {
       const alpha = r.buildState === 'operational' ? 1 : 0.5;
@@ -212,12 +240,17 @@ export class Scene3D {
     for (const e of Object.values(layout.taxiways)) {
       const a = layout.taxiNodes[e.from];
       const b = layout.taxiNodes[e.to];
-      if (a && b) flatWorld(taxiwayBandSurface(a.pos, b.pos, e), 0.2, 0x55595f, e.buildState === 'operational' ? 1 : 0.5);
+      if (a && b) flatWorld(taxiwayBandSurface(a.pos, b.pos, e), 0.2, 0x55595f, e.buildState === 'operational' ? 1 : 0.5, e.id, 0, 0);
     }
     for (const e of Object.values(layout.roads)) {
       const a = layout.roadNodes[e.from];
       const b = layout.roadNodes[e.to];
-      if (a && b) flatWorld(roadBandSurface(a.pos, b.pos, e), 0.15, e.roadClass === 'rail' ? 0x6b4f3a : 0x777777, 1);
+      if (!a || !b) continue;
+      const color = e.roadClass === 'rail' ? 0x6b4f3a : e.roadClass === 'walkway' ? 0x39a9a1 : e.roadClass === 'fuel' ? 0xcaa52b : 0x777777;
+      const ya = elevationOf(a) + 0.15;
+      const yb = elevationOf(b) + 0.15;
+      if (levelOf(a) !== levelOf(b)) slopedRoad(a.pos, b.pos, roadDrawWidthM(e), ya, yb, color, e.id, levelOf(a), levelOf(b));
+      else flatWorld(roadBandSurface(a.pos, b.pos, e), ya, color, 1, e.id, 0, levelOf(a));
     }
     for (const st of Object.values(layout.stands)) {
       const d = standDims(st);
@@ -232,6 +265,9 @@ export class Scene3D {
         0x6b7078,
         1,
         st.id,
+        false,
+        0,
+        0,
       );
     }
     for (const f of Object.values(layout.facilities)) this.addFacility(f);
@@ -244,12 +280,14 @@ export class Scene3D {
     const g = new THREE.BoxGeometry(w(d.w) - 2, h, w(d.h) - 2);
     const mat = new THREE.MeshLambertMaterial({ color: FACILITY_COLOR[f.kind] ?? 0x999999, transparent: f.buildState !== 'operational', opacity: f.buildState === 'operational' ? 1 : 0.45 });
     const m = new THREE.Mesh(g, mat);
-    m.position.set(w(f.origin.x + d.w / 2), h / 2, w(f.origin.y + d.h / 2));
+    m.position.set(w(f.origin.x + d.w / 2), facilityLevel(f) * 6 + h / 2, w(f.origin.y + d.h / 2));
     m.userData.entityId = f.id;
+    m.userData.layerLevels = [facilityLevel(f)];
     this.staticGroup.add(m);
     if (f.kind === 'tower') {
       const cab = new THREE.Mesh(new THREE.CylinderGeometry(10, 8, 8, 12), new THREE.MeshLambertMaterial({ color: 0x9ad1ff }));
       cab.position.set(m.position.x, h + 4, m.position.z);
+      cab.userData.layerLevels = [facilityLevel(f)];
       this.staticGroup.add(cab);
     }
   }
@@ -367,6 +405,20 @@ export class Scene3D {
     if (layout !== this.layout) {
       this.layout = layout;
       this.rebuildStatic(layout);
+    }
+    for (const object of this.staticGroup.children) {
+      const levels = object.userData.layerLevels as number[] | undefined;
+      if (object.userData.terrain === true) {
+        const material = (object as THREE.Mesh).material;
+        if (material instanceof THREE.MeshBasicMaterial) {
+          material.transparent = s.mapLevel !== 'all' && s.mapLevel !== 0;
+          material.opacity = s.mapLevel === 'all' || s.mapLevel === 0 ? 1 : 0.24;
+          material.depthWrite = s.mapLevel === 'all' || s.mapLevel === 0;
+        }
+        object.visible = true;
+      } else if (levels) {
+        object.visible = s.mapLevel === 'all' || levels.includes(s.mapLevel);
+      }
     }
     this.selRing.visible = false;
     if (s.ops) {

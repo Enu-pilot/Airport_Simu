@@ -11,10 +11,12 @@ import {
   PARKING_MAX_WALK_TILES,
   buildLandsideNetwork,
   distanceToTerminal,
-  touchesTiles,
+  touchesTilesAtLevel,
   walkMinutes,
   type LandsideNetwork,
 } from './landside';
+import { facilityLevel } from '../model/levels';
+import { findPedestrianRoute, type WalkRoute } from './verticalWalk';
 
 /**
  * 旅客の空港アクセス手段の選択（docs/15_access_rules.md §3）。ゲーム用の簡易なロジットモデル。
@@ -96,6 +98,8 @@ export interface AccessAnalysis {
   trainsPerHour: number;
   taxiBerths: number;
   hotelRooms: number;
+  /** 運用中の旅客通路に明示能力が設定されている場合の経路能力。未設定区間があれば null。 */
+  railWalkCapacityPerHour: number | null;
   /** 職員数と必要・使える職員用駐車台数 */
   staff: number;
   staffSpacesNeeded: number;
@@ -149,7 +153,7 @@ export function analyzeAccess(
     for (const p of facilityTiles(t)) {
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const k = tileKey(p.x + dx, p.y + dy);
-        if (net.publicTiles.has(k)) curbTiles.add(k);
+        if ((net.publicTilesByLevel[facilityLevel(t)] ?? new Set<string>()).has(k)) curbTiles.add(k);
       }
     }
   }
@@ -158,32 +162,61 @@ export function analyzeAccess(
     facilities: Facility[];
     reason: AccessUnavailable | null;
     walkTiles: number;
+    walkMin?: number;
   }
-  const usable = (kind: Facility['kind'], conn: Set<string>, maxWalk: number): Usable => {
+  const usable = (kind: Facility['kind'], conn: Record<number, Set<string>>, maxWalk: number): Usable => {
     const all = facilities.filter((f) => f.kind === kind);
     if (all.length === 0) return { facilities: [], reason: 'noFacility', walkTiles: 0 };
-    const connected = all.filter((f) => touchesTiles(f, conn));
+    const connected = all.filter((f) => touchesTilesAtLevel(f, conn, facilityLevel(f)));
     if (connected.length === 0) return { facilities: [], reason: 'notConnected', walkTiles: 0 };
     const near = connected.map((f) => ({ f, d: distanceToTerminal(layout, f) })).filter((x) => x.d <= maxWalk);
     if (near.length === 0) return { facilities: [], reason: 'tooFar', walkTiles: 0 };
     return { facilities: near.map((x) => x.f), reason: null, walkTiles: Math.min(...near.map((x) => x.d)) };
   };
 
-  const parking = usable('parking', net.publicTiles, PARKING_MAX_WALK_TILES);
-  const taxi = usable('taxiStand', net.publicTiles, ACCESS_MAX_WALK_TILES);
-  const bus = usable('busStop', net.publicTiles, ACCESS_MAX_WALK_TILES);
-  const railNetwork = usable('railStation', net.railTiles, ACCESS_MAX_WALK_TILES);
-  const railFacilities = railNetwork.facilities.filter((f) => railServiceAvailable(city, railServiceOf(f.props.railService)));
+  const parking = usable('parking', net.publicTilesByLevel, PARKING_MAX_WALK_TILES);
+  const taxi = usable('taxiStand', net.publicTilesByLevel, ACCESS_MAX_WALK_TILES);
+  const bus = usable('busStop', net.publicTilesByLevel, ACCESS_MAX_WALK_TILES);
+  const railNetwork = usable('railStation', net.railTilesByLevel, Number.MAX_SAFE_INTEGER);
+  const terminalsForAccess = terminals.filter((f) => f.buildState === 'operational');
+  const railRoutes = new Map<string, WalkRoute>();
+  const legacyRailStations = new Set<string>();
+  const railReachable = railNetwork.facilities.filter((station) => {
+    const route = terminalsForAccess.map((terminal) => findPedestrianRoute(layout, station, terminal)).filter((r): r is WalkRoute => r !== null).sort((a, b) => a.minutes - b.minutes)[0];
+    if (route && route.minutes <= walkMinutes(ACCESS_MAX_WALK_TILES)) {
+      railRoutes.set(station.id, route);
+      return true;
+    }
+    // Keep the legacy ground-level station rule when no explicit walkway route is attached.
+    if (facilityLevel(station) === 0 && distanceToTerminal(layout, station) <= ACCESS_MAX_WALK_TILES) {
+      legacyRailStations.add(station.id);
+      return true;
+    }
+    return false;
+  });
+  const railFacilities = railReachable.filter((f) => railServiceAvailable(city, railServiceOf(f.props.railService)));
+  const railWalkMin = Math.min(...railFacilities.map((f) => railRoutes.get(f.id)?.minutes ?? (legacyRailStations.has(f.id) ? walkMinutes(Math.min(distanceToTerminal(layout, f), ACCESS_MAX_WALK_TILES)) : Infinity)));
+  const railRouteEdges = [...new Set(railFacilities.flatMap((f) => railRoutes.get(f.id)?.edges ?? []))];
+  const railWalkCapacityPerHour = railFacilities.length && railRouteEdges.length
+    ? railRouteEdges.reduce<number | null>((min, edgeId) => {
+        const cap = layout.roads[edgeId]?.capacityPerHour;
+        return min === null || cap === undefined ? null : Math.min(min, cap);
+      }, Infinity)
+    : null;
   const rail: Usable = {
     ...railNetwork,
     facilities: railFacilities,
-    reason: railFacilities.length > 0 ? null : railNetwork.facilities.length > 0 && city ? 'noService' : railNetwork.reason,
+    walkMin: Number.isFinite(railWalkMin) ? railWalkMin : 0,
+    walkTiles: Number.isFinite(railWalkMin) ? railWalkMin / walkMinutes(1) : 0,
+    reason: railFacilities.length > 0 ? null : railReachable.length > 0 && city ? 'noService' : railNetwork.facilities.length > 0 ? 'notConnected' : railNetwork.reason,
   };
-  const hotel = usable('hotel', net.publicTiles, ACCESS_MAX_WALK_TILES);
+  const hotel = usable('hotel', net.publicTilesByLevel, ACCESS_MAX_WALK_TILES);
   const parkingSpaces = parking.facilities.reduce((s, f) => s + num(f.props.spaces), 0);
   const taxiBerths = taxi.facilities.reduce((s, f) => s + num(f.props.berths), 0);
   const busesPerHour = bus.facilities.reduce((s, f) => s + Math.min(num(f.props.busesPerHour), num(f.props.busBays) * M.busesPerBay), 0);
   const trainsPerHour = rail.facilities.reduce((s, f) => s + num(f.props.trainsPerHour), 0);
+  const needsWalkCapacity = railFacilities.some((f) => !legacyRailStations.has(f.id));
+  const railPaxCapacity = needsWalkCapacity ? (railWalkCapacityPerHour === null ? null : Math.min(trainsPerHour * M.trainSeats, railWalkCapacityPerHour)) : trainsPerHour * M.trainSeats;
   const weightedRail = rail.facilities.reduce((acc, f) => {
     const trains = num(f.props.trainsPerHour);
     const service = railServiceOf(f.props.railService);
@@ -224,7 +257,7 @@ export function analyzeAccess(
       wait: trainsPerHour > 0 ? 30 / trainsPerHour + (fb.waitMin.rail ?? 0) : 0,
       delay: 0,
       fare: M.baseFare.rail + A.rail * fees.rail + railFareSurcharge,
-      cap: trainsPerHour * M.trainSeats,
+      cap: railPaxCapacity,
     },
     walk: { reason: null, u: hotel.reason ? null : hotel, wait: 0, delay: 0, fare: 0, cap: null },
   };
@@ -236,7 +269,7 @@ export function analyzeAccess(
     let reason = b.reason;
     if (!terminalId) reason = 'noTerminal';
     else if (m !== 'rail' && m !== 'walk' && entrances === 0) reason = 'noEntrance';
-    const walkMin = b.u ? walkMinutes(b.u.walkTiles) : 0;
+    const walkMin = b.u ? (b.u.walkMin ?? walkMinutes(b.u.walkTiles)) : 0;
     // 徒歩: 空港ホテルがあれば宿泊客が歩いて来る（客室数に応じた定数項）
     const hotelWalk = m === 'walk' && hotelRooms > 0;
     const external = hotelWalk ? 5 : city && (m === 'car' || m === 'dropoff' || m === 'taxi' || m === 'bus')
@@ -268,7 +301,7 @@ export function analyzeAccess(
 
   const staff = staffCount(layout);
   const staffSpaces = facilities
-    .filter((f) => f.kind === 'staffParking' && touchesTiles(f, net.anyRoadTiles))
+    .filter((f) => f.kind === 'staffParking' && touchesTilesAtLevel(f, net.anyRoadTilesByLevel, facilityLevel(f)))
     .reduce((s, f) => s + num(f.props.spaces), 0);
   return {
     terminalId,
@@ -284,6 +317,7 @@ export function analyzeAccess(
     trainsPerHour,
     taxiBerths,
     hotelRooms,
+    railWalkCapacityPerHour,
     staff,
     staffSpacesNeeded: Math.ceil(staff * M.staffParkingPerStaff),
     staffSpaces,

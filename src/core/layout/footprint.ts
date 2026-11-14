@@ -90,6 +90,10 @@ function edgeTiles(nodes: Record<string, NetNode>, from: string, to: string): Ti
 export interface FootprintPart {
   ownerId: string;
   layer: FootprintLayer;
+  /** 占有する高度階。地上施設は省略（level 0）。 */
+  level?: number;
+  /** 階層接続設備は両端の階を占有検証する。 */
+  levels?: number[];
   tiles: Tile[];
   /** 実寸の多角形（自由形の滑走路だけ。World フレーム、凸）。ある部分は重なり判定を多角形で行う（`tiles` は重なるタイル） */
   poly?: WorldPoint[];
@@ -113,11 +117,15 @@ export function footprintOf(layout: AirportLayout, id: string): FootprintPart[] 
   if (t) return [{ ownerId: id, layer: 'taxiway', tiles: edgeTiles(layout.taxiNodes, t.from, t.to) }];
   const rd = layout.roads[id];
   if (rd) {
+    const fromLevel = layout.roadNodes[rd.from]?.level ?? 0;
+    const toLevel = layout.roadNodes[rd.to]?.level ?? 0;
+    const layer: FootprintLayer = rd.roadClass === 'public' ? 'roadPublic' : rd.roadClass === 'service' ? 'roadService' : rd.roadClass === 'rail' ? 'rail' : rd.roadClass === 'walkway' ? 'walkway' : 'fuelPipe';
     return [
       {
         ownerId: id,
-        layer: rd.roadClass === 'public' ? 'roadPublic' : rd.roadClass === 'rail' ? 'rail' : 'roadService',
+        layer,
         tiles: edgeTiles(layout.roadNodes, rd.from, rd.to),
+        ...(fromLevel === toLevel ? (fromLevel === 0 ? {} : { level: fromLevel }) : { levels: [fromLevel, toLevel] }),
       },
     ];
   }

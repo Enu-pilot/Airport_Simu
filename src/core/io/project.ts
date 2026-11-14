@@ -31,9 +31,11 @@ import { checkJournal, hasJournalData, type Journal } from '../analytics/journal
 export const PROJECT_FORMAT = 'skyport-project';
 /** 基本の版。新しい項目を使わないファイルはこの版で書く */
 export const PROJECT_FORMAT_VERSION = 1;
-/** 新しい項目を使うファイルの版（12B-3a）。このバージョンは 2 までを読める */
+/** 新しい項目を使うファイルの版（12B-3a） */
 export const PROJECT_FORMAT_VERSION_2 = 2;
-export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_2;
+/** 階層交通・ターミナル間交通データを使うファイル */
+export const PROJECT_FORMAT_VERSION_3 = 3;
+export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_3;
 
 const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !== null && k in (o as Record<string, unknown>);
 
@@ -47,6 +49,14 @@ export function layoutUsesFormat2(l: AirportLayout): boolean {
   return false;
 }
 
+/** 多層交通・ターミナル間交通の形を使うレイアウトは v3 を要する。 */
+export function layoutUsesFormat3(l: AirportLayout): boolean {
+  if (Object.values(l.roadNodes).some((n) => n.level !== undefined || n.elevationM !== undefined)) return true;
+  if (Object.values(l.roads).some((e) => e.roadClass === 'walkway' || e.roadClass === 'fuel' || e.connectorKind !== undefined || e.capacityPerHour !== undefined || e.travelSec !== undefined)) return true;
+  if (Object.values(l.facilities).some((f) => f.kind === 'railStation' && f.props.level !== undefined)) return true;
+  return Object.keys(l.terminalLinks ?? {}).length > 0;
+}
+
 function closureLedgerUsed(state: SimState): boolean {
   return !!state.closureReasons && (['taxiways', 'stands', 'gates'] as const).some((kind) => Object.keys(state.closureReasons![kind]).length > 0);
 }
@@ -56,10 +66,11 @@ function companyUsesFormat2(c: CompanyState | null | undefined): boolean {
 }
 
 /**
- * このプロジェクトを書くときの保存形式の版。新しい項目を 1 つでも使うときだけ 2（旧アプリが読み違えないため）、
+ * このプロジェクトを書くときの保存形式の版。新しい項目を使うときだけ必要な版に上げる（旧アプリが読み違えないため）、
  * 使わないときは 1 のまま（従来のファイル・ゴールデンの出力が変わらない）。
  */
 export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null; journal?: Journal }): number {
+  if (layoutUsesFormat3(p.layout) || p.scenarios.some((s) => layoutUsesFormat3(s.layout))) return PROJECT_FORMAT_VERSION_3;
   if (layoutUsesFormat2(p.layout) || companyUsesFormat2(p.company)) return PROJECT_FORMAT_VERSION_2;
   if (hasJournalData(p.journal)) return PROJECT_FORMAT_VERSION_2;
   for (const s of p.scenarios) if (layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) return PROJECT_FORMAT_VERSION_2;
@@ -168,7 +179,7 @@ export interface ValidationReport {
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-const LAYOUT_RECORDS = ['runways', 'taxiNodes', 'taxiways', 'roadNodes', 'roads', 'stands', 'facilities', 'terminalAreas'] as const;
+const LAYOUT_RECORDS = ['runways', 'taxiNodes', 'taxiways', 'roadNodes', 'roads', 'stands', 'facilities', 'terminalAreas', 'terminalLinks'] as const;
 
 /** レイアウトの内容の検証（必須項目・型・ID の重複・参照切れ） */
 export function checkLayout(l: unknown, where = 'レイアウト'): string[] {
@@ -177,7 +188,8 @@ export function checkLayout(l: unknown, where = 'レイアウト'): string[] {
   const layout = l as AirportLayout;
   const seen = new Map<string, string>();
   for (const k of LAYOUT_RECORDS) {
-    for (const [key, e] of Object.entries(layout[k] as Record<string, { id?: unknown }>)) {
+    if (k === 'terminalLinks' && layout.terminalLinks === undefined) continue;
+    for (const [key, e] of Object.entries((layout[k] ?? {}) as Record<string, { id?: unknown }>)) {
       if (!isObj(e)) {
         errors.push(`${where}: ${k} の ${key} が不正です`);
         continue;
@@ -196,6 +208,13 @@ export function checkLayout(l: unknown, where = 'レイアウト'): string[] {
   }
   for (const a of Object.values(layout.terminalAreas)) {
     if (layout.facilities[a.terminalId]?.kind !== 'terminal') errors.push(`${where}: ターミナル内エリア ${a.id} の建物 ${a.terminalId} が見つかりません`);
+  }
+  for (const link of Object.values(isObj(layout.terminalLinks) ? layout.terminalLinks as NonNullable<AirportLayout['terminalLinks']> : {})) {
+    const from = layout.terminalAreas[link.fromAreaId];
+    const to = layout.terminalAreas[link.toAreaId];
+    if (!from || !to) errors.push(`${where}: ターミナル連絡設備 ${link.id} の接続エリアが見つかりません`);
+    else if (from.terminalId === to.terminalId) errors.push(`${where}: ターミナル連絡設備 ${link.id} は異なるターミナルのエリアを接続してください`);
+    else if (Array.isArray(link.allowedZones) && link.allowedZones.some((zone) => zone !== from.zone || zone !== to.zone)) errors.push(`${where}: ターミナル連絡設備 ${link.id} の旅客区域が接続先エリアと一致しません`);
   }
   errors.push(...checkRunwayFields(layout, where));
   errors.push(...checkBusProps(layout, where));
@@ -560,10 +579,15 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
   const fv = formatVersionOf({ layout, company, scenarios, sim, journal });
   const simInputState = isObj(data.sim) && isObj(data.sim.state) ? data.sim.state as unknown as SimState : null;
   const containsV2Input = data.journal !== undefined || layoutUsesFormat2(layout) || companyUsesFormat2(company) || scenarios.some((s) => layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) || !!simInputState && (hasKey(simInputState, 'bus') || hasKey(simInputState, 'wx') || inputHadAirlineStandHomes || (inputHadClosureReasons && closureLedgerUsed(simInputState)) || companyUsesFormat2(sim?.company));
+  const containsV3Input = layoutUsesFormat3(layout) || scenarios.some((s) => layoutUsesFormat3(s.layout));
   // 版 1 を名乗るのに 12B-3a の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）がある: 旧アプリが誤読しないための版の取り決めに反するので拒否する
   // 旧形式の閉鎖配列から検証中に構築した closureReasons は、入力ファイルにない移行後データなので v1 拒否判定には使わない。
   if (data.formatVersion === PROJECT_FORMAT_VERSION && containsV2Input) {
     errors.push('保存形式の版（formatVersion）が 1 ですが、版 2 の項目（バス搭乗・連絡通路・ランプバス・航空会社別ホームスポット・ゲーム設定・天候など）を含んでいます。ファイルが壊れているか、手で編集された可能性があります');
+    return fail();
+  }
+  if (typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_3 && containsV3Input) {
+    errors.push(`保存形式の版（formatVersion）が ${String(data.formatVersion)} ですが、多層交通またはターミナル間連絡設備を含んでいます。版 3 として保存し直してください`);
     return fail();
   }
   const project: ProjectFile = {
@@ -586,5 +610,5 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     sim,
     ...(journal ? { journal } : {}),
   };
-  return { ok: true, errors, warnings, migratedFrom: data.formatVersion !== PROJECT_FORMAT_VERSION && data.formatVersion !== PROJECT_FORMAT_VERSION_2 ? `${PROJECT_FORMAT} v${String(data.formatVersion)}` : null, project };
+  return { ok: true, errors, warnings, migratedFrom: data.formatVersion !== PROJECT_FORMAT_VERSION && data.formatVersion !== PROJECT_FORMAT_VERSION_2 && data.formatVersion !== PROJECT_FORMAT_VERSION_3 ? `${PROJECT_FORMAT} v${String(data.formatVersion)}` : null, project };
 }

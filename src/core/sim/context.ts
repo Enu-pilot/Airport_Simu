@@ -13,6 +13,7 @@ import { resolveRunwayDims } from '../layout/runwayAreas';
 import { isFreeRunway } from '../model/types';
 import type { RunwayConfig, UnitKind } from './types';
 import { rotatedDims } from '../layout/footprint';
+import { hydrantConnectedStands } from '../layout/fuelHydrants';
 
 /**
  * シミュレーションが参照する、レイアウトから導出した不変の情報。
@@ -84,6 +85,8 @@ export interface SimContext {
   sorters: { id: string; x: number; y: number; capacityPerMin: number }[];
   /** 運用中の燃料施設があるか（給油の前提） */
   hasFuelFarm: boolean;
+  /** 地下配管で給油施設へ接続されたスポット（配管がない既存レイアウトは空）。 */
+  hydrantStands: Set<string>;
   /** 滑走路どうしの交差。自由形が関与するものだけ（従来形だけなら []） */
   crossings: RunwayCrossing[];
   crossingsByRunway: Record<string, RunwayCrossing[]>;
@@ -194,7 +197,8 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
     }));
   const sorters = operational.filter((f) => f.kind === 'baggageSort').map((f) => ({ id: f.id, ...center(f), capacityPerMin: n(f, 'capacityPerMin') }));
   const hasFuelFarm = operational.some((f) => f.kind === 'fuelFarm');
-  return { layout, network, runways, stands, terminal, standGate, busGates, paxTerminal, bases, sorters, hasFuelFarm, crossings, crossingsByRunway, crossingNodeRunways, freeRunways, types: opts.types ?? AIRCRAFT_TYPES };
+  const hydrantStands = hydrantConnectedStands(layout);
+  return { layout, network, runways, stands, terminal, standGate, busGates, paxTerminal, bases, sorters, hasFuelFarm, hydrantStands, crossings, crossingsByRunway, crossingNodeRunways, freeRunways, types: opts.types ?? AIRCRAFT_TYPES };
 }
 
 /** 運用方向に並べた滑走路上ノードと、進入端からの距離 */

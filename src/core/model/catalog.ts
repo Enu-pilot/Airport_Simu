@@ -10,7 +10,7 @@ export { TILE_M } from '../geometry/frames';
 export const TAXIWAY_DRAW_WIDTH_M = { S: 15, M: 23, L: 30, codeF: 38 } as const;
 
 /** 道路・鉄道の描画幅（m、ゲームの表示用の値） */
-export const ROAD_DRAW_WIDTH_M = { road: 12, rail: 8 } as const;
+export const ROAD_DRAW_WIDTH_M = { road: 12, rail: 8, walkway: 5, fuel: 2 } as const;
 
 /** 占有判定のレイヤー。重なりの可否は validation の互換表で決める */
 export type FootprintLayer =
@@ -25,7 +25,9 @@ export type FootprintLayer =
   | 'area'
   | 'roadPublic'
   | 'roadService'
-  | 'rail';
+  | 'rail'
+  | 'walkway'
+  | 'fuelPipe';
 
 export interface FacilitySpec {
   layer: FootprintLayer;
@@ -125,6 +127,7 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
     { key: 'busesPerHour', type: 'int', min: 1, max: 30 },
   ],
   railStation: [
+    { key: 'level', type: 'int', min: -5, max: 10 },
     { key: 'trainsPerHour', type: 'int', min: 1, max: 20 },
     { key: 'railService', type: 'enum', options: ['local', 'rapid', 'express'] },
   ],

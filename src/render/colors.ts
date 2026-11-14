@@ -59,6 +59,8 @@ export const COLOR = {
   roadPublic: 0x2e3135,
   roadService: 0x7a6a48,
   rail: 0x6e5a7e,
+  walkway: 0x39a9a1,
+  fuelPipe: 0xcaa52b,
   roadMarking: 0xdedede,
   selection: 0x3ff0ff,
   ghostOk: 0x5cff8d,

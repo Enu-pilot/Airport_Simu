@@ -43,15 +43,18 @@ export function allocId(d: AirportLayout, prefix: string): string {
 }
 
 export function findNodeAt(nodes: Record<string, NetNode>, tile: Tile): string | undefined {
-  for (const n of Object.values(nodes)) if (sameTile(n.pos, tile)) return n.id;
+  for (const n of Object.values(nodes)) if ((n.level ?? 0) === 0 && sameTile(n.pos, tile)) return n.id;
   return undefined;
 }
 
+const atLevel = (n: NetNode, level: number): boolean => (n.level ?? 0) === level;
+
 /** 位置が POS_EPS_T 以内のノード（実数の位置用。距離の最小、同距離なら ID 順）。従来の整数タイルは findNodeAt を使う */
-export function findNodeNear(nodes: Record<string, NetNode>, p: Tile, eps: number = POS_EPS_T): string | undefined {
+export function findNodeNear(nodes: Record<string, NetNode>, p: Tile, eps: number = POS_EPS_T, level = 0): string | undefined {
   let best: string | undefined;
   let bestD = Infinity;
   for (const n of Object.values(nodes)) {
+    if (!atLevel(n, level)) continue;
     const dist = Math.hypot(n.pos.x - p.x, n.pos.y - p.y);
     if (dist > eps) continue;
     if (dist < bestD || (dist === bestD && best !== undefined && n.id < best)) {
@@ -74,9 +77,9 @@ export function edgeBetween<E extends { from: string; to: string }>(
   return Object.values(edges).find((e) => (e.from === a && e.to === b) || (e.from === b && e.to === a));
 }
 
-export function createNode(d: AirportLayout, net: NetKind, tile: Tile): string {
+export function createNode(d: AirportLayout, net: NetKind, tile: Tile, level = 0): string {
   const id = allocId(d, NODE_PREFIX[net]);
-  netNodes(d, net)[id] = { id, pos: { x: tile.x, y: tile.y }, name: '', holdShort: true };
+  netNodes(d, net)[id] = { id, pos: { x: tile.x, y: tile.y }, name: '', holdShort: true, ...(level === 0 ? {} : { level }) };
   return id;
 }
 
@@ -97,44 +100,44 @@ export function splitEdge(d: AirportLayout, net: NetKind, edgeId: string, nodeId
  * tile にノードを保証する。既存ノードがあればそれを返し、エッジ内部にあればそのエッジを分割する。
  * どちらでもなければ create=true の場合のみ新規作成する。
  */
-export function ensureNodeAt(d: AirportLayout, net: NetKind, tile: Tile, create: boolean): string | undefined {
+export function ensureNodeAt(d: AirportLayout, net: NetKind, tile: Tile, create: boolean, level = 0): string | undefined {
   const nodes = netNodes(d, net);
-  const existing = findNodeAt(nodes, tile);
+  const existing = Object.values(nodes).find((n) => atLevel(n, level) && sameTile(n.pos, tile))?.id;
   if (existing) return existing;
   const edges = netEdges(d, net);
   for (const e of Object.values(edges)) {
     const a = nodes[e.from];
     const b = nodes[e.to];
-    if (!a || !b) continue;
+    if (!a || !b || !atLevel(a, level) || !atLevel(b, level)) continue;
     if (pointOnSegmentInterior(tile, a.pos, b.pos) !== null) {
-      const id = createNode(d, net, tile);
+      const id = createNode(d, net, tile, level);
       splitEdge(d, net, e.id, id);
       return id;
     }
   }
-  return create ? createNode(d, net, tile) : undefined;
+  return create ? createNode(d, net, tile, level) : undefined;
 }
 
 /**
  * 実数の位置 p にノードを保証する（自由形の滑走路との交点用）。
  * POS_EPS_T 以内の既存ノードがあればそれを返し、エッジの内部にあればそのエッジを分割し、なければ作成する。
  */
-export function ensureNodeNear(d: AirportLayout, net: NetKind, p: Tile): string {
+export function ensureNodeNear(d: AirportLayout, net: NetKind, p: Tile, level = 0): string {
   const nodes = netNodes(d, net);
-  const existing = findNodeNear(nodes, p);
+  const existing = findNodeNear(nodes, p, POS_EPS_T, level);
   if (existing) return existing;
   for (const e of Object.values(netEdges(d, net))) {
     const a = nodes[e.from];
     const b = nodes[e.to];
-    if (!a || !b) continue;
+    if (!a || !b || !atLevel(a, level) || !atLevel(b, level)) continue;
     const cp = closestPointOnSegment(p, a.pos, b.pos);
     if (cp.dist <= POS_EPS_T) {
-      const id = createNode(d, net, p);
+      const id = createNode(d, net, p, level);
       splitEdge(d, net, e.id, id);
       return id;
     }
   }
-  return createNode(d, net, p);
+  return createNode(d, net, p, level);
 }
 
 /**
@@ -145,6 +148,7 @@ export function addPath(
   net: NetKind,
   points: readonly Tile[],
   template: EdgeTemplate,
+  level = 0,
 ): { nodeIds: string[]; edgeIds: string[] } {
   const nodes = netNodes(d, net);
   const edges = netEdges(d, net);
@@ -153,7 +157,7 @@ export function addPath(
 
   // 1. 各頂点にノードを保証（既存エッジの途中なら分割 = T字交差点）
   // （整数でない頂点 = 自由形の中心線上の実数の位置は、POS_EPS_T 以内の既存ノードに併合する）
-  const vertexIds = points.map((p) => (isIntegerPoint(p) ? ensureNodeAt(d, net, p, true)! : ensureNodeNear(d, net, p)));
+  const vertexIds = points.map((p) => (isIntegerPoint(p) ? ensureNodeAt(d, net, p, true, level)! : ensureNodeNear(d, net, p, level)));
 
   for (let i = 0; i + 1 < vertexIds.length; i++) {
     const na = vertexIds[i]!;
@@ -165,6 +169,7 @@ export function addPath(
 
     // 2a. 区間内部を通過する既存ノード
     for (const n of Object.values(nodes)) {
+      if (!atLevel(n, level)) continue;
       if (n.id === na || n.id === nb) continue;
       const t = pointOnSegmentInterior(n.pos, pa, pb);
       if (t !== null) splits.push({ t, id: n.id });
@@ -173,32 +178,33 @@ export function addPath(
     for (const e of Object.values(edges)) {
       const c = nodes[e.from];
       const dd = nodes[e.to];
-      if (!c || !dd) continue;
+      if (!c || !dd || !atLevel(c, level) || !atLevel(dd, level)) continue;
       const hit = segmentIntersection(pa, pb, c.pos, dd.pos);
       if (!hit || !isIntegerPoint(hit.point)) continue;
-      const id = createNode(d, net, roundPoint(hit.point));
+      const id = createNode(d, net, roundPoint(hit.point), level);
       splitEdge(d, net, e.id, id);
       splits.push({ t: hit.t, id });
     }
     // 2c. 誘導路は滑走路中心線との交差点に滑走路入口ノードを作る
     if (net === 'taxi') {
       for (const r of Object.values(d.runways)) {
+        if (level !== 0) continue;
         if (isFreeRunway(r)) {
           // 自由形: 交点は実数のまま採用する。中心線に沿って走る（overlap）誘導路は検証に任せる
           const axis = runwayAxis(r);
           const c = classifySegmentIntersection(pa, pb, axis.start, axis.end);
           if (c.kind !== 'point' || c.atEndA) continue; // 区間の端は頂点のノードが既にある
           const near =
-            findNodeNear(nodes, c.p) ?? splits.find((s) => Math.hypot(nodes[s.id]!.pos.x - c.p.x, nodes[s.id]!.pos.y - c.p.y) <= POS_EPS_T)?.id;
+          findNodeNear(nodes, c.p, POS_EPS_T, level) ?? splits.find((s) => Math.hypot(nodes[s.id]!.pos.x - c.p.x, nodes[s.id]!.pos.y - c.p.y) <= POS_EPS_T)?.id;
           if (near !== undefined && (near === na || near === nb || splits.some((s) => s.id === near))) continue;
-          splits.push({ t: c.t, id: near ?? ensureNodeNear(d, net, c.p) });
+          splits.push({ t: c.t, id: near ?? ensureNodeNear(d, net, c.p, level) });
           continue;
         }
         const hit = segmentIntersection(pa, pb, r.start, runwayEnd(r));
         if (!hit || !isIntegerPoint(hit.point)) continue;
         const tile = roundPoint(hit.point);
         if (splits.some((s) => sameTile(nodes[s.id]!.pos, tile))) continue;
-        splits.push({ t: hit.t, id: ensureNodeAt(d, net, tile, true)! });
+        splits.push({ t: hit.t, id: ensureNodeAt(d, net, tile, true, level)! });
       }
     }
 

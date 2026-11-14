@@ -47,7 +47,7 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
   {
     title: '道路・エリア',
     tools: [
-      { id: 'road', label: '道路・鉄道', hint: 'クリックで頂点を追加、ダブルクリック/Enter/右クリックで確定（種別: 一般・業務用・鉄道）' },
+      { id: 'road', label: '道路・交通網', hint: '選択中の階層に交通網を敷設。別階層はノードのプロパティから接続設備を作成' },
       fac('serviceArea'),
       fac('parking'),
     ],
@@ -77,6 +77,7 @@ export function Toolbox() {
   const kind = facilityKindOf(tool);
   const level = useEditor((s) => s.interiorLevel);
   const interior = useEditor((s) => s.overlays.interior);
+  const mapLevel = useEditor((s) => s.mapLevel);
   const rotatable = tool === 'stand' || (kind !== null && !FACILITY_SPECS[kind].dragPlace);
 
   return (
@@ -102,6 +103,13 @@ export function Toolbox() {
 
       <div className="tool-options">
         <div className="tool-group-title">配置オプション</div>
+        <label>
+          交通レイヤ表示・敷設階
+          <select value={mapLevel} onChange={(e) => actions.setMapLevel(e.target.value === 'all' ? 'all' : Number(e.target.value))} data-testid="map-level">
+            <option value="all">全レイヤ</option>
+            {Array.from({ length: 16 }, (_, i) => i - 5).map((l) => <option key={l} value={l}>{l === 0 ? '地上' : l < 0 ? `地下 ${-l}` : `高架 ${l}`}</option>)}
+          </select>
+        </label>
         <label>
           ターミナル内部の階
           <span>
@@ -157,8 +165,16 @@ export function Toolbox() {
                 <option value="public">{ROAD_CLASS_LABEL.public}</option>
                 <option value="service">{ROAD_CLASS_LABEL.service}</option>
                 <option value="rail">{ROAD_CLASS_LABEL.rail}</option>
+                <option value="walkway">{ROAD_CLASS_LABEL.walkway}</option>
+                <option value="fuel">{ROAD_CLASS_LABEL.fuel}</option>
               </select>
             </label>
+            <label>
+              明示能力（/時、0=未算出）
+              <input type="number" min="0" value={options.roadCapacityPerHour} onChange={(e) => actions.setOption('roadCapacityPerHour', Math.max(0, Number(e.target.value) || 0))} data-testid="road-capacity" />
+            </label>
+            {options.roadClass === 'rail' && <div className="muted small">駅の「階層」と同じ階で接続してください。鉄道乗降客がターミナルへ移動するには旅客通路が必要です。</div>}
+            {options.roadClass === 'fuel' && <div className="muted small">給油施設からスポットまで連続した配管と階層間ライザーを敷設します。</div>}
             <label className="check">
               <input type="checkbox" checked={options.oneWay} onChange={(e) => actions.setOption('oneWay', e.target.checked)} />
               一方通行

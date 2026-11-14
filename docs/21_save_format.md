@@ -2,9 +2,9 @@
 
 実装: `src/core/io/project.ts`（形式・検証・復元）、`src/editor/project.ts`（保存先・操作）、`src/ui/ProjectPanel.tsx`（画面）。
 
-## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1` または 2）
+## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜3）
 
-**版の書き方（Phase 12B-3a/3b/4）**: `formatVersionOf(p)` が、新しい項目（ゲートの `boardingMode: 'bus'`・`connectedTo`、スポットの `remoteBoarding`・`busGateId`、GSE 基地の `apronBuses > 0`、運航状態の `bus`・`wx`・閉鎖理由台帳 `closureReasons`・`airlineStandHomes`、会社の `game`・`airlineEval`・`goals`・`city`、任意の `journal`）を **1 つでも使うときだけ 2**、使わないときは 1 のまま書く（`buildProject` と `validateProject` の作り直しの両方。`versions.format` も同じ値）。読み込みは 2 まで許可し、3 以上は拒否する（v1 → v2 は恒等）。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`。新フィールドは任意で、旧 v1 のレイアウト・会社・日報は引き続き読める。厳格な形の検査: `checkLayout`（`boardingMode`・`connectedTo`・`apronBuses`・リモートスポットの設定）、`checkSim`（`bus` の運行参照・`airlineStandHomes` の日付・スポット ID・重複・`closureReasons` と閉鎖配列・外部遅延秒数、復元後の BU1〜BU4）、`checkJournal`（任意のスポッティング・記録）。旧運航状態に `airlineStandHomes` がなければ、復元時に当日の空状態で初期化する。旧運航状態は既存の閉鎖配列と発生中の障害から閉鎖理由台帳を再構築する。外部遅延は原因名から推定せず、運航に実際に加えた秒数だけを記録する。
+**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜3 を読み、4 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
 
 `Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。`FlightRecord` の形式は変更しない。便別レビューの締め時点の原因・実時刻・機体状態・作業・施設名、航空会社評価要素・EMA/満足度前後・不満/要望は `DayReview` に集約し、日ごとの IndexedDB 履歴の `review` に保存する。会社状態やプロジェクトJSONには追加しないため、プロジェクト保存形式・シミュレーションモデルの版は上げない。古い保存済みレビューにない項目は推測せず欠落として表示する。
 
@@ -27,19 +27,17 @@
 
 | 版 | 定数 | 変わるとき |
 |---|---|---|
-| 保存形式 | `PROJECT_FORMAT_VERSION = 1` | ファイルの構造を変えたとき（移行処理を追加する） |
+| 保存形式 | `PROJECT_FORMAT_VERSION = 1`, `PROJECT_FORMAT_VERSION_2 = 2`, `PROJECT_FORMAT_VERSION_3 = 3` | 新しい任意データを含むファイルだけ版を上げ、旧アプリが誤読しないようにする |
 | 機種カタログ | `CATALOG_VERSION`（現在 2026.11.0） | 収録機種・値を変えたとき |
 | 3D アセット | `ASSET_VERSION`（現在 2026.11.0） | 3D の形を変えたとき（表示だけに影響） |
 | シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.1` | 運航の計算を変えたとき |
 
 ### 版の方針（Phase 11 で明文化。詳細は [22](22_geometry_architecture.md) §7）
 
-- Phase 11 はどの版も上げていない（データと運航の計算を変えない）: `SCHEMA_VERSION = 2`、`PROJECT_FORMAT_VERSION = 1`、`SIM_MODEL_VERSION = skyport-sim-10.0`。
-- **Phase 12 で `SCHEMA_VERSION` を 3 に上げた**（自由方位の滑走路・実寸 `dims`・番号の接尾辞・磁気偏角・判定ルールを保存できる）。`PROJECT_FORMAT_VERSION = 1`・`SIM_MODEL_VERSION = skyport-sim-10.0`・`CATALOG_VERSION` は上げていない。
-  追加項目はすべて任意で、欠落は従来の意味 → **v2 から v3 への移行は何も書き換えない**（`io/migrate.ts` に段とコメントのみ）。
-  **`layout.schemaVersion` の意味**: 「作成または最後に構造的な移行をした版」（v2 のデータは 2 のまま）。保存ファイルの外側の版（レイアウトファイルの `schemaVersion`、プロジェクトの `versions.layoutSchema`）は保存時に常に現行の 3 になり、こちらが正。
-  古いアプリでレイアウトファイルの新しい版を開くと「未対応の版」として拒否する（既存の処理）。**旧アプリは v3 のプロジェクトファイルの `versions.layoutSchema` を見ないため、自由形の滑走路入りのプロジェクトを開くと壊れたまま読める**（旧アプリは直せない既知の制限）。
-  Phase 12 以降のアプリは `versions.layoutSchema > SCHEMA_VERSION` をエラーにする。詳細と互換性の表は [27](27_migration_and_compatibility.md)、滑走路のデータは [23](23_runway_design.md)。
+- Phase 11 はどの版も上げていない。Phase 12 で `SCHEMA_VERSION` を 3 に上げ、自由形滑走路・実寸 `dims`・番号接尾辞・磁気偏角・判定ルールを追加した。
+- Phase U の階層交通項目はすべて任意項目として追加し、内部 `SCHEMA_VERSION = 3` を維持した。多層交通・ターミナル間連絡リンクを含むプロジェクトは外側の `formatVersion 3` として保存する。`SIM_MODEL_VERSION` は変更していない。
+- 階層のないノードは地上、連絡設備のないレイアウトは従来どおりとし、旧レイアウトを読み込むための必須書換えはない。内部スキーマ版は作成または最後に構造移行した版のまま保持する。
+- 新アプリは `versions.layoutSchema > SCHEMA_VERSION` を拒否する。旧アプリは新しい階層・接続情報を正しく扱えない可能性があるため、多層設備を含むデータを旧アプリで編集しないこと。詳細は [27](27_migration_and_compatibility.md)、[34](34_vertical_transport.md)。
 - **Phase 12 の不具合修正（C1・M1）は `SIM_MODEL_VERSION` を上げない**（PO 承認済み）。C1（連続横断で横断許可が上書きされ滑走路の占有が漏れる、Phase 2 からの不具合）は、漏れが起きる運航だけが変わり、起きない運航は 1 ビットも変わらない。
   修正前に保存された運航状態に漏れた占有がある場合は、読み込み時に修復して警告を出す（`heldCrossings` は任意項目で、無い保存は従来どおり読める。旧版のアプリは `heldCrossings` を無視して従来どおり漏れる）。
   以前に漏れた運航を記録したシナリオの結果は、同じ版の表記のまま再実行すると結果が変わる。
@@ -100,7 +98,7 @@
 
 ## 日ごとの履歴（Phase 12B-2。保存形式の版は変えない）
 
-- 日次の締めのたびに、**その日の朝（締めの直後）の建設モードの復元点**を IndexedDB に残す（DB `skyport`・ストア `dayHistory`・キー `<プロジェクトのスロット ID | "unsaved">:<締めた後の会社の日>`）。値 = `{ day, savedAt, cash, rating, operatingProfit, review（振り返りのデータ）, projectJson }`。`projectJson` は通常のプロジェクトファイル（`formatVersion` は 1。ゲーム設定・バス搭乗など版 2 の項目を使う会社・レイアウトでは 2）で、`sim: null`・`scenarios: []`（運航状態とシナリオは入れない）。完了した工事は、運航を終えたときと同じようにレイアウトへ反映済み。
+- 日次の締めのたびに、**その日の朝（締めの直後）の建設モードの復元点**を IndexedDB に残す（DB `skyport`・ストア `dayHistory`・キー `<プロジェクトのスロット ID | "unsaved">:<締めた後の会社の日>`）。値 = `{ day, savedAt, cash, rating, operatingProfit, review（振り返りのデータ）, projectJson }`。`projectJson` は通常のプロジェクトファイル（項目に応じて `formatVersion` 1〜3）で、`sim: null`・`scenarios: []`（運航状態とシナリオは入れない）。完了した工事は、運航を終えたときと同じようにレイアウトへ反映済み。
 - localStorage は小さい（約 5 MB。運航状態入りの 1 件が数百 KB）ため IndexedDB を使う。使えない環境（`indexedDB` がない・開けない）ではメモリに置き、1 回だけ「履歴はこのタブを閉じると消えます」と表示する。`DayHistoryStore` 抽象（`IndexedDbHistoryStore` / `MemoryHistoryStore`）は `src/editor/dayHistoryStore.ts`、IndexedDB は editor / ui 層のみ（core には置かない）。
 - **保持規則**（`core/io/historyPolicy.ts` の純関数 `retainHistoryDays`、書き込みのたびに整理）: 現在の日より先の履歴は捨てる（戻ってやり直した別の経過の残り）／直近 7 日はすべて／それより古いものは 7 日ごとの区間につき 1 件（区間で最も新しい日）で新しい区間から最大 8 件。1 プロジェクトあたり最大 15 件。
 - **戻す**: 「この日の朝に戻る」→ `validateProject`（読み込みと同じ検証）に通ったときだけ適用（レイアウト・会社・機種データの固定）し、失敗したら開いているプロジェクトは変えない。建設モードのみ。**現在のシナリオは保つ**（履歴に含めないため）。
