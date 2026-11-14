@@ -13,7 +13,7 @@ SkyPort（Enu-pilot/Airport_Simu）の開発を続けてください。
 0. 準備（設計書の S0）
    - PR #5（ブランチ claude/phase12b-ops-experience）がマージ済みなら、既定ブランチ claude/sweet-pasteur-4denw0 から新しいブランチ claude/phase12b-3b-city-noise-events を作る。
      未マージなら claude/phase12b-ops-experience の上に積み、既定ブランチ（PR #4 の acceptOffer の変更）をマージしておく（衝突なしを確認済み）。
-   - 12B-3a 後半の独立監査の結果: docs/design/phase12b_3a_partB_audit.md（あれば）。指摘があれば先に修正する。
+   - 12B-3a 後半の独立監査の指摘 docs/design/phase12b_3a_partB_audit.md（M1・m1〜m4）を先に修正し、PR #5 が未マージなら PR #5 のブランチに、マージ済みなら新しいブランチの最初のコミットとして入れる。M1 は従来の経路（ゲーム設定なし）の結果を変えないこと。
 1. 12B-3b を設計書 docs/design/phase12b_3b_design.md の手順どおりに実装する。
    3b-1 都市とアクセス鉄道（7 コミット）→ 3b-2 騒音と夜間制限（4）→ 3b-3 イベント（7）。
    高リスクの手順（C4/C5 access、C6 planning/company/goals、E2 simulation.ts のフック、E4 契約のチャーター）は設計書 §6.1 の回帰テスト一式を実行する。
