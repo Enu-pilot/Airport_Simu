@@ -32,6 +32,8 @@ export interface ScoreFacts {
   fallback?: boolean;
   /** スポット要素: 計画の便のうちランプバスで搭乗する便の割合（0〜1。バスがなければキーなし。表示のみ） */
   busShare?: number;
+  /** 評価要素の根拠として記録できた便名。便に帰属しない要素では欠落する。 */
+  flightNumbers?: string[];
 }
 
 export interface ScoreComponent {
@@ -109,7 +111,13 @@ function otpComponent(a: AirlineDef, recs: readonly FlightRecord[], company: Com
   for (const r of recs) for (const c of r.causes) if (!c.startsWith('hold:')) tally.set(c, (tally.get(c) ?? 0) + 1);
   const main = [...tally.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))[0]?.[0];
   const level: ScoreLevel = otp >= minOtp ? 'good' : otp >= minOtp - 0.1 ? 'warn' : 'bad';
-  return { key: 'otp', level, score: Math.round(clamp((otp / minOtp) * 100)), facts: { value: otp, target: minOtp, n: legs.length, ...(main ? { names: [main] } : {}), ...(fallback ? { fallback } : {}) } };
+  const late = recs.filter((r) => {
+    if (r.result !== 'completed') return false;
+    const pair = evaluateDelayPair({ arrScheduled: r.arrScheduled, arrActual: r.landedAt, depScheduled: r.depScheduled, depBlockOut: r.blockOut, turnaroundSec: resolveType(types, r.typeId).turnaroundSec, arrivalExternalDelaySec: r.arrivalExternalDelaySec });
+    return (r.landedAt !== null && pair.arrivalSec > ON_TIME_SEC) || (r.blockOut !== null && pair.departureSec > ON_TIME_SEC);
+  });
+  const flightNumbers = late.flatMap((r) => [r.arrNumber, r.depNumber]);
+  return { key: 'otp', level, score: Math.round(clamp((otp / minOtp) * 100)), facts: { value: otp, target: minOtp, n: legs.length, ...(main ? { names: [main] } : {}), ...(flightNumbers.length ? { flightNumbers: [...new Set(flightNumbers)] } : {}), ...(fallback ? { fallback } : {}) } };
 }
 
 function turnaroundComponent(recs: readonly FlightRecord[], types: TypeTable): ScoreComponent {
@@ -119,10 +127,11 @@ function turnaroundComponent(recs: readonly FlightRecord[], types: TypeTable): S
   const std = rows.reduce((s, r) => s + resolveType(types, r.typeId).turnaroundSec, 0) / rows.length;
   const over = (actual - std) / 60;
   const level: ScoreLevel = over <= 5 ? 'good' : over <= 15 ? 'warn' : 'bad';
-  return { key: 'turnaround', level, score: Math.round(clamp(100 - Math.max(0, over) * 4)), facts: { value: Math.round(over), target: Math.round(std / 60), n: rows.length } };
+  const flightNumbers = rows.filter((r) => (r.readyAt! - r.blockIn!) > resolveType(types, r.typeId).turnaroundSec).flatMap((r) => [r.arrNumber, r.depNumber]);
+  return { key: 'turnaround', level, score: Math.round(clamp(100 - Math.max(0, over) * 4)), facts: { value: Math.round(over), target: Math.round(std / 60), n: rows.length, ...(flightNumbers.length ? { flightNumbers: [...new Set(flightNumbers)] } : {}) } };
 }
 
-function standComponent(planKeys: Set<string>, analysis: PlanAnalysis, recs: readonly FlightRecord[], hasFlights: boolean): ScoreComponent {
+function standComponent(plan: DayPlan, planKeys: Set<string>, analysis: PlanAnalysis, recs: readonly FlightRecord[], hasFlights: boolean): ScoreComponent {
   if (!hasFlights && recs.length === 0) return na('stand');
   const conflict = new Set<string>();
   const noGate = new Set<string>();
@@ -137,6 +146,11 @@ function standComponent(planKeys: Set<string>, analysis: PlanAnalysis, recs: rea
   const score = clamp(100 - conflict.size * 40 - noGate.size * 15 - heldNoStand * 10);
   const facts: ScoreFacts = { value: conflict.size, target: noGate.size, n: heldNoStand };
   if (busKeys.size > 0 && planKeys.size > 0) facts.busShare = busKeys.size / planKeys.size;
+  const problemKeys = new Set([...conflict, ...noGate, ...busKeys]);
+  const planNumbers = plan.flights.filter((f) => problemKeys.has(f.key)).flatMap((f) => [f.arrNumber, f.depNumber]);
+  const recordNumbers = recs.filter((r) => r.causes.includes('noStand') || r.causes.includes('noGate') || r.causes.includes('noBus')).flatMap((r) => [r.arrNumber, r.depNumber]);
+  const flightNumbers = [...new Set([...planNumbers, ...recordNumbers])];
+  if (flightNumbers.length) facts.flightNumbers = flightNumbers;
   return { key: 'stand', level, score: Math.round(score), facts };
 }
 
@@ -158,7 +172,8 @@ function slotsComponent(company: CompanyState, airlineId: string, plan: DayPlan,
   const over = new Set<string>();
   for (const i of analysis.issues) if (i.code === 'RUNWAY_OVERLOAD' || i.code === 'OUTSIDE_HOURS') for (const k of i.keys) if (planKeys.has(k) || contracts.has(k)) over.add(k);
   const level: ScoreLevel = dropped > 0 ? 'bad' : over.size > 0 ? 'warn' : 'good';
-  return { key: 'slots', level, score: Math.round(clamp(100 - dropped * 40 - over.size * 15)), facts: { value: over.size, n: dropped } };
+  const planNumbers = plan.flights.filter((f) => over.has(f.key)).flatMap((f) => [f.arrNumber, f.depNumber]);
+  return { key: 'slots', level, score: Math.round(clamp(100 - dropped * 40 - over.size * 15)), facts: { value: over.size, n: dropped, ...(planNumbers.length ? { flightNumbers: [...new Set(planNumbers)] } : {}) } };
 }
 
 function aircraftComponent(a: AirlineDef, company: CompanyState, operable: ReadonlySet<string>): ScoreComponent {
@@ -185,7 +200,8 @@ function paxComponent(recs: readonly FlightRecord[]): ScoreComponent {
   const left = bags > 0 ? recs.reduce((s, r) => s + r.bagsLeft, 0) / bags : 0;
   const bad = missed + left;
   const level: ScoreLevel = bad <= 0.01 ? 'good' : bad <= 0.05 ? 'warn' : 'bad';
-  return { key: 'pax', level, score: Math.round(clamp(100 - bad * 800)), facts: { value: missed, target: left, n: recs.length } };
+  const affected = recs.filter((r) => r.paxMissed > 0 || r.bagsLeft > 0).flatMap((r) => [r.arrNumber, r.depNumber]);
+  return { key: 'pax', level, score: Math.round(clamp(100 - bad * 800)), facts: { value: missed, target: left, n: recs.length, ...(affected.length ? { flightNumbers: [...new Set(affected)] } : {}) } };
 }
 
 /** 全航空会社の評価カード（AIRLINES の順） */
@@ -198,7 +214,7 @@ export function airlineScorecard(input: ScorecardInput): AirlineScore[] {
     const components: ScoreComponent[] = [
       otpComponent(a, recs, company, ctx.types),
       turnaroundComponent(recs, ctx.types),
-      standComponent(planKeys, analysis, recs, planKeys.size > 0),
+      standComponent(plan, planKeys, analysis, recs, planKeys.size > 0),
       feesComponent(a, company),
       slotsComponent(company, a.id, plan, analysis, planKeys),
       aircraftComponent(a, company, operable),

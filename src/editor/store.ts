@@ -21,6 +21,7 @@ import type { CityConfig, CityEvent } from '../core/economy/city';
 import { applyCompletedProjects, prepareCareerEdit, startClosure, syncProjects } from '../core/economy/expansion';
 import { createStarterAirfield } from '../core/sample/starterAirfield';
 import type { DayReview } from '../core/analytics/review';
+import { createJournal, type Journal } from '../core/analytics/journal';
 import { clearUnsavedHistory } from './dayHistoryStore';
 import { CURRENCY } from '../core/economy/balance';
 import {
@@ -84,6 +85,8 @@ export interface Overlays {
   labels: boolean;
   /** 混雑マップ（運航中: 滑走路・スポット・誘導路ノード・処理施設の混雑） */
   congestion: boolean;
+  /** ゲーム時刻に応じた昼夜 tint（表示のみ） */
+  daylight: boolean;
 }
 
 export interface Toast {
@@ -128,6 +131,8 @@ export interface EditorState {
   projectName: string;
   /** 保存時の機種データ（プロジェクトを開いたときに固定。null なら現在のカタログ） */
   catalogPin: CatalogPin | null;
+  /** 日次の実運航ログから作る任意の記録 */
+  journal: Journal;
   /** 1 日のループの UI の状態（保存しない。docs/06 §9）。phase: 通常 / スキップ中 / 振り返りを表示中 */
   dayFlow: DayFlow;
   /** 運航の設定（localStorage に保存。表示・進め方だけで、シミュレーションの結果には関係しない） */
@@ -274,7 +279,7 @@ export const editorStore = createStore<EditorState>(() => ({
   hover: null,
   hoverW: null,
   draft: null,
-  overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true, congestion: false },
+  overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true, congestion: false, daylight: true },
   interiorLevel: 1,
   toast: null,
   mode: 'build',
@@ -286,6 +291,7 @@ export const editorStore = createStore<EditorState>(() => ({
   viewMode: '2d',
   dayFlow: initialDayFlow(),
   opsPrefs: loadPrefs(),
+  journal: createJournal(),
   ...loadInitialMeta(),
 }));
 
@@ -497,7 +503,7 @@ export function newGame(mode: CompanyState['mode'], game: GameSettings | null = 
   const company = mode === 'career' ? createCareerCompany() : createSandboxCompany();
   startGame(company, game);
   if (city) company.city = structuredClone(city);
-  set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select', scenarios: [], projectId: null, projectName: '無題のプロジェクト', catalogPin: null, dayFlow: initialDayFlow() });
+  set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select', scenarios: [], projectId: null, projectName: '無題のプロジェクト', catalogPin: null, journal: createJournal(), dayFlow: initialDayFlow() });
   void clearUnsavedHistory();
   showToast(mode === 'career' ? `新しいゲーム: 小さな飛行場から（資金 ${formatCr(company.cash)}）` : 'サンドボックス: サンプル空港と潤沢な資金で始めます');
 }

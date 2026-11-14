@@ -9,6 +9,8 @@ import { checkAirlineEval, type AirlineEvalState } from './airlineEval';
 import { aircraftIsLow, complaintCount, COMPLAINTS_BLOCK_INCREASE, increaseMinSatRelief, offerBoost, tierBonus } from './evalRules';
 import { checkGoals, type GoalState } from './goals';
 import { isCityConfig, type CityConfig, type CityEvent, type CityType } from './city';
+import type { AirlineRequest, RequestKind } from './airlineEval';
+import type { ScoreComponent, ScoreKey } from './airlineScore';
 
 /**
  * 空港会社（経営）の状態。建設モードと運航モードをまたいで保持し、レイアウトと一緒に保存する。
@@ -151,6 +153,22 @@ export interface DailyReport {
   grants?: number;
   city?: { type: CityType; populationStart: number; populationEnd: number; demandCeiling: number; expectedPax: number; actualPax: number; cityFactor: number; roadQuality: number; railQuality: number; residentsStart?: number; residentsEnd?: number; residentDelta?: number; noiseMovements?: number; nightMovements?: number; noisePoints?: number; events?: CityEvent[]; eventDemandMultiplier?: number; eventTrafficMultiplier?: number };
 }
+
+/** その日の振り返りを生成するときだけ渡す締め時点の評価スナップショット。会社保存形式には入れない。 */
+export interface DailyAirlineAnalysisEntry {
+  components: ScoreComponent[];
+  satisfactionBefore: number;
+  satisfactionAfter: number;
+  satisfactionDelta: number;
+  emaBefore?: Partial<Record<ScoreKey, number>>;
+  emaAfter?: Partial<Record<ScoreKey, number>>;
+  complaintsBefore?: ScoreKey[];
+  complaintsAfter?: ScoreKey[];
+  newComplaints?: ScoreKey[];
+  requests?: AirlineRequest[];
+  fulfilled?: RequestKind[];
+}
+export type DailyAirlineAnalysis = Record<string, DailyAirlineAnalysisEntry>;
 
 export interface CompanyState {
   version: 1;

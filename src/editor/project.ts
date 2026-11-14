@@ -15,6 +15,7 @@ import { historyKey, notifyHistoryChanged } from './dayHistory';
 import type { Scenario } from '../core/scenario/scenario';
 import { SAVE_FORMAT } from '../core/io/serialize';
 import { ops } from './simRunner';
+import { createJournal } from '../core/analytics/journal';
 
 /**
  * プロジェクトの操作（docs/21_save_format.md）: 新規・保存・名前を付けて保存・読み込み・削除・JSON の書き出し / 読み込み。
@@ -64,6 +65,7 @@ export function currentProject(name = get().projectName): ProjectFile {
     pin: s.catalogPin,
     scenarios: s.scenarios,
     sim: s.ops?.sim ?? null,
+    journal: s.journal,
   });
 }
 
@@ -108,6 +110,7 @@ function applyProject(p: ProjectFile, id: string | null, keepScenarios?: Scenari
     projectId: id,
     projectName: p.name,
     catalogPin: pin,
+    journal: p.journal ?? createJournal(),
   });
   if (p.sim) {
     const { sim, violations, repaired } = restoreSimulation(p.layout, p.sim, effectiveModels(pin));

@@ -14,6 +14,7 @@ import type { SimState } from '../sim/types';
 import { checkWxState } from '../sim/weather';
 import { SAVE_FORMAT, checkRunwayFields, validateLayoutData } from './serialize';
 import { migrateLayout } from './migrate';
+import { checkJournal, hasJournalData, type Journal } from '../analytics/journal';
 
 /**
  * プロジェクトの保存形式（docs/21_save_format.md）。
@@ -58,8 +59,9 @@ function companyUsesFormat2(c: CompanyState | null | undefined): boolean {
  * このプロジェクトを書くときの保存形式の版。新しい項目を 1 つでも使うときだけ 2（旧アプリが読み違えないため）、
  * 使わないときは 1 のまま（従来のファイル・ゴールデンの出力が変わらない）。
  */
-export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null }): number {
+export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null; journal?: Journal }): number {
   if (layoutUsesFormat2(p.layout) || companyUsesFormat2(p.company)) return PROJECT_FORMAT_VERSION_2;
+  if (hasJournalData(p.journal)) return PROJECT_FORMAT_VERSION_2;
   for (const s of p.scenarios) if (layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) return PROJECT_FORMAT_VERSION_2;
   if (p.sim) {
     if (hasKey(p.sim.state, 'bus') || hasKey(p.sim.state, 'wx') || closureLedgerUsed(p.sim.state) || companyUsesFormat2(p.sim.company)) return PROJECT_FORMAT_VERSION_2;
@@ -92,6 +94,8 @@ export interface ProjectFile {
   scenarios: Scenario[];
   /** 運航中に保存したときの運航状態（建設モードでは null） */
   sim: SimSnapshot | null;
+  /** 運航実績から作るスポッティング・記録（任意。運航モデルには影響しない） */
+  journal?: Journal;
 }
 
 /** プロジェクトの有効な機種データ: 現在のカタログに、保存時のスナップショットを優先して重ねる */
@@ -118,6 +122,7 @@ export interface BuildInput {
   pin: CatalogPin | null;
   scenarios: readonly Scenario[];
   sim: Simulation | null;
+  journal?: Journal;
 }
 
 export function buildProject(i: BuildInput): ProjectFile {
@@ -128,7 +133,8 @@ export function buildProject(i: BuildInput): ProjectFile {
   const models = effectiveModels(i.pin);
   const ids = projectModelIds(company, sim, i.scenarios);
   const snap = Object.fromEntries(ids.filter((id) => models[id]).map((id) => [id, structuredClone(models[id]!)]));
-  const fv = formatVersionOf({ layout: i.layout, company, scenarios: i.scenarios, sim });
+  const journal = hasJournalData(i.journal) ? structuredClone(i.journal) : undefined;
+  const fv = formatVersionOf({ layout: i.layout, company, scenarios: i.scenarios, sim, journal });
   return {
     format: PROJECT_FORMAT,
     formatVersion: fv,
@@ -141,6 +147,7 @@ export function buildProject(i: BuildInput): ProjectFile {
     assets: { version: ASSET_VERSION, refs: Object.fromEntries(Object.entries(snap).map(([id, m]) => [id, m.assetId])) },
     scenarios: structuredClone([...i.scenarios]),
     sim,
+    ...(journal ? { journal } : {}),
   };
 }
 
@@ -489,6 +496,12 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     }
   }
 
+  let journal: Journal | undefined;
+  if (data.journal !== undefined) {
+    errors.push(...checkJournal(data.journal));
+    if (!errors.length) journal = structuredClone(data.journal as Journal);
+  }
+
   // 運航状態
   let sim: SimSnapshot | null = null;
   if (data.sim !== null && data.sim !== undefined) {
@@ -535,9 +548,9 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     }
   }
 
-  const fv = formatVersionOf({ layout, company, scenarios, sim });
+  const fv = formatVersionOf({ layout, company, scenarios, sim, journal });
   const simInputState = isObj(data.sim) && isObj(data.sim.state) ? data.sim.state as unknown as SimState : null;
-  const containsV2Input = layoutUsesFormat2(layout) || companyUsesFormat2(company) || scenarios.some((s) => layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) || !!simInputState && (hasKey(simInputState, 'bus') || hasKey(simInputState, 'wx') || (inputHadClosureReasons && closureLedgerUsed(simInputState)) || companyUsesFormat2(sim?.company));
+  const containsV2Input = data.journal !== undefined || layoutUsesFormat2(layout) || companyUsesFormat2(company) || scenarios.some((s) => layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) || !!simInputState && (hasKey(simInputState, 'bus') || hasKey(simInputState, 'wx') || (inputHadClosureReasons && closureLedgerUsed(simInputState)) || companyUsesFormat2(sim?.company));
   // 版 1 を名乗るのに 12B-3a の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）がある: 旧アプリが誤読しないための版の取り決めに反するので拒否する
   // 旧形式の閉鎖配列から検証中に構築した closureReasons は、入力ファイルにない移行後データなので v1 拒否判定には使わない。
   if (data.formatVersion === PROJECT_FORMAT_VERSION && containsV2Input) {
@@ -562,6 +575,7 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     assets: isObj(assets) && isObj(assets.refs) ? { version: String(assets.version), refs: assets.refs as Record<string, string> } : { version: ASSET_VERSION, refs: {} },
     scenarios,
     sim,
+    ...(journal ? { journal } : {}),
   };
   return { ok: true, errors, warnings, migratedFrom: data.formatVersion !== PROJECT_FORMAT_VERSION && data.formatVersion !== PROJECT_FORMAT_VERSION_2 ? `${PROJECT_FORMAT} v${String(data.formatVersion)}` : null, project };
 }

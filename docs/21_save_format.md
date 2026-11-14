@@ -4,9 +4,9 @@
 
 ## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1` または 2）
 
-**版の書き方（Phase 12B-3a/3b）**: `formatVersionOf(p)` が、新しい項目（ゲートの `boardingMode: 'bus'`・`connectedTo`、スポットの `remoteBoarding`・`busGateId`、GSE 基地の `apronBuses > 0`、運航状態の `bus`・`wx`・閉鎖理由台帳 `closureReasons`、会社の `game`・`airlineEval`・`goals`・`city`）を **1 つでも使うときだけ 2**、使わないときは 1 のまま書く（`buildProject` と `validateProject` の作り直しの両方。`versions.format` も同じ値）。読み込みは 2 まで許可し、3 以上は拒否する（v1 → v2 は恒等）。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`。従来のファイルの内容・ゴールデン（`project.golden.json` は直列化の sha256）は変わらない。`SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない。厳格な形の検査: `checkLayout`（`boardingMode`・`connectedTo`・`apronBuses`・リモートスポットの設定）、`checkSim`（`bus` の運行参照・`closureReasons` と閉鎖配列・外部遅延秒数、復元後の BU1〜BU4）。旧運航状態は既存の閉鎖配列と発生中の障害から閉鎖理由台帳を再構築する。外部遅延は原因名から推定せず、運航に実際に加えた秒数だけを記録する。
+**版の書き方（Phase 12B-3a/3b/4）**: `formatVersionOf(p)` が、新しい項目（ゲートの `boardingMode: 'bus'`・`connectedTo`、スポットの `remoteBoarding`・`busGateId`、GSE 基地の `apronBuses > 0`、運航状態の `bus`・`wx`・閉鎖理由台帳 `closureReasons`、会社の `game`・`airlineEval`・`goals`・`city`、任意の `journal`）を **1 つでも使うときだけ 2**、使わないときは 1 のまま書く（`buildProject` と `validateProject` の作り直しの両方。`versions.format` も同じ値）。読み込みは 2 まで許可し、3 以上は拒否する（v1 → v2 は恒等）。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`。従来のファイルの内容・ゴールデン（`project.golden.json` は直列化の sha256）は変わらない。`SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない。厳格な形の検査: `checkLayout`（`boardingMode`・`connectedTo`・`apronBuses`・リモートスポットの設定）、`checkSim`（`bus` の運行参照・`closureReasons` と閉鎖配列・外部遅延秒数、復元後の BU1〜BU4）、`checkJournal`（任意のスポッティング・記録）。旧運航状態は既存の閉鎖配列と発生中の障害から閉鎖理由台帳を再構築する。外部遅延は原因名から推定せず、運航に実際に加えた秒数だけを記録する。
 
-`Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。
+`Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。`FlightRecord` の形式は変更しない。便別レビューの締め時点の原因・実時刻・機体状態・作業・施設名、航空会社評価要素・EMA/満足度前後・不満/要望は `DayReview` に集約し、日ごとの IndexedDB 履歴の `review` に保存する。会社状態やプロジェクトJSONには追加しないため、プロジェクト保存形式・シミュレーションモデルの版は上げない。古い保存済みレビューにない項目は推測せず欠落として表示する。
 
 | 項目 | 内容 |
 |---|---|
@@ -18,6 +18,7 @@
 | `assets` | 機種 ID → 3D アセット ID と、アセットの版 |
 | `scenarios` | シナリオ（初期条件・機種データ・シード・障害の条件・シミュレーションの版・変更履歴・結果と KPI） |
 | `sim` | 運航中に保存したときの運航状態（`SimState` 全体と運航中の会社）。建設モードでは `null` |
+| `journal` | 任意。日次締めで FlightRecord から更新するスポッティング・累計記録。シミュレーション状態とは独立 |
 
 `SimState` には、便・機体（位置・状態・経路）、滑走路・スポット・誘導路の占有と予約、旅客グループ、手荷物、地上作業とユニット、
 設備の状態、天候・障害と復旧状況、閉鎖対象ごとの独立した閉鎖理由、便ごとの外部遅延実秒数、乱数の状態、分析の記録が含まれる。

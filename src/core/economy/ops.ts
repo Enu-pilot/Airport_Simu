@@ -31,6 +31,7 @@ import {
   type CompanyState,
   type CostCategory,
   type DailyKpi,
+  type DailyAirlineAnalysis,
   type DailyReport,
 } from './company';
 import { layoutValue, scaleFactor } from './construction';
@@ -76,6 +77,11 @@ export interface SimEconomy {
   /** 空港ホテルの客室数（外部とつながりターミナルに近いもの） */
   hotelRooms: number;
 }
+
+// Evaluation details are consumed immediately when the daily review is built. Keeping them outside
+// CompanyState preserves the serialized simulation/economy state and existing deterministic results.
+const dailyAnalysisByReport = new WeakMap<DailyReport, DailyAirlineAnalysis>();
+export const dailyAirlineAnalysis = (report: DailyReport): DailyAirlineAnalysis | undefined => dailyAnalysisByReport.get(report);
 
 const enabled = (sim: Simulation): sim is Simulation & { company: CompanyState } => !!sim.company && !!sim.state.economy;
 
@@ -520,17 +526,20 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   const { kpi, byAirline } = computeKpi(sim, c);
   settleAccess(sim, c, kpi);
   for (const ev of advanceProjects(c)) log(state, ev);
+  const from = e.periodStart;
+  const recs = state.analytics.records.filter((r) => {
+    const t = r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled;
+    return t >= from && t < state.now;
+  });
+  // 評価カードは締めた日の実績・計画から一度だけ算出し、翌日の計画と混同しないようレビュー用に保持する。
+  const dayPlan = planDayWithDemand(c, c.day, state.access?.factor ?? 1, ctx.types);
+  const scorecard = airlineScorecard({ company: c, ctx, records: recs, plan: dayPlan, analysis: analyzeDayPlan(dayPlan, ctx) });
+  const evalBefore = structuredClone(c.airlineEval ?? {});
+  const satisfactionBefore = Object.fromEntries(Object.entries(c.airlines).map(([id, rel]) => [id, rel.satisfaction]));
   let evalIn: { deltas: Record<string, number>; bonus: Record<string, number> } | undefined;
   if (c.game?.airlineEval) {
     // 航空会社の評価要素（12B-1 の評価カードの 7 要素）→ 移動平均 → 満足度の変化・不満・要望
-    const from = e.periodStart;
-    const recs = state.analytics.records.filter((r) => {
-      const t = r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled;
-      return t >= from && t < state.now;
-    });
-    const plan = planDayWithDemand(c, c.day, state.access?.factor ?? 1, ctx.types);
-    const scores = airlineScorecard({ company: c, ctx, records: recs, plan, analysis: analyzeDayPlan(plan, ctx) });
-    const r = stepAirlineEval(c, { scores, operable: new Set<string>(operableTypes(ctx)) });
+    const r = stepAirlineEval(c, { scores: scorecard, operable: new Set<string>(operableTypes(ctx)) });
     for (const t of r.events) log(state, t);
     evalIn = { deltas: r.deltas, bonus: r.bonus };
   }
@@ -547,6 +556,30 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   for (const k of COST_CATEGORIES) if (c.today[k]) cost[k] = -c.today[k]!;
   const totalRevenue = Object.values(revenue).reduce((s, v) => s + v, 0);
   const totalCost = Object.values(cost).reduce((s, v) => s + v, 0);
+  const airlineAnalysis: DailyAirlineAnalysis = Object.fromEntries(scorecard.filter((s) => s.active || (satisfactionBefore[s.airlineId] ?? 0) > 0).map((s) => {
+    const id = s.airlineId;
+    const beforeEval = evalBefore[id];
+    const afterEval = c.airlineEval?.[id];
+    const complaintsBefore = beforeEval?.complaints.map((x) => x.key) ?? [];
+    const complaintsAfter = afterEval?.complaints.map((x) => x.key) ?? [];
+    const satisfaction0 = satisfactionBefore[id] ?? 0;
+    const satisfaction1 = c.airlines[id]?.satisfaction ?? satisfaction0;
+    return [id, {
+      components: structuredClone(s.components),
+      satisfactionBefore: satisfaction0,
+      satisfactionAfter: satisfaction1,
+      satisfactionDelta: Math.round((satisfaction1 - satisfaction0) * 10) / 10,
+      ...(beforeEval ? { emaBefore: { ...beforeEval.ema } } : {}),
+      ...(afterEval ? { emaAfter: { ...afterEval.ema } } : {}),
+      ...(c.game?.airlineEval ? {
+        complaintsBefore,
+        complaintsAfter,
+        newComplaints: complaintsAfter.filter((key) => !complaintsBefore.includes(key)),
+        requests: structuredClone(afterEval?.requests ?? []),
+        fulfilled: afterEval?.done.filter((x) => x.day === c.day).map((x) => x.kind) ?? [],
+      } : {}),
+    }];
+  }));
   const report: DailyReport = {
     day: c.day,
     partial,
@@ -597,6 +630,7 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
     for (const id of res.completed) log(state, `目標を達成しました: ${id}`);
     if (res.tierUp !== null) log(state, `空港の格が上がりました: ${res.tierUp}`);
   }
+  dailyAnalysisByReport.set(report, airlineAnalysis);
   checkBankruptcy(c);
   if (c.city && !partial) {
     const residentDelta = applyCityNoiseImpact(c.city, cityNoise?.noisePoints ?? 0, cityNoise?.nightMovements ?? 0);

@@ -39,6 +39,7 @@ const OVERLAY_LABEL: Record<keyof Overlays, string> = {
   issues: 'エラー表示',
   labels: 'ラベル',
   congestion: '混雑マップ',
+  daylight: '昼夜表現',
 };
 
 export function App() {
@@ -163,6 +164,7 @@ function TopBar() {
   const layout = useLayout();
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = useEditor((s) => s.mode);
+  const overlayKeys = (Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).filter((k) => mode === 'operate' || k !== 'daylight');
   const career = useEditor((s) => s.company.mode === 'career');
   const prefs = useEditor((s) => s.opsPrefs);
   const hasReview = useEditor((s) => s.dayFlow.review !== null);
@@ -270,7 +272,7 @@ function TopBar() {
         <details className="overlays-pop" data-testid="overlays-pop">
           <summary title="マップの表示切り替え">表示</summary>
           <div className="overlays-menu">
-            {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
+            {overlayKeys.map((k) => (
               <label key={k}>
                 <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
                 {OVERLAY_LABEL[k]}
@@ -280,7 +282,7 @@ function TopBar() {
         </details>
       ) : (
         <div className="top-group overlays">
-          {(Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).map((k) => (
+          {overlayKeys.map((k) => (
             <label key={k}>
               <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
               {OVERLAY_LABEL[k]}

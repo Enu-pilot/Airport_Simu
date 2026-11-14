@@ -20,7 +20,8 @@ export type OverlayKey =
   | 'project'
   | 'issues'
   | 'airlines'
-  | 'goals';
+  | 'goals'
+  | 'journal';
 
 export interface OpsUiState {
   /** 開いている大きなオーバーレイ（なければ null） */

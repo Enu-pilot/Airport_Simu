@@ -1,11 +1,15 @@
-import { airlineScorecard, type ScoreKey } from '../economy/airlineScore';
-import type { CompanyState, DailyReport } from '../economy/company';
+import type { CompanyState, DailyAirlineAnalysis, DailyReport } from '../economy/company';
 import { analyzeDayPlan, planDayWithDemand, type PlanIssue } from '../economy/planning';
 import type { Simulation } from '../sim/simulation';
+import { dailyAirlineAnalysis } from '../economy/ops';
 import { forecastForDay, type WeatherForecast } from '../sim/weather';
-import type { DisruptionKind } from '../sim/types';
+import type { AircraftState, DisruptionKind, TaskKind } from '../sim/types';
 import type { FlightRecord } from './records';
 import type { AirlineRequest, RequestKind } from '../economy/airlineEval';
+import type { ScoreComponent, ScoreKey } from '../economy/airlineScore';
+import { evaluateDelayPair } from '../economy/delayEvaluation';
+import { resolveType } from '../sim/aircraftTypes';
+import { designatorsOf } from '../layout/designators';
 
 /**
  * 1 日の振り返り（docs/14_management_rules.md §N）。日次の締めの直後に、既存の日報・運航の記録・障害の記録・
@@ -73,6 +77,71 @@ export interface ReviewBottleneck {
   recommendation: string;
 }
 
+/** 便記録から得られる実測値だけで構成する、日次振り返り用の便別情報。 */
+export interface ReviewFlight {
+  aircraftId: string;
+  arrNumber: string;
+  depNumber: string;
+  airlineId: string | null;
+  typeId: string;
+  typeName: string;
+  result: FlightRecord['result'];
+  arrRunway: string | null;
+  depRunway: string | null;
+  arrRunwayName: string | null;
+  depRunwayName: string | null;
+  standId: string | null;
+  standName: string | null;
+  gateId: string | null;
+  gateName: string | null;
+  arrScheduled: number;
+  landedAt: number | null;
+  blockIn: number | null;
+  readyAt: number | null;
+  blockOut: number | null;
+  depScheduled: number;
+  takeoffAt: number | null;
+  actualArrivalDelaySec: number | null;
+  evaluatedArrivalDelaySec: number | null;
+  arrivalExternalDelaySec: Partial<Record<string, number>>;
+  actualDepartureDelaySec: number | null;
+  evaluatedDepartureDelaySec: number | null;
+  departureGraceSec: number | null;
+  arrivalCauses: string[] | null;
+  departureCauses: string[] | null;
+  causes: string[];
+  paxBooked: number;
+  paxBoarded: number;
+  paxMissed: number;
+  paxArrived: number;
+  bagsLoaded: number;
+  bagsLeft: number;
+  taxiInSec: number;
+  taxiOutSec: number;
+  airborneHoldSec: number;
+  groundStopSec: number;
+  taskBlockedSec: number;
+  busWaitSec: number | null;
+  taskSec: Partial<Record<string, number>>;
+  taskRecords: { kind: TaskKind; createdAt: number; startedAt: number | null; doneAt: number | null; blockedSec: number; note: string | null }[];
+  timeline: { t: number; state: AircraftState; note?: string }[];
+  events: { t: number; kind: string; reason?: string; note?: string }[];
+  disruptionIds: string[];
+  impactKeys: ScoreKey[];
+}
+
+export interface ReviewFlightDetails {
+  arrRunwayName?: string | null;
+  depRunwayName?: string | null;
+  standName?: string | null;
+  gateName?: string | null;
+  arrivalCauses?: string[];
+  departureCauses?: string[];
+  taskRecords?: ReviewFlight['taskRecords'];
+  timeline?: ReviewFlight['timeline'];
+  events?: ReviewFlight['events'];
+}
+
 /** プレイヤーの対応の回数（UI が数える。シミュレーションには入れない） */
 export interface ReviewResponses {
   delays: number;
@@ -95,6 +164,8 @@ export interface DayReview {
   delayCauses: { cause: string; flights: number }[];
   /** 日中に終了記録が作られた便の実ログに基づく原因・影響便・対応案 */
   bottlenecks: ReviewBottleneck[];
+  /** 新しい記録形式では当日内の問題便と実時系列を含む。旧保存レビューでは欠落する。 */
+  flights?: ReviewFlight[];
   disruptions: ReviewDisruption[];
   responses: ReviewResponses;
   airlines: {
@@ -108,6 +179,11 @@ export interface DayReview {
     newComplaints?: ScoreKey[];
     requests?: AirlineRequest[];
     fulfilled?: RequestKind[];
+    components?: ScoreComponent[];
+    emaBefore?: Partial<Record<ScoreKey, number>>;
+    emaAfter?: Partial<Record<ScoreKey, number>>;
+    complaintsBefore?: ScoreKey[];
+    complaintsAfter?: ScoreKey[];
   }[];
   /** 目標（game.goals のときだけ）: この日に達成した目標・報酬の現金・昇格した格 */
   goals?: { completed: { id: string; cash: number }[]; tier: number; tierUp: boolean };
@@ -204,6 +280,97 @@ export function buildReviewBottlenecks(records: readonly FlightRecord[], from: n
   }).sort((a, b) => b.flights - a.flights || (a.cause < b.cause ? -1 : 1));
 }
 
+const inPeriod = (t: number | null, from: number, to: number): boolean => t !== null && t >= from && t < to;
+
+/** 当日の便記録を便単位に整え、既存の評価根拠に便名がある場合だけひも付ける。 */
+export function buildReviewFlights(input: {
+  records: readonly FlightRecord[];
+  from: number;
+  to: number;
+  types: ReviewInput['sim']['ctx']['types'];
+  airlineAnalysis?: DailyAirlineAnalysis;
+  details?: Record<string, ReviewFlightDetails>;
+}): ReviewFlight[] {
+  const { records, from, to, types, airlineAnalysis, details = {} } = input;
+  const all = records.filter((r) => inPeriod(r.landedAt, from, to) || inPeriod(r.blockOut, from, to) || inPeriod(r.takeoffAt, from, to) || (r.result !== 'completed' && inPeriod(recordTime(r), from, to)));
+  const rows = all.map((r): ReviewFlight => {
+    const detail = details[r.aircraftId] ?? {};
+    const delay = evaluateDelayPair({
+      arrScheduled: r.arrScheduled,
+      arrActual: r.landedAt,
+      depScheduled: r.depScheduled,
+      depBlockOut: r.blockOut,
+      turnaroundSec: resolveType(types, r.typeId).turnaroundSec,
+      arrivalExternalDelaySec: r.arrivalExternalDelaySec,
+    });
+    const impactKeys = (airlineAnalysis?.[r.airlineId ?? '']?.components ?? [])
+      .filter((component) => component.facts.flightNumbers?.includes(r.arrNumber) || component.facts.flightNumbers?.includes(r.depNumber))
+      .map((component) => component.key);
+    return {
+      aircraftId: r.aircraftId,
+      arrNumber: r.arrNumber,
+      depNumber: r.depNumber,
+      airlineId: r.airlineId,
+      typeId: r.typeId,
+      typeName: resolveType(types, r.typeId).label,
+      result: r.result,
+      arrRunway: r.arrRunway,
+      depRunway: r.depRunway,
+      arrRunwayName: detail.arrRunwayName ?? null,
+      depRunwayName: detail.depRunwayName ?? null,
+      standId: r.standId,
+      standName: detail.standName ?? null,
+      gateId: r.gateId,
+      gateName: detail.gateName ?? null,
+      arrScheduled: r.arrScheduled,
+      landedAt: r.landedAt,
+      blockIn: r.blockIn,
+      readyAt: r.readyAt,
+      blockOut: r.blockOut,
+      depScheduled: r.depScheduled,
+      takeoffAt: r.takeoffAt,
+      actualArrivalDelaySec: r.landedAt === null ? null : delay.actualArrivalSec,
+      evaluatedArrivalDelaySec: r.landedAt === null ? null : delay.arrivalSec,
+      arrivalExternalDelaySec: { ...(r.arrivalExternalDelaySec ?? {}) },
+      actualDepartureDelaySec: r.blockOut === null ? null : delay.actualDepartureSec,
+      evaluatedDepartureDelaySec: r.blockOut === null ? null : delay.departureSec,
+      departureGraceSec: r.blockOut === null ? null : delay.departureGraceSec,
+      arrivalCauses: detail.arrivalCauses ? [...detail.arrivalCauses] : null,
+      departureCauses: detail.departureCauses ? [...detail.departureCauses] : null,
+      causes: [...r.causes],
+      paxBooked: r.paxBooked,
+      paxBoarded: r.paxBoarded,
+      paxMissed: r.paxMissed,
+      paxArrived: r.paxArrived,
+      bagsLoaded: r.bagsLoaded,
+      bagsLeft: r.bagsLeft,
+      taxiInSec: r.taxiInSec,
+      taxiOutSec: r.taxiOutSec,
+      airborneHoldSec: r.airborneHoldSec,
+      groundStopSec: r.groundStopSec,
+      taskBlockedSec: r.taskBlockedSec,
+      busWaitSec: r.busWaitSec ?? null,
+      taskSec: { ...r.taskSec },
+      taskRecords: structuredClone((detail.taskRecords ?? []).filter((task) => task.createdAt < to && (task.doneAt ?? task.createdAt) >= from).sort((a, b) => a.createdAt - b.createdAt)),
+      timeline: structuredClone((detail.timeline ?? []).filter((entry) => entry.t >= from && entry.t < to)),
+      events: structuredClone((detail.events ?? []).filter((e) => e.t >= from && e.t < to).sort((a, b) => a.t - b.t || a.kind.localeCompare(b.kind))),
+      disruptionIds: [...r.disruptions],
+      impactKeys: [...new Set(impactKeys)],
+    };
+  });
+  const hasIssue = (r: ReviewFlight) => r.result !== 'completed' || r.causes.length > 0 || (r.actualArrivalDelaySec ?? 0) > 0 || (r.actualDepartureDelaySec ?? 0) > 0 || r.paxMissed > 0 || r.bagsLeft > 0 || r.taskBlockedSec > 0;
+  return rows.filter(hasIssue).sort((a, b) => {
+    const failed = Number(b.result !== 'completed') - Number(a.result !== 'completed');
+    if (failed) return failed;
+    const passengerImpact = (b.paxMissed + b.bagsLeft) - (a.paxMissed + a.bagsLeft);
+    if (passengerImpact) return passengerImpact;
+    const delay = Math.max(b.evaluatedArrivalDelaySec ?? 0, b.evaluatedDepartureDelaySec ?? 0) - Math.max(a.evaluatedArrivalDelaySec ?? 0, a.evaluatedDepartureDelaySec ?? 0);
+    if (delay) return delay;
+    const wait = b.taskBlockedSec + b.groundStopSec - a.taskBlockedSec - a.groundStopSec;
+    return wait || a.depNumber.localeCompare(b.depNumber);
+  });
+}
+
 export function buildDayReview(input: ReviewInput): DayReview {
   const { sim, company, dayStart, airlinesBefore, responses, access } = input;
   const reports = company.reports;
@@ -211,36 +378,76 @@ export function buildDayReview(input: ReviewInput): DayReview {
   const prev = reports.length >= 2 ? reports[reports.length - 2]! : null;
   const end = sim.state.economy?.periodStart ?? sim.state.now;
   const records = sim.state.analytics.records;
+  const airlineSnapshot = dailyAirlineAnalysis(report);
 
   const disruptions: ReviewDisruption[] = sim.state.disruptions
     .filter((d) => d.start < end && (d.resolvedAt ?? (d.status === 'resolved' ? d.end : null) ?? Infinity) >= dayStart)
     .map((d) => ({ id: d.id, kind: d.kind, target: d.targetId, start: d.start, end: d.resolvedAt ?? d.end, resolvedBy: d.resolvedBy }));
 
-  const plan = planDayWithDemand(company, company.day, access, sim.ctx.types);
-  const analysis = analyzeDayPlan(plan, sim.ctx);
-  const scores = airlineScorecard({ company, ctx: sim.ctx, records: records.filter((r) => (r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled) >= dayStart), plan, analysis });
-  const airlines = scores
-    .filter((s) => s.active)
-    .map((s) => {
-      const after = company.airlines[s.airlineId]?.satisfaction ?? s.satisfaction;
-      const before = airlinesBefore[s.airlineId] ?? after;
-      const ev = company.airlineEval?.[s.airlineId];
-      return {
-        id: s.airlineId,
-        before,
-        after,
-        delta: Math.round((after - before) * 10) / 10,
-        worst: s.lacking.map((c) => c.key),
-        ...(ev
-          ? {
-              complaints: ev.complaints.map((x) => x.key),
-              newComplaints: ev.complaints.filter((x) => x.sinceDay === report.day).map((x) => x.key),
-              requests: ev.requests.map((x) => ({ ...x })),
-              fulfilled: ev.done.filter((x) => x.day === report.day).map((x) => x.kind),
-            }
-          : {}),
-      };
+  const airlines = Object.entries(airlineSnapshot ?? {}).map(([id, saved]) => {
+    const worst = saved.components
+      .filter((component) => component.level === 'bad' || component.level === 'warn')
+      .sort((a, b) => (a.score ?? 100) - (b.score ?? 100))
+      .slice(0, 2)
+      .map((component) => component.key);
+    return {
+      id,
+      before: airlinesBefore[id] ?? saved.satisfactionBefore,
+      after: saved.satisfactionAfter,
+      delta: saved.satisfactionDelta,
+      worst,
+      ...(saved.complaintsAfter ? { complaints: [...saved.complaintsAfter] } : {}),
+      ...(saved.newComplaints ? { newComplaints: [...saved.newComplaints] } : {}),
+      ...(saved.requests ? { requests: structuredClone(saved.requests) } : {}),
+      ...(saved.fulfilled ? { fulfilled: [...saved.fulfilled] } : {}),
+      components: structuredClone(saved.components),
+      ...(saved.emaBefore ? { emaBefore: { ...saved.emaBefore } } : {}),
+      ...(saved.emaAfter ? { emaAfter: { ...saved.emaAfter } } : {}),
+      ...(saved.complaintsBefore ? { complaintsBefore: [...saved.complaintsBefore] } : {}),
+      ...(saved.complaintsAfter ? { complaintsAfter: [...saved.complaintsAfter] } : {}),
+    };
+  });
+  const details: Record<string, ReviewFlightDetails> = {};
+  for (const record of records) {
+    if (!(inPeriod(record.landedAt, dayStart, end) || inPeriod(record.blockOut, dayStart, end) || inPeriod(record.takeoffAt, dayStart, end) || (record.result !== 'completed' && inPeriod(recordTime(record), dayStart, end)))) continue;
+    const aircraft = sim.state.aircraft[record.aircraftId];
+    if (!aircraft) continue;
+    const arrival = sim.state.flights[aircraft.arrivalFlightId];
+    const departure = sim.state.flights[aircraft.departureFlightId];
+    const facilityName = (id: string | null | undefined): string | null => id ? sim.ctx.layout.facilities[id]?.name ?? null : null;
+    const runwayName = (id: string | null | undefined): string | null => {
+      const runway = id ? sim.ctx.layout.runways[id] : undefined;
+      return runway ? `${runway.name} ${designatorsOf(runway, sim.ctx.layout).text.join('/')}` : null;
+    };
+    const taskRecords = (sim.state.aircraftTasks[aircraft.id] ?? []).flatMap((id) => {
+      const task = sim.state.tasks[id];
+      return task ? [{ kind: task.kind, createdAt: task.createdAt, startedAt: task.startedAt, doneAt: task.doneAt, blockedSec: task.blockedTotal, note: task.note }] : [];
     });
+    details[record.aircraftId] = {
+      arrRunwayName: runwayName(arrival?.runwayId),
+      depRunwayName: runwayName(departure?.runwayId),
+      standName: record.standId ? sim.ctx.layout.stands[record.standId]?.name ?? null : null,
+      gateName: facilityName(departure?.pax.gateId ?? record.gateId),
+      arrivalCauses: arrival ? [...arrival.delayCauses] : undefined,
+      departureCauses: departure ? [...departure.delayCauses] : undefined,
+      taskRecords,
+      timeline: [...aircraft.history].sort((a, b) => a.t - b.t).map((entry) => ({ t: entry.t, state: entry.state, ...(entry.note ? { note: entry.note } : {}) })),
+      events: [
+        ...sim.state.events.filter((event) => event.aircraftId === aircraft.id).map((event) => ({ t: event.t, kind: event.kind, ...(event.reason ? { reason: event.reason } : {}), ...(event.note ? { note: event.note } : {}) })),
+        ...(arrival?.actual !== null && arrival?.actual !== undefined ? [{ t: arrival.actual, kind: 'flightLanded' }] : []),
+        ...(arrival?.block !== null && arrival?.block !== undefined ? [{ t: arrival.block, kind: 'blockIn' }] : []),
+        ...(arrival?.pax.bagsReadyAt !== null && arrival?.pax.bagsReadyAt !== undefined ? [{ t: arrival.pax.bagsReadyAt, kind: 'bagsReady' }] : []),
+        ...(departure?.readyAt !== null && departure?.readyAt !== undefined ? [{ t: departure.readyAt, kind: 'groundReady' }] : []),
+        ...(departure?.pax.boardingOpenedAt !== null && departure?.pax.boardingOpenedAt !== undefined ? [{ t: departure.pax.boardingOpenedAt, kind: 'boardingOpened' }] : []),
+        ...(departure?.block !== null && departure?.block !== undefined ? [{ t: departure.block, kind: 'blockOut' }] : []),
+        ...(departure?.actual !== null && departure?.actual !== undefined ? [{ t: departure.actual, kind: 'takeoff' }] : []),
+      ],
+    };
+  }
+  const flights = buildReviewFlights({ records, from: dayStart, to: end, types: sim.ctx.types, airlineAnalysis: airlineSnapshot, details });
+  // Tomorrow's constraints are shown in their own section and are never used as today's evaluation reasons.
+  const tomorrowPlan = planDayWithDemand(company, company.day, access, sim.ctx.types);
+  const tomorrowAnalysis = analyzeDayPlan(tomorrowPlan, sim.ctx);
 
   return {
     day: report.day,
@@ -249,6 +456,7 @@ export function buildDayReview(input: ReviewInput): DayReview {
     compare: compareReports(prev, report),
     delayCauses: delayCauseCounts(records, dayStart, end),
     bottlenecks: buildReviewBottlenecks(records, dayStart, end),
+    flights,
     disruptions,
     responses: { ...responses },
     airlines,
@@ -262,8 +470,8 @@ export function buildDayReview(input: ReviewInput): DayReview {
         }
       : {}),
     tomorrow: {
-      flights: plan.flights.length,
-      issues: analysis.issues,
+      flights: tomorrowPlan.flights.length,
+      issues: tomorrowAnalysis.issues,
       completing: Object.values(company.projects)
         .filter((p) => p.remaining === 1 && p.kind !== 'closure')
         .map((p) => ({ id: p.id, kind: p.kind })),

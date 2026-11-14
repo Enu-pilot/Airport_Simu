@@ -26,6 +26,7 @@ import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { linkBetween } from '../core/terminal/route';
 import { AREA_KIND_LABEL } from '../i18n/ja';
 import { airportKpis, type AirportKpis } from '../core/analytics/kpi';
+import { daylight } from './daylight';
 
 /**
  * PixiJS による空港マップ描画。シミュレーション・編集の状態は一切変更せず、
@@ -132,15 +133,39 @@ export class MapRenderer {
     for (const [k, t] of this.textPool) t.visible = this.usedTexts.has(k);
   }
 
-  /** Display-only game-time night tint; the simulation state and object colors remain unchanged. */
+  /** Display-only game-time tint and bounded airfield lights. */
   private drawNightShade(layout: AirportLayout, s: EditorState): void {
-    const now = s.mode === 'operate' && s.ops ? s.ops.sim.state.now : null;
-    const hour = now === null ? 12 : (now % 86400) / 3600;
-    const daylight = Math.max(0, Math.cos(((hour - 12) * Math.PI) / 12));
-    const alpha = now === null ? 0 : (1 - daylight) * 0.38;
     this.nightShade.clear();
-    if (alpha <= 0.01) return;
-    this.nightShade.rect(0, 0, layout.site.width, layout.site.height).fill({ color: 0x0b1730, alpha });
+    if (!s.overlays.daylight || s.mode !== 'operate' || !s.ops) return;
+    const d = daylight(s.ops.sim.state.now, s.ops.sim.company?.day ?? 172);
+    if (d.tint[3] > 0.01) this.nightShade.rect(0, 0, layout.site.width, layout.site.height).fill({ color: 0x0b1730, alpha: d.tint[3] });
+    const night = 1 - d.light;
+    if (night < 0.2) return;
+    const cap = 240;
+    let drawn = 0;
+    const addLineLights = (a: Vec2, b: Vec2, spacingM: number): void => {
+      if (drawn >= cap) return;
+      const lenM = distance(a, b) * 25;
+      const count = Math.max(1, Math.ceil(lenM / spacingM));
+      const stride = Math.max(1, Math.ceil(count / Math.max(1, cap - drawn)));
+      for (let i = stride; i < count && drawn < cap; i += stride) {
+        const t = i / count;
+        const p = worldToMap({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+        this.nightShade.circle(p.x, p.y, this.px(0.045)).fill({ color: 0xffd98a, alpha: night * 0.72 });
+        drawn++;
+      }
+    };
+    for (const r of Object.values(layout.runways)) {
+      if (drawn >= cap) break;
+      const axis = runwayAxis(r);
+      addLineLights(axis.start, axis.end, 100);
+    }
+    for (const e of Object.values(layout.taxiways)) {
+      if (drawn >= cap) break;
+      const a = layout.taxiNodes[e.from]?.pos;
+      const b = layout.taxiNodes[e.to]?.pos;
+      if (a && b) addLineLights(a, b, 125);
+    }
   }
 
   // ------------------------------------------------------------ 地形

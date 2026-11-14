@@ -153,6 +153,18 @@
 .review-sec .card-row { align-items: baseline; }
 .review-sec .card-sub { margin-top: 6px; }
 .review-sec .num { text-align: right; font-variant-numeric: tabular-nums; }
+.review-flight-list, .review-score-reasons { display: grid; gap: 6px; margin-top: 6px; }
+.review-flight { border: 1px solid var(--border); border-radius: 5px; background: var(--panel); }
+.review-flight > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 8px; }
+.review-flight > summary > span { color: var(--muted); }
+.review-flight-detail { padding: 5px 8px 8px; border-top: 1px solid var(--border); }
+.review-flight-timeline, .review-task-timeline { display: grid; gap: 3px; margin-top: 8px; }
+.review-timeline-row { display: grid; grid-template-columns: 46px minmax(80px, max-content) minmax(70px, max-content) 1fr; gap: 5px 8px; align-items: baseline; padding: 3px 5px; border-left: 2px solid var(--border); font-size: 11px; }
+.review-timeline-row time { color: var(--accent); font-variant-numeric: tabular-nums; }
+.review-timeline-row span { color: var(--muted); }
+.review-score-reason { display: grid; gap: 2px; padding: 6px; border-left: 2px solid var(--warning, #e6a23c); background: var(--panel); font-size: 11px; }
+.review-score-reason > div { color: var(--muted); }
+.review-sec details + details { margin-top: 5px; }
 .verdict.v-improved { color: var(--ok); }
 .verdict.v-worse { color: var(--error); }
 .verdict.v-same, .verdict.v-n\/a { color: var(--muted); }

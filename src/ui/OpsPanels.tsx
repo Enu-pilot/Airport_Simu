@@ -3,7 +3,7 @@ import { compareIds } from '../core/model/ids';
 import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, resolveType, type AircraftTypeId } from '../core/sim/aircraftTypes';
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { flightDelayMin, operableTypes } from '../core/sim/simulation';
-import { routeLength } from '../core/sim/routes';
+import { edgeIndexAt, routeLength } from '../core/sim/routes';
 import { tasksOf } from '../core/sim/ground';
 import { SIM_START_SEC } from '../core/sim/rules';
 import type { Simulation } from '../core/sim/simulation';
@@ -22,6 +22,7 @@ import {
   DELAY_CAUSE_LABEL,
   FLIGHT_STATUS_LABEL,
   HOLD_REASON_LABEL,
+  HOLD_REASON_EXPLANATION,
   RUNWAY_MODE_LABEL,
   BOARDING_LABEL,
   BAG_STATE_LABEL,
@@ -145,6 +146,40 @@ export function OpsControls() {
           </label>
         )}
       </div>
+    </div>
+  );
+}
+
+/** 保存可能なスポッティング・実運航記録。統計値は記録済み FlightRecord だけから更新する。 */
+export function JournalPanel() {
+  const journal = useEditor((s) => s.journal);
+  const entries = Object.values(journal.spotted).sort((a, b) => b.visits - a.visits || a.name.localeCompare(b.name, 'ja'));
+  const typeTotals = Object.entries(journal.typeMovements).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const records = journal.records;
+  return (
+    <div className="prop-panel" data-testid="journal-panel">
+      <div className="prop-section">
+        <div className="prop-section-title">累計記録</div>
+        <Row label="最多運航日">{records.busiestDay ? `${records.busiestDay.day + 1}日目 · ${records.busiestDay.movements}動作` : '記録なし'}</Row>
+        <Row label="最多の1時間">{records.busiestHour ? `${records.busiestHour.day + 1}日目 ${String(records.busiestHour.hour).padStart(2, '0')}:00 · ${records.busiestHour.movements}動作` : '記録なし'}</Row>
+        <Row label="カタログ最大翼幅">{records.largestAircraft ? `${records.largestAircraft.name} · ${records.largestAircraft.wingspanM.toFixed(1)} m` : '寸法データの記録なし'}</Row>
+        <Row label="最長の実遅延">{records.longestDelay ? `${records.longestDelay.flight} · ${(records.longestDelay.delaySec / 60).toFixed(1)}分` : '記録なし'}</Row>
+        <Row label="連続定時日数">{records.onTimeStreak.days}日（15分以内）</Row>
+      </div>
+      <div className="prop-section">
+        <div className="prop-section-title">スポッティング記録</div>
+        {entries.length === 0 ? <div className="muted">日次締め後に実運航ログから記録します。</div> : entries.map((entry) => (
+          <Row key={`${entry.kind}:${entry.id}`} label={entry.kind === 'aircraft' ? '機種' : '航空会社'}>
+            <span>{entry.name}{entry.rare ? ' · 珍しい運航' : ''}</span>
+            <small>{entry.visits}便 · 初回 {entry.firstDay + 1}日目</small>
+          </Row>
+        ))}
+      </div>
+      <div className="prop-section">
+        <div className="prop-section-title">機種別の累計発着回数</div>
+        {typeTotals.length === 0 ? <div className="muted">記録なし</div> : typeTotals.map(([id, count]) => <Row key={id} label={id}>{count}回</Row>)}
+      </div>
+      <p className="muted small">記録は実際に完了した便のログから集計します。珍しい運航は契約外の便または翼幅65 m以上を示すゲーム内分類です。</p>
     </div>
   );
 }
@@ -394,6 +429,11 @@ export function AircraftPanel() {
   const dep = state.flights[ac.departureFlightId]!;
   const remaining = ac.route ? Math.max(0, Math.round(routeLength(ac.route) - ac.dist)) : null;
   const layout = ctx.layout;
+  const routeNames = ac.route ? [...new Set(ac.route.edges.slice(edgeIndexAt(ac.route, ac.dist)).flatMap((edgeId) => {
+    const edge = ctx.network.edges[edgeId];
+    const name = edge?.kind === 'taxiway' ? layout.taxiways[edge.sourceId]?.name : '';
+    return name ? [name] : [];
+  }))] : [];
 
   return (
     <div className="properties" data-testid="aircraft-panel">
@@ -414,7 +454,7 @@ export function AircraftPanel() {
       <ResponseSection acId={ac.id} />
       <div className={ac.holdReason || ac.state === 'diverted' || ac.state === 'cannotOperate' ? 'operability ng' : 'operability ok'} data-testid="aircraft-state">
         {AIRCRAFT_STATE_LABEL[ac.state]}
-        {ac.holdReason && <div className="reason">待機理由: {HOLD_REASON_LABEL[ac.holdReason]}（{ac.waitSince !== null ? Math.round((state.now - ac.waitSince) / 60) : 0}分）</div>}
+        {ac.holdReason && <div className="reason">待機理由: {HOLD_REASON_LABEL[ac.holdReason]}（{ac.waitSince !== null ? Math.round((state.now - ac.waitSince) / 60) : 0}分）<div className="muted small">{HOLD_REASON_EXPLANATION[ac.holdReason]}</div></div>}
       </div>
       <div className="prop-section">
         <div className="prop-section-title">位置・速度</div>
@@ -423,6 +463,7 @@ export function AircraftPanel() {
         <Row label="滑走路">{ac.runwayId ? <Link layoutName={displayName(layout, ac.runwayId)} id={ac.runwayId} /> : '—'}</Row>
         <Row label="スポット">{ac.standId ? <Link layoutName={displayName(layout, ac.standId)} id={ac.standId} /> : arr.standId ? `${displayName(layout, arr.standId)}（離脱済み）` : '未割り当て'}</Row>
         <Row label="経路">{remaining !== null ? `残り ${remaining.toLocaleString()} m（${ac.route!.nodes.length} ノード）` : '—'}</Row>
+        {routeNames.length > 0 && <Row label="走行指示">誘導路 {routeNames.join(' → ')}{ac.holdReason === 'crossing' ? ' · 滑走路横断許可待ち' : ''}</Row>}
       </div>
       <div className="prop-section">
         <div className="prop-section-title">便</div>

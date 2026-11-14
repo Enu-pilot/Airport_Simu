@@ -5,7 +5,8 @@ import { planDay } from '../../src/core/economy/planning';
 import { createSimulation } from '../../src/core/sim/simulation';
 import { stepTicks } from '../../src/core/sim/dayloop';
 import { KPI_DIRECTION } from '../../src/core/scenario/scenario';
-import { buildDayReview, buildReviewBottlenecks, compareReports, delayCauseCounts, emptyResponses, REVIEW_DIRECTION } from '../../src/core/analytics/review';
+import { buildDayReview, buildReviewBottlenecks, buildReviewFlights, compareReports, delayCauseCounts, emptyResponses, REVIEW_DIRECTION } from '../../src/core/analytics/review';
+import { AIRCRAFT_TYPES } from '../../src/core/sim/aircraftTypes';
 import type { FlightRecord } from '../../src/core/analytics/records';
 
 function oneDay() {
@@ -77,6 +78,41 @@ describe('振り返りのデータ', () => {
     expect(buildReviewBottlenecks([record], 100, 200)).toEqual([]);
   });
 
+  it('便別レビューは脚別原因・実績/評価遅延・実時刻のイベントを保ち、記録済み評価便だけを関連付ける', () => {
+    const record = {
+      aircraftId: 'ac_1', arrNumber: 'SK101', depNumber: 'SK102', airlineId: 'SK', contractId: 'ct_1', typeId: 'B737-800W',
+      result: 'completed', causes: ['weather', 'groundHandling'], arrivalCauses: ['weather'], departureCauses: ['groundHandling'],
+      arrRunway: 'rwy_1', depRunway: 'rwy_2', standId: 'std_1', gateId: 'fac_1',
+      arrScheduled: 100, landedAt: 820, blockIn: 900, readyAt: 1800, blockOut: 2400, depScheduled: 1800, takeoffAt: 2700,
+      arrivalExternalDelaySec: { weather: 600 }, actualArrivalDelaySec: 720, evaluatedArrivalDelaySec: 120,
+      actualDepartureDelaySec: 600, evaluatedDepartureDelaySec: 0, departureGraceSec: 600,
+      airborneHoldSec: 60, taxiInSec: 80, taxiOutSec: 300, groundDistM: 500, groundStopSec: 30,
+      seats: 180, paxBooked: 100, paxBoarded: 95, paxMissed: 5, paxArrived: 90, bagsLoaded: 90, bagsLeft: 2,
+      taskSec: { fuel: 300 }, taskBlockedSec: 45, taskRecords: [{ kind: 'fuel', createdAt: 900, startedAt: 1000, doneAt: 1300, blockedSec: 45, note: null }],
+      timeline: [{ t: 800, state: 'landing' }, { t: 820, state: 'taxiIn' }, { t: 900, state: 'parked' }],
+      events: [{ t: 500, kind: 'hold', reason: 'weather' }, { t: 850, kind: 'taskBlocked', note: 'fuel:noVehicle' }],
+      revenue: 0, disruptions: ['dz1'], boarding: undefined,
+    } as unknown as FlightRecord;
+    const rows = buildReviewFlights({
+      records: [record], from: 700, to: 3000, types: AIRCRAFT_TYPES,
+      airlineAnalysis: { SK: { components: [{ key: 'otp', level: 'warn', score: 80, facts: { flightNumbers: ['SK101'] } }], satisfactionBefore: 60, satisfactionAfter: 58, satisfactionDelta: -2 } },
+      details: { ac_1: {
+        arrivalCauses: ['weather'], departureCauses: ['groundHandling'],
+        taskRecords: [{ kind: 'fuel', createdAt: 900, startedAt: 1000, doneAt: 1300, blockedSec: 45, note: null }],
+        timeline: [{ t: 800, state: 'landing' }, { t: 820, state: 'taxiIn' }, { t: 900, state: 'parked' }],
+        events: [{ t: 500, kind: 'hold', reason: 'weather' }, { t: 850, kind: 'taskBlocked', note: 'fuel:noVehicle' }],
+      } },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      arrivalCauses: ['weather'], departureCauses: ['groundHandling'],
+      actualArrivalDelaySec: 720, evaluatedArrivalDelaySec: 120,
+      actualDepartureDelaySec: 600, evaluatedDepartureDelaySec: 0,
+      arrivalExternalDelaySec: { weather: 600 }, disruptionIds: ['dz1'], impactKeys: ['otp'],
+    });
+    expect(rows[0]!.events).toEqual([{ t: 850, kind: 'taskBlocked', note: 'fuel:noVehicle' }]);
+  });
+
   it('1 日運航の後: 日報・前日・明日の便数・障害・航空会社が既存データと一致し、状態を変えない', { timeout: 120_000 }, () => {
     const { sim, dayStart, before } = oneDay();
     const snap = JSON.stringify({ s: sim.state, c: sim.company });
@@ -92,7 +128,11 @@ describe('振り返りのデータ', () => {
     expect(review.disruptions.map((d) => d.id)).toContain('dz1');
     expect(review.compare.find((r) => r.metric === 'totalRevenue')!.b).toBe(company.reports[0]!.totalRevenue);
     for (const a of review.airlines) expect(a.after).toBe(company.airlines[a.id]!.satisfaction);
+    expect(review.airlines.length).toBeGreaterThan(0);
+    expect(review.airlines.every((a) => a.components?.length === 7)).toBe(true);
     for (const c of review.delayCauses) expect(c.flights).toBeGreaterThan(0);
+    const laterPlanReview = buildDayReview({ sim, company: { ...company, day: company.day + 3 }, dayStart, airlinesBefore: before, responses: emptyResponses(), access: sim.state.access?.factor ?? 1 });
+    expect(laterPlanReview.airlines).toEqual(review.airlines);
   });
 
   it('完成する工事: 残り 1 日の新設・改修だけ（一時閉鎖を除く）', { timeout: 120_000 }, () => {

@@ -5,7 +5,7 @@ import { AnalyticsPanel, ScenarioPanel } from '../AnalysisPanels';
 import { CatalogPanel } from '../CatalogPanel';
 import { IssuesPanel } from '../IssuesPanel';
 import { FinancePanel, PlanPanel } from '../ManagementPanels';
-import { BaggageBoard, DisruptionBoard, EventLog, GroundBoard, TerminalBoard } from '../OpsPanels';
+import { BaggageBoard, DisruptionBoard, EventLog, GroundBoard, JournalPanel, TerminalBoard } from '../OpsPanels';
 import { ProjectPanel } from '../ProjectPanel';
 import { AirlineScoreTable } from './cards/AirlineScoreTable';
 import { GoalsPanel } from './cards/GoalsCard';
@@ -28,6 +28,7 @@ const BODY: Record<OverlayKey, () => ReactNode> = {
   issues: () => <IssuesPanel />,
   airlines: () => <AirlineScoreTable />,
   goals: () => <GoalsPanel />,
+  journal: () => <JournalPanel />,
 };
 
 /**

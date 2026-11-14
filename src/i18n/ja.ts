@@ -285,6 +285,23 @@ export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
   noiseCurfew: '夜間騒音規制',
 };
 
+export const HOLD_REASON_EXPLANATION: Record<HoldReason, string> = {
+  noStand: '適合する空きスポットが見つかるまで到着を保留します。',
+  noRunway: '機体サイズ・運用方向・閉鎖状態を満たす滑走路がありません。',
+  noRoute: '現在のネットワークに、割当先まで通行可能な経路がありません。',
+  routeBusy: '必要な経路区間またはノードを他の機体が使用中です。',
+  separation: '先行する機体との安全間隔を確保しています。',
+  runwayBusy: '滑走路の使用許可または占有が解放されるのを待っています。',
+  departurePriority: '到着機を優先しているため、地上走行の順番を待っています。',
+  crossing: '滑走路を横断するため、横断許可を待っています。',
+  intersection: '交差する滑走路の占有が解放されるのを待っています。',
+  goAround: '進入を中止し、再進入または代替処理を行っています。',
+  boarding: '搭乗処理または搭乗締切の完了を待っています。',
+  groundCrew: '牽引作業員・トーイングカーなど必要な地上資源が空くのを待っています。',
+  weather: '天候条件が運航可能な範囲へ戻るのを待っています。',
+  noiseCurfew: '夜間騒音規制の運航可能時間になるのを待っています。',
+};
+
 export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
   inboundLate: '出発地からの遅れ',
   noStand: 'スポット不足',
@@ -879,6 +896,7 @@ export const OPS_NAV: readonly (readonly [string, string])[] = [
   ['issues', '配置チェック'],
   ['airlines', '航空会社'],
   ['goals', '目標'],
+  ['journal', '運航記録'],
 ];
 
 /** 運航モードの常設カード・運航表・アラートの文言 */

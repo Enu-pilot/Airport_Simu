@@ -4,6 +4,9 @@ import type { DayReview } from '../core/analytics/review';
 import type { Simulation } from '../core/sim/simulation';
 import { editorStore, showToast } from './store';
 import { getHistoryStore, UNSAVED_KEY, type DayHistoryEntry } from './dayHistoryStore';
+import { effectiveModels } from '../core/io/project';
+import { updateJournal } from '../core/analytics/journal';
+import { DAY_SEC } from '../core/sim/rules';
 
 /**
  * 日次の締めの履歴を残す（保存先は dayHistoryStore.ts、保持規則は core/io/historyPolicy.ts）。
@@ -15,9 +18,12 @@ export function recordDayClose(sim: Simulation, review: DayReview): void {
   const s = editorStore.getState();
   const c = sim.company;
   if (!c) return;
+  const from = sim.state.economy?.periodStart ?? Math.max(0, sim.state.now - DAY_SEC);
+  const journal = updateJournal(s.journal, sim.state.analytics.records, from, sim.state.now, review.day, effectiveModels(s.catalogPin));
+  editorStore.setState({ journal });
   const company = structuredClone(c);
   const layout = applyCompletedProjects(company, s.history.present) ?? s.history.present;
-  const project = buildProject({ name: s.projectName, savedAt: new Date().toISOString(), layout, company, pin: s.catalogPin, scenarios: [], sim: null });
+  const project = buildProject({ name: s.projectName, savedAt: new Date().toISOString(), layout, company, pin: s.catalogPin, scenarios: [], sim: null, journal });
   const entry: DayHistoryEntry = {
     projectKey: historyKey(),
     day: company.day,

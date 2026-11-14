@@ -13,6 +13,7 @@ import { assetOf, liveryOf } from '../../core/assets/registry';
 import type { EditorState, OpsState } from '../../editor/store';
 import { FACILITY_COLOR, TERRAIN_COLOR } from '../colors';
 import { aircraftObject, geometryCacheSize } from './aircraftMesh';
+import { daylight } from '../daylight';
 
 /**
  * 3D 表示（Phase 9）。レイアウト（論理データ）から施設を組み立て、機体・車両の位置はシミュレーションの状態を
@@ -337,16 +338,16 @@ export class Scene3D {
     this.stats.units = units.length;
   }
 
-  private updateLighting(ops: OpsState | null): void {
-    const hour = ops ? (ops.sim.state.now % 86400) / 3600 : 12;
-    const daylight = Math.max(0, Math.cos(((hour - 12) * Math.PI) / 12));
+  private updateLighting(s: EditorState): void {
+    const enabled = s.overlays.daylight && s.mode === 'operate' && s.ops !== null;
+    const light = enabled ? daylight(s.ops!.sim.state.now, s.ops!.sim.company?.day ?? 172).light : 1;
     const nightColor = new THREE.Color(0x0b1830);
     const dayColor = new THREE.Color(0x9cc6e6);
-    const atmosphere = nightColor.clone().lerp(dayColor, daylight);
+    const atmosphere = nightColor.clone().lerp(dayColor, light);
     this.scene.background = atmosphere;
     if (this.scene.fog instanceof THREE.Fog) this.scene.fog.color.copy(atmosphere);
-    this.hemisphere.intensity = 0.45 + daylight * 1.15;
-    this.sun.intensity = 0.12 + daylight * 1.28;
+    this.hemisphere.intensity = 0.45 + light * 1.15;
+    this.sun.intensity = 0.12 + light * 1.28;
   }
 
   private updatePilotCamera(s: EditorState): void {
@@ -377,7 +378,7 @@ export class Scene3D {
       if (this.units) this.units.count = 0;
       this.stats.aircraft = this.stats.units = 0;
     }
-    this.updateLighting(s.ops ?? null);
+    this.updateLighting(s);
     this.updatePilotCamera(s);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);

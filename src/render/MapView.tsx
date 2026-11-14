@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { editorStore, actions, useEditor } from '../editor/store';
+import { centerOn } from '../core/geometry/camera';
+import { worldToMap } from '../core/geometry/frames';
 import { View3D } from './View3D';
 import {
   onDoubleClick,
@@ -14,6 +16,18 @@ import { MapRenderer } from './MapRenderer';
 /** PixiJS キャンバスを保持し、状態変化のたびに（フレーム単位で間引いて）描き直す */
 export function MapView() {
   const hostRef = useRef<HTMLDivElement>(null);
+  const [follow, setFollow] = useState(false);
+  const selectedAircraft = useEditor((s) => s.ops?.selectedAircraft ?? null);
+  const uiVersion = useEditor((s) => s.ops?.uiVersion ?? -1);
+  const viewSize = useEditor((s) => s.viewSize);
+
+  useEffect(() => {
+    if (!follow || !selectedAircraft) return;
+    const s = editorStore.getState();
+    const ac = s.ops?.sim.state.aircraft[selectedAircraft];
+    if (!ac) return;
+    actions.setCamera(centerOn(s.camera, worldToMap({ x: ac.x, y: ac.y }), s.viewSize.w, s.viewSize.h));
+  }, [follow, selectedAircraft, uiVersion, viewSize.w, viewSize.h]);
 
   useEffect(() => {
     const host = hostRef.current!;
@@ -82,7 +96,24 @@ export function MapView() {
       onPointerLeave={onPointerLeave}
       onDoubleClick={onDoubleClick}
       onContextMenu={(e) => e.preventDefault()}
-    />
+    >
+      <button
+        className="pilot-follow-toggle"
+        type="button"
+        disabled={!selectedAircraft}
+        aria-pressed={follow && selectedAircraft !== null}
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          setFollow((value) => !value);
+        }}
+        title="選択中の機体に2Dカメラを追従させます"
+        data-testid="pilot-follow-2d-toggle"
+      >
+        {follow && selectedAircraft ? '追従中' : '機体に追従'}
+      </button>
+    </div>
   );
 }
 

@@ -54,6 +54,14 @@ test('0:00 で自動的に一時停止し、収支・定時率・明日の見通
   await expect(page.getByTestId('review-otp-value')).toContainText('%');
   await expect(page.getByTestId('review-causes')).toBeVisible();
   await expect(page.getByTestId('review-disruptions')).toBeVisible();
+  await expect(page.getByTestId('review-flights')).toBeVisible();
+  const issueFlights = page.getByTestId('review-flights').locator('details.review-flight');
+  if (await issueFlights.count()) {
+    await issueFlights.first().locator('summary').click();
+    await expect(issueFlights.first().locator('.review-flight-detail')).toBeVisible();
+    await expect(issueFlights.first()).toContainText('到着遅延（実績 / 評価対象）');
+    await expect(issueFlights.first()).toContainText('運航時系列');
+  }
   await expect(page.getByTestId('review-compare')).toContainText('最初の日');
   await expect(page.getByTestId('review-airlines')).toBeVisible();
   await expect(page.getByTestId('review-tomorrow-flights')).toContainText('便');
