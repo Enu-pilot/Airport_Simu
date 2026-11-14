@@ -27,6 +27,7 @@ import { designatorsOf } from '../core/layout/designators';
 import { runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
 import { applyOp, closeTemporarily, editorStore, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { ops } from '../editor/simRunner';
+import { closureReasonsFor } from '../core/sim/closureState';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { focusEntity } from '../editor/input';
 import {
@@ -38,6 +39,7 @@ import {
   OPERABILITY_LABEL,
   PROP_LABEL,
   PROJECT_KIND_LABEL,
+  RAIL_SERVICE_LABEL,
   ROAD_CLASS_LABEL,
   SIZE_LABEL,
   displayName,
@@ -49,6 +51,7 @@ import {
 } from '../i18n/ja';
 
 export function PropertiesPanel() {
+  useEditor((s) => s.ops?.uiVersion ?? -1);
   const selection = useEditor((s) => s.selection);
   const mode = useEditor((s) => s.mode);
   const layout = useLayout();
@@ -165,6 +168,7 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
       )}
 
       <ProjectInfo layout={layout} id={id} buildState={buildState} />
+      <ResourceClosureControl id={id} type={type} />
 
       {op && (
         <div className={op.operable ? 'operability ok' : 'operability ng'} data-testid="operability">
@@ -206,6 +210,37 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
         </Section>
       )}
     </>
+  );
+}
+
+function ResourceClosureControl({ id, type }: { id: string; type: ReturnType<typeof entityTypeOf> }) {
+  const mode = useEditor((s) => s.mode);
+  if (mode !== 'operate' || (type !== 'stand' && type !== 'taxiway')) return null;
+  const sim = editorStore.getState().ops?.sim;
+  if (!sim) return null;
+  const kind = type === 'stand' ? 'stands' : 'taxiways';
+  const closed = sim.state.closures[kind].includes(id);
+  const reasons = closureReasonsFor(sim.state, kind, id);
+  const manuallyClosed = reasons.includes('manual');
+  const reasonLabel = (reason: string) => {
+    if (reason === 'manual') return '手動閉鎖';
+    if (reason === 'legacy') return '旧保存データの閉鎖';
+    const disruption = sim.state.disruptions.find((d) => `disruption:${d.id}` === reason);
+    return disruption ? `障害・整備 (${disruption.kind})` : reason;
+  };
+  const inUse = type === 'stand'
+    ? Number(!!sim.state.standAssignments[id])
+    : Object.values(sim.state.aircraft).filter((aircraft) => aircraft.route?.edges.some((edgeId) => sim.ctx.network.edges[edgeId]?.sourceId === id)).length;
+  return (
+    <section className="operability" data-testid="resource-closure-control">
+      <strong>{closed ? '使用停止中' : '使用可能'}</strong>
+      {closed && <div className="reason">閉鎖理由: {reasons.map(reasonLabel).join('、') || '不明'}</div>}
+      {inUse > 0 && <div className="reason">現在使用中: {inUse} 機。移動中の機体は安全のため既存経路を継続します。</div>}
+      {closed && type === 'taxiway' && <div className="reason">代替経路がない便は滑走路手前または進入待機となり、経路が開くまで進みません。</div>}
+      <button className={manuallyClosed ? 'primary' : 'danger'} onClick={() => ops.setResourceClosed(type, id, !manuallyClosed)} data-testid="toggle-resource-closure">
+        {manuallyClosed ? '手動閉鎖を解除' : '手動で使用停止'}
+      </button>
+    </section>
   );
 }
 
@@ -383,6 +418,8 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
     const s = layout.stands[id]!;
     const link = net.standLinks[id];
     const gates = sortedValues(layout.facilities).filter((f) => f.kind === 'gate' && f.props.standId === id);
+    const selectedBusGate = s.busGateId ? analysis.terminal.gates[s.busGateId] : undefined;
+    const busGateInvalid = s.remoteBoarding === 'bus' && !!s.busGateId && (!selectedBusGate?.terminalId || !selectedBusGate.boarding || !selectedBusGate.deplane);
     const entry = standEntry(s);
     return (
       <>
@@ -406,6 +443,29 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         <Info label="入口">{`(${entry.x}, ${entry.y})`}</Info>
         <Info label="誘導路接続">{link ? <EntityLink layout={layout} id={link} /> : <span className="ng-text">未接続</span>}</Info>
         <Info label="ゲート">{gates.length === 0 ? 'なし（リモート）' : gates.map((g) => <EntityLink key={g.id} layout={layout} id={g.id} />)}</Info>
+        {gates.length === 0 && (
+          <>
+            <Field label="リモート搭乗">
+              <select value={s.remoteBoarding ?? 'auto'} onChange={(e) => update(layout, id, { remoteBoarding: e.target.value })} data-testid="prop-remoteBoarding">
+                <option value="auto">自動割当（旧版互換）</option>
+                <option value="bus">バス搭乗を使用</option>
+                <option value="none">使用しない</option>
+              </select>
+            </Field>
+            {(s.remoteBoarding === 'bus') && (
+              <Field label="接続バスゲート">
+                <select value={s.busGateId ?? ''} onChange={(e) => update(layout, id, { busGateId: e.target.value || null })} data-testid="prop-busGateId">
+                  <option value="">選択してください</option>
+                  {sortedValues(layout.facilities).filter((f) => f.kind === 'gate' && gateMode(f) === 'bus').map((g) => (
+                    <option key={g.id} value={g.id}>{displayName(layout, g.id)}{analysis.terminal.gates[g.id]?.terminalId ? ` · ${displayName(layout, analysis.terminal.gates[g.id]!.terminalId!)}` : ' · ターミナル未接続'}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {s.remoteBoarding === 'bus' && !s.busGateId && <div className="reason ng-text">接続バスゲートが未設定です。このスポットの旅客は生成されません。</div>}
+            {busGateInvalid && <div className="reason ng-text">指定したバスゲートにターミナル・搭乗口・降機口の接続がありません。このスポットの旅客は生成されません。</div>}
+          </>
+        )}
       </>
     );
   }
@@ -519,7 +579,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
               <select value={String((f.props[def.key] as string | undefined) ?? propDefault(def))} onChange={(e) => update(layout, id, { props: { [def.key]: e.target.value } })}>
                 {def.options.map((o) => (
                   <option key={o} value={o}>
-                    {o}
+                    {RAIL_SERVICE_LABEL[o as keyof typeof RAIL_SERVICE_LABEL] ?? o}
                   </option>
                 ))}
               </select>

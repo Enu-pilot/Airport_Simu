@@ -1,7 +1,7 @@
 import type { Simulation } from '../sim/simulation';
 import { resolveType } from '../sim/aircraftTypes';
 import { TURNAROUND_TASKS } from '../sim/tasks';
-import { GROUND_MOVING_STATES, TERMINAL_STATES, type Aircraft, type TaskKind } from '../sim/types';
+import { GROUND_MOVING_STATES, TERMINAL_STATES, type Aircraft, type ExternalDelayCause, type TaskKind } from '../sim/types';
 
 /**
  * 運営分析のための記録（docs/18_analytics.md）。シミュレーションの実際の状態から集める（推定値は含めない）。
@@ -32,6 +32,8 @@ export interface FlightRecord {
   blockOut: number | null;
   depScheduled: number;
   takeoffAt: number | null;
+  /** 実遅延評価を再計算するための実測外部遅延。原因名から秒数を復元しない。 */
+  arrivalExternalDelaySec?: Partial<Record<ExternalDelayCause, number>>;
   /** 空中待機・地上走行（到着・出発）の時間（秒）と地上の移動距離（m）、地上での停止時間（秒） */
   airborneHoldSec: number;
   taxiInSec: number;
@@ -162,6 +164,7 @@ function buildRecord(sim: Simulation, ac: Aircraft): FlightRecord {
     blockOut: dep.block,
     depScheduled: dep.scheduled,
     takeoffAt: dep.actual,
+    ...(arr.externalDelaySec && Object.keys(arr.externalDelaySec).length > 0 ? { arrivalExternalDelaySec: { ...arr.externalDelaySec } } : {}),
     airborneHoldSec: live.airborneHoldSec,
     taxiInSec: arr.actual !== null && arr.block !== null ? arr.block - arr.actual : 0,
     taxiOutSec: dep.block !== null && dep.actual !== null ? dep.actual - dep.block : 0,

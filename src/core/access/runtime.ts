@@ -79,7 +79,7 @@ export function emptyAccessStats(): AccessStats {
 
 export function createAccessRuntime(sim: Simulation, c: CompanyState): AccessRuntime | null {
   if (!sim.ctx.paxTerminal) return null;
-  const a: AccessAnalysis = analyzeAccess(sim.ctx.layout, { fees: c.fees, feedback: c.accessFeedback });
+  const a: AccessAnalysis = analyzeAccess(sim.ctx.layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day });
   const dayStart = Math.floor(sim.state.now / DAY) * DAY;
   const shares = {} as Record<AccessMode, number>;
   const walkMin = {} as Record<AccessMode, number>;
@@ -109,7 +109,7 @@ export function createAccessRuntime(sim: Simulation, c: CompanyState): AccessRun
 
 /** 日が変わったとき: 前日の混雑（feedback）と料金を反映して分担率・アクセス係数を更新する。返り値 = アクセス係数 */
 export function refreshAccess(sim: Simulation, c: CompanyState): number {
-  const a = analyzeAccess(sim.ctx.layout, { fees: c.fees, feedback: c.accessFeedback });
+  const a = analyzeAccess(sim.ctx.layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day });
   const acc = sim.state.access;
   if (acc) {
     for (const m of ACCESS_MODES) acc.shares[m] = a.modes[m].share;

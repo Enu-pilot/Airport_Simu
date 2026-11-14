@@ -120,7 +120,8 @@ export function ReviewBody({ review }: { review: DayReview }) {
 
       <Section id="review-otp" title={DAY_LOOP.punctuality}>
         <Row label={DAY_LOOP.otp} value={<b data-testid="review-otp-value">{pct(k.otp)}</b>} tone={k.otp === null ? undefined : k.otp >= 0.85 ? 'ok' : k.otp >= 0.6 ? 'warn' : 'bad'} />
-        <Row label={DAY_LOOP.avgDelay} value={`${num(k.avgDelayMin)} 分`} />
+        <Row label="評価対象の平均遅延" value={`${num(k.avgDelayMin)} 分`} />
+        {k.actualAvgDelayMin !== undefined && <Row label="実績の平均遅延" value={`${k.actualAvgDelayMin.toFixed(1)} 分`} />}
         <Row label={DAY_LOOP.flights} value={`${k.flights}`} />
         <div className="card-sub" data-testid="review-causes">
           <b>{DAY_LOOP.causes}</b>
@@ -153,6 +154,23 @@ export function ReviewBody({ review }: { review: DayReview }) {
         <Row label={DAY_LOOP.airSat} value={num(k.airlineSatisfaction)} />
         <Row label={DAY_LOOP.rating} value={num(k.rating)} />
       </Section>
+
+      {r.city && (
+        <Section id="review-city" title="都市・旅客需要">
+          <Row label="都市規模" value={GAME_UI.cityType[r.city.type]} />
+          <Row label="人口" value={`${r.city.populationStart.toLocaleString('ja-JP')} → ${r.city.populationEnd.toLocaleString('ja-JP')} 人`} />
+          <Row label="需要上限" value={`${r.city.demandCeiling.toLocaleString('ja-JP')} 人/日`} />
+          <Row label="計画需要 / 実績" value={`${r.city.expectedPax.toLocaleString('ja-JP')} / ${r.city.actualPax.toLocaleString('ja-JP')} 人`} />
+          <Row label="都市係数" value={`×${r.city.cityFactor.toFixed(2)}`} />
+          <Row label="道路 / 鉄道品質" value={`${r.city.roadQuality} / ${r.city.railQuality}`} />
+          {r.city.noiseMovements !== undefined && <Row label="航空機の騒音ポイント" value={`${r.city.noisePoints ?? 0}（${r.city.noiseMovements} 動作）`} />}
+          {r.city.nightMovements !== undefined && <Row label="夜間運航（22:00〜06:00）" value={`${r.city.nightMovements} 回`} tone={r.city.nightMovements > 0 ? 'warn' : undefined} />}
+          {r.city.residentsStart !== undefined && r.city.residentsEnd !== undefined && <Row label="住民満足度" value={`${r.city.residentsStart.toFixed(1)} → ${r.city.residentsEnd.toFixed(1)}（${(r.city.residentDelta ?? 0) >= 0 ? '+' : ''}${(r.city.residentDelta ?? 0).toFixed(2)}）`} tone={(r.city.residentDelta ?? 0) < 0 ? 'warn' : undefined} />}
+          {(r.city.events?.length ?? 0) > 0 && <Row label="開催イベント" value={r.city.events!.map((event) => `${({ festival: '祭り', sports: 'スポーツ大会', conference: '会議・展示会' } as const)[event.kind]}（規模${event.scale}・${event.location === 'cityCenter' ? '市街地' : '空港周辺'}）`).join('、')} />}
+          {(r.city.eventDemandMultiplier ?? 1) > 1 && <Row label="イベント需要係数" value={`×${r.city.eventDemandMultiplier!.toFixed(2)} / 道路混雑 ×${(r.city.eventTrafficMultiplier ?? 1).toFixed(2)}`} />}
+          <div className="muted small">騒音ポイントは機種サイズ・エンジン数を使ったゲーム内指標で、実測dBではありません。都市設定時は夜間の着陸・離陸を06:00まで待機させます。</div>
+        </Section>
+      )}
 
       <Section id="review-disruptions" title={DAY_LOOP.disruptionsTitle}>
         {review.disruptions.length === 0 ? (

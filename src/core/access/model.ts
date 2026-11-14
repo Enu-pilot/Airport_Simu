@@ -3,6 +3,9 @@ import type { AirportLayout, Facility } from '../model/types';
 import { tileKey } from '../geometry/vec';
 import { facilityTiles } from '../layout/footprint';
 import { BALANCE } from '../economy/balance';
+import type { CityConfig } from '../economy/city';
+import { cityTravelMinutes, railServiceAvailable, railServiceOf, RAIL_SERVICE } from './rail';
+import { cityEventEffects } from '../economy/city';
 import {
   ACCESS_MAX_WALK_TILES,
   PARKING_MAX_WALK_TILES,
@@ -37,6 +40,7 @@ export type AccessUnavailable =
   | 'notConnected' // 施設が外部につながる道路・鉄道に接していない
   | 'tooFar' // ターミナルから遠すぎる
   | 'noCurb' // ターミナルが一般道路に接していない（車寄せなし）
+  | 'noService' // 都市側の鉄道整備度で列車種別が運行できない
   | 'noCapacity'; // 容量 0（台数・本数が 0）
 
 /** 前日の運航で観測した混雑（翌日の所要時間に反映する） */
@@ -127,10 +131,12 @@ export function accessFactor(accessibility: number): number {
 
 export function analyzeAccess(
   layout: AirportLayout,
-  opts: { fees?: Partial<AccessFees>; feedback?: AccessFeedback } = {},
+  opts: { fees?: Partial<AccessFees>; feedback?: AccessFeedback; city?: CityConfig; day?: number } = {},
 ): AccessAnalysis {
   const fees = { ...DEFAULT_ACCESS_FEES, ...opts.fees };
   const fb = opts.feedback ?? NO_FEEDBACK;
+  const city = opts.city;
+  const eventTraffic = cityEventEffects(city, opts.day ?? -1).trafficMultiplier;
   const net = buildLandsideNetwork(layout);
   const facilities = sortedValues(layout.facilities).filter((f) => f.buildState === 'operational');
   const terminals = facilities.filter((f) => f.kind === 'terminal');
@@ -166,12 +172,29 @@ export function analyzeAccess(
   const parking = usable('parking', net.publicTiles, PARKING_MAX_WALK_TILES);
   const taxi = usable('taxiStand', net.publicTiles, ACCESS_MAX_WALK_TILES);
   const bus = usable('busStop', net.publicTiles, ACCESS_MAX_WALK_TILES);
-  const rail = usable('railStation', net.railTiles, ACCESS_MAX_WALK_TILES);
+  const railNetwork = usable('railStation', net.railTiles, ACCESS_MAX_WALK_TILES);
+  const railFacilities = railNetwork.facilities.filter((f) => railServiceAvailable(city, railServiceOf(f.props.railService)));
+  const rail: Usable = {
+    ...railNetwork,
+    facilities: railFacilities,
+    reason: railFacilities.length > 0 ? null : railNetwork.facilities.length > 0 && city ? 'noService' : railNetwork.reason,
+  };
   const hotel = usable('hotel', net.publicTiles, ACCESS_MAX_WALK_TILES);
   const parkingSpaces = parking.facilities.reduce((s, f) => s + num(f.props.spaces), 0);
   const taxiBerths = taxi.facilities.reduce((s, f) => s + num(f.props.berths), 0);
   const busesPerHour = bus.facilities.reduce((s, f) => s + Math.min(num(f.props.busesPerHour), num(f.props.busBays) * M.busesPerBay), 0);
   const trainsPerHour = rail.facilities.reduce((s, f) => s + num(f.props.trainsPerHour), 0);
+  const weightedRail = rail.facilities.reduce((acc, f) => {
+    const trains = num(f.props.trainsPerHour);
+    const service = railServiceOf(f.props.railService);
+    return {
+      trains: acc.trains + trains,
+      speed: acc.speed + trains * RAIL_SERVICE[service].speedKph,
+      surcharge: acc.surcharge + trains * RAIL_SERVICE[service].fareSurcharge,
+    };
+  }, { trains: 0, speed: 0, surcharge: 0 });
+  const railSpeed = weightedRail.trains > 0 ? weightedRail.speed / weightedRail.trains : RAIL_SERVICE.local.speedKph;
+  const railFareSurcharge = weightedRail.trains > 0 ? weightedRail.surcharge / weightedRail.trains : 0;
   const hotelRooms = hotel.facilities.reduce((s, f) => s + num(f.props.rooms), 0);
 
   const A = BALANCE.accessFees;
@@ -200,7 +223,7 @@ export function analyzeAccess(
       u: rail,
       wait: trainsPerHour > 0 ? 30 / trainsPerHour + (fb.waitMin.rail ?? 0) : 0,
       delay: 0,
-      fare: M.baseFare.rail + A.rail * fees.rail,
+      fare: M.baseFare.rail + A.rail * fees.rail + railFareSurcharge,
       cap: trainsPerHour * M.trainSeats,
     },
     walk: { reason: null, u: hotel.reason ? null : hotel, wait: 0, delay: 0, fare: 0, cap: null },
@@ -216,7 +239,11 @@ export function analyzeAccess(
     const walkMin = b.u ? walkMinutes(b.u.walkTiles) : 0;
     // 徒歩: 空港ホテルがあれば宿泊客が歩いて来る（客室数に応じた定数項）
     const hotelWalk = m === 'walk' && hotelRooms > 0;
-    const external = hotelWalk ? 5 : M.externalMin[m];
+    const external = hotelWalk ? 5 : city && (m === 'car' || m === 'dropoff' || m === 'taxi' || m === 'bus')
+      ? cityTravelMinutes(city, (20 + city.roadQuality * 8) * (m === 'bus' ? 0.75 : 1)) * eventTraffic
+      : city && m === 'rail'
+        ? cityTravelMinutes(city, railSpeed)
+        : M.externalMin[m];
     const asc = hotelWalk ? Math.log(Math.min(1, hotelRooms / M.hotelRoomsForFull)) - 2 : M.asc[m];
     const timeMin = external + walkMin + b.wait + b.delay;
     const utility = asc - M.beta * (timeMin + b.fare / M.valueOfTime);

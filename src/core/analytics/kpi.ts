@@ -3,6 +3,7 @@ import { resolveType, type TypeTable } from '../sim/aircraftTypes';
 import type { Simulation } from '../sim/simulation';
 import type { BlockReason, TaskKind, UnitKind } from '../sim/types';
 import { ON_TIME_SEC } from '../economy/balance';
+import { evaluateDelayPair } from '../economy/delayEvaluation';
 import type { FlightRecord } from './records';
 
 /**
@@ -29,7 +30,10 @@ export interface GroupMetrics {
   /** 平均（分）: 折り返し（ブロックイン → 準備完了）、スポット占有（ブロックイン → ブロックアウト）、出発遅延、到着・出発の地上走行 */
   avgTurnMin: number | null;
   avgStandMin: number | null;
+  /** 出発遅延の評価対象値（外部要因と折返し猶予を控除）、分 */
   avgDepDelayMin: number | null;
+  /** 実績時刻と予定時刻の差（控除前）、分 */
+  avgActualDepDelayMin: number | null;
   avgTaxiInMin: number | null;
   avgTaxiOutMin: number | null;
   /** 定時運航率（出発、ブロックアウトが予定から15分以内） */
@@ -82,6 +86,14 @@ export function metricsOf(key: string, rs: FlightRecord[], types: TypeTable): Gr
     if (v !== null) taskMin[k] = r1(v)!;
   }
   const dep = done.filter((r) => r.blockOut !== null);
+  const delayPairs = dep.map((r) => evaluateDelayPair({
+    arrScheduled: r.arrScheduled,
+    arrActual: r.landedAt,
+    depScheduled: r.depScheduled,
+    depBlockOut: r.blockOut,
+    turnaroundSec: resolveType(types, r.typeId).turnaroundSec,
+    arrivalExternalDelaySec: r.arrivalExternalDelaySec,
+  }));
   return {
     key,
     n: rs.length,
@@ -92,10 +104,11 @@ export function metricsOf(key: string, rs: FlightRecord[], types: TypeTable): Gr
     loadFactor: seats ? pax / seats : null,
     avgTurnMin: r1(avg(done.filter((r) => r.readyAt !== null && r.blockIn !== null).map((r) => (r.readyAt! - r.blockIn!) / 60))),
     avgStandMin: r1(avg(dep.filter((r) => r.blockIn !== null).map((r) => (r.blockOut! - r.blockIn!) / 60))),
-    avgDepDelayMin: r1(avg(dep.map((r) => Math.max(0, r.blockOut! - r.depScheduled) / 60))),
+    avgDepDelayMin: r1(avg(delayPairs.map((p) => p.departureSec / 60))),
+    avgActualDepDelayMin: r1(avg(delayPairs.map((p) => p.actualDepartureSec / 60))),
     avgTaxiInMin: r1(avg(done.map((r) => r.taxiInSec / 60))),
     avgTaxiOutMin: r1(avg(done.map((r) => r.taxiOutSec / 60))),
-    otp: rs.length ? rs.filter((r) => r.result === 'completed' && r.blockOut !== null && r.blockOut - r.depScheduled <= ON_TIME_SEC).length / rs.length : null,
+    otp: rs.length ? dep.filter((_r, i) => delayPairs[i]!.departureSec <= ON_TIME_SEC).length / rs.length : null,
     taskMin,
     revenue: rs.reduce((s, r) => s + r.revenue, 0),
     estOpCost: Math.round(done.reduce((s, r) => s + resolveType(types, r.typeId).costPerBlockHour * 1.5, 0)),

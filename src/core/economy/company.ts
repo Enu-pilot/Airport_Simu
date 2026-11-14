@@ -8,6 +8,7 @@ import { checkGameSettings, otpAddOf, type GameSettings } from './game';
 import { checkAirlineEval, type AirlineEvalState } from './airlineEval';
 import { aircraftIsLow, complaintCount, COMPLAINTS_BLOCK_INCREASE, increaseMinSatRelief, offerBoost, tierBonus } from './evalRules';
 import { checkGoals, type GoalState } from './goals';
+import { isCityConfig, type CityConfig, type CityEvent, type CityType } from './city';
 
 /**
  * 空港会社（経営）の状態。建設モードと運航モードをまたいで保持し、レイアウトと一緒に保存する。
@@ -108,7 +109,10 @@ export interface DailyKpi {
   paxArrived: number;
   /** 定時運航率（0〜1、対象便なしは null） */
   otp: number | null;
+  /** 評価用の平均遅延（分）。外部要因と折返し猶予を反映 */
   avgDelayMin: number;
+  /** 実時刻と予定時刻の差（分）。評価用遅延と区別する。旧データでは欠落 */
+  actualAvgDelayMin?: number;
   runwayUtil: number;
   gateUtil: number;
   facilityUtil: number;
@@ -145,6 +149,7 @@ export interface DailyReport {
   kpi: DailyKpi;
   /** 目標の報酬の現金（営業収支には入れない。目標を有効にした会社で報酬があった日だけ） */
   grants?: number;
+  city?: { type: CityType; populationStart: number; populationEnd: number; demandCeiling: number; expectedPax: number; actualPax: number; cityFactor: number; roadQuality: number; railQuality: number; residentsStart?: number; residentsEnd?: number; residentDelta?: number; noiseMovements?: number; nightMovements?: number; noisePoints?: number; events?: CityEvent[]; eventDemandMultiplier?: number; eventTrafficMultiplier?: number };
 }
 
 export interface CompanyState {
@@ -182,6 +187,7 @@ export interface CompanyState {
   airlineEval?: AirlineEvalState;
   /** game.goals のときの目標・空港の格 */
   goals?: GoalState;
+  city?: CityConfig;
 }
 
 /** 工事: 新設・改修（移設・拡張）は建設中、一時閉鎖は運用を止めるだけ。残り日数は運航した日で進む */
@@ -544,6 +550,7 @@ export function importCompany(json: string): CompanyState | null {
     if (c.game !== undefined && checkGameSettings(c.game) !== null) delete c.game;
     if (c.airlineEval !== undefined && checkAirlineEval(c.airlineEval).length > 0) delete c.airlineEval;
     if (c.goals !== undefined && checkGoals(c.goals).length > 0) delete c.goals;
+    if (c.city !== undefined && !isCityConfig(c.city)) delete c.city;
     // 対応するゲーム設定のフラグがない評価・目標のデータは捨てる（フラグとデータの食い違いを持ち込まない）
     if (!c.game?.airlineEval) delete c.airlineEval;
     if (!c.game?.goals) delete c.goals;

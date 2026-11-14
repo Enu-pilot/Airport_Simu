@@ -3,6 +3,7 @@ import { resolveType, type TypeTable } from '../sim/aircraftTypes';
 import { operableTypes, type SimContext } from '../sim/context';
 import { ON_TIME_SEC } from './balance';
 import { contractsOf, type CompanyState } from './company';
+import { evaluateDelayPair } from './delayEvaluation';
 import { otpAddOf } from './game';
 import type { DayPlan, PlanAnalysis } from './planning';
 import { AIRLINES, type AirlineDef } from './registry';
@@ -68,21 +69,29 @@ const LEVEL_RANK: Record<ScoreLevel, number> = { bad: 0, warn: 1, good: 2, 'n/a'
 const na = (key: ScoreKey, facts: ScoreFacts = {}): ScoreComponent => ({ key, level: 'n/a', score: null, facts });
 
 /** 記録から、到着（着陸）・出発（ブロックアウト）の各区間の遅れ（秒、運航不能は null） */
-function legDelays(records: readonly FlightRecord[]): (number | null)[] {
+function legDelays(records: readonly FlightRecord[], types: TypeTable): (number | null)[] {
   const out: (number | null)[] = [];
   for (const r of records) {
     if (r.result !== 'completed') {
       out.push(null);
       continue;
     }
-    if (r.landedAt !== null) out.push(Math.max(0, r.landedAt - r.arrScheduled));
-    if (r.blockOut !== null) out.push(Math.max(0, r.blockOut - r.depScheduled));
+    const pair = evaluateDelayPair({
+      arrScheduled: r.arrScheduled,
+      arrActual: r.landedAt,
+      depScheduled: r.depScheduled,
+      depBlockOut: r.blockOut,
+      turnaroundSec: resolveType(types, r.typeId).turnaroundSec,
+      arrivalExternalDelaySec: r.arrivalExternalDelaySec,
+    });
+    if (r.landedAt !== null) out.push(pair.arrivalSec);
+    if (r.blockOut !== null) out.push(pair.departureSec);
   }
   return out;
 }
 
-function otpComponent(a: AirlineDef, recs: readonly FlightRecord[], company: CompanyState): ScoreComponent {
-  const legs = legDelays(recs);
+function otpComponent(a: AirlineDef, recs: readonly FlightRecord[], company: CompanyState, types: TypeTable): ScoreComponent {
+  const legs = legDelays(recs, types);
   let otp: number | null = null;
   let fallback = false;
   if (legs.length > 0) otp = legs.filter((d) => d !== null && d <= ON_TIME_SEC).length / legs.length;
@@ -187,7 +196,7 @@ export function airlineScorecard(input: ScorecardInput): AirlineScore[] {
     const recs = records.filter((r) => r.airlineId === a.id);
     const planKeys = new Set(plan.flights.filter((f) => f.airlineId === a.id).map((f) => f.key));
     const components: ScoreComponent[] = [
-      otpComponent(a, recs, company),
+      otpComponent(a, recs, company, ctx.types),
       turnaroundComponent(recs, ctx.types),
       standComponent(planKeys, analysis, recs, planKeys.size > 0),
       feesComponent(a, company),

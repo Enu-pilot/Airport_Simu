@@ -16,3 +16,15 @@ export function busLayout(opts: { buses?: number; gate?: 'bus' | 'none' } = {}):
   if ((opts.buses ?? 3) > 0) base.props.apronBuses = opts.buses ?? 3;
   return l;
 }
+
+/** 2つのリモートスポットに別々のバスゲートを設定する旅客動線用レイアウト */
+export function twoRemoteBusGateLayout(): AirportLayout {
+  const l = busLayout();
+  // fac_8 を2つ目のバスゲートにし、もとの std_6 をリモートスポットにする。
+  l.facilities.fac_8!.props = { boardingMode: 'bus', standId: null, jetBridge: false };
+  l.stands.std_6!.remoteBoarding = 'bus';
+  l.stands.std_6!.busGateId = 'fac_6';
+  l.stands.std_8!.remoteBoarding = 'bus';
+  l.stands.std_8!.busGateId = 'fac_8';
+  return l;
+}

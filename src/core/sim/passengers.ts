@@ -7,7 +7,7 @@ import { resolveType } from './aircraftTypes';
 import { demandFactorAt } from './disruptions';
 import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt } from './baggage';
 import { boardingAllowed } from './ground';
-import { applyBusArrival, applyBusDeparture, stepBusBoarding } from './apronBus';
+import { applyBusArrival, applyBusDeparture, pickBusGate, stepBusBoarding } from './apronBus';
 import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './busRules';
 import { gateMode } from '../model/gates';
 import { BALANCE } from '../economy/balance';
@@ -192,17 +192,37 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
     if (p.boarding !== 'closed') closeBoarding(sim, f, 'cancelled');
     return;
   }
-  const requiresTerminalAssignment = Object.keys(ctx.terminal.byTerminal).length > 1;
-  // Keep the single-terminal update order byte-for-byte compatible: historically
-  // passenger generation ran before the current stand's gate was copied to FlightPax.
-  if (!requiresTerminalAssignment && !p.generated && state.now >= f.scheduled - PAX_GENERATE_LEAD_SEC) generateDeparturePax(sim, f);
+  const prospectiveStandId = ac.standId ?? f.plannedStandId;
+  const prospectiveStandInfo = prospectiveStandId ? ctx.stands[prospectiveStandId] : undefined;
+  const explicitRemoteConfiguration = !!prospectiveStandInfo && !prospectiveStandInfo.contact && ctx.layout.stands[prospectiveStandId!]?.remoteBoarding !== undefined;
+  const configuredRemoteStandExists = Object.values(ctx.layout.stands).some((stand) => stand.remoteBoarding !== undefined);
+  const requiresTerminalAssignment = Object.keys(ctx.terminal.byTerminal).length > 1 || explicitRemoteConfiguration || (!ac.standId && configuredRemoteStandExists);
+  // A planned stand gives us a stable terminal/gate early enough to start passenger
+  // processing on time. Invalid explicit remote mappings deliberately remain unset.
+  if (!ac.standId && prospectiveStandInfo && requiresTerminalAssignment && !p.gateId) {
+    const layoutStand = ctx.layout.stands[prospectiveStandInfo.id];
+    const plannedGateId = prospectiveStandInfo.contact
+      ? ctx.standGate[prospectiveStandInfo.id] ?? null
+      : layoutStand?.remoteBoarding === 'bus'
+        ? layoutStand.busGateId ?? null
+        : layoutStand?.remoteBoarding === 'none'
+          ? null
+          : pickBusGate(sim, f, 'boarding', prospectiveStandInfo.id);
+    const gate = plannedGateId ? ctx.terminal.gates[plannedGateId] : undefined;
+    const validPlannedGate = !!gate?.terminalId && !!gate.boarding && !state.closures.gates.includes(plannedGateId!);
+    const explicitBusGateValid = layoutStand?.remoteBoarding !== 'bus' || (validPlannedGate && ctx.busGates.includes(plannedGateId!));
+    if (validPlannedGate && explicitBusGateValid) p.gateId = plannedGateId;
+  }
+  const hasStableTerminal = !!p.gateId && !!ctx.terminal.gates[p.gateId]?.terminalId;
+  // Keep the legacy single-terminal order when no planned gate is available.
+  if ((!requiresTerminalAssignment || hasStableTerminal) && !p.generated && state.now >= f.scheduled - PAX_GENERATE_LEAD_SEC) generateDeparturePax(sim, f);
   // 搭乗ゲートは機体のスポットで決まる
   if (ac.standId && p.boarding !== 'closed') {
     const previousGateId = p.gateId;
     p.gateId = ctx.standGate[ac.standId] ?? null;
-    if (requiresTerminalAssignment && p.generated && previousGateId !== p.gateId) reconcileDepartureGate(sim, f, p.gateId);
     // バスゲートがある運航: ゲートのないスポットの便はバスゲートで搭乗し、ランプバスで運ぶ（sim/apronBus.ts）
-    if (state.bus) applyBusDeparture(sim, f, ac);
+    if (state.bus || explicitRemoteConfiguration) applyBusDeparture(sim, f, ac);
+    if (requiresTerminalAssignment && p.generated && previousGateId !== p.gateId) reconcileDepartureGate(sim, f, p.gateId);
   }
   // 複数ターミナルでは、ゲート所属先が確定してから旅客を作る。
   // 単一ターミナル空港では従来どおり、便の生成時刻に旅客を作る。
@@ -290,6 +310,17 @@ function generateDeparturePax(sim: Simulation, f: Flight): void {
   const { state, ctx } = sim;
   const p = f.pax;
   p.generated = true;
+  const aircraft = state.aircraft[f.aircraftId];
+  const stand = aircraft?.standId ? ctx.stands[aircraft.standId] : undefined;
+  const remote = !!stand && !stand.contact;
+  if (remote && ((ctx.layout.stands[stand.id]?.remoteBoarding !== undefined && !p.gateId) || (state.bus && !p.gateId))) {
+    p.booked = 0;
+    if (!p.busFailure) {
+      const reason = ctx.layout.stands[stand.id]?.remoteBoarding === 'none' ? '無効' : '未設定または利用不可';
+      log(state, { t: state.now, kind: 'disruption', aircraftId: f.aircraftId, note: `リモートスポット ${stand.id} のバスゲートが${reason}のため出発旅客を生成しません` });
+    }
+    return;
+  }
   const terminalCount = Object.keys(ctx.terminal.byTerminal).length;
   const terminal = (p.gateId ? ctx.terminal.gates[p.gateId]?.terminalId : null) ?? (terminalCount === 1 ? ctx.paxTerminal : null);
   if (terminalCount === 0) return; // ターミナルのない空港では従来どおり旅客なし
@@ -403,7 +434,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
   const ac = state.aircraft[f.aircraftId]!;
   let gateId = ac.standId ? (ctx.standGate[ac.standId] ?? null) : null;
   // バスゲートがある運航: ゲートのないスポットの到着旅客は、スポットでランプバスを待ち、バスゲートの降機口へ運ばれる
-  if (state.bus && ac.standId) {
+  if (ac.standId && (state.bus || ctx.layout.stands[ac.standId]?.remoteBoarding !== undefined)) {
     const busGate = applyBusArrival(sim, f, ac);
     if (busGate !== undefined) gateId = busGate;
   }
@@ -412,7 +443,11 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
     const seats = f.seats ?? resolveType(ctx.types, ac.typeId).seats;
     const access = gateId ? ctx.terminal.gates[gateId] : undefined;
     withRng(state, (rng) => {
-      p.booked = ctx.paxTerminal || access?.terminalId ? (f.plannedPax ?? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min)))) : 0;
+      const stand = ac.standId ? ctx.stands[ac.standId] : undefined;
+      const remoteGateMissing = !!stand && !stand.contact && ((ctx.layout.stands[stand.id]?.remoteBoarding !== undefined && !gateId) || (!!state.bus && !gateId));
+      p.booked = !remoteGateMissing && (access?.terminalId || (stand?.contact && ctx.paxTerminal))
+        ? (f.plannedPax ?? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min))))
+        : 0;
       p.deplaneRemaining = p.booked;
       // 手荷物受取所: 降機口から近い受取所。ベルトが空くまで手荷物は出ない
       if (access?.deplane) {

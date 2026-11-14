@@ -4,7 +4,9 @@
 
 ## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1` または 2）
 
-**版の書き方（Phase 12B-3a）**: `formatVersionOf(p)` が、新しい項目（ゲートの `boardingMode: 'bus'`・`connectedTo`、GSE 基地の `apronBuses > 0`、運航状態の `bus`・`wx`、会社の `game`・`airlineEval`・`goals`）を **1 つでも使うときだけ 2**、使わないときは 1 のまま書く（`buildProject` と `validateProject` の作り直しの両方。`versions.format` も同じ値）。読み込みは 2 まで許可し、3 以上は拒否する（v1 → v2 は恒等）。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`。従来のファイルの内容・ゴールデン（`project.golden.json` は直列化の sha256）は変わらない。`SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない。厳格な形の検査: `checkLayout`（`boardingMode`・`connectedTo`・`apronBuses`）、`checkSim`（`bus` の運行の便・ゲート・スポット・バス・グループの参照、段階の値、`bus` がないのに `p.bus`・`trip`・`busTrip`・バス待ちのグループがある状態の拒否）、復元後の BU1〜BU4。
+**版の書き方（Phase 12B-3a/3b）**: `formatVersionOf(p)` が、新しい項目（ゲートの `boardingMode: 'bus'`・`connectedTo`、スポットの `remoteBoarding`・`busGateId`、GSE 基地の `apronBuses > 0`、運航状態の `bus`・`wx`・閉鎖理由台帳 `closureReasons`、会社の `game`・`airlineEval`・`goals`・`city`）を **1 つでも使うときだけ 2**、使わないときは 1 のまま書く（`buildProject` と `validateProject` の作り直しの両方。`versions.format` も同じ値）。読み込みは 2 まで許可し、3 以上は拒否する（v1 → v2 は恒等）。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`。従来のファイルの内容・ゴールデン（`project.golden.json` は直列化の sha256）は変わらない。`SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない。厳格な形の検査: `checkLayout`（`boardingMode`・`connectedTo`・`apronBuses`・リモートスポットの設定）、`checkSim`（`bus` の運行参照・`closureReasons` と閉鎖配列・外部遅延秒数、復元後の BU1〜BU4）。旧運航状態は既存の閉鎖配列と発生中の障害から閉鎖理由台帳を再構築する。外部遅延は原因名から推定せず、運航に実際に加えた秒数だけを記録する。
+
+`Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。
 
 | 項目 | 内容 |
 |---|---|
@@ -18,7 +20,7 @@
 | `sim` | 運航中に保存したときの運航状態（`SimState` 全体と運航中の会社）。建設モードでは `null` |
 
 `SimState` には、便・機体（位置・状態・経路）、滑走路・スポット・誘導路の占有と予約、旅客グループ、手荷物、地上作業とユニット、
-設備の状態、天候・障害と復旧状況、乱数の状態、分析の記録が含まれる。
+設備の状態、天候・障害と復旧状況、閉鎖対象ごとの独立した閉鎖理由、便ごとの外部遅延実秒数、乱数の状態、分析の記録が含まれる。
 
 ### 版の扱い
 
@@ -103,4 +105,4 @@
 - 未保存のプロジェクトは `unsaved` に残り、保存すると新しいスロット ID に付け替える。新しいゲーム・JSON の読み込みで `unsaved` は消す。スロットを削除するとそのスロットの履歴も消す。
 - **書き出し（JSON）に履歴は含めない**（端末・ブラウザごと）。サイズ（計測: サンプル空港＋サンドボックス会社、2 日分）: `projectJson` は 1 件あたり約 77〜78 KB、振り返りのデータは約 2〜3 KB。15 件でも約 1.2 MB で、IndexedDB の容量には十分収まる。
 
-**Phase 12B-3a Part B**: 会社の `game`・`airlineEval`・`goals`、運航状態の `wx` を使うファイルは `formatVersion 2`。`checkGameFields`（game の値・airlineEval の要素名と範囲・goals の目標 ID と格）と `checkWxState`（24 時間・段階 0〜4・乱数）で厳格に検査し、`state.wx` と `game.weather === 'levels'` の対応も検査する。`importCompany` は不正な任意項目を捨てる。詳細は [docs/30](30_game_models.md)。
+**Phase 12B-3a Part B / 3b**: 会社の `game`・`airlineEval`・`goals`・`city`、運航状態の `wx` を使うファイルは `formatVersion 2`。`checkGameFields` と `checkWxState` で既存項目を検査し、都市は `isCityConfig` で版・人口・距離・品質・住民満足度を検査する。`importCompany` は不正な任意項目を捨て、`validateProject` は不正な `city` を含むプロジェクトを拒否する。詳細は [docs/30](30_game_models.md)・[docs/31](31_city_models.md)。

@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import { CLIMATES, DIFFICULTIES, defaultGame, type GameSettings } from '../core/economy/game';
-import { editorStore, newGame, setGameSettings } from '../editor/store';
+import { CITY_TYPES, defaultCity, type CityType } from '../core/economy/city';
+import { editorStore, newGame, setCompanyCity, setGameSettings } from '../editor/store';
 import { GAME_UI, MODE_LABEL } from '../i18n/ja';
 
 /** ゲーム設定ダイアログの表示状態（表示だけの状態。保存しない） */
@@ -36,18 +37,22 @@ export function GameSetupDialog() {
 }
 
 function Dialog({ kind }: { kind: 'new' | 'settings' }) {
-  const current = editorStore.getState().company.game;
+  const currentCompany = editorStore.getState().company;
+  const current = currentCompany.game;
   const [legacy, setLegacy] = useState(kind === 'settings' && !current);
   const [g, setG] = useState<GameSettings>(current ?? defaultGame());
   const [mode, setMode] = useState<'career' | 'sandbox'>('career');
+  const [cityEnabled, setCityEnabled] = useState(kind === 'new' || !!currentCompany.city);
+  const [cityType, setCityType] = useState<CityType>(currentCompany.city?.type ?? 'regional');
   const patch = (p: Partial<GameSettings>) => setG((x) => ({ ...x, ...p }));
   const submit = () => {
     if (kind === 'new') {
       if (!window.confirm(GAME_UI.setupConfirm)) return;
-      newGame(mode, legacy ? null : g);
+      newGame(mode, legacy ? null : g, cityEnabled ? defaultCity(cityType) : null);
     } else {
       if (!window.confirm(GAME_UI.setupApplyConfirm)) return;
       setGameSettings(legacy ? null : g);
+      setCompanyCity(cityEnabled ? defaultCity(cityType) : null);
     }
     gameSetupUi.close();
   };
@@ -83,6 +88,16 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
               {GAME_UI.climate[c]}
             </label>
           ))}
+        </fieldset>
+        <fieldset>
+          <legend>{GAME_UI.setupCity}</legend>
+          <label>
+            <input type="checkbox" checked={cityEnabled} onChange={(e) => setCityEnabled(e.target.checked)} data-testid="setup-city-enabled" />
+            {GAME_UI.setupCityEnabled}
+          </label>
+          <select value={cityType} disabled={!cityEnabled} onChange={(e) => setCityType(e.target.value as CityType)} data-testid="setup-city-type">
+            {CITY_TYPES.map((type) => <option key={type} value={type}>{GAME_UI.cityType[type]}</option>)}
+          </select>
         </fieldset>
         <fieldset disabled={legacy}>
           <legend>{GAME_UI.setupRules}</legend>

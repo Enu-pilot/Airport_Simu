@@ -69,9 +69,11 @@ import { createWx, rollWeatherGoAround, disruptionScaleFor, stepWeather } from '
 import { createAnalytics, stepAnalytics } from '../analytics/records';
 import type { CompanyState } from '../economy/company';
 import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
-import { analyzeDayPlan, planDay } from '../economy/planning';
+import { analyzeDayPlan, planDayWithDemand } from '../economy/planning';
 import { stepBaggage } from './baggage';
 import { createApronBusRuntime, stepApronBuses } from './apronBus';
+import { isCityNightMovement, nextCityMovementTime } from '../economy/city';
+import { addExternalDelay } from '../economy/delayEvaluation';
 import {
   allTurnaroundDone,
   cancelTasks,
@@ -251,6 +253,7 @@ const HOLD_TO_DELAY: Partial<Record<HoldReason, DelayCause>> = {
   noRunway: 'noRoute',
   boarding: 'boarding',
   groundCrew: 'groundHandling',
+  noiseCurfew: 'noiseRestriction',
 };
 
 const typeOf = (sim: Simulation, ac: Aircraft): AircraftType => resolveType(sim.ctx.types, ac.typeId);
@@ -310,7 +313,10 @@ export function addTurnaround(
   });
   const arrEst = arrivalAt + (opts.inboundDelaySec ?? 0);
   state.flights[arrId] = flight(arrId, 'arrival', arrNumber, arrivalAt, arrEst);
-  if (arrEst > arrivalAt) addDelayCause(state.flights[arrId]!, 'inboundLate');
+  if (arrEst > arrivalAt) {
+    addDelayCause(state.flights[arrId]!, 'inboundLate');
+    addExternalDelay(state.flights[arrId]!, 'inboundDelay', arrEst - arrivalAt);
+  }
   state.flights[depId] = flight(depId, 'departure', depNumber, depAt, Math.max(depAt, arrEst + type.turnaroundSec));
   const ac: Aircraft = {
     id: acId,
@@ -392,7 +398,7 @@ export function generateDaySchedule(sim: Simulation, day: number): void {
 function generateContractSchedule(sim: Simulation, day: number): void {
   const { state, ctx } = sim;
   // 需要にはアクセス係数（前日の混雑を反映）が掛かる。運航計画タブのプレビューも同じ値を使う
-  const plan = planDay(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!), ctx.types);
+  const plan = planDayWithDemand(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!), ctx.types);
   const analysis = analyzeDayPlan(plan, ctx);
   const earliest = state.now + 20 * 60;
   for (const p of plan.flights) {
@@ -655,14 +661,15 @@ function runwayControl(sim: Simulation): void {
       .sort((a, b) => a.queuedSince! - b.queuedSince! || compareIds(a.id, b.id));
     const head = queue[0];
     if (head) {
-      const reason = departureBlocked(sim, rid, typeOf(sim, head));
+      const reason = departureBlocked(sim, rid, typeOf(sim, head), head);
       if (!reason) {
         rs.occupant = { aircraftId: head.id, purpose: 'takeoff', since: state.now };
         setHold(state, head, null);
         setState(state, head, 'lineUp');
       } else {
         setHold(state, head, reason);
-        if (state.now - head.queuedSince! > 5 * 60) addDelayCause(state.flights[head.departureFlightId]!, 'runwayQueue');
+        if (reason === 'noiseCurfew') addDelayCause(state.flights[head.departureFlightId]!, 'noiseRestriction');
+        else if (state.now - head.queuedSince! > 5 * 60) addDelayCause(state.flights[head.departureFlightId]!, 'runwayQueue');
       }
       for (const other of queue.slice(1)) setHold(state, other, 'runwayBusy');
     }
@@ -688,10 +695,15 @@ function runwayControl(sim: Simulation): void {
   }
 }
 
-function departureBlocked(sim: Simulation, rid: string, type: AircraftType): HoldReason | null {
+function departureBlocked(sim: Simulation, rid: string, type: AircraftType, aircraft: Aircraft): HoldReason | null {
   const size = type.size;
   const { state } = sim;
   const rs = state.runways[rid]!;
+  if (sim.company?.city) {
+    const lineUpSec = aircraft.route ? Math.max(0, routeLength(aircraft.route) - aircraft.dist) / LINEUP_SPEED : 0;
+    const takeoffSec = Math.sqrt((2 * takeoffDistanceM(type)) / Math.max(0.1, type.takeoffAccel));
+    if (isCityNightMovement(state.now + lineUpSec + LINEUP_ALIGN_SEC + takeoffSec)) return 'noiseCurfew';
+  }
   if (!runwayUsable(sim, rid, type, 'dep')) return 'runwayBusy';
   if (rs.occupant) return 'runwayBusy';
   if (rs.booking && rs.booking.eta - state.now < DEPARTURE_WINDOW_SEC) return 'runwayBusy';
@@ -980,6 +992,16 @@ function stepInbound(sim: Simulation, ac: Aircraft): void {
   const dep = state.flights[ac.departureFlightId]!;
   const ready = state.now >= arr.estimated - APPROACH_SEC;
 
+  if (ready && sim.company?.city && isCityNightMovement(state.now + APPROACH_SEC)) {
+    const allowedAt = nextCityMovementTime(state.now + APPROACH_SEC);
+    arr.estimated = allowedAt;
+    dep.estimated = Math.max(dep.scheduled, allowedAt + typeOf(sim, ac).turnaroundSec);
+    ac.retryAt = Math.max(state.now + 1, allowedAt - APPROACH_SEC);
+    setHold(state, ac, 'noiseCurfew');
+    addDelayCause(arr, 'noiseRestriction');
+    return;
+  }
+
   if (!ac.standId && state.now >= ac.retryAt) {
     const reason = assignStand(sim, ac);
     if (reason) {
@@ -1018,7 +1040,7 @@ function stepInbound(sim: Simulation, ac: Aircraft): void {
     ac.retryAt = state.now + RETRY_SEC;
     holdArrival(sim, ac, reason);
   }
-  if (ac.waitSince !== null && state.now - ac.waitSince >= HOLD_DIVERT_SEC) {
+  if (ac.holdReason !== 'noiseCurfew' && ac.waitSince !== null && state.now - ac.waitSince >= HOLD_DIVERT_SEC) {
     divert(sim, ac);
   }
 }
@@ -1042,6 +1064,7 @@ function goAround(sim: Simulation, ac: Aircraft, reason?: HoldReason): void {
   ac.eta = null;
   ac.retryAt = state.now + 4 * 60;
   state.stats.goArounds++;
+  if (reason === 'weather') addExternalDelay(state.flights[ac.arrivalFlightId]!, 'weather', 4 * 60);
   logEvent(state, { t: state.now, kind: 'goAround', aircraftId: ac.id, ...(reason ? { reason } : {}) });
   holdArrival(sim, ac, 'goAround');
 }

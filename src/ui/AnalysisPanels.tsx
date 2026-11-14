@@ -65,7 +65,8 @@ export function AnalyticsPanel() {
               <th>座席利用率</th>
               <th>折り返し</th>
               <th>スポット占有</th>
-              <th>出発遅延</th>
+              <th>評価対象の出発遅延</th>
+              <th>実出発遅延</th>
               <th>定時率</th>
               <th>作業（分）</th>
               <th>空港収入</th>
@@ -88,6 +89,7 @@ export function AnalyticsPanel() {
                 <td className="num">{num(g.avgTurnMin, '分')}</td>
                 <td className="num">{num(g.avgStandMin, '分')}</td>
                 <td className="num">{num(g.avgDepDelayMin, '分')}</td>
+                <td className="num muted">{num(g.avgActualDepDelayMin, '分')}</td>
                 <td className="num">{pct(g.otp)}</td>
                 <td className="muted small">
                   {Object.entries(g.taskMin)

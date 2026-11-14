@@ -124,7 +124,10 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
     { key: 'busBays', type: 'int', min: 1, max: 10 },
     { key: 'busesPerHour', type: 'int', min: 1, max: 30 },
   ],
-  railStation: [{ key: 'trainsPerHour', type: 'int', min: 1, max: 20 }],
+  railStation: [
+    { key: 'trainsPerHour', type: 'int', min: 1, max: 20 },
+    { key: 'railService', type: 'enum', options: ['local', 'rapid', 'express'] },
+  ],
   staffParking: [{ key: 'spaces', type: 'int', min: 0, max: 5000 }],
   hotel: [{ key: 'rooms', type: 'int', min: 10, max: 2000 }],
 };

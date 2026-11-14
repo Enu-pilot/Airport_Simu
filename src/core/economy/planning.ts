@@ -8,6 +8,7 @@ import { operableTypes, type SimContext } from '../sim/context';
 import { BALANCE } from './balance';
 import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
 import { airlineDef, destinationDef } from './registry';
+import { cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedPassengers } from './city';
 
 /**
  * 運航計画（docs/14_management_rules.md §4）。
@@ -134,6 +135,17 @@ export function planDay(c: CompanyState, day: number, access = 1, types: TypeTab
   return { day, flights, dropped };
 }
 
+/** 都市設定があるときだけ、アクセス性に都市需要上限を反映する計画。設定なしは従来の計画を返す。 */
+export function planDayWithDemand(c: CompanyState, day: number, access = 1, types: TypeTable = AIRCRAFT_TYPES): DayPlan {
+  const planningCompany = c.city ? { ...c, hours: cityOperatingHours(c.hours) } : c;
+  const base = planDay(planningCompany, day, access, types);
+  if (!c.city) return base;
+  const event = cityEventEffects(c.city, day);
+  const expected = expectedPassengers(c, day, types);
+  const factor = Math.min(1.1 * event.demandMultiplier, cityDemandCeiling(c.city, access) * event.demandMultiplier / Math.max(1, expected));
+  return planDay(planningCompany, day, access * factor, types);
+}
+
 // ---------------------------------------------------------------- 計画の分析
 
 export type PlanIssueCode =
@@ -141,6 +153,7 @@ export type PlanIssueCode =
   | 'STAND_CONFLICT' // 到着時に空きスポットがない
   | 'NO_GATE' // ゲートのないスポットに割り当て（旅客が搭乗できない）
   | 'BUS_BOARDING' // バスゲートがある空港のリモートスポット（ランプバスで搭乗。情報）
+  | 'INVALID_BUS_GATE' // 個別指定したバスゲートが未設定・利用不能
   | 'NO_TERMINAL' // 旅客ターミナル（入口）がない
   | 'RUNWAY_OVERLOAD' // 1時間の離着陸回数が滑走路の処理能力の目安を超える
   | 'SECURITY_OVERLOAD' // 保安検査の処理能力を超える時間帯がある
@@ -201,16 +214,24 @@ function processingPerHour(ctx: SimContext, terminalId: string, kind: 'security'
 }
 
 /** バスゲート選択前の計画値。搭乗口があり、スポットから最短の運用中バスゲートを使う。 */
-function nearestBusTerminal(ctx: SimContext, standId: string): string | null {
+function nearestBusTerminal(ctx: SimContext, standId: string): { terminalId: string | null; invalid: boolean } {
+  const stand = ctx.layout.stands[standId];
+  if (!stand || stand.remoteBoarding === 'none') return { terminalId: null, invalid: false };
+  if (stand.remoteBoarding === 'bus') {
+    const id = stand.busGateId;
+    const gate = id ? ctx.terminal.gates[id] : undefined;
+    const valid = !!id && ctx.busGates.includes(id) && !!gate?.terminalId && !!gate.boarding && !!gate.deplane;
+    return { terminalId: valid ? gate!.terminalId : null, invalid: !valid };
+  }
   const node = ctx.network.nodes[ctx.stands[standId]?.node ?? ''];
-  if (!node) return null;
-  const candidates = ctx.busGates.filter((id) => !!ctx.terminal.gates[id]?.boarding).map((id) => {
+  if (!node) return { terminalId: null, invalid: false };
+  const candidates = ctx.busGates.filter((id) => !!ctx.terminal.gates[id]?.terminalId && !!ctx.terminal.gates[id]?.boarding && !!ctx.terminal.gates[id]?.deplane).map((id) => {
     const gate = ctx.layout.facilities[id]!;
     const distance = Math.hypot(gate.origin.x + 0.5 - node.pos.x, gate.origin.y + 0.5 - node.pos.y);
     return { id, terminalId: ctx.terminal.gates[id]!.terminalId, distance };
   }).filter((x) => x.terminalId !== null);
   candidates.sort((a, b) => a.distance - b.distance || compareIds(a.id, b.id));
-  return candidates[0]?.terminalId ?? null;
+  return { terminalId: candidates[0]?.terminalId ?? null, invalid: false };
 }
 
 /** 地上支援で同時に扱える折り返しの目安 */
@@ -259,10 +280,14 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
     const gateId = ctx.standGate[s.id] ?? null;
     // Contact gate terminal is authoritative. Remote stands use the nearest
     // available bus-gate terminal for planning estimates; live dispatch balances load.
-    const terminalId = (gateId ? ctx.terminal.gates[gateId]?.terminalId : null) ?? (ctx.busGates.length ? nearestBusTerminal(ctx, s.id) : null) ?? ctx.paxTerminal;
+    const busTerminal = gateId ? { terminalId: null, invalid: false } : nearestBusTerminal(ctx, s.id);
+    const explicitRemote = s.remoteBoarding !== undefined;
+    const terminalId = (gateId ? ctx.terminal.gates[gateId]?.terminalId : null) ?? busTerminal.terminalId ?? (explicitRemote ? null : ctx.paxTerminal);
     assignments[f.key] = { standId: s.id, gateId, terminalId };
     if (!gateId) {
-      if (ctx.busGates.length > 0) add('BUS_BOARDING', 'info', f.key);
+      if (busTerminal.invalid) add('INVALID_BUS_GATE', 'error', f.key, s.busGateId ? `指定ゲート ${s.busGateId} が搭乗・降機の双方で利用できません` : '接続するバスゲートを選択してください');
+      else if (s.remoteBoarding === 'none') add('NO_GATE', 'warning', f.key, 'このリモートスポットはバス搭乗を無効にしています');
+      else if (busTerminal.terminalId) add('BUS_BOARDING', 'info', f.key);
       else add('NO_GATE', 'warning', f.key);
     }
   }

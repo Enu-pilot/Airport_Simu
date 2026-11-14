@@ -436,6 +436,11 @@ export function AircraftPanel() {
           </Row>
         )}
         {arr.pax.generated && <Row label="到着旅客">{`降機 ${arr.pax.deplaned}/${arr.pax.booked} · 退出 ${arr.pax.exited}`}</Row>}
+        {(dep.pax.busFailure || arr.pax.busFailure) && (
+          <div className="operability ng" data-testid="aircraft-bus-failure">
+            バスゲート設定エラー: {[...new Set([dep.pax.busFailure, arr.pax.busFailure].filter(Boolean))].map((failure) => failure === 'disabled' ? 'このスポットではバスを使用しない設定です' : failure === 'invalidGate' ? '指定ゲートが無効、閉鎖中、またはターミナル・搭乗口・降機口に接続されていません' : 'バスゲートが未設定または利用できません').join(' / ')}
+          </div>
+        )}
         {(dep.pax.bus || arr.pax.bus) && state.bus && <BusRows state={state} dep={dep} arr={arr} layout={layout} />}
       </div>
       <TurnaroundSection sim={o.sim} acId={ac.id} />

@@ -16,6 +16,8 @@ import {
   type SimStats,
 } from '../sim/types';
 import { BALANCE, ON_TIME_SEC } from './balance';
+import { railServiceOf, RAIL_SERVICE } from '../access/rail';
+import { evaluateDelayPair } from './delayEvaluation';
 import {
   COST_CATEGORIES,
   REPORT_LIMIT,
@@ -35,11 +37,12 @@ import { layoutValue, scaleFactor } from './construction';
 import { advanceProjects } from './expansion';
 import { analyzeAccess, type AccessAnalysis, type AccessFeedback } from '../access/model';
 import { takeAccessStats } from '../access/runtime';
-import { isPeak, RUNWAY_HOURLY_CAPACITY, analyzeDayPlan, planDay } from './planning';
+import { isPeak, RUNWAY_HOURLY_CAPACITY, analyzeDayPlan, planDayWithDemand } from './planning';
 import { airlineScorecard } from './airlineScore';
 import { stepAirlineEval } from './airlineEval';
 import { evaluateGoals } from './goals';
 import { airlineDef } from './registry';
+import { aircraftNoisePoints, applyCityNoiseImpact, cityDemandCeiling, cityDemandFactor, cityEventEffects, expectedPassengers, growCity, isCityNightMovement } from './city';
 
 /**
  * 運航中の経営処理（docs/14_management_rules.md §3・§5・§6）。
@@ -120,7 +123,8 @@ export function dailyFixedCosts(ctx: SimContext, access: AccessAnalysis = analyz
     if (f.buildState !== 'operational') continue;
     if (f.kind === 'gate') counterStaff += D.gate;
     if (f.kind === 'terminal') utilities += f.w * f.h * Math.max(1, Number(f.props.levels ?? 1)) * D.utilitiesPerTerminalTile;
-    if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'railStation' || f.kind === 'hotel') accessOps += D.access[f.kind];
+    if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'hotel') accessOps += D.access[f.kind];
+    if (f.kind === 'railStation') accessOps += D.access.railStation * RAIL_SERVICE[railServiceOf(f.props.railService)].operatingCostMultiplier;
   }
   return {
     salary,
@@ -142,7 +146,7 @@ export function dailyContractRevenue(c: CompanyState, day: number): number {
 
 export function createEconomy(ctx: SimContext, state: SimState, c: CompanyState): SimEconomy {
   const simDay = Math.floor(state.now / DAY_SEC);
-  const access = analyzeAccess(ctx.layout, { fees: c.fees, feedback: c.accessFeedback });
+  const access = analyzeAccess(ctx.layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day });
   return {
     dayOffset: c.day - simDay,
     periodStart: state.now,
@@ -311,6 +315,7 @@ interface Leg {
   at: number;
   lost: boolean;
   delaySec: number;
+  actualDelaySec: number;
 }
 
 /** 期間内に終わった便の区間（到着 = 着陸、出発 = ブロックアウト、運航不能 = その時刻） */
@@ -318,14 +323,38 @@ function legsInPeriod(sim: Simulation, from: number, to: number): Leg[] {
   const { state } = sim;
   const legs: Leg[] = [];
   const inP = (t: number | null) => t !== null && t >= from && t < to;
+  const evaluationFor = (f: Flight) => {
+    const ac = state.aircraft[f.aircraftId];
+    const arr = ac ? state.flights[ac.arrivalFlightId] : undefined;
+    const dep = ac ? state.flights[ac.departureFlightId] : undefined;
+    if (!arr || !dep || !ac) {
+      const actualAt = f.direction === 'arrival' ? f.actual : f.block;
+      const actual = actualAt === null ? 0 : Math.max(0, actualAt - f.scheduled);
+      return { evaluated: actual, actual };
+    }
+    const pair = evaluateDelayPair({
+      arrScheduled: arr.scheduled,
+      arrActual: arr.actual,
+      depScheduled: dep.scheduled,
+      depBlockOut: dep.block,
+      turnaroundSec: resolveType(sim.ctx.types, ac.typeId).turnaroundSec,
+      arrivalExternalDelaySec: arr.externalDelaySec,
+    });
+    return f.direction === 'arrival'
+      ? { evaluated: pair.arrivalSec, actual: pair.actualArrivalSec }
+      : { evaluated: pair.departureSec, actual: pair.actualDepartureSec };
+  };
   for (const f of Object.values(state.flights)) {
     if (f.status === 'diverted' || f.status === 'cancelled') {
       const ac = state.aircraft[f.aircraftId];
-      if (ac && (ac.state === 'diverted' || ac.state === 'cannotOperate') && inP(ac.stateSince)) legs.push({ f, at: ac.stateSince, lost: true, delaySec: 0 });
+      if (ac && (ac.state === 'diverted' || ac.state === 'cannotOperate') && inP(ac.stateSince)) legs.push({ f, at: ac.stateSince, lost: true, delaySec: 0, actualDelaySec: 0 });
       continue;
     }
     const ref = f.direction === 'arrival' ? f.actual : f.block;
-    if (inP(ref)) legs.push({ f, at: ref!, lost: false, delaySec: Math.max(0, ref! - f.scheduled) });
+    if (inP(ref)) {
+      const delay = evaluationFor(f);
+      legs.push({ f, at: ref!, lost: false, delaySec: delay.evaluated, actualDelaySec: delay.actual });
+    }
   }
   return legs;
 }
@@ -359,6 +388,7 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
   const avgWaitMin = dPax.finished > 0 ? dPax.wait / dPax.finished / 60 : 0;
   const avgWalkMin = dPax.finished > 0 ? dPax.walk / dPax.finished / 60 : 0;
   const avgDelayMin = done.length > 0 ? done.reduce((s, l) => s + l.delaySec, 0) / done.length / 60 : 0;
+  const actualAvgDelayMin = done.length > 0 ? done.reduce((s, l) => s + l.actualDelaySec, 0) / done.length / 60 : 0;
   // 地上作業時間 = 準備完了 − ブロックイン（期間内に準備完了した出発便）
   const ground: number[] = [];
   for (const f of Object.values(state.flights)) {
@@ -416,6 +446,7 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
     paxArrived: dPax.deplaned,
     otp: legs.length > 0 ? onTime / legs.length : null,
     avgDelayMin: round1(avgDelayMin),
+    actualAvgDelayMin: round1(actualAvgDelayMin),
     runwayUtil: runways > 0 ? Math.min(1, movements / (runways * RUNWAY_HOURLY_CAPACITY * (elapsed / 3600))) : 0,
     gateUtil: stands > 0 ? Math.min(1, e.standBusySec / (stands * elapsed)) : 0,
     facilityUtil: e.facilityCap > 0 ? e.facilityBusy / e.facilityCap : 0,
@@ -453,6 +484,23 @@ export function nextRating(prev: number, kpi: Pick<DailyKpi, 'paxSatisfaction' |
   return round1(clamp(0.7 * prev + 0.3 * today));
 }
 
+function cityNoiseMetrics(state: SimState, ctx: SimContext, from: number, to: number) {
+  let movements = 0;
+  let nightMovements = 0;
+  let noisePoints = 0;
+  for (const flight of Object.values(state.flights)) {
+    const at = flight.actual;
+    if (at === null || at < from || at >= to) continue;
+    const aircraft = state.aircraft[flight.aircraftId];
+    if (!aircraft) continue;
+    const type = resolveType(ctx.types, aircraft.typeId);
+    movements++;
+    noisePoints += aircraftNoisePoints(type.size, type.engines);
+    if (isCityNightMovement(at)) nightMovements++;
+  }
+  return { movements, nightMovements, noisePoints: Math.round(noisePoints * 10) / 10 };
+}
+
 /**
  * 日次締め。partial = true は運航の途中停止（その日を途中で締める）。
  * 収支を日報に移し、航空会社の満足度・契約・評価・新しい提案を更新して、会社の日を進める。
@@ -462,6 +510,12 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   const { state, ctx } = sim;
   const c = sim.company;
   const e = state.economy!;
+  const cityStart = c.city ? { ...c.city } : null;
+  const cityAccess = state.access?.factor ?? 1;
+  const cityCeiling = cityStart ? cityDemandCeiling(cityStart, cityAccess) : 0;
+  const cityExpected = cityStart ? expectedPassengers(c, c.day, ctx.types) : 0;
+  const cityNoise = cityStart ? cityNoiseMetrics(state, ctx, e.periodStart, state.now) : null;
+  const cityEvents = cityStart ? cityEventEffects(cityStart, c.day) : null;
   accrue(sim, state.now);
   const { kpi, byAirline } = computeKpi(sim, c);
   settleAccess(sim, c, kpi);
@@ -474,7 +528,7 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
       const t = r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled;
       return t >= from && t < state.now;
     });
-    const plan = planDay(c, c.day, state.access?.factor ?? 1, ctx.types);
+    const plan = planDayWithDemand(c, c.day, state.access?.factor ?? 1, ctx.types);
     const scores = airlineScorecard({ company: c, ctx, records: recs, plan, analysis: analyzeDayPlan(plan, ctx) });
     const r = stepAirlineEval(c, { scores, operable: new Set<string>(operableTypes(ctx)) });
     for (const t of r.events) log(state, t);
@@ -504,6 +558,26 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
     operatingProfit: totalRevenue - totalCost,
     cashEnd: c.cash,
     kpi,
+    ...(cityStart ? { city: {
+      type: cityStart.type,
+      populationStart: cityStart.population,
+      populationEnd: cityStart.population,
+      demandCeiling: Math.round(cityCeiling),
+      expectedPax: Math.round(cityExpected),
+      actualPax: kpi.paxDeparted + kpi.paxArrived,
+      cityFactor: cityDemandFactor(cityStart, cityAccess, cityExpected),
+      roadQuality: cityStart.roadQuality,
+      railQuality: cityStart.railQuality,
+      residentsStart: cityStart.residents,
+      residentsEnd: cityStart.residents,
+      residentDelta: 0,
+      noiseMovements: cityNoise?.movements ?? 0,
+      nightMovements: cityNoise?.nightMovements ?? 0,
+      noisePoints: cityNoise?.noisePoints ?? 0,
+      events: cityEvents?.events ?? [],
+      eventDemandMultiplier: cityEvents?.demandMultiplier ?? 1,
+      eventTrafficMultiplier: cityEvents?.trafficMultiplier ?? 1,
+    } } : {}),
   };
   c.reports.push(report);
   if (c.reports.length > REPORT_LIMIT) c.reports.splice(0, c.reports.length - REPORT_LIMIT);
@@ -524,6 +598,16 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
     if (res.tierUp !== null) log(state, `空港の格が上がりました: ${res.tierUp}`);
   }
   checkBankruptcy(c);
+  if (c.city && !partial) {
+    const residentDelta = applyCityNoiseImpact(c.city, cityNoise?.noisePoints ?? 0, cityNoise?.nightMovements ?? 0);
+    for (const event of growCity(c.city, kpi.paxDeparted + kpi.paxArrived, cityCeiling)) log(state, event);
+    if (report.city) {
+      report.city.populationEnd = c.city.population;
+      report.city.roadQuality = c.city.roadQuality;
+      report.city.residentsEnd = c.city.residents;
+      report.city.residentDelta = residentDelta;
+    }
+  }
   log(state, `${c.day + 1}日目を締めました: 営業利益 ${report.operatingProfit.toLocaleString('ja-JP')} cr`);
   c.day++;
 

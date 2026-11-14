@@ -9,6 +9,8 @@ import { setUnitBroken } from './ground';
 import { setAreaClosed } from './passengers';
 import type { Simulation } from './simulation';
 import { wxEffects } from './weather';
+import { addExternalDelay } from '../economy/delayEvaluation';
+import { addClosureReason, ensureClosureReasons, removeClosureReason } from './closureState';
 import { EVENT_LOG_LIMIT, type Disruption, type DisruptionKind, type SimState, type WeatherKind } from './types';
 
 /**
@@ -58,9 +60,6 @@ function nextId(state: SimState): string {
   state.counters.dr = n;
   return `dr_${n}`;
 }
-
-const addSorted = (list: string[], id: string) => (list.includes(id) ? list : [...list, id].sort(compareIds));
-const remove = (list: string[], id: string) => list.filter((x) => x !== id);
 
 export function weatherEffects(state: SimState): { separation: number; taxi: number } {
   // 天候 5 段階の運航（state.wx）は段階の表、そうでなければ従来の 4 種の表
@@ -160,13 +159,13 @@ function activate(sim: Simulation, d: Disruption): void {
       closeRunway(sim, d, id);
       break;
     case 'taxiwayClosed':
-      state.closures.taxiways = addSorted(state.closures.taxiways, id);
+      addClosureReason(state, 'taxiways', id, `disruption:${d.id}`);
       break;
     case 'standClosed':
       closeStand(sim, d, id);
       break;
     case 'gateFailure':
-      state.closures.gates = addSorted(state.closures.gates, id);
+      addClosureReason(state, 'gates', id, `disruption:${d.id}`);
       break;
     case 'baggageFailure':
       setEquipmentBroken(sim, id, true, d.end !== null ? d.end - state.now : 10 * 86400);
@@ -195,7 +194,9 @@ function activate(sim: Simulation, d: Disruption): void {
       const until = d.end ?? d.start + 3 * 3600;
       for (const f of sortedValues(state.flights)) {
         if (f.direction !== 'arrival' || f.status !== 'scheduled' || f.scheduled < d.start || f.scheduled > until) continue;
-        f.estimated += Math.round((d.amount ?? 30) * 60);
+        const delaySec = Math.round((d.amount ?? 30) * 60);
+        f.estimated += delaySec;
+        addExternalDelay(f, 'airTraffic', delaySec);
         if (!f.delayCauses.includes('inboundLate')) f.delayCauses.push('inboundLate');
         d.affected.flights.push(f.id);
         noteDisruption(sim, f.aircraftId, d.id);
@@ -204,9 +205,9 @@ function activate(sim: Simulation, d: Disruption): void {
     }
     case 'maintenance':
       if (kind === 'runway') closeRunway(sim, d, id);
-      else if (kind === 'taxiway') state.closures.taxiways = addSorted(state.closures.taxiways, id);
+      else if (kind === 'taxiway') addClosureReason(state, 'taxiways', id, `disruption:${d.id}`);
       else if (kind === 'stand') closeStand(sim, d, id);
-      else if (kind === 'gate') state.closures.gates = addSorted(state.closures.gates, id);
+      else if (kind === 'gate') addClosureReason(state, 'gates', id, `disruption:${d.id}`);
       else if (kind === 'area') setAreaClosed(sim, id, true);
       break;
   }
@@ -215,6 +216,7 @@ function activate(sim: Simulation, d: Disruption): void {
 
 function deactivate(sim: Simulation, d: Disruption, by: 'time' | 'player'): void {
   const { state } = sim;
+  ensureClosureReasons(state);
   d.status = 'resolved';
   d.resolvedAt = state.now;
   d.resolvedBy = by;
@@ -231,13 +233,13 @@ function deactivate(sim: Simulation, d: Disruption, by: 'time' | 'player'): void
       reopenRunway(sim, d, id);
       break;
     case 'taxiwayClosed':
-      state.closures.taxiways = remove(state.closures.taxiways, id);
+      removeClosureReason(state, 'taxiways', id, `disruption:${d.id}`);
       break;
     case 'standClosed':
-      state.closures.stands = remove(state.closures.stands, id);
+      removeClosureReason(state, 'stands', id, `disruption:${d.id}`);
       break;
     case 'gateFailure':
-      state.closures.gates = remove(state.closures.gates, id);
+      removeClosureReason(state, 'gates', id, `disruption:${d.id}`);
       break;
     case 'baggageFailure':
       setEquipmentBroken(sim, id, false);
@@ -248,9 +250,9 @@ function deactivate(sim: Simulation, d: Disruption, by: 'time' | 'player'): void
       break;
     case 'maintenance':
       if (t === 'runway') reopenRunway(sim, d, id);
-      else if (t === 'taxiway') state.closures.taxiways = remove(state.closures.taxiways, id);
-      else if (t === 'stand') state.closures.stands = remove(state.closures.stands, id);
-      else if (t === 'gate') state.closures.gates = remove(state.closures.gates, id);
+      else if (t === 'taxiway') removeClosureReason(state, 'taxiways', id, `disruption:${d.id}`);
+      else if (t === 'stand') removeClosureReason(state, 'stands', id, `disruption:${d.id}`);
+      else if (t === 'gate') removeClosureReason(state, 'gates', id, `disruption:${d.id}`);
       else if (t === 'area') setAreaClosed(sim, id, false);
       break;
     default:
@@ -260,7 +262,7 @@ function deactivate(sim: Simulation, d: Disruption, by: 'time' | 'player'): void
 }
 
 /** 着陸前の到着機のスポット・滑走路の割り当てを外す（再割り当てさせる） */
-function releaseInbound(sim: Simulation, d: Disruption, pred: (acId: string, standId: string | null, runwayId: string | null) => boolean): void {
+function releaseInbound(sim: Simulation, d: Disruption | undefined, pred: (acId: string, standId: string | null, runwayId: string | null) => boolean): void {
   const { state } = sim;
   for (const ac of sortedValues(state.aircraft)) {
     if (ac.state !== 'inbound' && ac.state !== 'holding') continue;
@@ -273,8 +275,10 @@ function releaseInbound(sim: Simulation, d: Disruption, pred: (acId: string, sta
       f.standId = null;
       f.runwayId = null;
     }
-    d.affected.flights.push(ac.arrivalFlightId);
-    noteDisruption(sim, ac.id, d.id);
+    if (d) {
+      d.affected.flights.push(ac.arrivalFlightId);
+      noteDisruption(sim, ac.id, d.id);
+    }
   }
 }
 
@@ -294,13 +298,28 @@ function reopenRunway(sim: Simulation, d: Disruption, runwayId: string): void {
 }
 
 function closeStand(sim: Simulation, d: Disruption, standId: string): void {
-  sim.state.closures.stands = addSorted(sim.state.closures.stands, standId);
+  addClosureReason(sim.state, 'stands', standId, `disruption:${d.id}`);
   releaseInbound(sim, d, (_a, s) => s === standId);
 }
 
 // ---------------------------------------------------------------- プレイヤーの対応
 
 export type ResponseResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'TOO_LATE' | 'INCOMPATIBLE' | 'OCCUPIED' | 'CLOSED' };
+
+/** 手動閉鎖は障害由来の理由と別に管理する。走行中の機体は経路を継続し、新規経路だけを除外する。 */
+export function setManualResourceClosure(sim: Simulation, kind: 'stand' | 'taxiway', id: string, closed: boolean): ResponseResult {
+  const { state, ctx } = sim;
+  if (kind === 'stand' ? !ctx.layout.stands[id] : !ctx.layout.taxiways[id]) return { ok: false, reason: 'NOT_FOUND' };
+  const closureKind = kind === 'stand' ? 'stands' : 'taxiways';
+  if (closed) {
+    addClosureReason(state, closureKind, id, 'manual');
+    if (kind === 'stand') releaseInbound(sim, undefined, (_aircraftId, standId) => standId === id);
+  } else removeClosureReason(state, closureKind, id, 'manual');
+  const reasons = state.closureReasons?.[closureKind][id] ?? [];
+  const remainsClosed = state.closures[closureKind].includes(id);
+  log(state, `${kind === 'stand' ? 'スポット' : '誘導路'} ${id} の手動${closed ? '閉鎖' : '再開'}${remainsClosed && !closed ? `（他の閉鎖理由が残っています: ${reasons.join(', ')}）` : ''}`);
+  return { ok: true };
+}
 
 /** 代替スポットへの変更（着陸前の到着機のみ）。適合しない・使用中・閉鎖中のスポットには変えない */
 export function reassignStand(sim: Simulation, acId: string, standId: string): ResponseResult {

@@ -1,10 +1,25 @@
 import type { CompanyState } from './company';
-import { airlineDef, destinationDef } from './registry';
+import { airlineDef } from './registry';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../sim/aircraftTypes';
 import type { DayPlan } from './planning';
+import type { OperatingHours } from './company';
+import type { SizeClass } from '../model/types';
 import { BALANCE } from './balance';
 
 export type CityType = 'regional' | 'core' | 'metropolitan';
+export type CityEventKind = 'festival' | 'sports' | 'conference';
+export const CITY_EVENT_KINDS: readonly CityEventKind[] = ['festival', 'sports', 'conference'];
+export type CityEventLocation = 'cityCenter' | 'airportDistrict';
+export interface CityEvent {
+  id: string;
+  day: number;
+  durationDays: number;
+  kind: CityEventKind;
+  /** 1 = local, 2 = regional, 3 = large */
+  scale: 1 | 2 | 3;
+  location: CityEventLocation;
+}
+
 export interface CityConfig {
   version: 1;
   type: CityType;
@@ -13,6 +28,38 @@ export interface CityConfig {
   roadQuality: 1 | 2 | 3 | 4 | 5;
   railQuality: 0 | 1 | 2 | 3 | 4 | 5;
   residents: number;
+  events?: CityEvent[];
+}
+
+export const CITY_NIGHT_CURFEW = { fromMin: 22 * 60, toMin: 6 * 60 } as const;
+
+export function isCityNightMovement(at: number): boolean {
+  const minute = Math.floor((at % 86_400) / 60);
+  return minute >= CITY_NIGHT_CURFEW.fromMin || minute < CITY_NIGHT_CURFEW.toMin;
+}
+
+/** 騒音規制を適用する日の次の許可時刻（06:00）。 */
+export function nextCityMovementTime(at: number): number {
+  const dayStart = Math.floor(at / 86_400) * 86_400;
+  const morning = dayStart + CITY_NIGHT_CURFEW.toMin * 60;
+  return at < morning ? morning : morning + 86_400;
+}
+
+export function cityOperatingHours(hours: OperatingHours): OperatingHours {
+  return { ...hours, openMin: Math.max(hours.openMin, CITY_NIGHT_CURFEW.toMin), closeMin: Math.min(hours.closeMin, CITY_NIGHT_CURFEW.fromMin) };
+}
+
+/** 機種ごとのゲーム内騒音ポイント。dB値や現実の曝露量を表さない。 */
+export function aircraftNoisePoints(size: SizeClass, engines: number): number {
+  const sizePoints: Record<SizeClass, number> = { S: 1, M: 2, L: 3 };
+  return sizePoints[size] + Math.max(1, engines) * 0.5;
+}
+
+export function applyCityNoiseImpact(city: CityConfig, noisePoints: number, nightMovements: number): number {
+  const before = city.residents;
+  const delta = Math.max(-1, Math.min(0.05, 0.03 - noisePoints * 0.0004 - nightMovements * 0.15));
+  city.residents = Math.max(0, Math.min(100, city.residents + delta));
+  return Math.round((city.residents - before) * 100) / 100;
 }
 
 export const CITY_TYPES: readonly CityType[] = ['regional', 'core', 'metropolitan'];
@@ -39,7 +86,37 @@ export function isCityConfig(value: unknown): value is CityConfig {
     && Number.isFinite(c.distanceKm) && Number(c.distanceKm) >= 0 && Number(c.distanceKm) <= 500
     && Number.isInteger(c.roadQuality) && Number(c.roadQuality) >= 1 && Number(c.roadQuality) <= 5
     && Number.isInteger(c.railQuality) && Number(c.railQuality) >= 0 && Number(c.railQuality) <= 5
-    && Number.isFinite(c.residents) && Number(c.residents) >= 0 && Number(c.residents) <= 100;
+    && Number.isFinite(c.residents) && Number(c.residents) >= 0 && Number(c.residents) <= 100
+    && (c.events === undefined || (Array.isArray(c.events) && c.events.every(isCityEvent)));
+}
+
+export function isCityEvent(value: unknown): value is CityEvent {
+  if (!value || typeof value !== 'object') return false;
+  const e = value as Record<string, unknown>;
+  return typeof e.id === 'string' && e.id.length > 0
+    && Number.isInteger(e.day) && Number(e.day) >= 0
+    && Number.isInteger(e.durationDays) && Number(e.durationDays) >= 1 && Number(e.durationDays) <= 30
+    && (e.kind === 'festival' || e.kind === 'sports' || e.kind === 'conference')
+    && (e.scale === 1 || e.scale === 2 || e.scale === 3)
+    && (e.location === 'cityCenter' || e.location === 'airportDistrict');
+}
+
+const EVENT_EFFECTS: Record<CityEventKind, { demand: number; traffic: number }> = {
+  festival: { demand: 0.06, traffic: 0.09 },
+  sports: { demand: 0.08, traffic: 0.12 },
+  conference: { demand: 0.1, traffic: 0.07 },
+};
+
+export function cityEventEffects(city: CityConfig | undefined, day: number): { events: CityEvent[]; demandMultiplier: number; trafficMultiplier: number } {
+  const events = (city?.events ?? []).filter((event) => day >= event.day && day < event.day + event.durationDays);
+  let demandMultiplier = 1;
+  let trafficMultiplier = 1;
+  for (const event of events) {
+    const effect = EVENT_EFFECTS[event.kind];
+    demandMultiplier *= 1 + effect.demand * event.scale;
+    trafficMultiplier += effect.traffic * event.scale * (event.location === 'airportDistrict' ? 1.5 : 1);
+  }
+  return { events, demandMultiplier: Math.min(1.8, demandMultiplier), trafficMultiplier: Math.min(2.5, trafficMultiplier) };
 }
 
 /** 旅客/日。すべてゲーム内のバランス値で、実都市の予測ではない。 */
@@ -82,8 +159,7 @@ export function expectedPassengers(company: CompanyState, day: number, types: Ty
     const seats = company.fleets?.[contract.airlineId]?.find((entry) => entry.typeId === contract.typeId)?.seats
       ?? resolveType(types, contract.typeId).seats;
     const baseLoad = BALANCE.demand.baseLoadFactor[airlineDef(contract.airlineId).type];
-    const routeDemand = destinationDef(contract.destinationId).demand;
-    return sum + contract.perDay * seats * baseLoad * routeDemand * 2;
+    return sum + contract.perDay * seats * baseLoad * 2;
   }, 0);
 }
 

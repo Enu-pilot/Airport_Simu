@@ -96,6 +96,7 @@ export const PROP_LABEL: Record<string, string> = {
   busBays: '乗り場数',
   busesPerHour: 'バス便数（毎時）',
   trainsPerHour: '列車本数（毎時）',
+  railService: '列車種別',
   rooms: '客室数',
 };
 
@@ -105,6 +106,8 @@ export const BOARDING_MODE_LABEL = {
   bus: 'バス（リモートスポット）',
   connectAuto: '自動（隣接）',
 } as const;
+
+export const RAIL_SERVICE_LABEL = { local: '各停', rapid: '快速', express: '特急' } as const;
 
 export const SEVERITY_LABEL: Record<Severity, string> = { error: 'エラー', warning: '警告', info: '情報' };
 
@@ -279,6 +282,7 @@ export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
   boarding: '搭乗手続き中',
   groundCrew: 'トーイングカー・作業員待ち',
   weather: '天候',
+  noiseCurfew: '夜間騒音規制',
 };
 
 export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
@@ -292,6 +296,7 @@ export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
   groundHandling: '地上支援作業',
   apronBus: 'ランプバス待ち',
   weather: '天候',
+  noiseRestriction: '夜間騒音規制',
 };
 
 export const FLIGHT_STATUS_LABEL: Record<FlightStatus, string> = {
@@ -588,6 +593,7 @@ export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
   STAND_CONFLICT: 'スポット不足（到着時に空きスポットがない見込み）',
   NO_GATE: 'ゲートのないスポット（旅客が搭乗できない）',
   BUS_BOARDING: 'リモートスポット（ランプバスで搭乗）',
+  INVALID_BUS_GATE: 'リモートスポットの接続バスゲートが未設定または利用不能',
   NO_TERMINAL: '旅客ターミナル（入口）がない',
   RUNWAY_OVERLOAD: '滑走路の処理能力の目安（30回/時・本）を超える',
   SECURITY_OVERLOAD: '保安検査の処理能力を超える見込み',
@@ -608,7 +614,8 @@ export const KPI_LABEL: Record<keyof DailyKpi, { label: string; formula: string 
   paxDeparted: { label: '出発旅客', formula: '搭乗した旅客数' },
   paxArrived: { label: '到着旅客', formula: '降機した旅客数' },
   otp: { label: '定時運航率', formula: '予定から15分以内の便 ÷ 全便（ダイバート・欠航は遅延扱い）。到着は着陸、出発はブロックアウトで判定' },
-  avgDelayMin: { label: '平均遅延', formula: '運航した便の (実績 − 予定) の平均（分）' },
+  avgDelayMin: { label: '評価対象の平均遅延', formula: '実遅延から記録済みの外部要因遅延と折返し猶予を控除した値（分）' },
+  actualAvgDelayMin: { label: '実績の平均遅延', formula: '便の実際の運航時刻と予定時刻との差（分）' },
   runwayUtil: { label: '滑走路使用率', formula: '離着陸回数 ÷ (運用中の滑走路数 × 30回/時 × 経過時間)' },
   gateUtil: { label: 'スポット使用率', formula: 'スポットが機体に割り当てられていた時間 ÷ (運用中のスポット数 × 経過時間)' },
   facilityUtil: { label: '窓口稼働率', formula: 'チェックイン・保安検査で処理中の窓口・秒 ÷ 開いていた窓口・秒' },
@@ -648,6 +655,7 @@ export const ACCESS_UNAVAILABLE_LABEL: Record<AccessUnavailable, string> = {
   notConnected: '外部につながる道路・鉄道に接続されていない',
   tooFar: 'ターミナルから遠すぎる',
   noCurb: 'ターミナルが一般道路に接していない（車寄せなし）',
+  noService: '都市側の鉄道整備度が不足している',
   noCapacity: '台数・本数が 0',
 };
 
@@ -1147,6 +1155,9 @@ export const GAME_UI = {
   setupDifficulty: '難易度',
   setupClimate: '気候（天候の出方の傾向）',
   setupRules: '使うルール',
+  setupCity: '都市・空港需要（ゲーム値）',
+  setupCityEnabled: '都市規模を旅客需要・アクセス所要時間・人口成長に反映する',
+  cityType: { regional: '地方都市（人口 30 万）', core: '中核都市（人口 120 万）', metropolitan: '大都市（人口 600 万）' } as Record<string, string>,
   setupWeather: '天候 5 段階・予報（オフ = 従来の 4 種の天候の障害）',
   setupEval: '航空会社の評価要素・不満・要望',
   setupGoals: '目標・空港の格',

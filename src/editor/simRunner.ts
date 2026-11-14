@@ -36,6 +36,7 @@ import {
   prioritize,
   reassignStand,
   resolveDisruption,
+  setManualResourceClosure,
   type DisruptionInput,
   type ResponseResult,
 } from '../core/sim/disruptions';
@@ -354,6 +355,17 @@ export const ops = {
     if (!o) return;
     setEquipmentBroken(o.sim, key, broken);
     patchOps({ uiVersion: o.uiVersion + 1 });
+  },
+  setResourceClosed(kind: 'stand' | 'taxiway', id: string, closed: boolean): void {
+    const o = get().ops;
+    if (!o) return;
+    const result = setManualResourceClosure(o.sim, kind, id, closed);
+    if (!result.ok) {
+      showToast(`${kind === 'stand' ? 'スポット' : '誘導路'}を更新できません: ${result.reason}`, 'error');
+      return;
+    }
+    patchOps({ uiVersion: o.uiVersion + 1 });
+    showToast(`${kind === 'stand' ? 'スポット' : '誘導路'}を${closed ? '使用停止' : '再開'}しました`);
   },
   setRandomFailures(on: boolean): void {
     const o = get().ops;

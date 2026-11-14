@@ -17,6 +17,7 @@ import type { CatalogPin } from '../core/io/project';
 import { createCareerCompany, createSandboxCompany, importCompany, post, type CompanyState } from '../core/economy/company';
 import { constructionCost } from '../core/economy/construction';
 import { applyGameState, defaultGame, scaleConstructionCost, startGame, type GameSettings } from '../core/economy/game';
+import type { CityConfig, CityEvent } from '../core/economy/city';
 import { applyCompletedProjects, prepareCareerEdit, startClosure, syncProjects } from '../core/economy/expansion';
 import { createStarterAirfield } from '../core/sample/starterAirfield';
 import type { DayReview } from '../core/analytics/review';
@@ -490,11 +491,12 @@ export function closeTemporarily(id: string, days: number): void {
  * game を省くと新しいルール（天候 5 段階・評価・目標。難易度は標準）、null を渡すと従来のルール。
  * 初期資金は難易度の倍率を掛ける（標準は ×1 で従来と同じ）。
  */
-export function newGame(mode: CompanyState['mode'], game: GameSettings | null = defaultGame()): void {
+export function newGame(mode: CompanyState['mode'], game: GameSettings | null = defaultGame(), city?: CityConfig | null): void {
   if (get().mode === 'operate') return;
   const layout = mode === 'career' ? createStarterAirfield() : createSampleAirport();
   const company = mode === 'career' ? createCareerCompany() : createSandboxCompany();
   startGame(company, game);
+  if (city) company.city = structuredClone(city);
   set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select', scenarios: [], projectId: null, projectName: '無題のプロジェクト', catalogPin: null, dayFlow: initialDayFlow() });
   void clearUnsavedHistory();
   showToast(mode === 'career' ? `新しいゲーム: 小さな飛行場から（資金 ${formatCr(company.cash)}）` : 'サンドボックス: サンプル空港と潤沢な資金で始めます');
@@ -510,6 +512,39 @@ export function setGameSettings(game: GameSettings | null): void {
   applyGameState(company);
   set({ company });
   showToast(game ? 'ゲーム設定を更新しました（次の運航から反映されます）' : '従来のルールに戻しました');
+}
+
+/** 都市モデルを有効化・更新する（建設モード。null は従来の需要モデルに戻す） */
+export function setCompanyCity(city: CityConfig | null): void {
+  const s = get();
+  if (s.mode === 'operate') return;
+  const company = structuredClone(s.company);
+  if (city) company.city = structuredClone(city);
+  else delete company.city;
+  set({ company });
+  showToast(city ? '都市と空港需要の設定を更新しました' : '都市モデルを停止し、従来の需要に戻しました');
+}
+
+export function addCityEvent(event: Omit<CityEvent, 'id'>): void {
+  const s = get();
+  if (s.mode === 'operate' || !s.company.city) return;
+  const company = structuredClone(s.company);
+  const events = company.city!.events ?? [];
+  let n = 1;
+  while (events.some((existing) => existing.id === `city-event-${n}`)) n++;
+  events.push({ ...event, id: `city-event-${n}` });
+  company.city!.events = events.sort((a, b) => a.day - b.day || a.id.localeCompare(b.id));
+  set({ company });
+  showToast('都市イベントを予定に追加しました');
+}
+
+export function removeCityEvent(eventId: string): void {
+  const s = get();
+  if (s.mode === 'operate' || !s.company.city?.events) return;
+  const company = structuredClone(s.company);
+  company.city!.events = company.city!.events!.filter((event) => event.id !== eventId);
+  set({ company });
+  showToast('都市イベントを予定から削除しました');
 }
 
 export const actions = {

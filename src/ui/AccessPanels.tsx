@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { ACCESS_MODES, analyzeAccess } from '../core/access/model';
 import { BALANCE } from '../core/economy/balance';
+import { cityDemandCeiling } from '../core/economy/city';
 import { constructionCost as constructionCostOf, layoutValue, scaleFactor } from '../core/economy/construction';
-import { analyzeDayPlan, planDay } from '../core/economy/planning';
+import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
 import { applyCompletedProjects } from '../core/economy/expansion';
 import { sortedValues } from '../core/model/ids';
 import { Terrain } from '../core/model/types';
@@ -15,6 +16,7 @@ import { useCompany } from './ManagementPanels';
 import {
   ACCESS_MODE_LABEL,
   ACCESS_UNAVAILABLE_LABEL,
+  GAME_UI,
   PLAN_ISSUE_LABEL,
   PROJECT_KIND_LABEL,
   displayName,
@@ -31,7 +33,7 @@ export function AccessPanel() {
   const layout = useLayout();
   useEditor((s) => s.ops?.uiVersion ?? -1);
   const live = editorStore.getState().ops?.sim.state.access ?? null;
-  const a = useMemo(() => analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback }), [layout, c.fees, c.accessFeedback]);
+  const a = useMemo(() => analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }), [layout, c.fees, c.accessFeedback, c.city, c.day]);
   const fb = c.accessFeedback;
   return (
     <div className="issues mgmt" data-testid="access-panel">
@@ -39,6 +41,9 @@ export function AccessPanel() {
         <strong>空港アクセス</strong>
         <span data-testid="access-factor" title="旅客の需要（搭乗率）に掛かる係数。0.3〜1.1">アクセス係数 ×{a.factor.toFixed(2)}</span>
         <span>一般車の出入口 {a.entrances}か所</span>
+        {c.city
+          ? <span data-testid="city-demand">{GAME_UI.cityType[c.city.type]}・人口 {Math.round(c.city.population).toLocaleString('ja-JP')}人・需要上限 {Math.round(cityDemandCeiling(c.city, a.factor)).toLocaleString('ja-JP')}人/日・道路/鉄道 {c.city.roadQuality}/{c.city.railQuality}</span>
+          : <span data-testid="city-demand-off" className="muted">都市連動なし（従来の需要計算）</span>}
         <span className="muted">交通手段の選択はゲーム用の簡易モデル（所要時間・運賃・容量・接続で分担率が変わる）</span>
       </div>
       <div className="issues-list mgmt-grid">
@@ -182,13 +187,13 @@ export function ExpansionPanel() {
 
   // 工事の影響: いまの配置と、工事がすべて終わった配置で、次の運航日の計画を比べる
   const impact = useMemo(() => {
-    const access = analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback }).factor;
-    const now = analyzeDayPlan(planDay(c, c.day, access), createContext(layout));
+    const access = analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor;
+    const now = analyzeDayPlan(planDayWithDemand(c, c.day, access), createContext(layout));
     const clone = structuredClone(c);
     for (const p of Object.values(clone.projects)) p.remaining = 0;
     const after = applyCompletedProjects(clone, layout) ?? layout;
-    const afterAccess = analyzeAccess(after, { fees: c.fees, feedback: c.accessFeedback }).factor;
-    const later = analyzeDayPlan(planDay(c, c.day, afterAccess), createContext(after));
+    const afterAccess = analyzeAccess(after, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor;
+    const later = analyzeDayPlan(planDayWithDemand(c, c.day, afterAccess), createContext(after));
     const ops = (l: typeof layout) => ({
       runways: Object.values(l.runways).filter((r) => r.buildState === 'operational').length,
       stands: Object.values(l.stands).filter((s) => s.buildState === 'operational').length,

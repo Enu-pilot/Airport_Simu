@@ -34,6 +34,8 @@ export interface StandInfo {
   operational: boolean;
   /** ゲートが紐付いている（ボーディングブリッジで搭乗できる） */
   contact: boolean;
+  remoteBoarding?: 'auto' | 'bus' | 'none';
+  busGateId?: string | null;
   /** ネットワーク上のスポットノード（`${id}:P`）と入口ノード */
   node: string;
   entry: string | null;
@@ -145,6 +147,8 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
       size: s.size,
       operational: s.buildState === 'operational',
       contact: contactStands.has(s.id),
+      ...(s.remoteBoarding !== undefined ? { remoteBoarding: s.remoteBoarding } : {}),
+      ...(s.busGateId !== undefined ? { busGateId: s.busGateId } : {}),
       node: `${s.id}:P`,
       entry: network.standLinks[s.id] ?? null,
       heading: s.rotation,

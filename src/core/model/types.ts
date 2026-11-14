@@ -159,6 +159,10 @@ export interface Stand {
   buildState: BuildState;
   /** コード F（翼幅 65〜80 m）の機体を駐機できる（L 級のみ意味を持つ。Phase 7） */
   codeF?: boolean;
+  /** リモートスポットのバス運用。欠落/auto は旧版と同じ自動選択、bus は個別ゲート指定、none はバスを使わない */
+  remoteBoarding?: 'auto' | 'bus' | 'none';
+  /** remoteBoarding=bus のときの専用バスゲート。複数スポットから共有可能 */
+  busGateId?: string | null;
 }
 
 export type FacilityKind =

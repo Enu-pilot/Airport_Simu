@@ -67,9 +67,11 @@ export type HoldReason =
   | 'goAround' // 着陸復行
   | 'boarding' // 搭乗手続きの完了待ち
   | 'groundCrew' // プッシュバックの車両・作業員待ち
-  | 'weather'; // 天候による欠航（天候 5 段階のモデルだけ。欠航の理由に使う）
+  | 'weather' // 天候による欠航（天候 5 段階のモデルだけ。欠航の理由に使う）
+  | 'noiseCurfew'; // 都市の夜間騒音規制による運航待機
 
-export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling' | 'apronBus' | 'weather';
+export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling' | 'apronBus' | 'weather' | 'noiseRestriction';
+export type ExternalDelayCause = 'inboundDelay' | 'weather' | 'airTraffic';
 
 export interface Route {
   kind: 'landing' | 'taxiIn' | 'pushback' | 'taxiOut' | 'takeoff';
@@ -160,6 +162,8 @@ export interface FlightPax {
   bagsReadyAt: number | null;
   /** ランプバスで搭乗・降機する便（バスゲートがあり、スポットがコンタクトでない便）だけが持つ。従来の便にはキーがない */
   bus?: { gateId: string | null; gateClosedAt: number | null; /** バスで運んだ旅客数と、その待ち時間の合計（人・秒。運行の作成からバスの出発まで） */ paxCarried: number; waitPaxSec: number };
+  /** 明示したリモートスポットのバス接続設定が無効・未設定の場合の診断 */
+  busFailure?: 'disabled' | 'unconfigured' | 'invalidGate';
 }
 
 export interface Flight {
@@ -179,6 +183,8 @@ export interface Flight {
   runwayId: string | null;
   standId: string | null;
   delayCauses: DelayCause[];
+  /** 外部要因として実際に加えた遅延秒数（原因ラベルから推定しない）。古い保存では欠落する。 */
+  externalDelaySec?: Partial<Record<ExternalDelayCause, number>>;
   pax: FlightPax;
   /** 出発便: 地上作業がすべて完了した時刻と、最後に完了した作業（遅延の主因） */
   readyAt: number | null;
@@ -542,6 +548,8 @@ export interface SimState {
   disruptions: Disruption[];
   /** 障害・整備で使えない施設（ID 順）。新しい機体・旅客・作業を割り当てない */
   closures: { taxiways: string[]; stands: string[]; gates: string[] };
+  /** 閉鎖要因の独立台帳。旧保存は closures から復元する */
+  closureReasons?: import('./closureState').ClosureReasonMap;
   /** 分析用の運航記録（analytics/records.ts） */
   analytics: AnalyticsState;
   /** ランプバスの運行（バスゲートがある運航だけ。従来の運航にはキーがない） */

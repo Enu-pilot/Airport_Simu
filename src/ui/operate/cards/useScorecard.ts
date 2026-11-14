@@ -1,5 +1,5 @@
 import { airlineScorecard, type AirlineScore } from '../../../core/economy/airlineScore';
-import { analyzeDayPlan, planDay } from '../../../core/economy/planning';
+import { analyzeDayPlan, planDayWithDemand } from '../../../core/economy/planning';
 import { useSecondly } from '../Card';
 
 /** 航空会社の評価（読み取り専用の導出）。運航計画の分析を含むので 1 秒に 1 回だけ作り直す */
@@ -8,7 +8,7 @@ export function useScorecard(): AirlineScore[] | null {
     const { sim } = o;
     const company = sim.company;
     if (!company) return null;
-    const plan = planDay(company, company.day, sim.state.access?.factor ?? 1, sim.ctx.types);
+    const plan = planDayWithDemand(company, company.day, sim.state.access?.factor ?? 1, sim.ctx.types);
     const analysis = analyzeDayPlan(plan, sim.ctx);
     return airlineScorecard({ company, ctx: sim.ctx, records: sim.state.analytics.records, plan, analysis });
   });

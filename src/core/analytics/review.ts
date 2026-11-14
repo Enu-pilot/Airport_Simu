@@ -1,6 +1,6 @@
 import { airlineScorecard, type ScoreKey } from '../economy/airlineScore';
 import type { CompanyState, DailyReport } from '../economy/company';
-import { analyzeDayPlan, planDay, type PlanIssue } from '../economy/planning';
+import { analyzeDayPlan, planDayWithDemand, type PlanIssue } from '../economy/planning';
 import type { Simulation } from '../sim/simulation';
 import { forecastForDay, type WeatherForecast } from '../sim/weather';
 import type { DisruptionKind } from '../sim/types';
@@ -216,7 +216,7 @@ export function buildDayReview(input: ReviewInput): DayReview {
     .filter((d) => d.start < end && (d.resolvedAt ?? (d.status === 'resolved' ? d.end : null) ?? Infinity) >= dayStart)
     .map((d) => ({ id: d.id, kind: d.kind, target: d.targetId, start: d.start, end: d.resolvedAt ?? d.end, resolvedBy: d.resolvedBy }));
 
-  const plan = planDay(company, company.day, access, sim.ctx.types);
+  const plan = planDayWithDemand(company, company.day, access, sim.ctx.types);
   const analysis = analyzeDayPlan(plan, sim.ctx);
   const scores = airlineScorecard({ company, ctx: sim.ctx, records: records.filter((r) => (r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled) >= dayStart), plan, analysis });
   const airlines = scores

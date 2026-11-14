@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createSimulation, stepSimulation, type Simulation } from '../../../src/core/sim/simulation';
+import { addTurnaround, createSimulation, stepSimulation, type Simulation } from '../../../src/core/sim/simulation';
 import { checkInvariants } from '../../../src/core/sim/invariants';
 import { APRON_BUS_CAPACITY } from '../../../src/core/sim/busRules';
 import type { AirportLayout } from '../../../src/core/model/types';
-import { busLayout } from './busHelpers';
+import { busLayout, twoRemoteBusGateLayout } from './busHelpers';
 
 /** 12B-3a A5: ランプバスによる出発旅客のバス搭乗（リモートスポット） */
 function run(layout: AirportLayout, hours: number, seed = 'bus-a'): Simulation {
@@ -97,6 +97,44 @@ describe('バス搭乗（到着）', () => {
     // 手荷物のある旅客は受取所へ着き、荷物を受け取れる
     expect(sim.state.groundStats.bagsCollected).toBeGreaterThan(0);
     expect(Object.values(sim.state.bus!.trips).some((t) => t.dir === 'arr' && t.phase === 'done')).toBe(true);
+  });
+});
+
+describe('リモートスポットごとのバスゲート', () => {
+  it('異なるリモートスポットは指定した別々のバスゲート経由で出発・到着する', { timeout: 300_000 }, () => {
+    const sim = run(twoRemoteBusGateLayout(), 6, 'bus-a');
+    const assignments = busFlights(sim).filter((f) => f.direction === 'departure' && (f.standId === 'std_6' || f.standId === 'std_8'));
+    const aFlights = assignments.filter((f) => f.standId === 'std_6');
+    const bFlights = assignments.filter((f) => f.standId === 'std_8');
+    expect(aFlights.length, JSON.stringify(assignments.map((f) => [f.number, f.standId, f.pax.gateId, f.pax.boarded]))).toBeGreaterThan(0);
+    expect(bFlights.length).toBeGreaterThan(0);
+    expect(aFlights.every((f) => f.pax.gateId === 'fac_6')).toBe(true);
+    expect(bFlights.every((f) => f.pax.gateId === 'fac_8')).toBe(true);
+    expect(aFlights.some((f) => f.pax.boarded > 0)).toBe(true);
+    expect(bFlights.some((f) => f.pax.boarded > 0)).toBe(true);
+    const aArrivals = busFlights(sim).filter((f) => f.direction === 'arrival' && f.standId === 'std_6');
+    const bArrivals = busFlights(sim).filter((f) => f.direction === 'arrival' && f.standId === 'std_8');
+    expect(aArrivals.length).toBeGreaterThan(0);
+    expect(bArrivals.length).toBeGreaterThan(0);
+    expect(aArrivals.every((f) => f.pax.gateId === 'fac_6')).toBe(true);
+    expect(bArrivals.every((f) => f.pax.gateId === 'fac_8')).toBe(true);
+    expect(aArrivals.some((f) => f.pax.exited > 0)).toBe(true);
+    expect(bArrivals.some((f) => f.pax.exited > 0)).toBe(true);
+  });
+
+  it('明示設定したバスゲートがない場合、到着・出発旅客を誤って生成しない', { timeout: 300_000 }, () => {
+    const layout = busLayout({ gate: 'none', buses: 0 });
+    layout.stands.std_8!.remoteBoarding = 'bus';
+    layout.stands.std_8!.busGateId = null;
+    const sim = createSimulation(layout, { seed: 'bus-unconfigured', settings: { autoSchedule: false, flightsPerDay: 0 } });
+    const ac = addTurnaround(sim, 'B737-800W', sim.state.now + 600, { plan: { contractId: 'test', destinationId: 'test', arrPax: 30, depPax: 30, standId: 'std_8', seats: 30 } });
+    for (let i = 0; i < 4 * 3600; i++) stepSimulation(sim);
+    const arr = sim.state.flights[ac.arrivalFlightId]!;
+    const dep = sim.state.flights[ac.departureFlightId]!;
+    expect(dep.pax.busFailure).toBe('unconfigured');
+    expect(dep.pax.booked).toBe(0);
+    expect(arr.pax.booked).toBe(0);
+    expect(Object.values(sim.state.paxGroups).some((g) => g.flightId === dep.id || g.flightId === arr.id)).toBe(false);
   });
 });
 

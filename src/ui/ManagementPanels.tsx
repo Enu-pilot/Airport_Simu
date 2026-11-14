@@ -1,14 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
 import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type DailyKpi, type DailyReport } from '../core/economy/company';
-import { analyzeDayPlan, planDay } from '../core/economy/planning';
+import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
 import { AIRLINES, airlineDef, destinationDef } from '../core/economy/registry';
 import { BALANCE } from '../core/economy/balance';
 import { forecastForDay } from '../core/sim/weather';
 import { analyzeAccess, type AccessMode } from '../core/access/model';
 import { companyActions } from '../editor/simRunner';
-import { editorStore, formatCr, useEditor, useLayout } from '../editor/store';
+import { addCityEvent, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
+import { CITY_EVENT_KINDS, type CityEventKind, type CityEventLocation } from '../core/economy/city';
 import {
   ACCESS_MODE_LABEL,
   GAME_UI,
@@ -44,7 +45,7 @@ export function PlanPanel() {
   const ctx = useMemo(() => createContext(layout), [layout]);
   const operable = operableTypes(ctx);
   // 実際の運航と同じアクセス係数（前日の混雑を反映）で計画する
-  const plan = planDay(c, c.day, analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback }).factor);
+  const plan = planDayWithDemand(c, c.day, analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor);
   const analysis = analyzeDayPlan(plan, ctx);
   const issueKeys = new Map<string, string[]>();
   for (const i of analysis.issues) for (const k of i.keys) issueKeys.set(k, [...(issueKeys.get(k) ?? []), PLAN_ISSUE_LABEL[i.code]]);
@@ -68,6 +69,7 @@ export function PlanPanel() {
         )}
       </div>
       <div className="issues-list mgmt-grid">
+        <CityEventPlanner company={c} />
         <section>
           <h4>契約中の路線</h4>
           <table className="board" data-testid="contracts">
@@ -301,6 +303,41 @@ export function PlanPanel() {
         </section>
       </div>
     </div>
+  );
+}
+
+function CityEventPlanner({ company }: { company: CompanyState }) {
+  const mode = useEditor((s) => s.mode);
+  const city = company.city;
+  const [day, setDay] = useState(company.day + 1);
+  const [durationDays, setDurationDays] = useState(1);
+  const [kind, setKind] = useState<CityEventKind>('festival');
+  const [scale, setScale] = useState<1 | 2 | 3>(1);
+  const [location, setLocation] = useState<CityEventLocation>('cityCenter');
+  if (!city) return null;
+  const labels: Record<CityEventKind, string> = { festival: '祭り', sports: 'スポーツ大会', conference: '会議・展示会' };
+  const events = city.events ?? [];
+  return (
+    <section className="city-event-planner" data-testid="city-event-planner">
+      <h4>都市イベント</h4>
+      <p className="muted small">イベント日は旅客需要と道路混雑が増えます。開催規模と場所はゲーム内モデルです。</p>
+      {events.length > 0 && <ul>{events.map((event) => (
+        <li key={event.id}>
+          {event.day + 1}日目〜{event.day + event.durationDays}日目 · {labels[event.kind]} · 規模{event.scale} · {event.location === 'cityCenter' ? '市街地' : '空港周辺'}
+          {mode !== 'operate' && <button type="button" onClick={() => removeCityEvent(event.id)} aria-label="イベントを削除">削除</button>}
+        </li>
+      ))}</ul>}
+      {mode !== 'operate' && (
+        <form onSubmit={(e) => { e.preventDefault(); addCityEvent({ day: day - 1, durationDays, kind, scale, location }); }}>
+          <label>開始日 <input type="number" min={company.day + 1} max={company.day + 91} value={day} onChange={(e) => setDay(Number(e.target.value))} /> 日目</label>
+          <label>期間 <select value={durationDays} onChange={(e) => setDurationDays(Number(e.target.value))}>{[1, 2, 3, 5, 7].map((value) => <option key={value} value={value}>{value}日</option>)}</select></label>
+          <label>種類 <select value={kind} onChange={(e) => setKind(e.target.value as CityEventKind)}>{CITY_EVENT_KINDS.map((value) => <option key={value} value={value}>{labels[value]}</option>)}</select></label>
+          <label>規模 <select value={scale} onChange={(e) => setScale(Number(e.target.value) as 1 | 2 | 3)}><option value={1}>地域</option><option value={2}>広域</option><option value={3}>大規模</option></select></label>
+          <label>場所 <select value={location} onChange={(e) => setLocation(e.target.value as CityEventLocation)}><option value="cityCenter">市街地</option><option value="airportDistrict">空港周辺</option></select></label>
+          <button type="submit">イベントを予定</button>
+        </form>
+      )}
+    </section>
   );
 }
 

@@ -2,11 +2,13 @@ import { CATALOG, CATALOG_VERSION, type AircraftModel } from '../aircraft/catalo
 import { AIRCRAFT_ASSETS, ASSET_VERSION } from '../assets/registry';
 import { importCompany, type CompanyState } from '../economy/company';
 import { checkGameFields } from '../economy/game';
+import { isCityConfig } from '../economy/city';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
 import { SIM_MODEL_VERSION, modelsUsed, type Scenario } from '../scenario/scenario';
 import { buildTypeTable } from '../sim/aircraftTypes';
 import { createContext } from '../sim/context';
 import { checkInvariants, repairCrossingState } from '../sim/invariants';
+import { hydrateClosureReasons } from '../sim/closureState';
 import type { Simulation } from '../sim/simulation';
 import type { SimState } from '../sim/types';
 import { checkWxState } from '../sim/weather';
@@ -36,6 +38,7 @@ const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !=
 
 /** レイアウトが保存形式 2 の項目（ゲートの boardingMode 'bus'・connectedTo、GSE 基地の apronBuses > 0）を使っているか */
 export function layoutUsesFormat2(l: AirportLayout): boolean {
+  if (Object.values(l.stands).some((s) => s.remoteBoarding !== undefined || s.busGateId !== undefined)) return true;
   for (const f of Object.values(l.facilities)) {
     if (f.kind === 'gate' && (f.props.boardingMode === 'bus' || (f.props.connectedTo !== undefined && f.props.connectedTo !== null))) return true;
     if (f.kind === 'gseBase' && typeof f.props.apronBuses === 'number' && f.props.apronBuses > 0) return true;
@@ -43,8 +46,12 @@ export function layoutUsesFormat2(l: AirportLayout): boolean {
   return false;
 }
 
+function closureLedgerUsed(state: SimState): boolean {
+  return !!state.closureReasons && (['taxiways', 'stands', 'gates'] as const).some((kind) => Object.keys(state.closureReasons![kind]).length > 0);
+}
+
 function companyUsesFormat2(c: CompanyState | null | undefined): boolean {
-  return !!c && (hasKey(c, 'game') || hasKey(c, 'airlineEval') || hasKey(c, 'goals'));
+  return !!c && (hasKey(c, 'game') || hasKey(c, 'airlineEval') || hasKey(c, 'goals') || hasKey(c, 'city'));
 }
 
 /**
@@ -55,7 +62,7 @@ export function formatVersionOf(p: { layout: AirportLayout; company: CompanyStat
   if (layoutUsesFormat2(p.layout) || companyUsesFormat2(p.company)) return PROJECT_FORMAT_VERSION_2;
   for (const s of p.scenarios) if (layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) return PROJECT_FORMAT_VERSION_2;
   if (p.sim) {
-    if (hasKey(p.sim.state, 'bus') || hasKey(p.sim.state, 'wx') || companyUsesFormat2(p.sim.company)) return PROJECT_FORMAT_VERSION_2;
+    if (hasKey(p.sim.state, 'bus') || hasKey(p.sim.state, 'wx') || closureLedgerUsed(p.sim.state) || companyUsesFormat2(p.sim.company)) return PROJECT_FORMAT_VERSION_2;
   }
   return PROJECT_FORMAT_VERSION;
 }
@@ -115,6 +122,8 @@ export interface BuildInput {
 
 export function buildProject(i: BuildInput): ProjectFile {
   const sim: SimSnapshot | null = i.sim ? structuredClone({ state: i.sim.state, company: i.sim.company ?? null }) : null;
+  // Read paths may hydrate an empty ledger. Keep legacy project bytes stable when there is no closure reason to preserve.
+  if (sim && !closureLedgerUsed(sim.state)) delete sim.state.closureReasons;
   const company = structuredClone(sim?.company ?? i.company);
   const models = effectiveModels(i.pin);
   const ids = projectModelIds(company, sim, i.scenarios);
@@ -203,6 +212,13 @@ function checkBusProps(layout: AirportLayout, where: string): string[] {
       if (n !== undefined && (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 30)) errors.push(`${where}: GSE 基地 ${f.id} のランプバス台数（apronBuses）が不正です`);
     }
   }
+  for (const s of Object.values(layout.stands)) {
+    if (s.remoteBoarding !== undefined && !['auto', 'bus', 'none'].includes(s.remoteBoarding)) errors.push(`${where}: スポット ${s.id} のバス搭乗方式（remoteBoarding）が不正です`);
+    if (s.busGateId !== undefined && s.busGateId !== null) {
+      const gate = layout.facilities[s.busGateId];
+      if (typeof s.busGateId !== 'string' || gate?.kind !== 'gate' || gate.props.boardingMode !== 'bus') errors.push(`${where}: スポット ${s.id} の接続バスゲート（busGateId）が不正です`);
+    }
+  }
   return errors;
 }
 
@@ -211,6 +227,7 @@ function checkCompany(c: unknown, where: string): { errors: string[]; company: C
   const company = importCompany(JSON.stringify(c));
   if (!company) return { errors: [`${where}: 会社のデータが不正です（版・資金・契約）`], company: null };
   const errors: string[] = checkGameFields(c).map((e) => `${where}: ${e}`);
+  if (c.city !== undefined && !isCityConfig(c.city)) errors.push(`${where}: 都市設定（city）の形式が不正です`);
   for (const [key, k] of Object.entries(company.contracts)) {
     if (!isObj(k) || k.id !== key) errors.push(`${where}: 契約 ${key} の ID が一致しません`);
     else if (typeof k.typeId !== 'string' || typeof k.airlineId !== 'string') errors.push(`${where}: 契約 ${key} の機種・航空会社が不正です`);
@@ -247,6 +264,13 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
   }
   if (errors.length) return errors;
   const state = s as unknown as SimState;
+  const rawClosures = s.closures;
+  if (!isObj(rawClosures) || (['taxiways', 'stands', 'gates'] as const).some((kind) => !Array.isArray(rawClosures[kind]) || (rawClosures[kind] as unknown[]).some((id) => typeof id !== 'string'))) errors.push('運航状態: 閉鎖対象（closures）が不正です');
+  if (s.closureReasons !== undefined && !isValidClosureReasons(s.closureReasons, layout, rawClosures)) errors.push('運航状態: 閉鎖理由（closureReasons）が不正です');
+  for (const f of Object.values(state.flights)) {
+    const causes = ['inboundDelay', 'weather', 'airTraffic'];
+    if (f.externalDelaySec !== undefined && (!isObj(f.externalDelaySec) || Object.entries(f.externalDelaySec).some(([cause, v]) => !causes.includes(cause) || typeof v !== 'number' || !Number.isFinite(v) || v < 0))) errors.push(`運航状態: 便 ${f.id} の外部遅延秒数が不正です`);
+  }
   for (const [id, a] of Object.entries(state.aircraft)) {
     if (a.id !== id) errors.push(`運航状態: 機体 ${id} の ID が一致しません`);
     if (a.standId && !layout.stands[a.standId]) errors.push(`運航状態: 機体 ${id} のスポット ${a.standId} がレイアウトにありません`);
@@ -276,6 +300,20 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
     if (!state.aircraft[acId as string]) errors.push(`運航状態: スポット ${standId} に割り当てた機体 ${String(acId)} がありません`);
   }
   return errors;
+}
+
+function isValidClosureReasons(value: unknown, layout: AirportLayout, closures: unknown): boolean {
+  if (!isObj(value)) return false;
+  for (const kind of ['taxiways', 'stands', 'gates'] as const) {
+    const map = value[kind];
+    if (!isObj(map)) return false;
+    const closedIds = isObj(closures) && Array.isArray(closures[kind]) ? closures[kind] as unknown[] : [];
+    for (const [id, sources] of Object.entries(map)) {
+      const entityExists = kind === 'taxiways' ? !!layout.taxiways[id] : kind === 'stands' ? !!layout.stands[id] : layout.facilities[id]?.kind === 'gate';
+      if (!entityExists || !closedIds.includes(id) || !Array.isArray(sources) || sources.length === 0 || sources.some((source) => typeof source !== 'string' || source.length === 0) || new Set(sources).size !== sources.length) return false;
+    }
+  }
+  return true;
 }
 
 /** 天候 5 段階の運航状態（state.wx）の形。会社の game.weather === 'levels' のときだけ持つ（従来の運航は持たない） */
@@ -372,6 +410,7 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     errors.push('ファイルの中身がオブジェクトではありません');
     return fail();
   }
+  const inputHadClosureReasons = isObj(data.sim) && isObj(data.sim.state) && hasKey(data.sim.state, 'closureReasons');
 
   // 旧形式: レイアウトだけのファイル（Phase 1〜6 の「書き出し」）
   if (data.format === SAVE_FORMAT) {
@@ -462,7 +501,9 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
         const raw = data.sim as Record<string, unknown>;
         const sc = raw.company === null || raw.company === undefined ? { errors: [], company: null } : checkCompany(raw.company, '運航中の会社');
         errors.push(...sc.errors);
-        sim = { state: raw.state as unknown as SimState, company: sc.company };
+        const state = raw.state as unknown as SimState;
+        hydrateClosureReasons(state);
+        sim = { state, company: sc.company };
       }
     }
   }
@@ -495,8 +536,11 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
   }
 
   const fv = formatVersionOf({ layout, company, scenarios, sim });
+  const simInputState = isObj(data.sim) && isObj(data.sim.state) ? data.sim.state as unknown as SimState : null;
+  const containsV2Input = layoutUsesFormat2(layout) || companyUsesFormat2(company) || scenarios.some((s) => layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) || !!simInputState && (hasKey(simInputState, 'bus') || hasKey(simInputState, 'wx') || (inputHadClosureReasons && closureLedgerUsed(simInputState)) || companyUsesFormat2(sim?.company));
   // 版 1 を名乗るのに 12B-3a の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）がある: 旧アプリが誤読しないための版の取り決めに反するので拒否する
-  if (data.formatVersion === PROJECT_FORMAT_VERSION && fv >= PROJECT_FORMAT_VERSION_2) {
+  // 旧形式の閉鎖配列から検証中に構築した closureReasons は、入力ファイルにない移行後データなので v1 拒否判定には使わない。
+  if (data.formatVersion === PROJECT_FORMAT_VERSION && containsV2Input) {
     errors.push('保存形式の版（formatVersion）が 1 ですが、版 2 の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）を含んでいます。ファイルが壊れているか、手で編集された可能性があります');
     return fail();
   }

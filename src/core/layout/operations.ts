@@ -114,6 +114,9 @@ function finalize(d: AirportLayout): AirportLayout {
       if (!t || t.kind !== 'terminal') delete f.props.connectedTo;
     }
   }
+  for (const s of Object.values(d.stands)) {
+    if (s.busGateId && (d.facilities[s.busGateId]?.kind !== 'gate' || d.facilities[s.busGateId]?.props.boardingMode !== 'bus')) s.busGateId = null;
+  }
   return d;
 }
 

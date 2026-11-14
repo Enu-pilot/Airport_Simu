@@ -5,6 +5,7 @@ import { DAY_SEC } from './rules';
 import type { Simulation } from './simulation';
 import type { Aircraft, SimState, WxRuntime } from './types';
 import { effectiveWx, legacyKindOf, overrideOf, weatherPlan, wxEffects } from './weather';
+import { addExternalDelay } from '../economy/delayEvaluation';
 
 /**
  * 天候 5 段階の運航への組み込み（12B-3a。docs/30 §1）。会社の game.weather === 'levels' の運航（state.wx がある）だけが使う。
@@ -61,7 +62,9 @@ function hourlyEffects(sim: Simulation, cancelTurnaround: (sim: Simulation, ac: 
     for (const f of sortedValues(state.flights)) {
       if (f.direction !== 'arrival' || f.status !== 'scheduled' || f.estimated < state.now || f.estimated >= state.now + 3600) continue;
       if (rng.next() >= fx.arrivalDelay.prob) continue;
-      f.estimated += rng.int(0, fx.arrivalDelay.maxMin) * 60;
+      const delaySec = rng.int(0, fx.arrivalDelay.maxMin) * 60;
+      f.estimated += delaySec;
+      addExternalDelay(f, 'weather', delaySec);
       if (!f.delayCauses.includes('weather')) f.delayCauses.push('weather');
     }
   }
