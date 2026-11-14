@@ -90,7 +90,7 @@ export function TerminalCard() {
           ))}
           {data.transitLinks.length > 0 && (
             <div data-testid="terminal-transit-status">
-              <div className="card-sub">ターミナル間連絡設備 · 今時間帯</div>
+              <div className="card-sub">旅客連絡設備 · 今時間帯</div>
               {data.transitLinks.map((link) => (
                 <div key={link.id} className="card-item" data-testid={`terminal-link-status-${link.id}`}>
                   <span>{link.name || `${link.fromTerminalId} → ${link.toTerminalId}`}</span>

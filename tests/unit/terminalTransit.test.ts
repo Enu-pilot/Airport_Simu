@@ -50,6 +50,32 @@ describe('ターミナル間連絡設備', () => {
     })]);
   });
 
+  it('ターミナル内のエレベーターも階層移動能力と待機人数を表示対象にする', () => {
+    let layout = emptyLayout(30, 30);
+    layout = must(placeFacility(layout, 'terminal', { x: 2, y: 2 }, { w: 12, h: 8, props: { levels: 2 } })).layout;
+    const terminalId = Object.values(layout.facilities).find((facility) => facility.kind === 'terminal')!.id;
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'hall', { x: 5, y: 5 }, { w: 1, h: 1 })).layout;
+    layout = must(placeTerminalArea(layout, terminalId, 1, 'hall', { x: 6, y: 5 }, { w: 1, h: 1 })).layout;
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'elevator', { x: 6, y: 5 }, {
+      w: 1,
+      h: 1,
+      props: { capacityPerHour: 90 },
+    })).layout;
+    const elevator = Object.values(layout.terminalAreas).find((area) => area.kind === 'elevator')!;
+    const transportId = `vertical:${elevator.id}`;
+    const status = terminalTransitStatus(
+      layout,
+      { hour: 3, passengersByLink: { [transportId]: 70 } },
+      { [transportId]: 5 },
+    );
+    expect(status).toEqual([expect.objectContaining({
+      id: transportId,
+      capacityPerHour: 90,
+      reservedThisHour: 70,
+      waitingPax: 5,
+    })]);
+  });
+
   it('既存のエリア間を双方向・片方向の徒歩経路として探索し、利用区域を守る', () => {
     const { layout: base, a1, a2 } = twoTerminals();
     const layout = must(addTerminalTransitLink(base, {
