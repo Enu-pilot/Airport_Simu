@@ -78,9 +78,18 @@ describe('プロジェクトの保存形式', () => {
     const facility = Object.values(restored.project!.layout.facilities).find((f) => f.parentFacilityId === terminal.id);
     expect(facility).toMatchObject({ kind: 'baggageSort', parentFacilityId: terminal.id, floorIndex: -1 });
 
-    p.formatVersion = PROJECT_FORMAT_VERSION;
-    p.versions.format = PROJECT_FORMAT_VERSION;
-    expect(validateProject(serializeProject(p), opts).errors.some((error) => error.includes('版 3'))).toBe(true);
+    const legacy = JSON.parse(serializeProject(p)) as ProjectFile;
+    legacy.formatVersion = PROJECT_FORMAT_VERSION;
+    legacy.versions.format = PROJECT_FORMAT_VERSION;
+    const migrated = validateProject(serializeProject(legacy), opts);
+    expect(migrated.ok).toBe(true);
+    expect(migrated.project?.formatVersion).toBe(PROJECT_FORMAT_VERSION_3);
+    expect(migrated.warnings.some((warning) => warning.includes('版 3 に移行'))).toBe(true);
+
+    const withLevelledRoad = structuredClone(legacy);
+    const roadNode = Object.values(withLevelledRoad.layout.roadNodes)[0]!;
+    roadNode.level = 0;
+    expect(validateProject(serializeProject(withLevelledRoad), opts).errors.some((error) => error.includes('版 3'))).toBe(true);
   });
 
   it('独立した階層施設も保存形式 3 として扱う', () => {

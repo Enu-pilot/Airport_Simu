@@ -49,17 +49,31 @@ export function layoutUsesFormat2(l: AirportLayout): boolean {
   return false;
 }
 
-/** 多層交通・ターミナル間交通の形を使うレイアウトは v3 を要する。 */
-export function layoutUsesFormat3(l: AirportLayout): boolean {
+function layoutUsesFormat3Traffic(l: AirportLayout): boolean {
   if (Object.values(l.roadNodes).some((n) => n.level !== undefined || n.elevationM !== undefined)) return true;
   if (Object.values(l.roads).some((e) => e.roadClass === 'walkway' || e.roadClass === 'fuel' || e.connectorKind !== undefined || e.capacityPerHour !== undefined || e.travelSec !== undefined)) return true;
+  return Object.keys(l.terminalLinks ?? {}).length > 0;
+}
+
+function layoutUsesFormat3FacilityLevels(l: AirportLayout): boolean {
   if (Object.values(l.facilities).some((f) =>
     f.mapLevel !== undefined ||
     f.parentFacilityId !== undefined ||
     f.floorIndex !== undefined ||
     (f.kind === 'railStation' && f.props.level !== undefined),
   )) return true;
-  return Object.keys(l.terminalLinks ?? {}).length > 0;
+  return false;
+}
+
+function layoutHasLegacyFacilityLevels(l: AirportLayout): boolean {
+  return Object.values(l.facilities).some((f) =>
+    f.mapLevel !== undefined || f.parentFacilityId !== undefined || f.floorIndex !== undefined,
+  );
+}
+
+/** Multi-level traffic, terminal links, or layered facilities require v3. */
+export function layoutUsesFormat3(l: AirportLayout): boolean {
+  return layoutUsesFormat3Traffic(l) || layoutUsesFormat3FacilityLevels(l);
 }
 
 function closureLedgerUsed(state: SimState): boolean {
@@ -593,16 +607,22 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
   const simInputState = isObj(data.sim) && isObj(data.sim.state) ? data.sim.state as unknown as SimState : null;
   const containsV2Input = data.journal !== undefined || layoutUsesFormat2(layout) || companyUsesFormat2(company) || scenarios.some((s) => layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) || !!simInputState && (hasKey(simInputState, 'bus') || hasKey(simInputState, 'wx') || inputHadAirlineStandHomes || (inputHadClosureReasons && closureLedgerUsed(simInputState)) || companyUsesFormat2(sim?.company));
   const containsV3Input = layoutUsesFormat3(layout) || scenarios.some((s) => layoutUsesFormat3(s.layout));
+  const projectLayouts = [layout, ...scenarios.map((scenario) => scenario.layout)];
+  const containsLegacyFacilityLevels = projectLayouts.some(layoutHasLegacyFacilityLevels);
+  const containsV3Traffic = projectLayouts.some(layoutUsesFormat3Traffic);
   // 版 1 を名乗るのに 12B-3a の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）がある: 旧アプリが誤読しないための版の取り決めに反するので拒否する
   // 旧形式の閉鎖配列から検証中に構築した closureReasons は、入力ファイルにない移行後データなので v1 拒否判定には使わない。
   if (data.formatVersion === PROJECT_FORMAT_VERSION && containsV2Input) {
     errors.push('保存形式の版（formatVersion）が 1 ですが、版 2 の項目（バス搭乗・連絡通路・ランプバス・航空会社別ホームスポット・ゲーム設定・天候など）を含んでいます。ファイルが壊れているか、手で編集された可能性があります');
     return fail();
   }
-  if (typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_3 && containsV3Input) {
+  const legacyFacilityVersion = typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_3 &&
+    containsV3Input && containsLegacyFacilityLevels && !containsV3Traffic;
+  if (typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_3 && containsV3Input && !legacyFacilityVersion) {
     errors.push(`保存形式の版（formatVersion）が ${String(data.formatVersion)} ですが、多層交通またはターミナル間連絡設備を含んでいます。版 3 として保存し直してください`);
     return fail();
   }
+  if (legacyFacilityVersion) warnings.push('階層施設の保存形式が古い版として記録されていたため、版 3 に移行しました');
   const project: ProjectFile = {
     format: PROJECT_FORMAT,
     formatVersion: fv,
