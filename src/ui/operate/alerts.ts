@@ -1,6 +1,7 @@
 import type { CompanyState } from '../../core/economy/company';
 import { ISSUE_SEVERITY, analyzeLayout, type Issue } from '../../core/validation/validate';
 import { passengerFlowIssues } from '../../core/terminal/flowDiagnostics';
+import { terminalTransitStatus } from '../../core/terminal/transitStatus';
 import { serviceSecPerPax } from '../../core/terminal/capacity';
 import type { SimContext } from '../../core/sim/context';
 import type { Disruption, DisruptionKind, SimEvent, SimState } from '../../core/sim/types';
@@ -160,6 +161,26 @@ export function deriveAlerts(sim: { state: SimState; ctx: SimContext }, company:
       detail: `影響 ${issue.pax}人 / 便 ${flights}。対応: ${issue.recommendation}`,
       target: { kind: 'area', id: issue.targetId ?? issue.terminalId },
       actions: [...(issue.targetId || issue.terminalId ? (['focus'] as const) : []), 'openPanel'],
+      panel: 'terminal',
+    });
+  }
+  const waitingByLink: Record<string, number> = {};
+  for (const group of Object.values(state.paxGroups)) {
+    if (group.state !== 'waitingTransport' || !group.terminalLinkWaitingId) continue;
+    waitingByLink[group.terminalLinkWaitingId] = (waitingByLink[group.terminalLinkWaitingId] ?? 0) + group.count;
+  }
+  for (const link of terminalTransitStatus(layout, ctx.terminal, state.terminalTransit, waitingByLink)) {
+    if (link.waitingPax === 0) continue;
+    const from = displayName(layout, link.fromTerminalId);
+    const to = displayName(layout, link.toTerminalId);
+    add({
+      key: `transportCapacity:${link.id}`,
+      severity: 'warning',
+      t: state.now,
+      title: `${link.name || '旅客連絡設備'} の能力待ち ${link.waitingPax}人`,
+      detail: `${from} · ${link.fromAreaName} → ${to} · ${link.toAreaName}。時間当たり能力 ${link.capacityPerHour}人を超過しています。推奨: 建設ページで連絡設備の能力を確認してください。`,
+      target: { kind: 'area', id: link.fromAreaId },
+      actions: ['focus', 'openPanel'],
       panel: 'terminal',
     });
   }

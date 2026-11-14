@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
-import { placeStand } from '../../src/core/layout/operations';
+import { addTerminalTransitLink, placeFacility, placeStand, placeTerminalArea } from '../../src/core/layout/operations';
 import { createSandboxCompany, contractsOf, type CompanyState } from '../../src/core/economy/company';
 import { computeKpi } from '../../src/core/economy/ops';
 import { analyzeDayPlan, planDay, type DayPlan, type PlanAnalysis } from '../../src/core/economy/planning';
@@ -121,6 +121,64 @@ describe('12B-1: アラート（deriveAlerts）', () => {
     const alert = deriveAlerts(sim, sim.company).alerts.find((item) => item.key.includes(standId));
     expect(alert).toMatchObject({ severity: 'critical', target: { kind: 'area', id: standId }, actions: expect.arrayContaining(['focus']) });
     expect(alert?.title).toContain('航空機動線');
+  });
+
+  it('ターミナル連絡設備の能力待ちを、対象施設への導線付きアラートにする', () => {
+    let layout = emptyLayout(80, 60);
+    layout = must(placeFacility(layout, 'terminal', { x: 2, y: 2 }, { name: 'Terminal A' })).layout;
+    const fromTerminalId = Object.values(layout.facilities).find((facility) => facility.name === 'Terminal A')!.id;
+    layout = must(placeFacility(layout, 'terminal', { x: 35, y: 2 }, { name: 'Terminal B' })).layout;
+    const toTerminalId = Object.values(layout.facilities).find((facility) => facility.name === 'Terminal B')!.id;
+    layout = must(placeTerminalArea(layout, fromTerminalId, 0, 'departureLobby', { x: 2, y: 2 })).layout;
+    const fromAreaId = Object.values(layout.terminalAreas).find((area) => area.terminalId === fromTerminalId)!.id;
+    layout = must(placeTerminalArea(layout, toTerminalId, 0, 'departureLobby', { x: 35, y: 2 })).layout;
+    const toAreaId = Object.values(layout.terminalAreas).find((area) => area.terminalId === toTerminalId)!.id;
+    layout = must(addTerminalTransitLink(layout, {
+      kind: 'walkway',
+      fromAreaId,
+      toAreaId,
+      distanceM: 100,
+      travelSec: 60,
+      capacityPerHour: 100,
+      allowedZones: ['departure'],
+    })).layout;
+    const linkId = Object.keys(layout.terminalLinks!)[0]!;
+    const sim = createSimulation(layout, { company: createSandboxCompany() });
+    sim.state.paxGroups['pg_waiting'] = {
+      id: 'pg_waiting',
+      flightId: 'missing',
+      direction: 'departure',
+      terminalId: fromTerminalId,
+      count: 8,
+      bags: 0,
+      state: 'waitingTransport',
+      steps: [],
+      stepIndex: 0,
+      area: fromAreaId,
+      route: [toAreaId],
+      legProgress: 0,
+      legLength: 0,
+      facility: null,
+      serviceUntil: null,
+      appearAt: sim.state.now,
+      finishedAt: null,
+      securityCleared: true,
+      boardedGate: null,
+      waitSec: 0,
+      walkSec: 0,
+      reason: null,
+      retryAt: sim.state.now + 3600,
+      terminalLinkWaitingId: linkId,
+    };
+    const alert = deriveAlerts(sim, sim.company).alerts.find((item) => item.key === `transportCapacity:${linkId}`);
+    expect(alert).toMatchObject({
+      severity: 'warning',
+      title: '旅客連絡設備 の能力待ち 8人',
+      target: { kind: 'area', id: fromAreaId },
+      actions: ['focus', 'openPanel'],
+      panel: 'terminal',
+    });
+    expect(alert?.detail).toContain('時間当たり能力 100人');
   });
 });
 
