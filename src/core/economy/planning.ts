@@ -7,7 +7,7 @@ import { checkStand } from '../aircraft/compat';
 import { operableTypes, type SimContext } from '../sim/context';
 import { BALANCE } from './balance';
 import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
-import { airlineDef, destinationDef } from './registry';
+import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
 import { cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedPassengers } from './city';
 import { resolveBusGateForStand } from '../terminal/busGateAssignment';
 
@@ -60,6 +60,8 @@ export interface DayPlan {
   flights: PlannedFlight[];
   /** 運用時間・時間帯に収まらず計画できなかった便（契約ID） */
   dropped: string[];
+  /** Carrier or airport route requirements prevent these contracts from being scheduled. */
+  unsupportedRoutes?: { contractId: string; destinationId: string; reason: 'airline-unsupported' | 'international-processing-required' }[];
 }
 
 /** 契約の時間帯と運用時間から、到着できる時間の範囲（日内の分）。出発が閉場時刻を越えない */
@@ -84,7 +86,7 @@ export function loadFactor(c: CompanyState, k: Pick<Contract, 'airlineId' | 'des
   const fee = 1 - (c.fees.terminal - 1) * BALANCE.feeSensitivity.loadFactorPerRatio;
   const rating = D.ratingFactorMin + ((D.ratingFactorMax - D.ratingFactorMin) * c.rating) / 100;
   const noise = 1 + D.noise * (2 * u - 1);
-  return Math.min(1, Math.max(0.15, base * destinationDef(k.destinationId).demand * fee * rating * access * noise));
+  return Math.min(1, Math.max(0.15, base * destinationDef(k.destinationId).passengerDemand * fee * rating * access * noise));
 }
 
 /**
@@ -92,10 +94,22 @@ export function loadFactor(c: CompanyState, k: Pick<Contract, 'airlineId' | 'des
  * types = 機種テーブル（保存時のスナップショットで再現するときはそれを渡す）
  * 座席数は航空会社の座席構成（company.fleets）、なければ機種の既定値。
  */
-export function planDay(c: CompanyState, day: number, access = 1, types: TypeTable = AIRCRAFT_TYPES): DayPlan {
+export function planDay(
+  c: CompanyState,
+  day: number,
+  access = 1,
+  types: TypeTable = AIRCRAFT_TYPES,
+  routeCapabilities: RouteCapabilities = routeCapabilitiesForAirport(),
+): DayPlan {
   const flights: PlannedFlight[] = [];
   const dropped: string[] = [];
+  const unsupportedRoutes: DayPlan['unsupportedRoutes'] = [];
   for (const k of activeContractsOn(c, day)) {
+    const availability = routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities);
+    if (availability !== 'available') {
+      unsupportedRoutes.push({ contractId: k.id, destinationId: k.destinationId, reason: availability });
+      continue;
+    }
     const range = arrivalRange(k.window, k.typeId, c.hours, types);
     const seats = seatsFor(c, k.airlineId, k.typeId, types);
     const code = airlineDef(k.airlineId).code;
@@ -133,18 +147,24 @@ export function planDay(c: CompanyState, day: number, access = 1, types: TypeTab
     }
   }
   flights.sort((a, b) => a.arrivalAt - b.arrivalAt || compareIds(a.key, b.key));
-  return { day, flights, dropped };
+  return { day, flights, dropped, unsupportedRoutes };
 }
 
 /** 都市設定があるときだけ、アクセス性に都市需要上限を反映する計画。設定なしは従来の計画を返す。 */
-export function planDayWithDemand(c: CompanyState, day: number, access = 1, types: TypeTable = AIRCRAFT_TYPES): DayPlan {
+export function planDayWithDemand(
+  c: CompanyState,
+  day: number,
+  access = 1,
+  types: TypeTable = AIRCRAFT_TYPES,
+  routeCapabilities: RouteCapabilities = routeCapabilitiesForAirport(),
+): DayPlan {
   const planningCompany = c.city ? { ...c, hours: cityOperatingHours(c.hours) } : c;
-  const base = planDay(planningCompany, day, access, types);
+  const base = planDay(planningCompany, day, access, types, routeCapabilities);
   if (!c.city) return base;
   const event = cityEventEffects(c.city, day);
-  const expected = expectedPassengers(c, day, types);
+  const expected = expectedPassengers(c, day, types, routeCapabilities);
   const factor = Math.min(1.1 * event.demandMultiplier, cityDemandCeiling(c.city, access) * event.demandMultiplier / Math.max(1, expected));
-  return planDay(planningCompany, day, access * factor, types);
+  return planDay(planningCompany, day, access * factor, types, routeCapabilities);
 }
 
 // ---------------------------------------------------------------- 計画の分析
@@ -160,6 +180,8 @@ export type PlanIssueCode =
   | 'SECURITY_OVERLOAD' // 保安検査の処理能力を超える時間帯がある
   | 'CHECKIN_OVERLOAD' // チェックインの処理能力を超える時間帯がある
   | 'GROUND_OVERLOAD' // 同時に折り返す機数が地上支援の能力を超える
+  | 'AIRLINE_ROUTE_UNSUPPORTED' // 航空会社がこの路線種別を運航しない
+  | 'INTERNATIONAL_PROCESSING_REQUIRED' // 国際旅客処理設備が未実装・不足
   | 'OUTSIDE_HOURS'; // 運用時間・契約の時間帯に収まらない
 
 export interface PlanIssue {
@@ -236,6 +258,15 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
       if (!found.keys.includes(key)) found.keys.push(key);
     } else issues.push({ code, severity, keys: [key], ...(detail !== undefined ? { detail } : {}) });
   };
+
+  for (const route of plan.unsupportedRoutes ?? []) {
+    add(
+      route.reason === 'airline-unsupported' ? 'AIRLINE_ROUTE_UNSUPPORTED' : 'INTERNATIONAL_PROCESSING_REQUIRED',
+      'error',
+      route.contractId,
+      route.destinationId,
+    );
+  }
   for (const id of plan.dropped) add('OUTSIDE_HOURS', 'warning', id);
 
   // スポットの仮割り当て（到着順、区分が合う最小のスポット・ゲート付き優先）

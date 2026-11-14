@@ -7,6 +7,7 @@ import type { SimContext } from '../sim/context';
 import { operableTypes } from '../sim/context';
 import type { CompanyState, Contract, TimeWindow } from './company';
 import { addContract } from './company';
+import { routeCapabilitiesForAirport } from './registry';
 import {
   analyzeDayPlan,
   CHECKIN_SHARE,
@@ -90,7 +91,7 @@ function peakConcurrentStands(plan: DayPlan, analysis: PlanAnalysis): { byStand:
 }
 
 /** Planned demand and modelled capacities from the same planning rules used by the operations panel. */
-export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, closedBusGateIds: readonly string[] = [], plan = planDayWithDemand(company, company.day, 1, ctx.types), currentPaxByTerminal?: Readonly<Record<string, number>>): AirportCapacitySnapshot {
+export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, closedBusGateIds: readonly string[] = [], plan = planDayWithDemand(company, company.day, 1, ctx.types, routeCapabilitiesForAirport(ctx.layout.countryId)), currentPaxByTerminal?: Readonly<Record<string, number>>): AirportCapacitySnapshot {
   const analysis = analyzeDayPlan(plan, ctx, closedBusGateIds);
   const operatingHours = Math.max(0, (company.hours.closeMin - company.hours.openMin) / 60);
   const peakMovements = peak(analysis.hourly.movements);
@@ -210,9 +211,17 @@ export interface CapacityPreview {
   reason: string;
 }
 
+function newlyIntroducedIssues(before: PlanAnalysis, after: PlanAnalysis): PlanAnalysis['issues'] {
+  const existing = new Map(before.issues.map((issue) => [`${issue.code}:${issue.detail ?? ''}`, new Set(issue.keys)]));
+  return after.issues
+    .map((issue) => ({ ...issue, keys: issue.keys.filter((key) => !existing.get(`${issue.code}:${issue.detail ?? ''}`)?.has(key)) }))
+    .filter((issue) => issue.keys.length > 0);
+}
+
 /** Add a temporary contract to a deep copy; no company, layout, save slot, or running simulation is mutated. */
 export function previewContractCapacity(company: CompanyState, ctx: SimContext, input: CapacityPreviewInput, closedBusGateIds: readonly string[] = [], access = 1): CapacityPreview {
-  const beforePlan = planDayWithDemand(company, company.day, access, ctx.types);
+  const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId);
+  const beforePlan = planDayWithDemand(company, company.day, access, ctx.types, routeCapabilities);
   const before = analyzeAirportCapacity(company, ctx, closedBusGateIds, beforePlan);
   const copy = structuredClone(company);
   const contract: Omit<Contract, 'id' | 'numberBase'> = {
@@ -228,15 +237,44 @@ export function previewContractCapacity(company: CompanyState, ctx: SimContext, 
     offerExpiresDay: company.day,
   };
   addContract(copy, contract);
-  const afterPlan = planDayWithDemand(copy, copy.day, access, ctx.types);
+  const afterPlan = planDayWithDemand(copy, copy.day, access, ctx.types, routeCapabilities);
   const after = analyzeAirportCapacity(copy, ctx, closedBusGateIds, afterPlan);
-  const existing = new Map(before.analysis.issues.map((i) => [`${i.code}:${i.detail ?? ''}`, new Set(i.keys)]));
-  const newIssues = after.analysis.issues.map((i) => ({ ...i, keys: i.keys.filter((k) => !existing.get(`${i.code}:${i.detail ?? ''}`)?.has(k)) })).filter((i) => i.keys.length > 0);
+  const newIssues = newlyIntroducedIssues(before.analysis, after.analysis);
   const newErrors = newIssues.filter((i) => i.severity === 'error');
   const addedWarnings = newIssues.filter((i) => i.severity === 'warning');
   const result: CapacityPreview['result'] = newErrors.length ? 'unacceptable' : addedWarnings.length ? 'conditional' : 'acceptable';
   const reason = newErrors.length ? `新たな運航不能 ${newErrors.length} 件（例: ${newErrors[0]!.code}）` : addedWarnings.length ? `新たな能力警告 ${addedWarnings.length} 件。追加需要と施設計画を確認してください` : operableTypes(ctx).includes(input.typeId) ? '追加便による新規の運航不能・能力警告はありません' : '選択機材は現在の空港で運航できません';
   return { result: !operableTypes(ctx).includes(input.typeId) ? 'unacceptable' : result, before, after, newIssues, reason };
+}
+
+/** Increase one existing route by a single daily round-trip on a clone and reject only newly fatal constraints. */
+export function previewFrequencyCapacity(
+  company: CompanyState,
+  ctx: SimContext,
+  contractId: string,
+  closedBusGateIds: readonly string[] = [],
+  access = 1,
+): CapacityPreview {
+  const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId);
+  const beforePlan = planDayWithDemand(company, company.day, access, ctx.types, routeCapabilities);
+  const before = analyzeAirportCapacity(company, ctx, closedBusGateIds, beforePlan);
+  const copy = structuredClone(company);
+  const contract = copy.contracts[contractId];
+  if (!contract || contract.status !== 'active') {
+    return { result: 'unacceptable', before, after: before, newIssues: [], reason: '増便対象の契約が見つからないか、契約中ではありません' };
+  }
+  contract.perDay += 1;
+  const afterPlan = planDayWithDemand(copy, copy.day, access, ctx.types, routeCapabilities);
+  const after = analyzeAirportCapacity(copy, ctx, closedBusGateIds, afterPlan);
+  const newIssues = newlyIntroducedIssues(before.analysis, after.analysis);
+  const newErrors = newIssues.filter((issue) => issue.severity === 'error');
+  const addedWarnings = newIssues.filter((issue) => issue.severity === 'warning');
+  const result: CapacityPreview['result'] = newErrors.length ? 'unacceptable' : addedWarnings.length ? 'conditional' : 'acceptable';
+  const reason = newErrors.length
+    ? `増便による新たな運航不能 ${newErrors.length} 件（例: ${newErrors[0]!.code}）`
+    : addedWarnings.length ? `増便による能力警告 ${addedWarnings.length} 件`
+      : 'この増便による新規の運航不能・能力警告はありません';
+  return { result, before, after, newIssues, reason };
 }
 
 export function airportCapacityLabel(layout: AirportLayout, id: string): string {

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { findPedestrianRoute } from '../../src/core/access/verticalWalk';
-import { connectRoadLevels, addRoadPath, placeFacility } from '../../src/core/layout/operations';
+import { connectRoadLevels, addRoadPath, placeFacility, placeTerminalArea } from '../../src/core/layout/operations';
 import { importLayout, exportLayout } from '../../src/core/io/serialize';
 import { constructionCost } from '../../src/core/economy/construction';
 import { createStarterAirfield } from '../../src/core/sample/starterAirfield';
 import { analyzeAccess } from '../../src/core/access/model';
+import { buildTerminalModel } from '../../src/core/terminal/model';
+import { findPaxRoute } from '../../src/core/terminal/route';
 import type { AirportLayout, Facility } from '../../src/core/model/types';
 import { emptyLayout, must } from './helpers';
 
@@ -17,6 +19,23 @@ function facility(id: string, kind: Facility['kind'], level: number): Facility {
 }
 
 describe('階層交通ネットワーク', () => {
+  it('ターミナルの階段は上下階の旅客経路を接続し、保存・復元後も利用できる', () => {
+    let layout = emptyLayout(30, 30);
+    layout = must(placeFacility(layout, 'terminal', { x: 2, y: 2 }, { w: 12, h: 8, props: { levels: 2 } })).layout;
+    const terminalId = Object.values(layout.facilities).find((f) => f.kind === 'terminal')!.id;
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'hall', { x: 5, y: 5 }, { w: 1, h: 1 })).layout;
+    layout = must(placeTerminalArea(layout, terminalId, 1, 'hall', { x: 6, y: 5 }, { w: 1, h: 1 })).layout;
+    const lower = Object.values(layout.terminalAreas).find((area) => area.level === 0)!.id;
+    const upper = Object.values(layout.terminalAreas).find((area) => area.level === 1)!.id;
+    expect(findPaxRoute(buildTerminalModel(layout), { from: lower, goals: new Map([[upper, 0]]) })).toBeNull();
+
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'stairs', { x: 6, y: 5 }, { w: 1, h: 1 })).layout;
+    const stairs = Object.values(layout.terminalAreas).find((area) => area.kind === 'stairs')!.id;
+    const restored = importLayout(exportLayout(layout));
+    expect(restored.terminalAreas[stairs]?.kind).toBe('stairs');
+    expect(findPaxRoute(buildTerminalModel(restored), { from: lower, goals: new Map([[upper, 0]]) })?.areas).toEqual([lower, stairs, upper]);
+  });
+
   it('同じ平面座標でも地上・地下ノードを分離し、垂直接続の有無を歩行経路に反映する', () => {
     let layout = emptyLayout(30, 30);
     layout = must(addRoadPath(layout, [{ x: 10, y: 10 }, { x: 10, y: 20 }], { roadClass: 'walkway', level: 0, capacityPerHour: 500 })).layout;

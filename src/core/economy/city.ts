@@ -1,5 +1,5 @@
 import type { CompanyState } from './company';
-import { airlineDef } from './registry';
+import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../sim/aircraftTypes';
 import type { DayPlan } from './planning';
 import type { OperatingHours } from './company';
@@ -153,12 +153,19 @@ export function growCity(city: CityConfig, dailyPax: number, demandCeiling: numb
 }
 
 /** 契約便の基本搭乗率から計画旅客数を推定する。 */
-export function expectedPassengers(company: CompanyState, day: number, types: TypeTable = AIRCRAFT_TYPES): number {
+export function expectedPassengers(
+  company: CompanyState,
+  day: number,
+  types: TypeTable = AIRCRAFT_TYPES,
+  routeCapabilities: RouteCapabilities = routeCapabilitiesForAirport(),
+): number {
   return Object.values(company.contracts).reduce((sum, contract) => {
     if (contract.status !== 'active' || contract.startDay > day || contract.endDay < day) return sum;
+    const airline = airlineDef(contract.airlineId);
+    if (routeAvailability(airline, destinationDef(contract.destinationId), routeCapabilities) !== 'available') return sum;
     const seats = company.fleets?.[contract.airlineId]?.find((entry) => entry.typeId === contract.typeId)?.seats
       ?? resolveType(types, contract.typeId).seats;
-    const baseLoad = BALANCE.demand.baseLoadFactor[airlineDef(contract.airlineId).type];
+    const baseLoad = BALANCE.demand.baseLoadFactor[airline.type];
     return sum + contract.perDay * seats * baseLoad * 2;
   }, 0);
 }

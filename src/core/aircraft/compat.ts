@@ -112,7 +112,7 @@ export function airportUnits(layout: AirportLayout): Partial<Record<UnitKind, nu
   const out: Partial<Record<UnitKind, number>> = {};
   const add = (k: UnitKind, v: number) => (out[k] = (out[k] ?? 0) + v);
   for (const f of Object.values(layout.facilities)) {
-    if (f.buildState !== 'operational') continue;
+    if (f.buildState !== 'operational' || f.parentFacilityId) continue;
     if (f.kind === 'gseBase') {
       add('staff', n(f, 'staff'));
       add('tug', n(f, 'tugs'));
@@ -146,7 +146,7 @@ export function checkGround(type: AircraftType, layout: AirportLayout): Check {
       }
     }
   }
-  if (!Object.values(layout.facilities).some((f) => f.kind === 'fuelFarm' && f.buildState === 'operational')) reasons.add('NO_FUEL_FARM');
+  if (!Object.values(layout.facilities).some((f) => f.kind === 'fuelFarm' && f.buildState === 'operational' && !f.parentFacilityId)) reasons.add('NO_FUEL_FARM');
   const ng = reasons.has('GSE_NONE') || reasons.has('NO_FUEL_FARM');
   return { id: 'ground', status: ng ? 'ng' : 'ok', reasons: [...reasons], detail: [...detail].sort() };
 }

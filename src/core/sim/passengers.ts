@@ -1,6 +1,6 @@
 import { Rng } from '../rng';
 import { compareIds } from '../model/ids';
-import { WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
+import { terminalLinkCapacityPerHour, WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
 import { findPaxRoute, linkBetween } from '../terminal/route';
 import { serviceSecPerPax } from '../terminal/capacity';
 import { resolveType } from './aircraftTypes';
@@ -218,7 +218,7 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
     p.gateId = ctx.standGate[ac.standId] ?? null;
     // バスゲートがある運航: ゲートのないスポットの便はバスゲートで搭乗し、ランプバスで運ぶ（sim/apronBus.ts）
     if (state.bus || explicitRemoteConfiguration) applyBusDeparture(sim, f, ac);
-    if (requiresTerminalAssignment && p.generated && previousGateId !== p.gateId) reconcileDepartureGate(sim, f, p.gateId);
+    if (p.generated && previousGateId && previousGateId !== p.gateId) reconcileDepartureGate(sim, f, p.gateId);
   }
   // 複数ターミナルでは、ゲート所属先が確定してから旅客を作る。
   // 単一ターミナル空港では従来どおり、便の生成時刻に旅客を作る。
@@ -339,7 +339,7 @@ function generateDeparturePax(sim: Simulation, f: Flight): void {
   });
 }
 
-/** Reassigns passengers after an operational gate change without moving them between terminals. */
+/** Reassigns passengers after an operational gate change, preserving their current location. */
 function reconcileDepartureGate(sim: Simulation, f: Flight, gateId: string | null): void {
   const terminalCount = Object.keys(sim.ctx.terminal.byTerminal).length;
   const terminalId = (gateId ? sim.ctx.terminal.gates[gateId]?.terminalId : null) ?? (terminalCount === 1 ? sim.ctx.paxTerminal : null);
@@ -347,17 +347,19 @@ function reconcileDepartureGate(sim: Simulation, f: Flight, gateId: string | nul
     if (PAX_FINAL_STATES.includes(g.state)) continue;
     if (g.state === 'toAirport' && g.area === null) {
       g.terminalId = terminalId;
+      delete g.targetTerminalId;
       continue;
     }
-    if (g.terminalId !== terminalId) {
-      leaveFacility(sim.state, g);
-      g.route = [];
-      g.state = 'stranded';
-      g.reason = 'unreachable';
-      continue;
-    }
+    g.targetTerminalId = terminalId !== g.terminalId ? terminalId : null;
+    if (!g.targetTerminalId) delete g.targetTerminalId;
     if (g.steps[g.stepIndex] !== 'gate') continue;
     if (g.facility?.startsWith('gate:')) leaveFacility(sim.state, g);
+    if (g.terminalLinkId && g.route.length > 0) {
+      g.replanAfterTerminalLink = true;
+      continue;
+    }
+    delete g.terminalLinkWaitingId;
+    delete g.replanAfterTerminalLink;
     g.route = [];
     g.legProgress = 0;
     g.legLength = 0;
@@ -438,23 +440,19 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
     if (busGate !== undefined) gateId = busGate;
   }
   const assignedStand = ac.standId ? ctx.stands[ac.standId] : undefined;
-  if (assignedStand && !assignedStand.contact && !gateId && (
+  const remoteGateMissing = !!assignedStand && !assignedStand.contact && !gateId && (
     ctx.layout.stands[assignedStand.id]?.remoteBoarding !== undefined || !!state.bus
-  )) return;
+  );
+  if (remoteGateMissing) p.busFailure ??= 'unconfigured';
+  if (remoteGateMissing) return;
   if (!p.generated) {
     const seats = f.seats ?? resolveType(ctx.types, ac.typeId).seats;
     const access = gateId ? ctx.terminal.gates[gateId] : undefined;
     const stand = ac.standId ? ctx.stands[ac.standId] : undefined;
-    const remoteGateMissing = !!stand && !stand.contact && !gateId && (
-      ctx.layout.stands[stand.id]?.remoteBoarding !== undefined || !!state.bus
-    );
-    if (remoteGateMissing) {
-      p.busFailure ??= 'unconfigured';
-      return;
-    }
+    const legacyRemote = !!stand && !stand.contact && ctx.layout.stands[stand.id]?.remoteBoarding === undefined && !state.bus;
     p.generated = true;
     withRng(state, (rng) => {
-      p.booked = (access?.terminalId || (stand?.contact && ctx.paxTerminal))
+      p.booked = (access?.terminalId || (stand?.contact && ctx.paxTerminal) || legacyRemote)
         ? (f.plannedPax ?? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min))))
         : 0;
       p.deplaneRemaining = p.booked;
@@ -601,6 +599,13 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
     case 'queuing':
     case 'boardingQueue':
     case 'waitingTransport':
+      if (g.terminalLinkWaitingId && state.now >= g.retryAt && g.route.length > 0) {
+        g.state = 'walking';
+        startLeg(sim, g);
+      } else {
+        g.waitSec++;
+      }
+      return;
     case 'waitingBus':
     case 'onBus':
       g.waitSec++;
@@ -760,6 +765,8 @@ function setWaiting(state: SimState, g: PaxGroup, s: 'stranded' | 'waitingFacili
 
 function startRoute(sim: Simulation, g: PaxGroup, areas: string[]): void {
   g.route = areas.slice(1);
+  delete g.terminalLinkWaitingId;
+  delete g.replanAfterTerminalLink;
   if (g.route.length === 0) {
     arrive(sim, g);
     return;
@@ -772,6 +779,35 @@ function startLeg(sim: Simulation, g: PaxGroup): void {
   const link = linkBetween(sim.ctx.terminal, g.area!, g.route[0]!);
   g.legProgress = 0;
   g.legLength = link ? link.lengthM + link.travelSec * WALK_SPEED_MPS : 0;
+  const transferLinkId = link?.transferLinkId;
+  if (!transferLinkId) {
+    delete g.terminalLinkId;
+    delete g.terminalLinkWaitingId;
+    return;
+  }
+  if (g.terminalLinkId === transferLinkId) return;
+  const layoutLink = sim.ctx.layout.terminalLinks?.[transferLinkId];
+  if (!layoutLink) {
+    g.state = 'stranded';
+    g.reason = 'unreachable';
+    return;
+  }
+  const hour = Math.floor(sim.state.now / 3600);
+  const runtime = sim.state.terminalTransit;
+  if (!runtime || runtime.hour !== hour) {
+    sim.state.terminalTransit = { hour, passengersByLink: {} };
+  }
+  const usage = sim.state.terminalTransit!.passengersByLink;
+  const used = usage[transferLinkId] ?? 0;
+  if (used + g.count > terminalLinkCapacityPerHour(layoutLink)) {
+    g.state = 'waitingTransport';
+    g.terminalLinkWaitingId = transferLinkId;
+    g.retryAt = (hour + 1) * 3600;
+    return;
+  }
+  usage[transferLinkId] = used + g.count;
+  g.terminalLinkId = transferLinkId;
+  delete g.terminalLinkWaitingId;
 }
 
 function walk(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): void {
@@ -781,6 +817,11 @@ function walk(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): voi
     return;
   }
   const next = g.route[0]!;
+  const link = linkBetween(ctx.terminal, g.area!, next);
+  if (!link) {
+    planStep(sim, g);
+    return;
+  }
   // 次のエリアが閉鎖されたら、今いるエリアから経路を探し直す
   if (isClosed(state, next) && g.legProgress === 0) {
     planStep(sim, g);
@@ -792,8 +833,21 @@ function walk(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): voi
   g.legProgress += speed;
   g.walkSec++;
   if (g.legProgress >= g.legLength) {
+    const completedTransfer = link.transferLinkId === g.terminalLinkId;
     g.area = next;
+    const nextTerminal = ctx.terminal.areas[next]?.terminalId;
+    if (nextTerminal && nextTerminal !== g.terminalId) {
+      g.terminalId = nextTerminal;
+      if (g.targetTerminalId === nextTerminal) delete g.targetTerminalId;
+    }
     g.route.shift();
+    if (completedTransfer) delete g.terminalLinkId;
+    if (completedTransfer && g.replanAfterTerminalLink) {
+      delete g.replanAfterTerminalLink;
+      g.route = [];
+      planStep(sim, g);
+      return;
+    }
     // 保安検査を通らずに出発区域へ入らないことは不変条件 P4 で検査する
     if (g.route.length === 0) arrive(sim, g);
     else startLeg(sim, g);

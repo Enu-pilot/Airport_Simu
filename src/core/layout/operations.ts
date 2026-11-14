@@ -29,11 +29,11 @@ import {
   type TerminalTransitKind,
   Terrain,
 } from '../model/types';
-import { add, distance, sameTile, type Tile } from '../geometry/vec';
+import { add, distance, sameTile, tileKey, type Tile } from '../geometry/vec';
 import { bearingToDir, dirToBearing, normalizeDeg } from '../geometry/angle';
 import type { WorldPoint } from '../geometry/frames';
 import { sortedValues } from '../model/ids';
-import { facilityDims, originAfterRotation, standDims, standEntry } from './footprint';
+import { facilityDims, facilityTiles, originAfterRotation, standDims, standEntry } from './footprint';
 import {
   addPath,
   allocId,
@@ -47,7 +47,9 @@ import {
   type NetKind,
 } from './network';
 import { headingVector, runwayAxis, runwayEnd, runwayMidpoint } from './runway';
-import { roadEdgeLevelValid } from '../model/levels';
+import { facilityLevel, roadEdgeLevelValid } from '../model/levels';
+import { DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, DEFAULT_TERMINAL_LINK_WIDTH_M } from '../terminal/model';
+import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
 
 /**
  * 編集操作。すべて純粋関数で、入力レイアウトを変更せず新しいレイアウトを返す。
@@ -136,6 +138,9 @@ export interface PlaceFacilityOptions {
   h?: number;
   buildState?: BuildState;
   name?: string;
+  mapLevel?: number;
+  parentFacilityId?: string;
+  floorIndex?: number;
   props?: Record<string, PropValue>;
 }
 
@@ -149,6 +154,13 @@ export function placeFacility(
   const w = spec.resizable ? (opts.w ?? spec.defaultW) : spec.defaultW;
   const h = spec.resizable ? (opts.h ?? spec.defaultH) : spec.defaultH;
   if (w < spec.minW || h < spec.minH) return fail('INVALID_VALUE');
+  if (opts.mapLevel !== undefined && (!Number.isInteger(opts.mapLevel) || opts.mapLevel < -5 || opts.mapLevel > 10)) return fail('INVALID_VALUE');
+  const parent = opts.parentFacilityId ? layout.facilities[opts.parentFacilityId] : undefined;
+  if (opts.parentFacilityId && (!parent || parent.parentFacilityId || FACILITY_SPECS[parent.kind].layer !== 'building' || parent.kind === 'gate')) return fail('INVALID_VALUE');
+  const floorIndex = opts.parentFacilityId ? (opts.floorIndex ?? 0) : undefined;
+  if (floorIndex !== undefined && (!Number.isInteger(floorIndex) || floorIndex < -5 || floorIndex >= Number(parent?.props.levels ?? 1))) return fail('INVALID_VALUE');
+  if (!opts.parentFacilityId && opts.floorIndex !== undefined) return fail('INVALID_VALUE');
+  if (parent && opts.mapLevel !== undefined && opts.mapLevel !== facilityLevel(parent)) return fail('INVALID_VALUE');
   const d = cloneLayout(layout);
   const id = allocId(d, 'fac');
   d.facilities[id] = {
@@ -160,8 +172,14 @@ export function placeFacility(
     h,
     rotation: opts.rotation ?? 0,
     buildState: opts.buildState ?? 'operational',
+    ...(opts.mapLevel === undefined ? (parent ? { mapLevel: facilityLevel(parent) } : {}) : { mapLevel: opts.mapLevel }),
+    ...(parent ? { parentFacilityId: parent.id, floorIndex: floorIndex! } : {}),
     props: { ...DEFAULT_PROPS[kind], ...opts.props },
   };
+  if (parent) {
+    const parentTiles = new Set(facilityTiles(parent).map((tile) => tileKey(tile.x, tile.y)));
+    if (!facilityTiles(d.facilities[id]!).every((tile) => parentTiles.has(tileKey(tile.x, tile.y)))) return fail('INVALID_VALUE');
+  }
   if (kind === 'gate' && d.facilities[id]!.props.standId == null) {
     d.facilities[id]!.props.standId = nearestStandForGate(d, d.facilities[id]!);
   }
@@ -439,7 +457,10 @@ export interface TerminalTransitOptions {
   toAreaId: string;
   distanceM: number;
   travelSec: number;
+  widthM?: number;
   capacityPerHour?: number;
+  elevationM?: number;
+  aircraftClearanceM?: number;
   bidirectional?: boolean;
   buildState?: BuildState;
   allowedZones: PaxZone[];
@@ -451,8 +472,13 @@ export function addTerminalTransitLink(layout: AirportLayout, opts: TerminalTran
   const to = layout.terminalAreas[opts.toAreaId];
   if (!from || !to) return fail('NOT_FOUND');
   if (from.terminalId === to.terminalId) return fail('INVALID_VALUE');
-  if (opts.kind !== 'walkway' && opts.kind !== 'movingWalkway') return fail('INVALID_VALUE');
+  if (!['walkway', 'movingWalkway', 'elevatedWalkway', 'escalator', 'elevator'].includes(opts.kind)) return fail('INVALID_VALUE');
   if (!Number.isFinite(opts.distanceM) || opts.distanceM <= 0 || !Number.isFinite(opts.travelSec) || opts.travelSec <= 0) return fail('INVALID_VALUE');
+  const widthM = opts.widthM ?? DEFAULT_TERMINAL_LINK_WIDTH_M;
+  const elevationM = opts.elevationM ?? DEFAULT_TERMINAL_LINK_ELEVATION_M;
+  const aircraftClearanceM = opts.aircraftClearanceM ?? DEFAULT_TERMINAL_LINK_CLEARANCE_M;
+  if (!Number.isFinite(widthM) || widthM <= 0 || !Number.isFinite(elevationM) || elevationM <= 0) return fail('INVALID_VALUE');
+  if (!Number.isFinite(aircraftClearanceM) || aircraftClearanceM < requiredAircraftClearanceM() || elevationM < aircraftClearanceM) return fail('INVALID_VALUE');
   if (opts.capacityPerHour !== undefined && (!Number.isFinite(opts.capacityPerHour) || opts.capacityPerHour <= 0)) return fail('INVALID_VALUE');
   const zones = [...new Set(opts.allowedZones)];
   if (!zones.length || zones.some((zone) => zone !== from.zone || zone !== to.zone)) return fail('INVALID_VALUE');
@@ -467,6 +493,9 @@ export function addTerminalTransitLink(layout: AirportLayout, opts: TerminalTran
     toAreaId: to.id,
     distanceM: opts.distanceM,
     travelSec: opts.travelSec,
+    widthM,
+    elevationM,
+    aircraftClearanceM,
     ...(opts.capacityPerHour === undefined ? {} : { capacityPerHour: opts.capacityPerHour }),
     bidirectional: opts.bidirectional ?? true,
     buildState: opts.buildState ?? 'operational',
@@ -644,6 +673,9 @@ export function moveEntity(layout: AirportLayout, id: string, delta: Tile): OpRe
       const f = d.facilities[id];
       if (!f) return fail('NOT_FOUND');
       f.origin = add(f.origin, delta);
+      for (const child of Object.values(d.facilities)) {
+        if (child.parentFacilityId === id) child.origin = add(child.origin, delta);
+      }
       // ターミナル内部のエリアも一緒に動かす
       for (const a of areasOf(d, id)) a.origin = add(a.origin, delta);
       break;
@@ -689,6 +721,15 @@ export function rotateEntity(layout: AirportLayout, id: string, stepDeg = 15): O
     const oldOrigin = f.origin;
     f.rotation = ((f.rotation + 90) % 360) as Rotation;
     f.origin = originAfterRotation(f.origin, old, facilityDims(f), f.rotation);
+    for (const child of Object.values(d.facilities)) {
+      if (child.parentFacilityId !== id) continue;
+      const childDims = facilityDims(child);
+      const rx = child.origin.x - oldOrigin.x;
+      const ry = child.origin.y - oldOrigin.y;
+      child.origin = { x: f.origin.x + old.h - (ry + childDims.h), y: f.origin.y + rx };
+      child.rotation = ((child.rotation + 90) % 360) as Rotation;
+      child.mapLevel = facilityLevel(f);
+    }
     // 内部のエリアをターミナルと一緒に時計回りに回す（相対位置 (x, y) → (H − y − h, x)）
     for (const a of areasOf(d, id)) {
       const rx = a.origin.x - oldOrigin.x;
@@ -804,6 +845,9 @@ export function deleteEntity(layout: AirportLayout, id: string): OpResult {
     case 'facility':
       if (!d.facilities[id]) return fail('NOT_FOUND');
       delete d.facilities[id];
+      for (const child of Object.values(d.facilities)) {
+        if (child.parentFacilityId === id) delete d.facilities[child.id];
+      }
       for (const a of areasOf(d, id)) delete d.terminalAreas[a.id];
       break;
     case 'terminalArea':
@@ -1042,6 +1086,12 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
           if (!ROTATIONS.includes(v as Rotation)) return fail('INVALID_VALUE');
         } else if (k === 'buildState') {
           if (!isBuildState(v)) return fail('INVALID_VALUE');
+        } else if (k === 'mapLevel') {
+          if (!isInt(v, -5, 10)) return fail('INVALID_VALUE');
+        } else if (k === 'floorIndex') {
+          if (!isInt(v, -5, 10)) return fail('INVALID_VALUE');
+        } else if (k === 'parentFacilityId') {
+          if (typeof v !== 'string' || FACILITY_SPECS[d.facilities[v]?.kind ?? 'gate'].layer !== 'building') return fail('INVALID_VALUE');
         } else if (k === 'props') {
           if (typeof v !== 'object' || v === null) return fail('INVALID_VALUE');
           for (const [pk, pv] of Object.entries(v)) {
@@ -1068,6 +1118,26 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
       Object.assign(f, rest);
       if (props) f.props = { ...f.props, ...props };
       if ('rotation' in patch) f.origin = originAfterRotation(f.origin, old, facilityDims(f), f.rotation);
+      if (f.parentFacilityId) {
+        const parent = d.facilities[f.parentFacilityId];
+        if (
+          !parent ||
+          parent.parentFacilityId ||
+          parent.kind === 'gate' ||
+          (f.floorIndex ?? 0) < -5 ||
+          (f.floorIndex ?? 0) >= Number(parent.props.levels ?? 1) ||
+          facilityLevel(f) !== facilityLevel(parent)
+        ) return fail('INVALID_VALUE');
+        const parentTiles = new Set(facilityTiles(parent).map((tile) => tileKey(tile.x, tile.y)));
+        if (!facilityTiles(f).every((tile) => parentTiles.has(tileKey(tile.x, tile.y)))) return fail('INVALID_VALUE');
+      }
+      if ('mapLevel' in patch) {
+        for (const child of Object.values(d.facilities)) if (child.parentFacilityId === id) child.mapLevel = facilityLevel(f);
+      }
+      if ('props' in patch && 'levels' in (patch.props as Record<string, unknown>)) {
+        const levels = Number(f.props.levels ?? 1);
+        if (Object.values(d.facilities).some((child) => child.parentFacilityId === id && (child.floorIndex ?? 0) >= levels)) return fail('INVALID_VALUE');
+      }
       err = null;
       break;
     }

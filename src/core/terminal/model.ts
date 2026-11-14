@@ -41,6 +41,8 @@ export interface AreaLink {
   travelSec: number;
   /** 経由点（境界の中点、または上下移動の重なりの中心） */
   via: Vec2;
+  /** ターミナル間連絡設備を通る場合、その設備 ID */
+  transferLinkId?: string;
 }
 
 export interface GateAccess {
@@ -79,6 +81,14 @@ export const CONNECTOR_DETOUR = 1.25;
 /** 1タイル（25m四方）あたりの混雑の目安人数 */
 export const PAX_PER_TILE = 40;
 export const WALK_SPEED_MPS = 1.3;
+export const DEFAULT_TERMINAL_LINK_WIDTH_M = 6;
+export const DEFAULT_TERMINAL_LINK_ELEVATION_M = 36;
+export const DEFAULT_TERMINAL_LINK_CLEARANCE_M = 33;
+
+/** A finite legacy capacity based on the clear width; one metre supports 200 passengers/hour. */
+export function terminalLinkCapacityPerHour(link: { capacityPerHour?: number; widthM?: number }): number {
+  return link.capacityPerHour ?? Math.max(1, Math.floor((link.widthM ?? DEFAULT_TERMINAL_LINK_WIDTH_M) * 200));
+}
 
 export function buildTerminalModel(layout: AirportLayout): TerminalModel {
   const areas: Record<string, AreaNode> = {};
@@ -118,6 +128,16 @@ export function buildTerminalModel(layout: AirportLayout): TerminalModel {
         }
       }
     }
+  }
+  for (const link of sortedValues(layout.terminalLinks ?? {})) {
+    if (link.buildState !== 'operational') continue;
+    const from = areas[link.fromAreaId];
+    const to = areas[link.toAreaId];
+    if (!from || !to || from.terminalId === to.terminalId) continue;
+    if (!link.allowedZones.includes(from.zone) || from.zone !== to.zone) continue;
+    const via = { x: (from.center.x + to.center.x) / 2, y: (from.center.y + to.center.y) / 2 };
+    links[from.id]!.push({ to: to.id, lengthM: link.distanceM, travelSec: link.travelSec, via, transferLinkId: link.id });
+    if (link.bidirectional) links[to.id]!.push({ to: from.id, lengthM: link.distanceM, travelSec: link.travelSec, via, transferLinkId: link.id });
   }
   for (const list of Object.values(links)) list.sort((p, q) => compareIds(p.to, q.to));
 
@@ -234,7 +254,7 @@ function connectIndependentGate(
   return { terminalId, boarding, deplane };
 }
 
-const isLift = (k: TerminalAreaKind): boolean => k === 'escalator' || k === 'elevator';
+const isLift = (k: TerminalAreaKind): boolean => k === 'stairs' || k === 'escalator' || k === 'elevator';
 
 function addLink(links: Record<string, AreaLink[]>, a: AreaNode, b: AreaNode, via: Vec2, travelSec: number): void {
   const d = (p: Vec2, q: Vec2) => Math.hypot(p.x - q.x, p.y - q.y) * TILE_M;

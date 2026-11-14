@@ -25,11 +25,12 @@ import { rasterizeSegment } from '../geometry/vec';
 import { satOverlapConvex } from '../geometry/polygon';
 import { TILE_M } from '../model/catalog';
 import type { NetNode, TerminalAreaKind } from '../model/types';
-import { CONNECTOR_DETOUR, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
+import { CONNECTOR_DETOUR, DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
+import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
 import { ACCESS_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTilesAtLevel } from '../access/landside';
-import { connectorFits, facilityLevel, roadEdgeLevelValid } from '../model/levels';
+import { connectorFits, facilityLevel, roadEdgeLevelValid, DEFAULT_LEVEL_HEIGHT_M } from '../model/levels';
 import { findPedestrianRoute } from '../access/verticalWalk';
 import { busGateStatus } from '../terminal/busGateAssignment';
 
@@ -111,6 +112,9 @@ export type IssueCode =
   | 'GATE_ARRIVAL_NO_EXIT'
   | 'TERMINAL_DEPARTURE_ROUTE'
   | 'GATE_ARRIVAL_NO_BAGGAGE_ROUTE'
+  | 'FACILITY_INTERIOR_INVALID'
+  | 'FACILITY_INTERIOR_OUTSIDE'
+  | 'TERMINAL_LINK_CLEARANCE'
   // 空港全体
   | 'NO_RUNWAY'
   | 'NO_TOWER'
@@ -183,6 +187,9 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   GATE_ARRIVAL_NO_EXIT: 'warning',
   TERMINAL_DEPARTURE_ROUTE: 'warning',
   GATE_ARRIVAL_NO_BAGGAGE_ROUTE: 'warning',
+  FACILITY_INTERIOR_INVALID: 'error',
+  FACILITY_INTERIOR_OUTSIDE: 'error',
+  TERMINAL_LINK_CLEARANCE: 'error',
   NO_RUNWAY: 'warning',
   NO_TOWER: 'warning',
   NO_GSE_BASE: 'warning',
@@ -292,7 +299,7 @@ function polyBBox(poly: readonly Vec2[]): { x0: number; y0: number; x1: number; 
 }
 
 function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: IssueSink, net: AirsideNetwork): void {
-  const occ = new Map<string, { ownerId: string; layer: FootprintLayer }[]>();
+  const occ = new Map<string, { ownerId: string; layer: FootprintLayer; minM: number; maxM: number }[]>();
   for (const p of parts) {
     if (p.layer !== 'strip' && p.layer !== 'resa') {
       let outside = 0;
@@ -312,13 +319,18 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
     }
     // 多角形で判定する部分（自由形）は下の多角形の判定で扱う
     if (p.poly) continue;
-    for (const t of p.tiles) {
-      for (const level of p.levels ?? [p.level ?? 0]) {
-        const k = `${level}|${tileKey(t.x, t.y)}`;
-        let list = occ.get(k);
-        if (!list) occ.set(k, (list = []));
-        list.push({ ownerId: p.ownerId, layer: p.layer });
-      }
+    const cells = p.occupancy ?? p.tiles.flatMap((tile) =>
+      (p.levels ?? [p.level ?? 0]).map((level) => ({
+        tile,
+        minM: p.vertical?.minM ?? level * DEFAULT_LEVEL_HEIGHT_M,
+        maxM: p.vertical?.maxM ?? level * DEFAULT_LEVEL_HEIGHT_M + 0.4,
+      })),
+    );
+    for (const cell of cells) {
+      const k = `${p.spaceId ?? 'map'}|${tileKey(cell.tile.x, cell.tile.y)}`;
+      const list = occ.get(k) ?? [];
+      list.push({ ownerId: p.ownerId, layer: p.layer, minM: cell.minM, maxM: cell.maxM });
+      occ.set(k, list);
     }
   }
 
@@ -371,7 +383,13 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
     if (list.length < 2) continue;
     const [x, y] = k.slice(k.lastIndexOf('|') + 1).split(',').map(Number) as [number, number];
     for (let i = 0; i < list.length; i++) {
-      for (let j = i + 1; j < list.length; j++) judge(list[i]!, list[j]!, { x, y }, false);
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i]!;
+        const b = list[j]!;
+        if (a.maxM <= b.minM || b.maxM <= a.minM) continue;
+        // A connector only occupies the vertical span recorded for this tile, not its full path on both floors.
+        judge(a, b, { x, y }, false);
+      }
     }
   }
 
@@ -380,7 +398,12 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
   for (const p of polys) {
     for (const t of p.tiles) {
       for (const level of p.levels ?? [p.level ?? 0]) {
-        for (const o of occ.get(`${level}|${tileKey(t.x, t.y)}`) ?? []) judge({ ownerId: p.ownerId, layer: p.layer }, o, t, true);
+        const minM = p.vertical?.minM ?? level * DEFAULT_LEVEL_HEIGHT_M;
+        const maxM = p.vertical?.maxM ?? level * DEFAULT_LEVEL_HEIGHT_M + 0.4;
+        for (const o of occ.get(`${p.spaceId ?? 'map'}|${tileKey(t.x, t.y)}`) ?? []) {
+          if (maxM <= o.minM || o.maxM <= minM) continue;
+          judge({ ownerId: p.ownerId, layer: p.layer }, o, t, true);
+        }
       }
     }
   }
@@ -390,7 +413,9 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
       const A = polys[i]!;
       const B = polys[j]!;
       if (A.ownerId === B.ownerId) continue;
-      if (!(A.levels ?? [A.level ?? 0]).some((level) => (B.levels ?? [B.level ?? 0]).includes(level))) continue;
+      const az = A.vertical ?? { minM: (A.level ?? 0) * DEFAULT_LEVEL_HEIGHT_M, maxM: (A.level ?? 0) * DEFAULT_LEVEL_HEIGHT_M + 0.4 };
+      const bz = B.vertical ?? { minM: (B.level ?? 0) * DEFAULT_LEVEL_HEIGHT_M, maxM: (B.level ?? 0) * DEFAULT_LEVEL_HEIGHT_M + 0.4 };
+      if (az.maxM <= bz.minM || bz.maxM <= az.minM) continue;
       const a = boxes[i]!;
       const b = boxes[j]!;
       if (a.x1 < b.x0 || b.x1 < a.x0 || a.y1 < b.y0 || b.y1 < a.y0) continue;
@@ -405,7 +430,7 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
 
   // スポットはエプロン上に置く
   for (const s of sortedValues(layout.stands)) {
-    const off = standTiles(s).find((t) => !(occ.get(`0|${tileKey(t.x, t.y)}`) ?? []).some((o) => o.layer === 'apron'));
+    const off = standTiles(s).find((t) => !(occ.get(`map|${tileKey(t.x, t.y)}`) ?? []).some((o) => o.layer === 'apron' && o.minM < 0.4 && o.maxM > 0));
     if (off) sink.add('STAND_NOT_ON_APRON', [s.id], {}, off);
   }
 }
@@ -796,7 +821,7 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
     if (gates.length > 1) sink.add('STAND_MULTIPLE_GATES', [s.id, ...gates], {}, s.origin);
   }
   if (busGates.length > 0) {
-    const buses = facilities.filter((f) => f.kind === 'gseBase' && f.buildState === 'operational').reduce((n, f) => n + apronBusesOf(f), 0);
+    const buses = facilities.filter((f) => f.kind === 'gseBase' && f.buildState === 'operational' && !f.parentFacilityId).reduce((n, f) => n + apronBusesOf(f), 0);
     if (buses === 0) for (const g of busGates) sink.add('GATE_BUS_NO_VEHICLES', [g.id], {}, g.origin);
     if (remote === 0) sink.add('BUS_GATE_NO_REMOTE_STAND', [busGates[0]!.id], {}, busGates[0]!.origin);
   }
@@ -958,6 +983,17 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     if (tiles > GATE_CONNECTOR_MAX_TILES) sink.add('GATE_CONNECTOR_LONG', [c.gateId, c.terminalId], { tiles: Math.round(tiles) }, layout.facilities[c.gateId]?.origin);
   }
 
+  for (const link of Object.values(layout.terminalLinks ?? {})) {
+    if (link.kind !== 'elevatedWalkway') continue;
+    const required = requiredAircraftClearanceM();
+    const clearance = link.aircraftClearanceM ?? DEFAULT_TERMINAL_LINK_CLEARANCE_M;
+    const elevation = link.elevationM ?? DEFAULT_TERMINAL_LINK_ELEVATION_M;
+    if (clearance < required || elevation < clearance) {
+      const area = layout.terminalAreas[link.fromAreaId];
+      sink.add('TERMINAL_LINK_CLEARANCE', [link.id], { clearance, required, elevation }, area?.origin);
+    }
+  }
+
   // ゲート: 搭乗口・降機口があり、入口から保安検査を経て到達でき、降機口から出口へ出られる
   for (const g of sortedValues(layout.facilities).filter((f) => f.kind === 'gate')) {
     const access = model.gates[g.id];
@@ -977,6 +1013,7 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
       );
       if (!reachable) sink.add('GATE_UNREACHABLE', [g.id], {}, g.origin);
     }
+
     if (!access.deplane) {
       sink.add('GATE_NO_ARRIVAL_ACCESS', [g.id], {}, g.origin);
     } else {
@@ -1001,7 +1038,7 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     !sortedValues(layout.facilities).some((gate) => gate.kind === 'gate' && gateMode(gate) !== 'bus' && gate.props.standId === stand.id),
   );
   const hasRampBuses = sortedValues(layout.facilities)
-    .filter((f) => f.kind === 'gseBase' && f.buildState === 'operational')
+    .filter((f) => f.kind === 'gseBase' && f.buildState === 'operational' && !f.parentFacilityId)
     .some((base) => apronBusesOf(base) > 0);
   for (const stand of remoteStands) {
     if (stand.remoteBoarding === 'none') continue;
@@ -1052,6 +1089,26 @@ function checkConnectorRunways(layout: AirportLayout, parts: FootprintPart[], mo
 
 // ---------------------------------------------------------------- 全体
 
+function checkFacilityHierarchy(layout: AirportLayout, sink: IssueSink): void {
+  for (const facility of Object.values(layout.facilities)) {
+    if (!facility.parentFacilityId) continue;
+    const parent = layout.facilities[facility.parentFacilityId];
+    if (!parent || parent.id === facility.id || parent.parentFacilityId || parent.kind === 'gate' || FACILITY_SPECS[parent.kind].layer !== 'building') {
+      sink.add('FACILITY_INTERIOR_INVALID', [facility.id, facility.parentFacilityId], {}, facility.origin);
+      continue;
+    }
+    const floor = facility.floorIndex ?? 0;
+    if (floor < -5 || floor >= Number(parent.props.levels ?? 1) || facilityLevel(facility) !== facilityLevel(parent)) {
+      sink.add('FACILITY_INTERIOR_INVALID', [facility.id, parent.id], { floor }, facility.origin);
+      continue;
+    }
+    const parentTiles = new Set(facilityTiles(parent).map((tile) => tileKey(tile.x, tile.y)));
+    if (!facilityTiles(facility).every((tile) => parentTiles.has(tileKey(tile.x, tile.y)))) {
+      sink.add('FACILITY_INTERIOR_OUTSIDE', [facility.id, parent.id], {}, facility.origin);
+    }
+  }
+}
+
 export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   const sink = new IssueSink();
   const parts = collectFootprints(layout);
@@ -1060,7 +1117,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   const isolatedEdges = new Set<string>();
 
   if (Object.keys(layout.runways).length === 0) sink.add('NO_RUNWAY', []);
-  const has = (k: string) => Object.values(layout.facilities).some((f) => f.kind === k);
+  const has = (k: string) => Object.values(layout.facilities).some((f) => f.kind === k && !f.parentFacilityId);
   if (!has('tower')) sink.add('NO_TOWER', []);
   // 地上支援の基地: スポットがあるのに無いと折り返し作業ができない
   if (Object.keys(layout.stands).length > 0) {
@@ -1078,6 +1135,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   checkRunwayRules(layout, sink);
   checkHoldShort(layout, network, sink);
   checkFacilities(layout, parts, sink);
+  checkFacilityHierarchy(layout, sink);
   checkRoads(layout, parts, sink);
   checkAccess(layout, sink);
   checkTerminals(layout, terminal, sink);

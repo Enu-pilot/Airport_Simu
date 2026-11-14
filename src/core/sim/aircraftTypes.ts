@@ -95,6 +95,17 @@ export function buildTypeTable(models: Record<string, AircraftModel> = CATALOG):
 export const AIRCRAFT_TYPES: TypeTable = buildTypeTable();
 export const AIRCRAFT_TYPE_IDS: AircraftTypeId[] = Object.keys(AIRCRAFT_TYPES);
 
+/** Unknown-height and future aircraft get a conservative envelope instead of being treated as zero-height. */
+export const UNKNOWN_AIRCRAFT_HEIGHT_M = 30;
+export const AIRCRAFT_CLEARANCE_MARGIN_M = 3;
+
+export function requiredAircraftClearanceM(types: TypeTable = AIRCRAFT_TYPES): number {
+  return Math.max(
+    UNKNOWN_AIRCRAFT_HEIGHT_M,
+    ...Object.values(types).map((type) => type.heightM ?? UNKNOWN_AIRCRAFT_HEIGHT_M),
+  ) + AIRCRAFT_CLEARANCE_MARGIN_M;
+}
+
 /**
  * 機種を引く。テーブルにない ID は「未解決の機種」として汎用ナローボディ機の値で代替する
  * （データは消さず、表示・検証で未解決であることを示す）。

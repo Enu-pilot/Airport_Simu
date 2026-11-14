@@ -12,6 +12,13 @@ export const TAXIWAY_DRAW_WIDTH_M = { S: 15, M: 23, L: 30, codeF: 38 } as const;
 /** 道路・鉄道の描画幅（m、ゲームの表示用の値） */
 export const ROAD_DRAW_WIDTH_M = { road: 12, rail: 8, walkway: 5, fuel: 2 } as const;
 
+/** Vertical occupancy used by layout validation and 3D rendering (game display dimensions). */
+export const FACILITY_HEIGHT_M: Partial<Record<FacilityKind, number>> = {
+  terminal: 18, tower: 45, hangar: 24, maintenance: 14, fuelFarm: 10, fireStation: 9,
+  gseBase: 6, baggageSort: 10, serviceArea: 6, parking: 3, gate: 6, apron: 0.2,
+  railStation: 8, taxiStand: 2, busStop: 3, staffParking: 1, hotel: 18,
+};
+
 /** 占有判定のレイヤー。重なりの可否は validation の互換表で決める */
 export type FootprintLayer =
   | 'runway'
@@ -22,6 +29,7 @@ export type FootprintLayer =
   | 'stand'
   | 'gate'
   | 'building'
+  | 'interior'
   | 'area'
   | 'roadPublic'
   | 'roadService'
@@ -228,6 +236,10 @@ export const TERMINAL_AREA_SPECS: Record<TerminalAreaKind, TerminalAreaSpec> = {
     props: [{ key: 'belts', type: 'int', min: 0, max: 20 }], defaults: { belts: 2 },
   },
   hall: { defaultW: 4, defaultH: 4, minW: 1, minH: 1, zone: 'landside', zoneEditable: true, props: [], defaults: {} },
+  stairs: {
+    defaultW: 2, defaultH: 1, minW: 1, minH: 1, zone: 'landside', zoneEditable: true,
+    props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }], defaults: { travelSec: 45 },
+  },
   escalator: {
     defaultW: 2, defaultH: 1, minW: 1, minH: 1, zone: 'landside', zoneEditable: true,
     props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }], defaults: { travelSec: 30 },

@@ -8,6 +8,7 @@ import { isBuildable } from '../core/model/site';
 import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Runway, RunwayFree, Site, Stand, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, isFreeRunway } from '../core/model/types';
 import { facilityDims, standDims, standEntry } from '../core/layout/footprint';
+import { facilityLevel } from '../core/model/levels';
 import { offsiteTilesIn } from '../core/layout/operations';
 import { designatorsOf } from '../core/layout/designators';
 import { runwayAxis } from '../core/layout/runway';
@@ -227,7 +228,7 @@ export class MapRenderer {
 
   private drawLayout(layout: AirportLayout, analysis: LayoutAnalysis, s: EditorState): void {
     const g = this.g;
-    const facilities = Object.values(layout.facilities).filter((f) => f.kind !== 'railStation' || s.mapLevel === 'all' || Number(f.props.level ?? 0) === s.mapLevel);
+    const facilities = Object.values(layout.facilities).filter((f) => !f.parentFacilityId && (s.mapLevel === 'all' || facilityLevel(f) === s.mapLevel));
     const byLayer = (layer: string) => facilities.filter((f) => FACILITY_SPECS[f.kind].layer === layer);
 
     // 滑走路保護区域
@@ -553,7 +554,7 @@ export class MapRenderer {
       const a = c({ x: from.origin.x + from.w / 2, y: from.origin.y + from.h / 2 });
       const b = c({ x: to.origin.x + to.w / 2, y: to.origin.y + to.h / 2 });
       const selected = selection === from.id || selection === to.id;
-      const color = link.kind === 'movingWalkway' ? COLOR.selection : COLOR.walkway;
+      const color = link.kind === 'movingWalkway' ? COLOR.selection : link.kind === 'elevatedWalkway' ? 0x7fdbff : COLOR.walkway;
       const alpha = BUILD_ALPHA[link.buildState];
       this.dashed(g, a, b, 0.65, 0.4, { width: this.px(selected ? 3 : 1.7), color, alpha });
       if (!link.bidirectional) this.arrow(g, a, b, color, alpha);
@@ -731,7 +732,7 @@ export class MapRenderer {
         if (st.name) this.label(`std:${st.id}`, st.name, { x: st.origin.x + d.w / 2, y: st.origin.y + d.h / 2 }, cam, { size: 11 });
       }
       for (const f of Object.values(layout.facilities)) {
-        if (!f.name || f.kind === 'gate' || (f.kind === 'terminal' && this.interiorShown)) continue;
+        if (!f.name || f.parentFacilityId || f.kind === 'gate' || (f.kind === 'terminal' && this.interiorShown)) continue;
         const d = facilityDims(f);
         this.label(`fac:${f.id}`, f.name, { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 }, cam, { size: 11 });
       }
@@ -752,6 +753,7 @@ export class MapRenderer {
     const ops = s.ops;
     const occupancy = ops ? areaOccupancy(ops.sim.state) : null;
     const closed = new Set(ops?.sim.state.closedAreas ?? []);
+    const terminalIds = new Set(Object.values(layout.facilities).filter((f) => f.kind === 'terminal').map((f) => f.id));
     for (const t of Object.values(layout.facilities)) {
       if (t.kind !== 'terminal') continue;
       const d = facilityDims(t);
@@ -777,6 +779,14 @@ export class MapRenderer {
           }
           g.stroke({ width: this.px(1.5), color: 0xff4d4f, alpha: 0.7 });
         }
+      }
+      for (const f of Object.values(layout.facilities)) {
+        if (!f.parentFacilityId || !terminalIds.has(f.parentFacilityId)) continue;
+        if ((f.floorIndex ?? 0) !== level) continue;
+        const d = facilityDims(f);
+        g.rect(f.origin.x + 0.2, f.origin.y + 0.2, Math.max(0.6, d.w - 0.4), Math.max(0.6, d.h - 0.4))
+          .fill({ color: FACILITY_COLOR[f.kind], alpha: BUILD_ALPHA[f.buildState] });
+        if (s.overlays.labels && f.name) this.label(`interior-fac:${f.id}`, f.name, { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 }, cam, { size: 9, color: 0xffffff });
       }
       if (s.overlays.labels && this.zoom >= 6) {
         let text = a.name || AREA_SHORT[a.kind];
@@ -987,6 +997,7 @@ const AREA_COLOR: Record<TerminalAreaKind, number> = {
   arrivalCorridor: 0x2a4a6b,
   baggageClaim: 0x2a6b5a,
   hall: 0x4a4f55,
+  stairs: 0x8a6a2a,
   escalator: 0x8a7a2a,
   elevator: 0x8a6a2a,
   shop: 0x9a5a2a,

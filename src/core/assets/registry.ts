@@ -119,6 +119,9 @@ export const LIVERIES: Record<string, Livery> = {
   RJ: { id: 'liv-rj', airlineId: 'RJ', body: 0xeef2f7, tail: 0x7c3aed, stripe: 0x7c3aed, engine: 0x9ca3af },
   AQ: { id: 'liv-aq', airlineId: 'AQ', body: 0xffffff, tail: 0x06b6d4, stripe: 0x0891b2, engine: 0x06b6d4 },
   HB: { id: 'liv-hb', airlineId: 'HB', body: 0xfffbeb, tail: 0xdc2626, stripe: 0x16a34a, engine: 0xe5e7eb },
+  AS: { id: 'liv-as', airlineId: 'AS', body: 0xf8fafc, tail: 0x4338ca, stripe: 0xc4b5fd, engine: 0x94a3b8 },
+  NW: { id: 'liv-nw', airlineId: 'NW', body: 0xf1f5f9, tail: 0x0f172a, stripe: 0x38bdf8, engine: 0x94a3b8 },
+  ML: { id: 'liv-ml', airlineId: 'ML', body: 0xecfdf5, tail: 0x047857, stripe: 0xa3e635, engine: 0x9ca3af },
 };
 
 /** 契約のない便（手動・ランダム生成）の塗装 */

@@ -17,6 +17,7 @@ import { createSimulation, stepSimulation } from '../../src/core/sim/simulation'
 import { checkInvariants } from '../../src/core/sim/invariants';
 import { createScenario, catalogDiff, SIM_MODEL_VERSION } from '../../src/core/scenario/scenario';
 import { buildTypeTable } from '../../src/core/sim/aircraftTypes';
+import { placeFacility } from '../../src/core/layout/operations';
 
 const NOW = '2026-11-10T00:00:00Z';
 const opts = { fallbackCompany: createSandboxCompany() };
@@ -26,6 +27,19 @@ function baseProject(extra: Partial<Parameters<typeof buildProject>[0]> = {}): P
 }
 
 describe('プロジェクトの保存形式', () => {
+  it('建物内設備の親・階情報を保存して復元する', () => {
+    const layout = createSampleAirport();
+    const terminal = Object.values(layout.facilities).find((f) => f.kind === 'terminal')!;
+    const placed = placeFacility(layout, 'baggageSort', terminal.origin, { parentFacilityId: terminal.id, floorIndex: -1 });
+    expect(placed.ok).toBe(true);
+    if (!placed.ok) throw new Error('建物内施設を配置できませんでした');
+    const p = baseProject({ layout: placed.layout });
+    const restored = validateProject(serializeProject(p), opts);
+    expect(restored.ok).toBe(true);
+    const facility = Object.values(restored.project!.layout.facilities).find((f) => f.parentFacilityId === terminal.id);
+    expect(facility).toMatchObject({ kind: 'baggageSort', parentFacilityId: terminal.id, floorIndex: -1 });
+  });
+
   it('保存 → 読み込みで同じ内容に戻り、4 つの版（保存形式・カタログ・アセット・シミュレーション）を別々に持つ', () => {
     const p = baseProject({ scenarios: [createScenario({ id: 'sc_1', name: '基準', createdAt: NOW, layout: createSampleAirport(), company: createSandboxCompany(), seed: 's', durationHours: 2 })] });
     expect(p.versions).toEqual({ format: PROJECT_FORMAT_VERSION, layoutSchema: SCHEMA_VERSION, catalog: CATALOG_VERSION, assets: expect.any(String), simModel: SIM_MODEL_VERSION });

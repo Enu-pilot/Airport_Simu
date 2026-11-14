@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { bearingToSceneYawRad, tilesToM, worldPolyToScene, worldToScene } from '../../core/geometry/frames';
-import { type AirportLayout, type Facility, type FacilityKind } from '../../core/model/types';
-import { elevationOf, facilityLevel, levelOf } from '../../core/model/levels';
+import { type AirportLayout, type Facility } from '../../core/model/types';
+import { elevationOf, facilityLevel, facilityVerticalRange, levelOf } from '../../core/model/levels';
 import { facilityDims, standDims } from '../../core/layout/footprint';
 import { bandSurface, roadBandSurface, roadDrawWidthM, runwaySurfaces, taxiwayBandSurface } from '../../core/layout/surfaces';
 import { resolveType, type AircraftType } from '../../core/sim/aircraftTypes';
@@ -29,22 +29,6 @@ import { daylight } from '../daylight';
 
 /** Map フレームのタイル座標 → m（位置は World → Map を frames.ts で変換してから使う） */
 const w = tilesToM;
-
-/** 施設の高さ（m、ゲームの表示用の値） */
-const FACILITY_HEIGHT: Partial<Record<FacilityKind, number>> = {
-  terminal: 18,
-  tower: 45,
-  hangar: 24,
-  maintenance: 14,
-  fuelFarm: 10,
-  fireStation: 9,
-  gseBase: 6,
-  baggageSort: 10,
-  serviceArea: 6,
-  parking: 3,
-  gate: 6,
-  apron: 0.2,
-};
 
 const UNIT_COLOR3D: Record<UnitKind, number> = {
   apronBus: 0x2b8cff,
@@ -270,17 +254,41 @@ export class Scene3D {
         0,
       );
     }
-    for (const f of Object.values(layout.facilities)) this.addFacility(f);
+    const interiorHosts = new Set(Object.values(layout.facilities).flatMap((f) => f.parentFacilityId ? [f.parentFacilityId] : []));
+    for (const f of Object.values(layout.facilities)) {
+      if (f.parentFacilityId) this.addInteriorFacility(f, layout.facilities[f.parentFacilityId]);
+      else this.addFacility(f, interiorHosts.has(f.id));
+    }
+    for (const link of Object.values(layout.terminalLinks ?? {})) {
+      if (link.kind !== 'elevatedWalkway' || link.buildState === 'planned') continue;
+      const from = layout.terminalAreas[link.fromAreaId];
+      const to = layout.terminalAreas[link.toAreaId];
+      if (!from || !to) continue;
+      const path = new THREE.LineCurve3(
+        new THREE.Vector3(w(from.origin.x + from.w / 2), link.elevationM ?? 36, w(from.origin.y + from.h / 2)),
+        new THREE.Vector3(w(to.origin.x + to.w / 2), link.elevationM ?? 36, w(to.origin.y + to.h / 2)),
+      );
+      const mesh = new THREE.Mesh(
+        new THREE.TubeGeometry(path, 1, (link.widthM ?? 6) / 2, 8, false),
+        new THREE.MeshLambertMaterial({ color: 0x7fdbff, transparent: link.buildState !== 'operational', opacity: link.buildState === 'operational' ? 0.85 : 0.4 }),
+      );
+      mesh.userData.entityId = link.id;
+      this.staticGroup.add(mesh);
+    }
   }
 
-  private addFacility(f: Facility): void {
+  private addFacility(f: Facility, hasInterior: boolean): void {
     const d = facilityDims(f);
-    const levels = f.kind === 'terminal' ? Math.max(1, Number(f.props.levels ?? 1)) : 1;
-    const h = (FACILITY_HEIGHT[f.kind] ?? 5) * (f.kind === 'terminal' ? Math.max(1, levels * 0.6) : 1);
+    const vertical = facilityVerticalRange(f);
+    const h = vertical.maxM - vertical.minM;
     const g = new THREE.BoxGeometry(w(d.w) - 2, h, w(d.h) - 2);
-    const mat = new THREE.MeshLambertMaterial({ color: FACILITY_COLOR[f.kind] ?? 0x999999, transparent: f.buildState !== 'operational', opacity: f.buildState === 'operational' ? 1 : 0.45 });
+    const mat = new THREE.MeshLambertMaterial({
+      color: FACILITY_COLOR[f.kind] ?? 0x999999,
+      transparent: f.buildState !== 'operational' || hasInterior,
+      opacity: f.buildState !== 'operational' ? 0.45 : hasInterior ? 0.28 : 1,
+    });
     const m = new THREE.Mesh(g, mat);
-    m.position.set(w(f.origin.x + d.w / 2), facilityLevel(f) * 6 + h / 2, w(f.origin.y + d.h / 2));
+    m.position.set(w(f.origin.x + d.w / 2), vertical.minM + h / 2, w(f.origin.y + d.h / 2));
     m.userData.entityId = f.id;
     m.userData.layerLevels = [facilityLevel(f)];
     this.staticGroup.add(m);
@@ -290,6 +298,25 @@ export class Scene3D {
       cab.userData.layerLevels = [facilityLevel(f)];
       this.staticGroup.add(cab);
     }
+  }
+
+  private addInteriorFacility(f: Facility, parent: Facility | undefined): void {
+    if (!parent) return;
+    const d = facilityDims(f);
+    const width = Math.max(4, Math.min(w(d.w), 18));
+    const depth = Math.max(4, Math.min(w(d.h), 18));
+    const height = 3;
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(width, height, depth),
+      new THREE.MeshLambertMaterial({ color: FACILITY_COLOR[f.kind] ?? 0x999999, transparent: true, opacity: f.buildState === 'operational' ? 0.8 : 0.35 }),
+    );
+    mesh.position.set(
+      w(f.origin.x + d.w / 2),
+      facilityLevel(parent) * 6 + (f.floorIndex ?? 0) * 6 + height / 2,
+      w(f.origin.y + d.h / 2),
+    );
+    mesh.userData.entityId = f.id;
+    this.staticGroup.add(mesh);
   }
 
   // ------------------------------------------------------------ 動くもの（毎フレーム、シミュレーションの位置を読む）

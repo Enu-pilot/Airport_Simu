@@ -1,6 +1,6 @@
 import { distance } from '../geometry/vec';
 import type { Facility, NetNode, RoadClass, RoadConnectorKind, RoadEdge } from './types';
-import { TILE_M } from './catalog';
+import { FACILITY_HEIGHT_M, TILE_M } from './catalog';
 
 /** Height used for rendering and routing when a node has only a discrete level. */
 export const DEFAULT_LEVEL_HEIGHT_M = 6;
@@ -9,7 +9,26 @@ export const MAX_MAP_LEVEL = 10;
 
 export const levelOf = (node: NetNode | undefined): number => node?.level ?? 0;
 export const elevationOf = (node: NetNode | undefined): number => node?.elevationM ?? levelOf(node) * DEFAULT_LEVEL_HEIGHT_M;
-export const facilityLevel = (facility: Facility): number => Number.isInteger(facility.props.level) ? Number(facility.props.level) : 0;
+export const facilityLevel = (facility: Facility): number =>
+  Number.isInteger(facility.mapLevel)
+    ? Number(facility.mapLevel)
+    : facility.kind === 'railStation' && Number.isInteger(facility.props.level)
+      ? Number(facility.props.level)
+      : 0;
+
+export function facilityVerticalRange(facility: Facility): { minM: number; maxM: number } {
+  const floorOffset = facility.parentFacilityId ? (facility.floorIndex ?? 0) * DEFAULT_LEVEL_HEIGHT_M : 0;
+  const minM = facilityLevel(facility) * DEFAULT_LEVEL_HEIGHT_M + floorOffset;
+  const heightM = facility.parentFacilityId
+    ? Math.min(FACILITY_HEIGHT_M[facility.kind] ?? 5, DEFAULT_LEVEL_HEIGHT_M * 0.6)
+    : facility.kind === 'terminal'
+    ? (FACILITY_HEIGHT_M.terminal ?? 18) * Math.max(1, Number(facility.props.levels ?? 1) * 0.6)
+    : FACILITY_HEIGHT_M[facility.kind] ?? 5;
+  const maxM = facility.parentFacilityId || facilityLevel(facility) >= 0
+    ? minM + heightM
+    : Math.min(minM + heightM, (facilityLevel(facility) + 1) * DEFAULT_LEVEL_HEIGHT_M - 0.2);
+  return { minM, maxM };
+}
 
 export function connectorFits(roadClass: RoadClass, kind: RoadConnectorKind | undefined): boolean {
   return (roadClass === 'walkway' && (kind === 'stairs' || kind === 'escalator' || kind === 'elevator')) ||

@@ -2,7 +2,7 @@ import { Rng, type RngState } from '../rng';
 import { compareIds } from '../model/ids';
 import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
-import { AIRLINES, DESTINATIONS, airlineDef, type FleetEntry } from './registry';
+import { AIRLINES, DESTINATIONS, HOME_COUNTRY_ID, airlineDef, routeAvailability, type FleetEntry } from './registry';
 import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
 import { checkGameSettings, otpAddOf, type GameSettings } from './game';
 import { checkAirlineEval, type AirlineEvalState } from './airlineEval';
@@ -221,7 +221,9 @@ export const REPORT_LIMIT = 120;
 
 export function createCompany(mode: CompanyState['mode'] = 'career', seed = 'company'): CompanyState {
   const airlines: Record<string, AirlineRelation> = {};
-  for (const a of AIRLINES) airlines[a.id] = { satisfaction: 60, lowDays: 0 };
+  for (const a of AIRLINES) {
+    if ((a.minimumAirportRating ?? 0) <= 50) airlines[a.id] = { satisfaction: 60, lowDays: 0 };
+  }
   return {
     version: 1,
     mode,
@@ -247,7 +249,9 @@ export function createCompany(mode: CompanyState['mode'] = 'career', seed = 'com
 }
 
 export function defaultFleets(): Record<string, FleetEntry[]> {
-  return Object.fromEntries(AIRLINES.map((a) => [a.id, a.fleet.map((e) => ({ ...e }))]));
+  return Object.fromEntries(
+    AIRLINES.filter((a) => (a.minimumAirportRating ?? 0) <= 50).map((a) => [a.id, a.fleet.map((e) => ({ ...e }))]),
+  );
 }
 
 /** 便の座席数: 航空会社の座席構成にあればその値、なければ機種の既定値 */
@@ -297,7 +301,7 @@ export function removeFleetEntry(c: CompanyState, airlineId: string, typeId: Air
 export function changeContractAircraft(c: CompanyState, contractId: string, typeId: AircraftTypeId): FleetResult {
   const k = c.contracts[contractId];
   if (!k) return { ok: false, reason: 'NOT_FOUND' };
-  if (!c.fleets[k.airlineId]?.some((e) => e.typeId === typeId)) return { ok: false, reason: 'NOT_IN_FLEET' };
+  if (!(c.fleets[k.airlineId] ?? airlineDef(k.airlineId).fleet).some((e) => e.typeId === typeId)) return { ok: false, reason: 'NOT_IN_FLEET' };
   k.typeId = typeId;
   return { ok: true };
 }
@@ -339,14 +343,23 @@ export function addContract(c: CompanyState, k: Omit<Contract, 'id' | 'numberBas
 
 // ---------------------------------------------------------------- プレイヤーの操作
 
-export type ContractActionResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'NOT_OFFERED' | 'NOT_ACTIVE' | 'UNSUPPORTED' | 'AIRLINE_REFUSED' | 'MIN_FREQUENCY' };
+export type ContractActionResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'NOT_OFFERED' | 'NOT_ACTIVE' | 'UNSUPPORTED' | 'AIRLINE_ROUTE_UNSUPPORTED' | 'INTERNATIONAL_PROCESSING_REQUIRED' | 'CAPACITY_INSUFFICIENT' | 'AIRLINE_REFUSED' | 'MIN_FREQUENCY' };
 
 /** 提案を受け入れる（翌運航日から有効）。supported = 空港で運航可能な機種か */
-export function acceptOffer(c: CompanyState, id: string, supported: boolean): ContractActionResult {
+export function acceptOffer(
+  c: CompanyState,
+  id: string,
+  supported: boolean,
+  routeStatus: 'available' | 'airline-unsupported' | 'international-processing-required' = 'available',
+  capacityStatus: 'acceptable' | 'conditional' | 'unacceptable' = 'acceptable',
+): ContractActionResult {
   const k = c.contracts[id];
   if (!k) return { ok: false, reason: 'NOT_FOUND' };
   if (k.status !== 'offered') return { ok: false, reason: 'NOT_OFFERED' };
   if (!supported) return { ok: false, reason: 'UNSUPPORTED' };
+  if (routeStatus === 'airline-unsupported') return { ok: false, reason: 'AIRLINE_ROUTE_UNSUPPORTED' };
+  if (routeStatus === 'international-processing-required') return { ok: false, reason: 'INTERNATIONAL_PROCESSING_REQUIRED' };
+  if (capacityStatus === 'unacceptable') return { ok: false, reason: 'CAPACITY_INSUFFICIENT' };
 
   // 新規契約の受諾時に、過去の撤退カウントをリセットする
   c.airlines[k.airlineId]!.lowDays = 0;
@@ -368,13 +381,19 @@ export function rejectOffer(c: CompanyState, id: string): ContractActionResult {
 /**
  * 便数の変更を依頼する。増便は航空会社の満足度が一定以上のときだけ応じる。減便は満足度が下がる。
  */
-export function changeFrequency(c: CompanyState, id: string, delta: 1 | -1): ContractActionResult {
+export function changeFrequency(
+  c: CompanyState,
+  id: string,
+  delta: 1 | -1,
+  capacityStatus: 'acceptable' | 'conditional' | 'unacceptable' = 'acceptable',
+): ContractActionResult {
   const k = c.contracts[id];
   if (!k) return { ok: false, reason: 'NOT_FOUND' };
   if (k.status !== 'active') return { ok: false, reason: 'NOT_ACTIVE' };
   const rel = c.airlines[k.airlineId]!;
   if (delta > 0) {
     if (rel.satisfaction < BALANCE.contracts.increaseMinSat - increaseMinSatRelief(c, k.airlineId)) return { ok: false, reason: 'AIRLINE_REFUSED' };
+    if (capacityStatus === 'unacceptable') return { ok: false, reason: 'CAPACITY_INSUFFICIENT' };
     k.perDay += 1;
   } else {
     if (k.perDay <= 1) return { ok: false, reason: 'MIN_FREQUENCY' };
@@ -408,17 +427,27 @@ function withRng<T>(c: CompanyState, fn: (rng: Rng) => T): T {
  * 新しい契約提案を作る。航空会社ごとに、空港評価が高いほど提案しやすい。
  * operableTypes = 現在の空港で運航できる機種（それ以外の機種の提案も「受け入れ不可」として届く）
  */
-export function generateOffers(c: CompanyState, operable: readonly AircraftTypeId[]): Contract[] {
+export function generateOffers(
+  c: CompanyState,
+  operable: readonly AircraftTypeId[],
+  originCountryId = HOME_COUNTRY_ID,
+  internationalPassengerProcessing = false,
+): Contract[] {
   const out: Contract[] = [];
   const open = () => contractsOf(c, 'offered').length;
   withRng(c, (rng) => {
     for (const a of AIRLINES) {
       if (open() >= BALANCE.offers.maxOpen) break;
-      const rel = c.airlines[a.id]!;
+      if (c.rating < (a.minimumAirportRating ?? 0)) continue;
+      const rel = (c.airlines[a.id] ??= { satisfaction: 60, lowDays: 0 });
+      c.fleets[a.id] ??= a.fleet.map((entry) => ({ ...entry }));
       const p = (BALANCE.offers.baseProb + BALANCE.offers.ratingProb * (c.rating / 100) * (rel.satisfaction / 60)) * offerBoost(c, a.id);
       if (rng.next() >= p) continue;
       const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && (k.status === 'active' || k.status === 'offered')).map((k) => k.destinationId));
-      const dests = DESTINATIONS.filter((d) => !served.has(d.id));
+      const dests = DESTINATIONS.filter((d) => {
+        if (served.has(d.id) || c.rating < (d.minimumAirportRating ?? 0)) return false;
+        return routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
+      });
       if (dests.length === 0) continue;
       const dest = dests[rng.int(0, dests.length - 1)]!;
       // 運航できる機種を優先しつつ、評価が高いと大型機の提案も来る
@@ -479,10 +508,10 @@ export function updateContracts(c: CompanyState, results: Record<string, Airline
   const events: string[] = [];
   const feeRatio = (c.fees.landing + c.fees.terminal + c.fees.parking) / 3;
   for (const a of AIRLINES) {
-    const rel = c.airlines[a.id]!;
     const r = results[a.id];
     const hasContract = contractsOf(c, 'active').some((k) => k.airlineId === a.id);
-    if (!hasContract && !r) continue;
+    if (!hasContract && !r && !c.airlines[a.id]) continue;
+    const rel = (c.airlines[a.id] ??= { satisfaction: 60, lowDays: 0 });
     let delta = 0;
     if (ev) {
       // 評価要素から計算した変化（定時率・乗り遅れ・料金は要素に含まれる）。欠航のペナルティだけ従来どおり別に引く

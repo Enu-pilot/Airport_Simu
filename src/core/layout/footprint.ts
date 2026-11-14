@@ -6,6 +6,7 @@ import type { WorldPoint } from '../geometry/frames';
 import { isFreeRunway } from '../model/types';
 import { runwayPolygon, runwayStripPolygon } from './runway';
 import { runwayAreas } from './runwayAreas';
+import { facilityLevel, facilityVerticalRange, elevationOf, levelOf } from '../model/levels';
 
 /** 回転後の幅・高さ */
 export function rotatedDims(w: number, h: number, rotation: Rotation): { w: number; h: number } {
@@ -94,6 +95,12 @@ export interface FootprintPart {
   level?: number;
   /** 階層接続設備は両端の階を占有検証する。 */
   levels?: number[];
+  /** Hosted equipment occupies a private floor namespace inside its parent building. */
+  spaceId?: string;
+  /** Physical vertical extent, used instead of discrete-level equality when checking collisions. */
+  vertical?: { minM: number; maxM: number };
+  /** Per-tile physical extents for sloped and vertical connectors. */
+  occupancy?: { tile: Tile; minM: number; maxM: number }[];
   tiles: Tile[];
   /** 実寸の多角形（自由形の滑走路だけ。World フレーム、凸）。ある部分は重なり判定を多角形で行う（`tiles` は重なるタイル） */
   poly?: WorldPoint[];
@@ -117,22 +124,46 @@ export function footprintOf(layout: AirportLayout, id: string): FootprintPart[] 
   if (t) return [{ ownerId: id, layer: 'taxiway', tiles: edgeTiles(layout.taxiNodes, t.from, t.to) }];
   const rd = layout.roads[id];
   if (rd) {
-    const fromLevel = layout.roadNodes[rd.from]?.level ?? 0;
-    const toLevel = layout.roadNodes[rd.to]?.level ?? 0;
+    const from = layout.roadNodes[rd.from];
+    const to = layout.roadNodes[rd.to];
+    const fromLevel = levelOf(from);
+    const toLevel = levelOf(to);
+    const tiles = edgeTiles(layout.roadNodes, rd.from, rd.to);
+    const fromElevation = elevationOf(from);
+    const toElevation = elevationOf(to);
     const layer: FootprintLayer = rd.roadClass === 'public' ? 'roadPublic' : rd.roadClass === 'service' ? 'roadService' : rd.roadClass === 'rail' ? 'rail' : rd.roadClass === 'walkway' ? 'walkway' : 'fuelPipe';
+    const occupancy = from && to && fromLevel !== toLevel
+      ? tiles.map((tile, index) => {
+          if (from.pos.x === to.pos.x && from.pos.y === to.pos.y) {
+            return { tile, minM: Math.min(fromElevation, toElevation) - 0.2, maxM: Math.max(fromElevation, toElevation) + 0.2 };
+          }
+          const ratio = tiles.length <= 1 ? 0.5 : index / (tiles.length - 1);
+          const elevation = fromElevation + (toElevation - fromElevation) * ratio;
+          return { tile, minM: elevation - 0.2, maxM: elevation + 0.2 };
+        })
+      : undefined;
     return [
       {
         ownerId: id,
         layer,
-        tiles: edgeTiles(layout.roadNodes, rd.from, rd.to),
-        ...(fromLevel === toLevel ? (fromLevel === 0 ? {} : { level: fromLevel }) : { levels: [fromLevel, toLevel] }),
+        tiles,
+        ...(fromLevel !== 0 ? { level: fromLevel } : {}),
+        ...(from && to && fromLevel === toLevel ? { vertical: { minM: Math.min(fromElevation, toElevation) - 0.2, maxM: Math.max(fromElevation, toElevation) + 0.2 } } : {}),
+        ...(occupancy ? { occupancy } : {}),
       },
     ];
   }
   const s = layout.stands[id];
   if (s) return [{ ownerId: id, layer: 'stand', tiles: standTiles(s) }];
   const f = layout.facilities[id];
-  if (f) return [{ ownerId: id, layer: FACILITY_SPECS[f.kind].layer, tiles: facilityTiles(f) }];
+  if (f) return [{
+    ownerId: id,
+    layer: f.parentFacilityId ? 'interior' : FACILITY_SPECS[f.kind].layer,
+    level: facilityLevel(f),
+    ...(f.parentFacilityId ? { spaceId: `facility:${f.parentFacilityId}:floor:${f.floorIndex ?? 0}` } : {}),
+    vertical: facilityVerticalRange(f),
+    tiles: facilityTiles(f),
+  }];
   return [];
 }
 

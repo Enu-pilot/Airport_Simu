@@ -4,6 +4,7 @@ import { BALANCE } from '../core/economy/balance';
 import { cityDemandCeiling } from '../core/economy/city';
 import { constructionCost as constructionCostOf, layoutValue, scaleFactor } from '../core/economy/construction';
 import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
+import { routeCapabilitiesForAirport } from '../core/economy/registry';
 import { applyCompletedProjects } from '../core/economy/expansion';
 import { sortedValues } from '../core/model/ids';
 import { Terrain } from '../core/model/types';
@@ -188,12 +189,12 @@ export function ExpansionPanel() {
   // 工事の影響: いまの配置と、工事がすべて終わった配置で、次の運航日の計画を比べる
   const impact = useMemo(() => {
     const access = analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor;
-    const now = analyzeDayPlan(planDayWithDemand(c, c.day, access), createContext(layout));
+    const now = analyzeDayPlan(planDayWithDemand(c, c.day, access, undefined, routeCapabilitiesForAirport(layout.countryId)), createContext(layout));
     const clone = structuredClone(c);
     for (const p of Object.values(clone.projects)) p.remaining = 0;
     const after = applyCompletedProjects(clone, layout) ?? layout;
     const afterAccess = analyzeAccess(after, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor;
-    const later = analyzeDayPlan(planDayWithDemand(c, c.day, afterAccess), createContext(after));
+    const later = analyzeDayPlan(planDayWithDemand(c, c.day, afterAccess, undefined, routeCapabilitiesForAirport(after.countryId)), createContext(after));
     const ops = (l: typeof layout) => ({
       runways: Object.values(l.runways).filter((r) => r.buildState === 'operational').length,
       stands: Object.values(l.stands).filter((s) => s.buildState === 'operational').length,

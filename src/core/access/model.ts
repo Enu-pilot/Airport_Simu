@@ -142,7 +142,7 @@ export function analyzeAccess(
   const city = opts.city;
   const eventTraffic = cityEventEffects(city, opts.day ?? -1).trafficMultiplier;
   const net = buildLandsideNetwork(layout);
-  const facilities = sortedValues(layout.facilities).filter((f) => f.buildState === 'operational');
+  const facilities = sortedValues(layout.facilities).filter((f) => f.buildState === 'operational' && !f.parentFacilityId);
   const terminals = facilities.filter((f) => f.kind === 'terminal');
   const terminalId = terminals[0]?.id ?? null;
   const entrances = net.entryRoads.length;

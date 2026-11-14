@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createSandboxCompany } from '../../../src/core/economy/company';
 import { analyzeDayPlan, type DayPlan } from '../../../src/core/economy/planning';
-import { moveEntity, placeFacility, placeTerminalArea, updateEntity } from '../../../src/core/layout/operations';
+import { addTerminalTransitLink, moveEntity, placeFacility, placeTerminalArea, updateEntity } from '../../../src/core/layout/operations';
 import { createSampleAirport } from '../../../src/core/sample/sampleAirport';
 import { buildProject, effectiveModels, restoreSimulation, serializeProject, validateProject } from '../../../src/core/io/project';
 import { checkPaxInvariants } from '../../../src/core/sim/invariants';
 import { createContext } from '../../../src/core/sim/context';
-import { setAreaClosed } from '../../../src/core/sim/passengers';
+import { addDepartureGroup, setAreaClosed } from '../../../src/core/sim/passengers';
 import { analyzeLayout } from '../../../src/core/validation/validate';
 import { passengerFlowIssues } from '../../../src/core/terminal/flowDiagnostics';
 import { addTurnaround, createSimulation, stepSimulation, type Simulation } from '../../../src/core/sim/simulation';
@@ -262,6 +262,54 @@ describe('複数ターミナルの旅客処理', () => {
     const passengers = groups(sim, dep.id);
     expect(passengers.every((group) => group.terminalId === second)).toBe(true);
     expect(passengers.every((group) => group.state === 'boarded' && group.boardedGate === gateA.id)).toBe(true);
+    expect(checkPaxInvariants(sim, true)).toEqual([]);
+  });
+
+  it('スポット変更で別ターミナルになっても連絡通路を歩いて新ゲートへ搭乗する', { timeout: 300_000 }, () => {
+    const { layout: initial, first, second, standA, standB } = twoTerminalAirport();
+    const departureArea = (terminalId: string) =>
+      Object.values(initial.terminalAreas).find((area) => area.terminalId === terminalId && area.kind === 'waiting')!;
+    const layout = must(addTerminalTransitLink(initial, {
+      kind: 'walkway',
+      fromAreaId: departureArea(second).id,
+      toAreaId: departureArea(first).id,
+      distanceM: 250,
+      travelSec: 120,
+      capacityPerHour: 1200,
+      bidirectional: true,
+      allowedZones: ['departure'],
+    })).layout;
+    const sim = createSimulation(layout, { seed: 'cross-terminal-stand-change', settings: manual });
+    const start = sim.state.now;
+    const ac = addTurnaround(sim, 'narrow180', start + 20 * 60, { departureAt: start + 5 * 3600, plan: contractPlan(standB) });
+    const dep = sim.state.flights[ac.departureFlightId]!;
+    runUntil(sim, () => dep.pax.gateId !== null, 60);
+    expect(sim.ctx.terminal.gates[dep.pax.gateId!]!.terminalId).toBe(second);
+    const passenger = addDepartureGroup(sim, dep.id, 50, sim.state.now)!;
+    passenger.steps = ['gate'];
+    passenger.stepIndex = 0;
+    passenger.securityCleared = true;
+    passenger.area = sim.ctx.terminal.gates[dep.pax.gateId!]!.boarding;
+    passenger.state = 'dwelling';
+    passenger.retryAt = sim.state.now + 3600;
+
+    expect(reassignStand(sim, ac.id, standA)).toEqual({ ok: true });
+    runUntil(sim, () => ac.standId === standA && dep.pax.gateId === Object.values(layout.facilities).find((f) => f.kind === 'gate' && f.props.standId === standA)!.id, 10 * 60);
+    runUntil(sim, () => passenger.targetTerminalId === first && passenger.state === 'walking', 10 * 60);
+    const crossing = groups(sim, dep.id).find((group) => group.targetTerminalId === first && group.state === 'walking')!;
+    const project = buildProject({ name: 'transfer', savedAt: '2026-11-14T00:00:00Z', layout, company: createSandboxCompany(), pin: null, scenarios: [], sim });
+    const saved = validateProject(serializeProject(project), { fallbackCompany: createSandboxCompany() });
+    expect(saved.errors).toEqual([]);
+    const restored = restoreSimulation(saved.project!.layout, saved.project!.sim!, effectiveModels(saved.project!.catalog));
+    expect(restored.sim.state.paxGroups[crossing.id]).toEqual(crossing);
+    runUntil(sim, () => ac.state === 'departed', 8 * 3600);
+
+    const passengers = groups(sim, dep.id);
+    expect(passengers.every((group) => group.terminalId === first)).toBe(true);
+    expect(passengers.every((group) => group.targetTerminalId === undefined)).toBe(true);
+    expect(passengers.every((group) => group.state === 'boarded' && group.boardedGate === dep.pax.gateId)).toBe(true);
+    expect(passenger.walkSec).toBeGreaterThan(120);
+    expect(passengers.some((group) => group.walkSec > 120)).toBe(true);
     expect(checkPaxInvariants(sim, true)).toEqual([]);
   });
 });

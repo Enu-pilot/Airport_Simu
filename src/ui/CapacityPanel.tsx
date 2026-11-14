@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { analyzeAccess } from '../core/access/model';
 import { analyzeAirportCapacity, previewContractCapacity, type CapacityMetric, type CapacityPreview, type CapacityStatus } from '../core/economy/capacity';
-import { AIRLINES, DESTINATIONS, airlineDef, destinationDef } from '../core/economy/registry';
+import { AIRLINES, DESTINATIONS, airlineDef, destinationDef, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { PLAN_ISSUE_LABEL } from '../i18n/ja';
 import { createContext } from '../core/sim/context';
 import { planDayWithDemand } from '../core/economy/planning';
@@ -36,7 +36,10 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
   if (simState && currentPaxByTerminal) for (const group of Object.values(simState.paxGroups)) {
     if (group.terminalId && !PAX_FINAL_STATES.includes(group.state)) currentPaxByTerminal[group.terminalId] = (currentPaxByTerminal[group.terminalId] ?? 0) + group.count;
   }
-  const plan = useMemo(() => planDayWithDemand(company, company.day, access.factor, ctx.types), [company, access.factor, ctx]);
+  const plan = useMemo(
+    () => planDayWithDemand(company, company.day, access.factor, ctx.types, routeCapabilitiesForAirport(layout.countryId)),
+    [company, access.factor, ctx, layout.countryId],
+  );
   const snapshot = analyzeAirportCapacity(company, ctx, closedGates, plan, currentPaxByTerminal);
   const [filter, setFilter] = useState('すべて');
   const [airlineId, setAirlineId] = useState(AIRLINES[0]?.id ?? '');

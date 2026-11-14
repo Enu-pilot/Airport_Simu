@@ -3,7 +3,7 @@ import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
 import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type DailyKpi, type DailyReport } from '../core/economy/company';
 import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
-import { AIRLINES, airlineDef, destinationDef } from '../core/economy/registry';
+import { AIRLINES, airlineDef, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { BALANCE } from '../core/economy/balance';
 import { forecastForDay } from '../core/sim/weather';
 import { analyzeAccess, type AccessMode } from '../core/access/model';
@@ -44,8 +44,9 @@ export function PlanPanel() {
   const layout = useLayout();
   const ctx = useMemo(() => createContext(layout), [layout]);
   const operable = operableTypes(ctx);
+  const routeCapabilities = routeCapabilitiesForAirport(layout.countryId);
   // 実際の運航と同じアクセス係数（前日の混雑を反映）で計画する
-  const plan = planDayWithDemand(c, c.day, analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor);
+  const plan = planDayWithDemand(c, c.day, analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor, ctx.types, routeCapabilities);
   const analysis = analyzeDayPlan(plan, ctx);
   const issueKeys = new Map<string, string[]>();
   for (const i of analysis.issues) for (const k of i.keys) issueKeys.set(k, [...(issueKeys.get(k) ?? []), PLAN_ISSUE_LABEL[i.code]]);
@@ -89,7 +90,11 @@ export function PlanPanel() {
               {active.map((k) => (
                 <tr key={k.id} data-testid={`contract-${k.id}`}>
                   <td>{airlineDef(k.airlineId).name}</td>
-                  <td>{destinationDef(k.destinationId).name}</td>
+                  <td>
+                    {destinationDef(k.destinationId).name}（{classifyRoute(routeCapabilities.originCountryId, destinationDef(k.destinationId)) === 'domestic' ? '国内線' : '国際線'}）
+                    {routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities) === 'international-processing-required' && <span className="ng-text"> 国際旅客処理未実装</span>}
+                    {routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities) === 'airline-unsupported' && <span className="ng-text"> 航空会社未対応</span>}
+                  </td>
                   <td className={operable.includes(k.typeId) ? '' : 'ng-text'}>
                     <select
                       value={k.typeId}
@@ -129,11 +134,16 @@ export function PlanPanel() {
           <table className="board" data-testid="offers">
             <tbody>
               {offers.map((k) => {
-                const ok = operable.includes(k.typeId);
+                const routeStatus = routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities);
+                const ok = operable.includes(k.typeId) && routeStatus === 'available';
                 return (
                   <tr key={k.id} data-testid={`offer-${k.id}`}>
                     <td>{airlineDef(k.airlineId).name}</td>
-                    <td>{destinationDef(k.destinationId).name}</td>
+                    <td>
+                      {destinationDef(k.destinationId).name}（{classifyRoute(routeCapabilities.originCountryId, destinationDef(k.destinationId)) === 'domestic' ? '国内線' : '国際線'}）
+                      {routeStatus === 'international-processing-required' && <span className="ng-text"> 国際旅客処理未実装</span>}
+                      {routeStatus === 'airline-unsupported' && <span className="ng-text"> 航空会社未対応</span>}
+                    </td>
                     <td className={ok ? '' : 'ng-text'}>
                       {resolveType(AIRCRAFT_TYPES, k.typeId).label}
                       {ok ? '' : '（未対応）'}
@@ -175,7 +185,9 @@ export function PlanPanel() {
                   <td>{AIRLINE_TYPE_LABEL[a.type]}</td>
                   <td>求める定時率 {Math.round(a.minOtp * 100)}%</td>
                   <td>料金への敏感さ {Math.round(a.priceSensitivity * 100)}%</td>
-                  <td className={c.airlines[a.id]!.satisfaction < BALANCE.contracts.withdrawSat ? 'ng-text' : ''}>満足度 {Math.round(c.airlines[a.id]!.satisfaction)}</td>
+                  <td className={(c.airlines[a.id]?.satisfaction ?? 0) < BALANCE.contracts.withdrawSat ? 'ng-text' : ''}>
+                    {c.airlines[a.id] ? `満足度 ${Math.round(c.airlines[a.id]!.satisfaction)}` : c.rating < (a.minimumAirportRating ?? 0) ? `参入条件: 空港評価 ${a.minimumAirportRating}以上` : '未参入'}
+                  </td>
                 </tr>
               ))}
             </tbody>

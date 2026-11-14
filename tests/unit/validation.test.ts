@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   addRoadPath,
   addTaxiwayPath,
+  deleteEntity,
   moveEntity,
   placeFacility,
   placeRunway,
   placeStand,
+  rotateEntity,
   updateEntity,
   type OpResult,
 } from '../../src/core/layout/operations';
@@ -32,6 +34,33 @@ function minimalAirport(): AirportLayout {
 }
 
 describe('配置エラー', () => {
+  it('立体占有では別階層を重複扱いせず、同階層の実干渉は検出する', () => {
+    let l = must(placeFacility(emptyLayout(), 'baggageSort', { x: 30, y: 30 }, { mapLevel: -1 })).layout;
+    l = must(placeFacility(l, 'baggageSort', { x: 30, y: 30 }, { mapLevel: 0 })).layout;
+    expect(codes(l)).not.toContain('OVERLAP');
+    l = must(placeFacility(l, 'baggageSort', { x: 30, y: 30 }, { mapLevel: 2 })).layout;
+    expect(codes(l)).not.toContain('OVERLAP');
+    l = must(placeFacility(l, 'baggageSort', { x: 30, y: 30 }, { mapLevel: 0 })).layout;
+    expect(codes(l)).toContain('OVERLAP');
+  });
+
+  it('建物内部設備は階ごとに同位置を使え、親の移動・回転・削除に追従する', () => {
+    let l = must(placeFacility(emptyLayout(), 'terminal', { x: 30, y: 30 }, { w: 12, h: 8, props: { levels: 3 } })).layout;
+    l = must(placeFacility(l, 'baggageSort', { x: 30, y: 30 }, { parentFacilityId: 'fac_1', floorIndex: 0 })).layout;
+    l = must(placeFacility(l, 'gseBase', { x: 30, y: 30 }, { parentFacilityId: 'fac_1', floorIndex: 1 })).layout;
+    expect(codesFor(l, 'fac_2')).not.toContain('FACILITY_INTERIOR_OUTSIDE');
+    expect(codesFor(l, 'fac_3')).not.toContain('FACILITY_INTERIOR_OUTSIDE');
+    expect(codes(l)).not.toContain('OVERLAP');
+
+    l = must(moveEntity(l, 'fac_1', { x: 5, y: 4 })).layout;
+    expect(l.facilities.fac_2!.origin).toEqual({ x: 35, y: 34 });
+    l = must(rotateEntity(l, 'fac_1')).layout;
+    expect(l.facilities.fac_2!.origin).not.toEqual({ x: 35, y: 34 });
+    l = must(deleteEntity(l, 'fac_1')).layout;
+    expect(l.facilities.fac_2).toBeUndefined();
+    expect(l.facilities.fac_3).toBeUndefined();
+  });
+
   it('施設の重複を検出する', () => {
     let l = must(placeFacility(emptyLayout(), 'hangar', { x: 10, y: 10 })).layout;
     l = must(placeFacility(l, 'tower', { x: 12, y: 12 })).layout;

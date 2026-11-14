@@ -173,7 +173,9 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
     const d = rotatedDims(f.w, f.h, f.rotation);
     return mapToWorld({ x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 });
   };
-  const operational = sortedValues(layout.facilities).filter((f) => f.buildState === 'operational');
+  // Interior facilities have no equipment-to-apron/service network yet; do not
+  // expose their capacity until an explicit operational connection exists.
+  const operational = sortedValues(layout.facilities).filter((f) => f.buildState === 'operational' && !f.parentFacilityId);
   const n = (f: (typeof layout.facilities)[string], k: string) => Math.max(0, Number(f.props[k] ?? 0));
   const bases = operational
     .filter((f) => f.kind === 'gseBase' || f.kind === 'maintenance')

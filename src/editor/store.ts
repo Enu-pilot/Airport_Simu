@@ -47,6 +47,8 @@ export interface ToolOptions {
   roadClass: RoadClass;
   roadLevel: number;
   roadCapacityPerHour: number;
+  interiorParentId: string | null;
+  interiorFloorIndex: number;
   runwayWidth: 30 | 45 | 60;
   buildState: BuildState;
   /** 滑走路ツールの方式。既定は従来形（8 方向のグリッド）。自由形は任意方位・実寸（Phase 12） */
@@ -269,6 +271,8 @@ export const editorStore = createStore<EditorState>(() => ({
     roadClass: 'public',
     roadLevel: 0,
     roadCapacityPerHour: 0,
+    interiorParentId: null,
+    interiorFloorIndex: 0,
     runwayWidth: 45,
     buildState: 'operational',
     runwayAlignment: 'grid8',

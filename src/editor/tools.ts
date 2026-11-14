@@ -316,6 +316,8 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
             w: Math.max(r.w, spec.minW),
             h: Math.max(r.h, spec.minH),
             buildState: options.buildState,
+            mapLevel: options.roadLevel,
+            ...(options.interiorParentId ? { parentFacilityId: options.interiorParentId, floorIndex: options.interiorFloorIndex } : {}),
             ...(kind === 'railStation' ? { props: { level: options.roadLevel } } : {}),
           }),
         );
@@ -325,6 +327,8 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
         placeFacility(layout, kind, centeredOrigin(hover, dims.w, dims.h), {
           rotation: options.rotation,
           buildState: options.buildState,
+          mapLevel: options.roadLevel,
+          ...(options.interiorParentId ? { parentFacilityId: options.interiorParentId, floorIndex: options.interiorFloorIndex } : {}),
           ...(kind === 'railStation' ? { props: { level: options.roadLevel } } : {}),
         }),
       );

@@ -42,7 +42,7 @@ import { isPeak, RUNWAY_HOURLY_CAPACITY, analyzeDayPlan, planDayWithDemand } fro
 import { airlineScorecard } from './airlineScore';
 import { stepAirlineEval } from './airlineEval';
 import { evaluateGoals } from './goals';
-import { airlineDef } from './registry';
+import { airlineDef, routeCapabilitiesForAirport } from './registry';
 import { aircraftNoisePoints, applyCityNoiseImpact, cityDemandCeiling, cityDemandFactor, cityEventEffects, expectedPassengers, growCity, isCityNightMovement } from './city';
 
 /**
@@ -519,7 +519,8 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   const cityStart = c.city ? { ...c.city } : null;
   const cityAccess = state.access?.factor ?? 1;
   const cityCeiling = cityStart ? cityDemandCeiling(cityStart, cityAccess) : 0;
-  const cityExpected = cityStart ? expectedPassengers(c, c.day, ctx.types) : 0;
+  const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId);
+  const cityExpected = cityStart ? expectedPassengers(c, c.day, ctx.types, routeCapabilities) : 0;
   const cityNoise = cityStart ? cityNoiseMetrics(state, ctx, e.periodStart, state.now) : null;
   const cityEvents = cityStart ? cityEventEffects(cityStart, c.day) : null;
   accrue(sim, state.now);
@@ -532,7 +533,7 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
     return t >= from && t < state.now;
   });
   // 評価カードは締めた日の実績・計画から一度だけ算出し、翌日の計画と混同しないようレビュー用に保持する。
-  const dayPlan = planDayWithDemand(c, c.day, state.access?.factor ?? 1, ctx.types);
+  const dayPlan = planDayWithDemand(c, c.day, state.access?.factor ?? 1, ctx.types, routeCapabilities);
   const scorecard = airlineScorecard({ company: c, ctx, records: recs, plan: dayPlan, analysis: analyzeDayPlan(dayPlan, ctx) });
   const evalBefore = structuredClone(c.airlineEval ?? {});
   const satisfactionBefore = Object.fromEntries(Object.entries(c.airlines).map(([id, rel]) => [id, rel.satisfaction]));
@@ -547,7 +548,7 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   kpi.airlineSatisfaction = airlineSatisfaction(c);
   c.rating = nextRating(c.rating, kpi);
   kpi.rating = c.rating;
-  const offers = generateOffers(c, operableTypes(ctx));
+  const offers = generateOffers(c, operableTypes(ctx), routeCapabilities.originCountryId, routeCapabilities.internationalPassengerProcessing);
   for (const k of offers) log(state, `${airlineDef(k.airlineId).name} から新しい契約の提案があります`);
 
   const revenue: DailyReport['revenue'] = {};

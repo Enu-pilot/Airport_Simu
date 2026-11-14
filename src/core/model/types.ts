@@ -209,6 +209,12 @@ export interface Facility {
   h: number;
   rotation: Rotation;
   buildState: BuildState;
+  /** Map elevation, independent from a hosted building's floor index. Missing means ground level. */
+  mapLevel?: number;
+  /** Optional host building for equipment located inside a facility. */
+  parentFacilityId?: string;
+  /** Building floor: 0 is ground, negative is basement, positive is upper floors. */
+  floorIndex?: number;
   /** 種別ごとのプロパティ（catalog の PROP_SCHEMAS 参照） */
   props: Record<string, PropValue>;
 }
@@ -225,6 +231,7 @@ export type TerminalAreaKind =
   | 'arrivalCorridor'
   | 'baggageClaim'
   | 'hall'
+  | 'stairs'
   | 'escalator'
   | 'elevator'
   | 'shop'
@@ -251,7 +258,7 @@ export interface TerminalArea {
   props: Record<string, PropValue>;
 }
 
-export type TerminalTransitKind = 'walkway' | 'movingWalkway';
+export type TerminalTransitKind = 'walkway' | 'movingWalkway' | 'elevatedWalkway' | 'escalator' | 'elevator';
 /** Explicit passenger transport between area nodes in distinct terminals (separate from GateConnector). */
 export interface TerminalTransitLink {
   id: string;
@@ -262,7 +269,13 @@ export interface TerminalTransitLink {
   distanceM: number;
   /** End-to-end seconds for this connection segment. */
   travelSec: number;
+  /** Clear walking width (m); legacy links use the finite default derived by terminal/model.ts. */
+  widthM?: number;
   capacityPerHour?: number;
+  /** Deck floor height above ground (m). */
+  elevationM?: number;
+  /** Vertical clear span below the deck, reserved for aircraft (m). */
+  aircraftClearanceM?: number;
   bidirectional: boolean;
   buildState: BuildState;
   /** Passenger/security zones permitted to use this link. */
@@ -272,6 +285,7 @@ export interface TerminalTransitLink {
 /**
  * レイアウトの保存形式の版。
  * v3: 任意項目として階層/標高、交通エッジ、ターミナル間連絡設備を追加。
+ * TerminalTransitLink の寸法・標高は任意項目として後方互換の既定値を持つ。
  * 欠落した階層は地上として扱う。新しい交通情報を含むプロジェクトは外側の形式版で識別する（docs/21）。
  */
 export const SCHEMA_VERSION = 3;
@@ -279,6 +293,8 @@ export const SCHEMA_VERSION = 3;
 export interface AirportLayout {
   schemaVersion: number;
   name: string;
+  /** ISO-like country/region identifier for route classification; absent legacy data defaults to Japan. */
+  countryId?: string;
   site: Site;
   /** ID発行カウンタ（接頭辞ごと、単調増加） */
   counters: Record<string, number>;

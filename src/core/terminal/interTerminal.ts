@@ -1,6 +1,6 @@
 import type { AirportLayout, PaxZone, TerminalTransitLink } from '../model/types';
 import { sortedValues } from '../model/ids';
-import { buildTerminalModel, canMove, WALK_SPEED_MPS } from './model';
+import { buildTerminalModel, canMove, terminalLinkCapacityPerHour, WALK_SPEED_MPS } from './model';
 
 export interface TerminalTransferQuery {
   fromAreaId: string;
@@ -18,7 +18,7 @@ export interface TerminalTransferRoute {
   connectionIds: string[];
   travelSec: number;
   distanceM: number;
-  /** Bottleneck among explicit transfer-link capacities; null if a traversed link lacks capacity. */
+  /** Bottleneck among explicit capacities or finite width-derived legacy capacities. */
   capacityPerHour: number | null;
 }
 
@@ -33,11 +33,14 @@ export function findTerminalTransferRoute(layout: AirportLayout, q: TerminalTran
   if (!model.areas[q.fromAreaId] || !model.areas[q.toAreaId]) return null;
   const outgoing = new Map<string, Hop[]>();
   for (const [from, links] of Object.entries(model.links)) {
-    for (const link of links) (outgoing.get(from) ?? (outgoing.set(from, []), outgoing.get(from)!)).push({
-      to: link.to,
-      travelSec: link.lengthM / WALK_SPEED_MPS + link.travelSec,
-      distanceM: link.lengthM,
-    });
+    for (const link of links) {
+      if (link.transferLinkId) continue;
+      (outgoing.get(from) ?? (outgoing.set(from, []), outgoing.get(from)!)).push({
+        to: link.to,
+        travelSec: link.lengthM / WALK_SPEED_MPS + link.travelSec,
+        distanceM: link.lengthM,
+      });
+    }
   }
   const addConnection = (link: TerminalTransitLink, from: string, to: string) => {
     (outgoing.get(from) ?? (outgoing.set(from, []), outgoing.get(from)!)).push({
@@ -96,8 +99,8 @@ export function findTerminalTransferRoute(layout: AirportLayout, q: TerminalTran
   }
   const connectionIds = hops.flatMap((hop) => hop.connectionId ? [hop.connectionId] : []);
   const capacityPerHour = connectionIds.length === 0 ? null : connectionIds.reduce<number | null>((capacity, id) => {
-    const configured = layout.terminalLinks?.[id]?.capacityPerHour;
-    return capacity === null || configured === undefined ? null : Math.min(capacity, configured);
+    const link = layout.terminalLinks?.[id];
+    return capacity === null || !link ? null : Math.min(capacity, terminalLinkCapacityPerHour(link));
   }, Infinity);
   return {
     areas,

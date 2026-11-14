@@ -70,6 +70,7 @@ import { createAnalytics, stepAnalytics } from '../analytics/records';
 import type { CompanyState } from '../economy/company';
 import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
 import { analyzeDayPlan, planDayWithDemand } from '../economy/planning';
+import { routeCapabilitiesForAirport } from '../economy/registry';
 import { stepBaggage } from './baggage';
 import { createApronBusRuntime, stepApronBuses } from './apronBus';
 import { isCityNightMovement, nextCityMovementTime } from '../economy/city';
@@ -155,6 +156,7 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     flightPax: {},
     facilities: {},
     closedAreas: [],
+    terminalTransit: { hour: Math.floor((opts.startTime ?? SIM_START_SEC) / 3600), passengersByLink: {} },
     paxStats: { spawned: 0, boarded: 0, missed: 0, deplaned: 0, exited: 0, waitTotal: 0, walkTotal: 0, finished: 0 },
     units: {},
     tasks: {},
@@ -399,7 +401,7 @@ export function generateDaySchedule(sim: Simulation, day: number): void {
 function generateContractSchedule(sim: Simulation, day: number): void {
   const { state, ctx } = sim;
   // 需要にはアクセス係数（前日の混雑を反映）が掛かる。運航計画タブのプレビューも同じ値を使う
-  const plan = planDayWithDemand(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!), ctx.types);
+  const plan = planDayWithDemand(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!), ctx.types, routeCapabilitiesForAirport(ctx.layout.countryId));
   const analysis = analyzeDayPlan(plan, ctx, state.closures.gates);
   const earliest = state.now + 20 * 60;
   for (const p of plan.flights) {

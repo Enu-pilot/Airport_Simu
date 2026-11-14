@@ -6,7 +6,9 @@ import { createContext } from '../../src/core/sim/context';
 import { resolveType } from '../../src/core/sim/aircraftTypes';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 import { analyzeLayout } from '../../src/core/validation/validate';
+import { placeFacility } from '../../src/core/layout/operations';
 import type { AirportLayout } from '../../src/core/model/types';
+import { must } from './helpers';
 
 /** 12B-3a A4: 文脈・互換・経済・検証へのバスゲート/ランプバスの反映（バスがなければ従来と同一） */
 const gates = (l: AirportLayout) => Object.values(l.facilities).filter((f) => f.kind === 'gate');
@@ -22,6 +24,22 @@ function busLayout(buses = 2): AirportLayout {
 }
 
 describe('バスゲート・ランプバスの文脈', () => {
+  it('建物内 GSE 基地は地上アクセス網がないため運用資源に加算しない', () => {
+    const l = structuredClone(createSampleAirport());
+    const host = Object.values(l.facilities).find((f) => f.kind === 'terminal')!;
+    const before = airportUnits(l);
+    const nested = must(
+      placeFacility(l, 'gseBase', host.origin, {
+        parentFacilityId: host.id,
+        floorIndex: -1,
+        props: { staff: 100, apronBuses: 20 },
+      }),
+    ).layout;
+    expect(airportUnits(nested)).toEqual(before);
+    const internalBase = Object.values(nested.facilities).find((f) => f.parentFacilityId === host.id)!;
+    expect(createContext(nested).bases.some((b) => b.id === internalBase.id)).toBe(false);
+  });
+
   it('従来のレイアウト: busGates は空、基地にランプバスのキーなし', () => {
     const ctx = createContext(createSampleAirport());
     expect(ctx.busGates).toEqual([]);

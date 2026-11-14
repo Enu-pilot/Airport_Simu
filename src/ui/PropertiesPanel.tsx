@@ -19,6 +19,7 @@ import {
 } from '../core/model/types';
 import { distance } from '../core/geometry/vec';
 import { facilityDims, standEntry } from '../core/layout/footprint';
+import { facilityLevel } from '../core/model/levels';
 import { edgesOfNode } from '../core/layout/network';
 import {
   deleteEntity,
@@ -225,10 +226,13 @@ function EntityProperties({ layout, id }: { layout: AirportLayout; id: string })
 function TerminalTransitControls({ layout, areaId, readOnly }: { layout: AirportLayout; areaId: string; readOnly: boolean }) {
   const area = layout.terminalAreas[areaId];
   const [targetId, setTargetId] = useState('');
-  const [kind, setKind] = useState<TerminalTransitKind>('walkway');
+  const [kind, setKind] = useState<TerminalTransitKind>('elevatedWalkway');
   const [distanceM, setDistanceM] = useState(250);
   const [travelSec, setTravelSec] = useState(190);
   const [capacity, setCapacity] = useState(0);
+  const [widthM, setWidthM] = useState(6);
+  const [elevationM, setElevationM] = useState(36);
+  const [aircraftClearanceM, setAircraftClearanceM] = useState(33);
   const [bidirectional, setBidirectional] = useState(true);
   if (!area) return null;
   const candidates = Object.values(layout.terminalAreas)
@@ -241,8 +245,9 @@ function TerminalTransitControls({ layout, areaId, readOnly }: { layout: Airport
       const from = layout.terminalAreas[link.fromAreaId];
       const to = layout.terminalAreas[link.toAreaId];
       return <div key={link.id} className="operability" data-testid={`terminal-link-${link.id}`}>
-        <strong>{link.kind === 'movingWalkway' ? '動く歩道' : '徒歩連絡通路'} · {from?.terminalId ?? '?'} → {to?.terminalId ?? '?'}</strong>
-        <div>{link.distanceM} m · {link.travelSec} 秒 · {link.bidirectional ? '双方向' : '片方向'} · {link.capacityPerHour ?? '未設定'} 人/時</div>
+        <strong>{TERMINAL_TRANSIT_LABEL[link.kind]} · {from?.terminalId ?? '?'} → {to?.terminalId ?? '?'}</strong>
+        <div>{link.distanceM} m · {link.travelSec} 秒 · 幅 {link.widthM ?? 6} m · 標高 {link.elevationM ?? 36} m · 航空機クリアランス {link.aircraftClearanceM ?? 33} m</div>
+        <div>{link.bidirectional ? '双方向' : '片方向'} · {(link.capacityPerHour ?? Math.floor((link.widthM ?? 6) * 200)).toLocaleString()} 人/時</div>
         <div className="muted small">利用区域: {link.allowedZones.map((zone) => ZONE_LABEL[zone]).join('、')} · {BUILD_STATE_LABEL[link.buildState]}</div>
         {!readOnly && <button className="danger" onClick={() => applyOp(deleteTerminalTransitLink(layout, link.id))}>連絡設備を撤去</button>}
       </div>;
@@ -254,16 +259,30 @@ function TerminalTransitControls({ layout, areaId, readOnly }: { layout: Airport
           {candidates.map((target) => <option key={target.id} value={target.id}>{layout.facilities[target.terminalId]?.name ?? target.terminalId} · {target.name || target.id} ({ZONE_LABEL[target.zone]})</option>)}
         </select>
       </Field>
-      <Field label="設備"><select value={kind} onChange={(e) => setKind(e.target.value as TerminalTransitKind)}><option value="walkway">徒歩連絡通路</option><option value="movingWalkway">動く歩道</option></select></Field>
+      <Field label="設備"><select value={kind} onChange={(e) => setKind(e.target.value as TerminalTransitKind)}>{Object.entries(TERMINAL_TRANSIT_LABEL).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field>
       <Field label="距離 (m)"><NumberInput value={distanceM} min={1} max={100000} onCommit={setDistanceM} /></Field>
       <Field label="移動時間 (秒)"><NumberInput value={travelSec} min={1} max={86400} onCommit={setTravelSec} /></Field>
-      <Field label="能力 (人/時、0=未算出)"><NumberInput value={capacity} min={0} max={1000000} onCommit={setCapacity} /></Field>
+      <Field label="幅 (m)"><NumberInput value={widthM} min={1} max={100} onCommit={setWidthM} /></Field>
+      <Field label="輸送能力 (人/時、0=幅から算出)"><NumberInput value={capacity} min={0} max={1000000} onCommit={setCapacity} /></Field>
+      {kind === 'elevatedWalkway' && <>
+        <Field label="通路階の高さ (m)"><NumberInput value={elevationM} min={1} max={200} onCommit={setElevationM} /></Field>
+        <Field label="航空機クリアランス (m)"><NumberInput value={aircraftClearanceM} min={1} max={200} onCommit={setAircraftClearanceM} /></Field>
+        <div className="muted small">橋脚のないクリアスパンとして扱い、通路下の航空機経路は既存の地上ネットワークを維持します。</div>
+      </>}
       <label className="prop-field"><span className="prop-label">方向</span><select value={bidirectional ? 'both' : 'oneWay'} onChange={(e) => setBidirectional(e.target.value === 'both')}><option value="both">双方向</option><option value="oneWay">選択元から片方向</option></select></label>
-      <button className="primary" disabled={!targetId} onClick={() => applyOp(addTerminalTransitLink(layout, { kind, fromAreaId: areaId, toAreaId: targetId, distanceM, travelSec, ...(capacity > 0 ? { capacityPerHour: capacity } : {}), bidirectional, allowedZones: [area.zone], name: kind === 'movingWalkway' ? '動く歩道' : '連絡通路' }))} data-testid="terminal-link-create">連絡設備を建設</button>
+      <button className="primary" disabled={!targetId} onClick={() => applyOp(addTerminalTransitLink(layout, { kind, fromAreaId: areaId, toAreaId: targetId, distanceM, travelSec, widthM, ...(capacity > 0 ? { capacityPerHour: capacity } : {}), ...(kind === 'elevatedWalkway' ? { elevationM, aircraftClearanceM } : {}), bidirectional, allowedZones: [area.zone], name: TERMINAL_TRANSIT_LABEL[kind] }))} data-testid="terminal-link-create">連絡設備を建設</button>
     </div>}
     {!candidates.length && <div className="muted">接続できる別ターミナルの同一区域エリアがありません。対象側のエリアを先に配置してください。</div>}
   </Section>;
 }
+
+const TERMINAL_TRANSIT_LABEL: Record<TerminalTransitKind, string> = {
+  walkway: '徒歩連絡通路',
+  movingWalkway: '動く歩道',
+  elevatedWalkway: '高架連絡通路',
+  escalator: 'エスカレーター',
+  elevator: 'エレベーター',
+};
 
 function ResourceClosureControl({ id, type }: { id: string; type: ReturnType<typeof entityTypeOf> }) {
   const mode = useEditor((s) => s.mode);
@@ -654,6 +673,13 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
       <>
         <NameField layout={layout} id={id} value={f.name} />
         <Info label="位置">{`(${f.origin.x}, ${f.origin.y})`}</Info>
+        {f.parentFacilityId ? (
+          <Info label="建物内配置">{`${layout.facilities[f.parentFacilityId]?.name || f.parentFacilityId} · ${f.floorIndex! < 0 ? `地下${-f.floorIndex!}階` : `${f.floorIndex! + 1}階`}`}</Info>
+        ) : f.kind !== 'gate' && (
+          <Field label="階層">
+            <NumberInput value={facilityLevel(f)} min={-5} max={10} onCommit={(v) => update(layout, id, { mapLevel: v })} testid="prop-mapLevel" />
+          </Field>
+        )}
         {spec.resizable ? (
           <>
             <Field label="幅（タイル）">

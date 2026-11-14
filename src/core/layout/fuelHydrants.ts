@@ -10,7 +10,7 @@ const touchesAtGround = (layout: AirportLayout, nodeId: string, tiles: { x: numb
 
 /** Stands whose ground-level connection reaches an operational fuel farm through fuel pipes. */
 export function hydrantConnectedStands(layout: AirportLayout): Set<string> {
-  const farms = Object.values(layout.facilities).filter((f) => f.kind === 'fuelFarm' && f.buildState === 'operational');
+  const farms = Object.values(layout.facilities).filter((f) => f.kind === 'fuelFarm' && f.buildState === 'operational' && !f.parentFacilityId);
   const edges = Object.values(layout.roads).filter((e) => e.roadClass === 'fuel' && e.buildState === 'operational' && roadEdgeLevelValid(e, layout.roadNodes[e.from], layout.roadNodes[e.to]));
   if (!farms.length || !edges.length) return new Set();
   const outgoing = new Map<string, string[]>();

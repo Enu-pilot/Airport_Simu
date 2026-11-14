@@ -3,6 +3,7 @@ import type { BuildState, FacilityKind, RoadClass, SizeClass } from '../core/mod
 import { BUILD_STATES } from '../core/model/types';
 import { actions, useEditor, type ToolId } from '../editor/store';
 import { facilityKindOf } from '../editor/tools';
+import { useLayout } from '../editor/store';
 import { RunwayToolOptions } from './RunwayPanels';
 import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, ROAD_CLASS_LABEL } from '../i18n/ja';
 
@@ -38,7 +39,7 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
   },
   {
     title: 'ターミナル内部（ドラッグで範囲）',
-    tools: (['entrance', 'checkIn', 'security', 'departureLobby', 'waiting', 'restroom', 'arrivalCorridor', 'baggageClaim', 'exit', 'hall', 'escalator', 'elevator', 'shop', 'restaurant'] as const).map((k) => ({
+    tools: (['entrance', 'checkIn', 'security', 'departureLobby', 'waiting', 'restroom', 'arrivalCorridor', 'baggageClaim', 'exit', 'hall', 'stairs', 'escalator', 'elevator', 'shop', 'restaurant'] as const).map((k) => ({
       id: `area:${k}` as ToolId,
       label: AREA_KIND_LABEL[k],
       hint: 'ターミナルの中でドラッグして範囲を指定（表示中の階に配置）',
@@ -78,6 +79,7 @@ export function Toolbox() {
   const level = useEditor((s) => s.interiorLevel);
   const interior = useEditor((s) => s.overlays.interior);
   const mapLevel = useEditor((s) => s.mapLevel);
+  const layout = useLayout();
   const rotatable = tool === 'stand' || (kind !== null && !FACILITY_SPECS[kind].dragPlace);
 
   return (
@@ -104,12 +106,29 @@ export function Toolbox() {
       <div className="tool-options">
         <div className="tool-group-title">配置オプション</div>
         <label>
-          交通レイヤ表示・敷設階
+          交通・独立施設の階層
           <select value={mapLevel} onChange={(e) => actions.setMapLevel(e.target.value === 'all' ? 'all' : Number(e.target.value))} data-testid="map-level">
             <option value="all">全レイヤ</option>
             {Array.from({ length: 16 }, (_, i) => i - 5).map((l) => <option key={l} value={l}>{l === 0 ? '地上' : l < 0 ? `地下 ${-l}` : `高架 ${l}`}</option>)}
           </select>
         </label>
+        <label>
+          施設の配置先
+          <select value={options.interiorParentId ?? ''} onChange={(e) => actions.setOption('interiorParentId', e.target.value || null)} data-testid="facility-parent">
+            <option value="">独立施設</option>
+            {Object.values(layout.facilities).filter((f) => f.kind !== 'gate' && FACILITY_SPECS[f.kind].layer === 'building').sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)).map((f) => (
+              <option key={f.id} value={f.id}>{f.name || f.kind} · {f.id}</option>
+            ))}
+          </select>
+        </label>
+        {options.interiorParentId && (
+          <label>
+            建物内の階
+            <select value={options.interiorFloorIndex} onChange={(e) => actions.setOption('interiorFloorIndex', Number(e.target.value))} data-testid="facility-floor">
+              {Array.from({ length: 8 }, (_, i) => i - 5).map((floor) => <option key={floor} value={floor}>{floor < 0 ? `地下${-floor}階` : `${floor + 1}階`}</option>)}
+            </select>
+          </label>
+        )}
         <label>
           ターミナル内部の階
           <span>

@@ -249,6 +249,9 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   GATE_ARRIVAL_NO_EXIT: (n) => `${n[0]} から降りた旅客が出口へ行けません`,
   TERMINAL_DEPARTURE_ROUTE: (n) => `${n[0]} は入口から利用可能なチェックイン・保安検査まで連続して移動できません`,
   GATE_ARRIVAL_NO_BAGGAGE_ROUTE: (n) => `${n[0]} の到着旅客が手荷物受取所を経由して出口へ行けません`,
+  FACILITY_INTERIOR_INVALID: (n, p) => `${n[0]} の建物内配置が無効です（階 ${p.floor ?? '不明'} または親建物・階層を確認してください）`,
+  FACILITY_INTERIOR_OUTSIDE: (n) => `${n[0]} が親建物 ${n[1]} の範囲外にあります`,
+  TERMINAL_LINK_CLEARANCE: (n, p) => `${n[0]} の連絡通路下の航空機クリアランスが不足しています（${p.clearance}m、必要 ${p.required}m）`,
   NO_RUNWAY: () => '滑走路がありません',
   NO_TOWER: () => '管制塔がありません',
   NO_GSE_BASE: () => 'GSE基地がありません（作業員・車両がいないため折り返し作業ができません）',
@@ -434,6 +437,7 @@ export const AREA_KIND_LABEL: Record<TerminalAreaKind, string> = {
   arrivalCorridor: '到着通路',
   baggageClaim: '手荷物受取所',
   hall: '通路・ホール',
+  stairs: '階段',
   escalator: 'エスカレーター',
   elevator: 'エレベーター',
   shop: '店舗',
@@ -625,6 +629,9 @@ export const CONTRACT_ACTION_LABEL: Record<Exclude<ContractActionResult, { ok: t
   NOT_OFFERED: '提案中の契約ではありません',
   NOT_ACTIVE: '契約中ではありません',
   UNSUPPORTED: 'この機種はこの空港では運航できません（滑走路・スポットの区分を確認してください）',
+  AIRLINE_ROUTE_UNSUPPORTED: '航空会社がこの路線種別を運航していません',
+  INTERNATIONAL_PROCESSING_REQUIRED: '国際旅客処理（出入国審査・税関）が未対応です',
+  CAPACITY_INSUFFICIENT: '追加便を受け入れる空港処理能力が不足しています（能力画面で不足箇所を確認してください）',
   AIRLINE_REFUSED: '航空会社の満足度が低いため、増便に応じてもらえません',
   MIN_FREQUENCY: 'これ以上減便できません（1日1便が最小）',
 };
@@ -640,6 +647,8 @@ export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
   SECURITY_OVERLOAD: '保安検査の処理能力を超える見込み',
   CHECKIN_OVERLOAD: 'チェックインの処理能力を超える見込み',
   GROUND_OVERLOAD: '地上支援の能力を超えて折り返しが重なる',
+  AIRLINE_ROUTE_UNSUPPORTED: '航空会社がこの路線種別を運航していない',
+  INTERNATIONAL_PROCESSING_REQUIRED: '国際旅客処理（出入国審査・税関）が未対応',
   OUTSIDE_HOURS: '運用時間・契約の時間帯に収まらない（計画できない便）',
 };
 

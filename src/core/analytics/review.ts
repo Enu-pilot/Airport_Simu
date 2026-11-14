@@ -10,6 +10,7 @@ import type { ScoreComponent, ScoreKey } from '../economy/airlineScore';
 import { evaluateDelayPair } from '../economy/delayEvaluation';
 import { resolveType } from '../sim/aircraftTypes';
 import { designatorsOf } from '../layout/designators';
+import { routeCapabilitiesForAirport } from '../economy/registry';
 
 /**
  * 1 日の振り返り（docs/14_management_rules.md §N）。日次の締めの直後に、既存の日報・運航の記録・障害の記録・
@@ -446,7 +447,7 @@ export function buildDayReview(input: ReviewInput): DayReview {
   }
   const flights = buildReviewFlights({ records, from: dayStart, to: end, types: sim.ctx.types, airlineAnalysis: airlineSnapshot, details });
   // Tomorrow's constraints are shown in their own section and are never used as today's evaluation reasons.
-  const tomorrowPlan = planDayWithDemand(company, company.day, access, sim.ctx.types);
+  const tomorrowPlan = planDayWithDemand(company, company.day, access, sim.ctx.types, routeCapabilitiesForAirport(sim.ctx.layout.countryId));
   const tomorrowAnalysis = analyzeDayPlan(tomorrowPlan, sim.ctx);
 
   return {

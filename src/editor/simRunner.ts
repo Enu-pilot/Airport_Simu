@@ -13,6 +13,8 @@ import type { AircraftTypeId } from '../core/sim/aircraftTypes';
 import type { RunwayConfig } from '../core/sim/types';
 import { applyFinishedProjects, editorStore, forgetCharges, formatCr, initialDayFlow, saveCompanyAutosave, showToast, type OpsState } from './store';
 import { settleDay } from '../core/economy/ops';
+import { previewContractCapacity, previewFrequencyCapacity } from '../core/economy/capacity';
+import { analyzeAccess } from '../core/access/model';
 import {
   acceptOffer,
   changeContractAircraft,
@@ -29,6 +31,7 @@ import {
   type OperatingHours,
 } from '../core/economy/company';
 import { createContext, operableTypes } from '../core/sim/context';
+import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { CONTRACT_ACTION_LABEL, FLEET_RESULT_LABEL, RESPONSE_LABEL } from '../i18n/ja';
 import {
   addDisruption,
@@ -466,7 +469,18 @@ export const companyActions = {
     const k = c.contracts[id];
     if (!k) return;
     const ctx = s.ops?.sim.ctx ?? createContext(s.history.present);
-    if (mutateCompany((x) => acceptOffer(x, id, operableTypes(ctx).includes(k.typeId)))) {
+    const route = routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilitiesForAirport(ctx.layout.countryId));
+    const closedGates = s.ops?.sim.state.closures.gates ?? [];
+    const access = s.ops?.sim.state.access?.factor
+      ?? analyzeAccess(ctx.layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor;
+    const capacity = previewContractCapacity(c, ctx, {
+      airlineId: k.airlineId,
+      destinationId: k.destinationId,
+      typeId: k.typeId,
+      perDay: k.perDay,
+      window: k.window,
+    }, closedGates, access).result;
+    if (mutateCompany((x) => acceptOffer(x, id, operableTypes(ctx).includes(k.typeId), route, capacity))) {
       showToast(s.ops ? '契約しました（翌日の運航計画から運航します）' : '契約しました');
     }
   },
@@ -474,7 +488,20 @@ export const companyActions = {
     mutateCompany((c) => rejectOffer(c, id));
   },
   changeFrequency(id: string, delta: 1 | -1): void {
-    mutateCompany((c) => changeFrequency(c, id, delta));
+    const s = get();
+    if (delta < 0) {
+      mutateCompany((c) => changeFrequency(c, id, delta));
+      return;
+    }
+    const c = s.ops?.sim.company ?? s.company;
+    const contract = c?.contracts[id];
+    if (!c || !contract) return;
+    const ctx = s.ops?.sim.ctx ?? createContext(s.history.present);
+    const closedGates = s.ops?.sim.state.closures.gates ?? [];
+    const access = s.ops?.sim.state.access?.factor
+      ?? analyzeAccess(ctx.layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor;
+    const capacity = previewFrequencyCapacity(c, ctx, id, closedGates, access).result;
+    mutateCompany((company) => changeFrequency(company, id, delta, capacity));
   },
   setFees(fees: Partial<FeeSettings>): void {
     mutateCompany((c) => setFees(c, fees));

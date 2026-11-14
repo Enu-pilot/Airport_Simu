@@ -358,6 +358,8 @@ export interface PaxGroup {
   flightId: string;
   direction: 'departure' | 'arrival';
   terminalId: string | null;
+  /** Spot/gate change destination while the passenger is walking between terminals. */
+  targetTerminalId?: string | null;
   count: number;
   bags: number;
   state: PaxState;
@@ -388,6 +390,16 @@ export interface PaxGroup {
   /** 空港アクセスの手段（アクセスを扱う運航のみ）と、到着時のアクセス処理を済ませたか */
   mode?: AccessMode | null;
   accessDone?: boolean;
+  /** Active elevated/inter-terminal link; the group finishes this segment before rerouting after a gate change. */
+  terminalLinkId?: string;
+  terminalLinkWaitingId?: string;
+  replanAfterTerminalLink?: boolean;
+}
+
+export interface TerminalTransitRuntime {
+  /** Simulation-hour bucket used to enforce each link's finite passengers/hour capacity. */
+  hour: number;
+  passengersByLink: Record<string, number>;
 }
 
 export interface FacilityRuntime {
@@ -527,6 +539,8 @@ export interface SimState {
   facilities: Record<string, FacilityRuntime>;
   /** 閉鎖中のターミナル内エリア（ID 順） */
   closedAreas: string[];
+  /** Per-link throughput reservations for the current simulation hour. */
+  terminalTransit?: TerminalTransitRuntime;
   paxStats: PaxStats;
   units: Record<string, GroundUnit>;
   tasks: Record<string, GroundTask>;

@@ -1,6 +1,7 @@
-import { FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M } from '../model/catalog';
+import { FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M } from '../model/catalog';
 import { runwayDimsProblem } from '../model/runwayReference';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
+import { COUNTRIES } from '../economy/registry';
 import { migrateLayout } from './migrate';
 
 export const SAVE_FORMAT = 'skyport-layout';
@@ -24,6 +25,7 @@ export function validateLayoutData(l: unknown): string[] {
   const layout = l as Partial<AirportLayout>;
   const errors: string[] = [];
   if (typeof layout.name !== 'string') errors.push('項目 name が不正です');
+  if (layout.countryId !== undefined && !COUNTRIES.some((country) => country.id === layout.countryId)) errors.push('項目 countryId が不正です');
   for (const k of RECORD_KEYS) {
     const v = layout[k];
     if (typeof v !== 'object' || v === null || Array.isArray(v)) errors.push(`項目 ${k} が不正です`);
@@ -90,6 +92,15 @@ export function checkRunwayFields(layout: AirportLayout, where: string): string[
   for (const f of Object.values(layout.facilities)) {
     const level = f.props?.level;
     if (level !== undefined && (!Number.isInteger(level) || Number(level) < -5 || Number(level) > 10)) errors.push(`${where}: 施設 ${f.id} の level が不正です`);
+    if (f.mapLevel !== undefined && (!Number.isInteger(f.mapLevel) || f.mapLevel < -5 || f.mapLevel > 10)) errors.push(`${where}: 施設 ${f.id} の mapLevel が不正です`);
+    if (f.parentFacilityId !== undefined) {
+      const parent = layout.facilities[f.parentFacilityId];
+      if (!parent || parent.id === f.id || FACILITY_SPECS[parent.kind]?.layer !== 'building') errors.push(`${where}: 施設 ${f.id} の parentFacilityId が不正です`);
+      if (!Number.isInteger(f.floorIndex) || (f.floorIndex ?? 0) < -5 || (f.floorIndex ?? 0) >= Number(parent?.props.levels ?? 1)) errors.push(`${where}: 施設 ${f.id} の floorIndex が不正です`);
+      if (parent && f.mapLevel !== undefined && f.mapLevel !== (parent.mapLevel ?? (parent.kind === 'railStation' ? Number(parent.props.level ?? 0) : 0))) {
+        errors.push(`${where}: 施設 ${f.id} の階層が親施設と一致しません`);
+      }
+    } else if (f.floorIndex !== undefined) errors.push(`${where}: 施設 ${f.id} に親がないのに floorIndex が設定されています`);
   }
   const transitLinks = layout.terminalLinks === undefined ? {} : isObj(layout.terminalLinks) ? layout.terminalLinks : {};
   if (layout.terminalLinks !== undefined && !isObj(layout.terminalLinks)) errors.push(`${where}: terminalLinks が不正です`);
@@ -97,10 +108,13 @@ export function checkRunwayFields(layout: AirportLayout, where: string): string[
     if (!isObj(raw)) { errors.push(`${where}: ターミナル連絡設備 ${id} が不正です`); continue; }
     const link = raw as Record<string, unknown>;
     if (link.id !== id) errors.push(`${where}: ターミナル連絡設備 ${id} の ID が一致しません`);
-    if (link.kind !== 'walkway' && link.kind !== 'movingWalkway') errors.push(`${where}: ターミナル連絡設備 ${id} の kind が不正です`);
+    if (!['walkway', 'movingWalkway', 'elevatedWalkway', 'escalator', 'elevator'].includes(String(link.kind))) errors.push(`${where}: ターミナル連絡設備 ${id} の kind が不正です`);
     if (typeof link.fromAreaId !== 'string' || typeof link.toAreaId !== 'string' || link.fromAreaId === link.toAreaId) errors.push(`${where}: ターミナル連絡設備 ${id} の接続エリアが不正です`);
     if (!isFin(link.distanceM) || link.distanceM <= 0 || !isFin(link.travelSec) || link.travelSec <= 0) errors.push(`${where}: ターミナル連絡設備 ${id} の距離・所要時間が不正です`);
     if (link.capacityPerHour !== undefined && (!isFin(link.capacityPerHour) || link.capacityPerHour <= 0)) errors.push(`${where}: ターミナル連絡設備 ${id} の capacityPerHour が不正です`);
+    if (link.widthM !== undefined && (!isFin(link.widthM) || link.widthM <= 0)) errors.push(`${where}: ターミナル連絡設備 ${id} の widthM が不正です`);
+    if (link.elevationM !== undefined && (!isFin(link.elevationM) || link.elevationM <= 0)) errors.push(`${where}: ターミナル連絡設備 ${id} の elevationM が不正です`);
+    if (link.aircraftClearanceM !== undefined && (!isFin(link.aircraftClearanceM) || link.aircraftClearanceM <= 0)) errors.push(`${where}: ターミナル連絡設備 ${id} の aircraftClearanceM が不正です`);
     if (typeof link.bidirectional !== 'boolean' || !['operational', 'underConstruction', 'planned'].includes(String(link.buildState))) errors.push(`${where}: ターミナル連絡設備 ${id} の状態が不正です`);
     if (!Array.isArray(link.allowedZones) || !link.allowedZones.length || link.allowedZones.some((zone) => zone !== 'landside' && zone !== 'departure' && zone !== 'arrival')) errors.push(`${where}: ターミナル連絡設備 ${id} の利用区域が不正です`);
   }
