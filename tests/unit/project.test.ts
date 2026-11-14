@@ -10,6 +10,7 @@ import {
   serializeProject,
   validateProject,
   PROJECT_FORMAT_VERSION,
+  PROJECT_FORMAT_VERSION_3,
   type ProjectFile,
 } from '../../src/core/io/project';
 import { CATALOG, CATALOG_VERSION } from '../../src/core/aircraft/catalog';
@@ -71,10 +72,22 @@ describe('プロジェクトの保存形式', () => {
     expect(placed.ok).toBe(true);
     if (!placed.ok) throw new Error('建物内施設を配置できませんでした');
     const p = baseProject({ layout: placed.layout });
+    expect(p.formatVersion).toBe(PROJECT_FORMAT_VERSION_3);
     const restored = validateProject(serializeProject(p), opts);
     expect(restored.ok).toBe(true);
     const facility = Object.values(restored.project!.layout.facilities).find((f) => f.parentFacilityId === terminal.id);
     expect(facility).toMatchObject({ kind: 'baggageSort', parentFacilityId: terminal.id, floorIndex: -1 });
+
+    p.formatVersion = PROJECT_FORMAT_VERSION;
+    p.versions.format = PROJECT_FORMAT_VERSION;
+    expect(validateProject(serializeProject(p), opts).errors.some((error) => error.includes('版 3'))).toBe(true);
+  });
+
+  it('独立した階層施設も保存形式 3 として扱う', () => {
+    const layout = createSampleAirport();
+    const maintenance = Object.values(layout.facilities).find((f) => f.kind === 'maintenance')!;
+    maintenance.mapLevel = -1;
+    expect(baseProject({ layout }).formatVersion).toBe(PROJECT_FORMAT_VERSION_3);
   });
 
   it('保存 → 読み込みで同じ内容に戻り、4 つの版（保存形式・カタログ・アセット・シミュレーション）を別々に持つ', () => {

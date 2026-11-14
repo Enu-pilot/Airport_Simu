@@ -4,7 +4,7 @@
 
 ## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜3）
 
-**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜3 を読み、4 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
+**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・階層施設／建物内設備・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜3 を読み、4 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
 
 `Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。`FlightRecord` の形式は変更しない。便別レビューの締め時点の原因・実時刻・機体状態・作業・施設名、航空会社評価要素・EMA/満足度前後・不満/要望は `DayReview` に集約し、日ごとの IndexedDB 履歴の `review` に保存する。会社状態やプロジェクトJSONには追加しないため、プロジェクト保存形式・シミュレーションモデルの版は上げない。古い保存済みレビューにない項目は推測せず欠落として表示する。
 

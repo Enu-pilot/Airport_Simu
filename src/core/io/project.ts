@@ -53,7 +53,12 @@ export function layoutUsesFormat2(l: AirportLayout): boolean {
 export function layoutUsesFormat3(l: AirportLayout): boolean {
   if (Object.values(l.roadNodes).some((n) => n.level !== undefined || n.elevationM !== undefined)) return true;
   if (Object.values(l.roads).some((e) => e.roadClass === 'walkway' || e.roadClass === 'fuel' || e.connectorKind !== undefined || e.capacityPerHour !== undefined || e.travelSec !== undefined)) return true;
-  if (Object.values(l.facilities).some((f) => f.kind === 'railStation' && f.props.level !== undefined)) return true;
+  if (Object.values(l.facilities).some((f) =>
+    f.mapLevel !== undefined ||
+    f.parentFacilityId !== undefined ||
+    f.floorIndex !== undefined ||
+    (f.kind === 'railStation' && f.props.level !== undefined),
+  )) return true;
   return Object.keys(l.terminalLinks ?? {}).length > 0;
 }
 
