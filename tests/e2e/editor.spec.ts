@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settingsAction } from './settings';
 
 // 初期カメラ（src/editor/store.ts）: 左上 (10, 20)、9px/タイル
 const CAM = { x: 10, y: 20, zoom: 9 };
@@ -29,6 +30,7 @@ const uncaught = new WeakMap<Page, string[]>();
 
 test.beforeEach(async ({ page }) => {
   const list: string[] = [];
+  page.on('dialog', (d) => void d.accept());
   page.on('pageerror', (e) => list.push(e.message));
   uncaught.set(page, list);
   await page.goto('/');
@@ -94,9 +96,9 @@ test('滑走路をドラッグで配置し、プロパティで長さを変更�
 });
 
 test('空の敷地 → サンプル空港を生成', async ({ page }) => {
-  await page.getByTestId('new-empty').click();
+  await settingsAction(page, 'new-empty');
   await expect(page.getByTestId('issues')).toContainText('滑走路がありません');
-  await page.getByTestId('load-sample').click();
+  await settingsAction(page, 'load-sample');
   await expect(errors(page)).toHaveText('0');
   await expect(warnings(page)).toHaveText('0');
 });

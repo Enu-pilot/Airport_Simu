@@ -203,11 +203,7 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
     const layoutStand = ctx.layout.stands[prospectiveStandInfo.id];
     const plannedGateId = prospectiveStandInfo.contact
       ? ctx.standGate[prospectiveStandInfo.id] ?? null
-      : layoutStand?.remoteBoarding === 'bus'
-        ? layoutStand.busGateId ?? null
-        : layoutStand?.remoteBoarding === 'none'
-          ? null
-          : pickBusGate(sim, f, 'boarding', prospectiveStandInfo.id);
+      : pickBusGate(sim, f, 'boarding', prospectiveStandInfo.id);
     const gate = plannedGateId ? ctx.terminal.gates[plannedGateId] : undefined;
     const validPlannedGate = !!gate?.terminalId && !!gate.boarding && !state.closures.gates.includes(plannedGateId!);
     const explicitBusGateValid = layoutStand?.remoteBoarding !== 'bus' || (validPlannedGate && ctx.busGates.includes(plannedGateId!));
@@ -313,15 +309,18 @@ function generateDeparturePax(sim: Simulation, f: Flight): void {
   const aircraft = state.aircraft[f.aircraftId];
   const stand = aircraft?.standId ? ctx.stands[aircraft.standId] : undefined;
   const remote = !!stand && !stand.contact;
-  if (remote && ((ctx.layout.stands[stand.id]?.remoteBoarding !== undefined && !p.gateId) || (state.bus && !p.gateId))) {
+  const terminalCount = Object.keys(ctx.terminal.byTerminal).length;
+  if (remote && !p.gateId && (ctx.layout.stands[stand.id]?.remoteBoarding !== undefined || !!state.bus)) {
+    p.generated = false;
     p.booked = 0;
-    if (!p.busFailure) {
+    const firstFailure = !p.busFailure;
+    p.busFailure ??= ctx.layout.stands[stand.id]?.remoteBoarding === 'none' ? 'disabled' : 'unconfigured';
+    if (firstFailure) {
       const reason = ctx.layout.stands[stand.id]?.remoteBoarding === 'none' ? '無効' : '未設定または利用不可';
       log(state, { t: state.now, kind: 'disruption', aircraftId: f.aircraftId, note: `リモートスポット ${stand.id} のバスゲートが${reason}のため出発旅客を生成しません` });
     }
     return;
   }
-  const terminalCount = Object.keys(ctx.terminal.byTerminal).length;
   const terminal = (p.gateId ? ctx.terminal.gates[p.gateId]?.terminalId : null) ?? (terminalCount === 1 ? ctx.paxTerminal : null);
   if (terminalCount === 0) return; // ターミナルのない空港では従来どおり旅客なし
   const seats = f.seats ?? resolveType(sim.ctx.types, state.aircraft[f.aircraftId]!.typeId).seats;
@@ -438,14 +437,24 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
     const busGate = applyBusArrival(sim, f, ac);
     if (busGate !== undefined) gateId = busGate;
   }
+  const assignedStand = ac.standId ? ctx.stands[ac.standId] : undefined;
+  if (assignedStand && !assignedStand.contact && !gateId && (
+    ctx.layout.stands[assignedStand.id]?.remoteBoarding !== undefined || !!state.bus
+  )) return;
   if (!p.generated) {
-    p.generated = true;
     const seats = f.seats ?? resolveType(ctx.types, ac.typeId).seats;
     const access = gateId ? ctx.terminal.gates[gateId] : undefined;
+    const stand = ac.standId ? ctx.stands[ac.standId] : undefined;
+    const remoteGateMissing = !!stand && !stand.contact && !gateId && (
+      ctx.layout.stands[stand.id]?.remoteBoarding !== undefined || !!state.bus
+    );
+    if (remoteGateMissing) {
+      p.busFailure ??= 'unconfigured';
+      return;
+    }
+    p.generated = true;
     withRng(state, (rng) => {
-      const stand = ac.standId ? ctx.stands[ac.standId] : undefined;
-      const remoteGateMissing = !!stand && !stand.contact && ((ctx.layout.stands[stand.id]?.remoteBoarding !== undefined && !gateId) || (!!state.bus && !gateId));
-      p.booked = !remoteGateMissing && (access?.terminalId || (stand?.contact && ctx.paxTerminal))
+      p.booked = (access?.terminalId || (stand?.contact && ctx.paxTerminal))
         ? (f.plannedPax ?? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min))))
         : 0;
       p.deplaneRemaining = p.booked;

@@ -1,5 +1,6 @@
 import { compareIds } from '../model/ids';
 import { gateMode } from '../model/gates';
+import { resolveBusGateForStand } from '../terminal/busGateAssignment';
 import { onBusTrip } from '../economy/ops';
 import {
   APRON_BUS_CAPACITY,
@@ -59,40 +60,20 @@ export function isBusFlight(f: Flight): boolean {
 
 // ---------------------------------------------------------------- バスゲートの選択
 
-/**
- * 便ごとに負荷の少ないバスゲートを選ぶ（故障・閉鎖中を除く。並び: そのゲートを使っている未完了の便の数 → スポットとの距離 → ID）。
- * need: 出発 = 搭乗口、到着 = 降機口があるゲートだけ
- */
+/** Plan preview and live operation use the same nearest-usable-gate rule. */
 export function pickBusGate(sim: Simulation, f: Flight, need: 'boarding' | 'deplane', standId: string): string | null {
-  const { state, ctx } = sim;
-  const cands = ctx.busGates.filter((g) => !state.closures.gates.includes(g) && !!ctx.terminal.gates[g]?.terminalId && !!ctx.terminal.gates[g]?.[need]);
-  if (cands.length === 0) return null;
-  const load = new Map<string, number>(cands.map((g) => [g, 0]));
-  for (const o of Object.values(state.flights)) {
-    const b = o.pax.bus;
-    if (!b?.gateId || o.id === f.id || !load.has(b.gateId)) continue;
-    const active = o.direction === 'departure' ? o.pax.boarding !== 'closed' : o.pax.deplaneRemaining > 0;
-    if (active) load.set(b.gateId, load.get(b.gateId)! + 1);
-  }
-  const sp = standPos(sim, standId);
-  const dist = (g: string) => {
-    const p = gatePos(sim, g);
-    return Math.hypot(p.x - sp.x, p.y - sp.y);
-  };
-  return [...cands].sort((a, b) => load.get(a)! - load.get(b)! || dist(a) - dist(b) || compareIds(a, b))[0]!;
+  void f;
+  void need;
+  const point = sim.ctx.network.nodes[sim.ctx.stands[standId]?.node ?? '']?.pos ?? null;
+  return resolveBusGateForStand(sim.ctx.layout, sim.ctx.terminal, standId, point, sim.ctx.busGates, sim.state.closures.gates).gateId;
 }
 
 function configuredBusGate(sim: Simulation, f: Flight, standId: string, need: 'boarding' | 'deplane'): { gateId: string | null; failure?: 'disabled' | 'unconfigured' | 'invalidGate' } {
-  const stand = sim.ctx.layout.stands[standId]!;
-  if (stand.remoteBoarding === 'none') return { gateId: null, failure: 'disabled' };
-  if (stand.remoteBoarding === 'bus') {
-    const id = stand.busGateId;
-    const gate = id ? sim.ctx.terminal.gates[id] : undefined;
-    const usable = !!id && sim.ctx.busGates.includes(id) && !sim.state.closures.gates.includes(id) && !!gate?.terminalId && !!gate[need];
-    return usable ? { gateId: id! } : { gateId: null, failure: id ? 'invalidGate' : 'unconfigured' };
-  }
-  const gateId = pickBusGate(sim, f, need, standId);
-  return { gateId, ...(gateId ? {} : { failure: 'unconfigured' as const }) };
+  void f;
+  void need;
+  const point = sim.ctx.network.nodes[sim.ctx.stands[standId]?.node ?? '']?.pos ?? null;
+  const assignment = resolveBusGateForStand(sim.ctx.layout, sim.ctx.terminal, standId, point, sim.ctx.busGates, sim.state.closures.gates);
+  return { gateId: assignment.gateId, ...(assignment.failure ? { failure: assignment.failure } : {}) };
 }
 
 /** 出発便: スポットがコンタクトでなければバスゲートを決める（搭乗開始前なら、使えなくなったゲートは選び直す）。p.gateId を設定する */
@@ -112,16 +93,17 @@ export function applyBusDeparture(sim: Simulation, f: Flight, ac: Aircraft): voi
     return;
   }
   const priorGate = p.bus?.gateId ?? null;
-  const explicitGate = stand.remoteBoarding === 'bus' ? stand.busGateId ?? null : null;
-  const usable = (g: string | null) => !!g && sim.ctx.busGates.includes(g) && !state.closures.gates.includes(g) && !!ctx.terminal.gates[g]?.terminalId && !!ctx.terminal.gates[g]?.boarding;
   let gateId = p.boarding === 'notStarted' ? null : priorGate;
+  let selectionFailure: 'disabled' | 'unconfigured' | 'invalidGate' | undefined;
   if (p.boarding === 'notStarted') {
-    gateId = explicitGate ? (usable(explicitGate) ? explicitGate : null) : stand.remoteBoarding === 'bus' ? null : pickBusGate(sim, f, 'boarding', stand.id);
+    const assignment = configuredBusGate(sim, f, stand.id, 'boarding');
+    gateId = assignment.gateId;
+    selectionFailure = assignment.failure;
   }
   if (!gateId) {
     const previousFailure = p.busFailure;
     delete p.bus;
-    p.busFailure = stand.remoteBoarding === 'bus' ? (explicitGate ? 'invalidGate' : 'unconfigured') : 'unconfigured';
+    p.busFailure = selectionFailure ?? 'unconfigured';
     p.gateId = null;
     if (p.busFailure !== previousFailure) log(state, { t: state.now, kind: 'disruption', aircraftId: f.aircraftId, note: `リモートスポット ${stand.id} の搭乗バスゲートが利用できません（${p.busFailure}）` });
     return;
@@ -145,22 +127,22 @@ export function applyBusArrival(sim: Simulation, f: Flight, ac: Aircraft): strin
     if (first) log(sim.state, { t: sim.state.now, kind: 'disruption', aircraftId: f.aircraftId, note: `リモートスポット ${stand.id} はバス搭乗を使用しません` });
     return null;
   }
-  if (!p.bus) {
+  if (!p.generated) {
     const configured = configuredBusGate(sim, f, stand.id, 'deplane');
     const gateId = configured.gateId;
     const previousFailure = p.busFailure;
-    if (configured.failure) p.busFailure = configured.failure;
-    else delete p.busFailure;
-    if (configured.failure && !sim.state.bus) {
+    if (configured.failure || !gateId) {
+      p.busFailure = configured.failure ?? 'unconfigured';
       p.gateId = null;
-      if (previousFailure !== configured.failure) log(sim.state, { t: sim.state.now, kind: 'disruption', aircraftId: f.aircraftId, note: `リモートスポット ${stand.id} の到着バスゲートが利用できません（${configured.failure}）` });
+      if (previousFailure !== p.busFailure) log(sim.state, { t: sim.state.now, kind: 'disruption', aircraftId: f.aircraftId, note: `リモートスポット ${stand.id} の到着バスゲートが利用できません（${p.busFailure}）` });
       return null;
     }
-    p.bus = { gateId, gateClosedAt: null, paxCarried: 0, waitPaxSec: 0 };
+    delete p.busFailure;
+    p.bus ??= { gateId, gateClosedAt: null, paxCarried: 0, waitPaxSec: 0 };
+    p.bus.gateId = gateId;
     p.gateId = gateId;
-    if (configured.failure && previousFailure !== configured.failure) log(sim.state, { t: sim.state.now, kind: 'disruption', aircraftId: f.aircraftId, note: `リモートスポット ${stand.id} の到着バスゲートが利用できません（${configured.failure}）` });
   }
-  return p.bus.gateId;
+  return p.bus?.gateId ?? null;
 }
 
 // ---------------------------------------------------------------- 出発便の搭乗（ゲートの締切・バス待ち）

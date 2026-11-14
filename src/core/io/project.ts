@@ -29,7 +29,7 @@ import { checkJournal, hasJournalData, type Journal } from '../analytics/journal
  */
 
 export const PROJECT_FORMAT = 'skyport-project';
-/** 基本の版。新しい項目（バスゲート・独立ゲート・ランプバス・運航中のバスの状態など）を使わないファイルはこの版で書く */
+/** 基本の版。新しい項目を使わないファイルはこの版で書く */
 export const PROJECT_FORMAT_VERSION = 1;
 /** 新しい項目を使うファイルの版（12B-3a）。このバージョンは 2 までを読める */
 export const PROJECT_FORMAT_VERSION_2 = 2;
@@ -64,7 +64,7 @@ export function formatVersionOf(p: { layout: AirportLayout; company: CompanyStat
   if (hasJournalData(p.journal)) return PROJECT_FORMAT_VERSION_2;
   for (const s of p.scenarios) if (layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) return PROJECT_FORMAT_VERSION_2;
   if (p.sim) {
-    if (hasKey(p.sim.state, 'bus') || hasKey(p.sim.state, 'wx') || closureLedgerUsed(p.sim.state) || companyUsesFormat2(p.sim.company)) return PROJECT_FORMAT_VERSION_2;
+    if (hasKey(p.sim.state, 'bus') || hasKey(p.sim.state, 'wx') || hasKey(p.sim.state, 'airlineStandHomes') || closureLedgerUsed(p.sim.state) || companyUsesFormat2(p.sim.company)) return PROJECT_FORMAT_VERSION_2;
   }
   return PROJECT_FORMAT_VERSION;
 }
@@ -271,6 +271,12 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
   }
   if (errors.length) return errors;
   const state = s as unknown as SimState;
+  if (s.airlineStandHomes !== undefined) {
+    const homes = s.airlineStandHomes;
+    if (!isObj(homes) || !Number.isInteger(homes.day) || !isObj(homes.byAirline) || Object.values(homes.byAirline).some((ids) =>
+      !Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || !layout.stands[id]) || new Set(ids).size !== ids.length,
+    )) errors.push('運航状態: 航空会社別ホームスポットの割当が不正です');
+  }
   const rawClosures = s.closures;
   if (!isObj(rawClosures) || (['taxiways', 'stands', 'gates'] as const).some((kind) => !Array.isArray(rawClosures[kind]) || (rawClosures[kind] as unknown[]).some((id) => typeof id !== 'string'))) errors.push('運航状態: 閉鎖対象（closures）が不正です');
   if (s.closureReasons !== undefined && !isValidClosureReasons(s.closureReasons, layout, rawClosures)) errors.push('運航状態: 閉鎖理由（closureReasons）が不正です');
@@ -386,6 +392,7 @@ export function restoreSimulation(
 ): { sim: Simulation; violations: string[]; repaired: string[] } {
   const ctx = createContext(structuredClone(layout), { types: buildTypeTable(models) });
   const sim: Simulation = { ctx, state: structuredClone(snap.state), company: snap.company ? structuredClone(snap.company) : null };
+  sim.state.airlineStandHomes ??= { day: Math.floor(sim.state.now / 86400), byAirline: {} };
   // 横断の占有が漏れた状態（修正前の版で保存されたもの）は、厳しくした R2 を通る前に修復する
   const repaired = repairCrossingState(sim.state);
   return { sim, violations: checkInvariants(sim), repaired };
@@ -418,6 +425,7 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     return fail();
   }
   const inputHadClosureReasons = isObj(data.sim) && isObj(data.sim.state) && hasKey(data.sim.state, 'closureReasons');
+  const inputHadAirlineStandHomes = isObj(data.sim) && isObj(data.sim.state) && hasKey(data.sim.state, 'airlineStandHomes');
 
   // 旧形式: レイアウトだけのファイル（Phase 1〜6 の「書き出し」）
   if (data.format === SAVE_FORMAT) {
@@ -515,6 +523,7 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
         const sc = raw.company === null || raw.company === undefined ? { errors: [], company: null } : checkCompany(raw.company, '運航中の会社');
         errors.push(...sc.errors);
         const state = raw.state as unknown as SimState;
+        state.airlineStandHomes ??= { day: Math.floor(state.now / 86400), byAirline: {} };
         hydrateClosureReasons(state);
         sim = { state, company: sc.company };
       }
@@ -550,11 +559,11 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
 
   const fv = formatVersionOf({ layout, company, scenarios, sim, journal });
   const simInputState = isObj(data.sim) && isObj(data.sim.state) ? data.sim.state as unknown as SimState : null;
-  const containsV2Input = data.journal !== undefined || layoutUsesFormat2(layout) || companyUsesFormat2(company) || scenarios.some((s) => layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) || !!simInputState && (hasKey(simInputState, 'bus') || hasKey(simInputState, 'wx') || (inputHadClosureReasons && closureLedgerUsed(simInputState)) || companyUsesFormat2(sim?.company));
+  const containsV2Input = data.journal !== undefined || layoutUsesFormat2(layout) || companyUsesFormat2(company) || scenarios.some((s) => layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) || !!simInputState && (hasKey(simInputState, 'bus') || hasKey(simInputState, 'wx') || inputHadAirlineStandHomes || (inputHadClosureReasons && closureLedgerUsed(simInputState)) || companyUsesFormat2(sim?.company));
   // 版 1 を名乗るのに 12B-3a の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）がある: 旧アプリが誤読しないための版の取り決めに反するので拒否する
   // 旧形式の閉鎖配列から検証中に構築した closureReasons は、入力ファイルにない移行後データなので v1 拒否判定には使わない。
   if (data.formatVersion === PROJECT_FORMAT_VERSION && containsV2Input) {
-    errors.push('保存形式の版（formatVersion）が 1 ですが、版 2 の項目（バス搭乗・連絡通路・ランプバス・ゲーム設定・天候など）を含んでいます。ファイルが壊れているか、手で編集された可能性があります');
+    errors.push('保存形式の版（formatVersion）が 1 ですが、版 2 の項目（バス搭乗・連絡通路・ランプバス・航空会社別ホームスポット・ゲーム設定・天候など）を含んでいます。ファイルが壊れているか、手で編集された可能性があります');
     return fail();
   }
   const project: ProjectFile = {

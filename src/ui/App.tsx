@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Viewport } from '../render/MapView';
 import { actions, editorStore, formatCr, newGame, setOpsPrefs, useEditor, useLayout } from '../editor/store';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
@@ -29,7 +29,8 @@ import { useSecondly } from './operate/Card';
 import { LevelChip } from './operate/WxView';
 import { effectiveWx } from '../core/sim/weather';
 import { StatusBar, Toast } from './StatusBar';
-import { useState } from 'react';
+import { ManagementPage, type ManagementSection } from './ManagementPage';
+import { CapacityPanel } from './CapacityPanel';
 
 const OVERLAY_LABEL: Record<keyof Overlays, string> = {
   grid: 'グリッド',
@@ -66,10 +67,22 @@ export function App() {
   }, []);
 
   const mode = useEditor((s) => s.mode);
+  const [page, setPage] = useState<MainPage>(mode === 'operate' ? 'operations' : 'construction');
+  const [managementSection, setManagementSection] = useState<ManagementSection>('plan');
+  const previousMode = useRef(mode);
+  useEffect(() => {
+    if (mode === previousMode.current) return;
+    previousMode.current = mode;
+    setPage(mode === 'operate' ? 'operations' : 'construction');
+  }, [mode]);
+  const openConstruction = (id?: string) => {
+    if (id) actions.select(id);
+    setPage('construction');
+  };
   return (
-    <div className={`app mode-${mode}`}>
-      <TopBar />
-      {mode === 'build' ? <BuildLayout /> : <OperateLayout />}
+    <div className={`app mode-${mode} page-${page}`}>
+      <TopBar page={page} setPage={setPage} onSavedProjects={() => { setManagementSection('project'); setPage('management'); }} />
+      {page === 'management' ? <ManagementPage onOpenConstruction={openConstruction} section={managementSection} onSectionChange={setManagementSection} /> : page === 'operations' ? <OperateLayout /> : <BuildLayout readOnly={mode === 'operate'} />}
       <DayReviewOverlay />
       <SkipDayOverlay />
       <HistoryOverlay />
@@ -78,12 +91,14 @@ export function App() {
   );
 }
 
+type MainPage = 'construction' | 'management' | 'operations';
+
 /** 建設モードの画面（従来のまま: 左にツールボックスと一覧、右にプロパティ、下にタブ） */
-function BuildLayout() {
+function BuildLayout({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <>
       <aside className="left">
-        <Toolbox />
+        {readOnly ? <div className="build-readonly"><strong>建設・確認</strong><span>運航中は空港構造を変更できません。運航を終了すると編集できます。</span></div> : <Toolbox />}
         <FacilityList />
       </aside>
       <main className="center">
@@ -101,7 +116,7 @@ function BuildLayout() {
   );
 }
 
-type BottomTab = 'issues' | 'plan' | 'finance' | 'access' | 'expansion' | 'catalog' | 'scenarios' | 'project';
+type BottomTab = 'issues' | 'plan' | 'capacity' | 'finance' | 'access' | 'expansion' | 'catalog' | 'scenarios' | 'project';
 
 function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
   return (
@@ -123,6 +138,7 @@ function BuildBottom() {
         tabs={[
           ['issues', '配置チェック'],
           ['plan', '運航計画'],
+          ['capacity', '空港能力'],
           ['finance', '経営'],
           ['access', 'アクセス'],
           ['expansion', '拡張計画'],
@@ -136,6 +152,8 @@ function BuildBottom() {
       <div className="tab-body">
         {tab === 'plan' ? (
           <PlanPanel />
+        ) : tab === 'capacity' ? (
+          <CapacityPanel />
         ) : tab === 'finance' ? (
           <FinancePanel />
         ) : tab === 'access' ? (
@@ -156,7 +174,7 @@ function BuildBottom() {
   );
 }
 
-function TopBar() {
+function TopBar({ page, setPage, onSavedProjects }: { page: MainPage; setPage: (p: MainPage) => void; onSavedProjects: () => void }) {
   const canUndo = useEditor((s) => s.history.past.length > 0);
   const canRedo = useEditor((s) => s.history.future.length > 0);
   const overlays = useEditor((s) => s.overlays);
@@ -169,6 +187,7 @@ function TopBar() {
   const prefs = useEditor((s) => s.opsPrefs);
   const hasReview = useEditor((s) => s.dayFlow.review !== null);
   const skipping = useEditor((s) => s.dayFlow.phase === 'skipping');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // 書き出し・読み込みはプロジェクト単位（レイアウト・会社・機種データ・シナリオ）。旧形式のレイアウトファイルも読める
   const download = () => {
@@ -176,22 +195,23 @@ function TopBar() {
     downloadText(fileName, json);
   };
   const upload = async (file: File) => {
+    if (!window.confirm(mode === 'operate' ? '読み込みで現在の運航状態を置き換えます。続けますか？' : '読み込んだ空港・会社で現在の内容を置き換えます。続けますか？')) return;
     projectActions.importJson(await file.text(), file.name);
+    setSettingsOpen(false);
   };
 
   return (
     <header className="top">
       <span className="brand">✈ SkyPort</span>
-      <span className="subtitle">{mode === 'build' ? '建設モード' : '運航モード'}</span>
+      <span className="subtitle">{page === 'construction' ? '建設' : page === 'management' ? '経営' : '運行'} · {mode === 'build' ? '編集可能' : '運航中'}</span>
       <CompanyBadge />
       {mode === 'operate' && <WxBadge />}
-      <div className="top-group">
-        {mode === 'build' ? (
-          <button className="primary" onClick={() => ops.start()} data-testid="start-ops">
-            ▶ 運航開始
-          </button>
-        ) : (
-          <>
+      <nav className="primary-nav" aria-label="ゲームページ">
+        <button className={page === 'construction' ? 'active' : ''} onClick={() => setPage('construction')} data-testid="page-construction">建設</button>
+        <button className={page === 'management' ? 'active' : ''} onClick={() => setPage('management')} data-testid="page-management">経営</button>
+        <button className={page === 'operations' ? 'active' : ''} onClick={() => mode === 'build' ? ops.start() : setPage('operations')} data-testid="page-operations">{mode === 'build' ? '運行開始' : '運行'}</button>
+      </nav>
+      {mode === 'operate' && <div className="top-group">
             <button onClick={() => ops.restart()} title="今日を締めて（結果を日報に記録して）次の日を 0:00 から始めます。同じ日をやり直すものではありません" data-testid="restart-ops">
               今日を締めて次の日へ
             </button>
@@ -205,10 +225,8 @@ function TopBar() {
             >
               ■ 建設モードに戻る
             </button>
-          </>
-        )}
-      </div>
-      {mode === 'build' && (
+      </div>}
+      {mode === 'build' && page === 'construction' && (
         <>
         <div className="top-group">
           <button onClick={actions.undo} disabled={!canUndo} title="Ctrl+Z" data-testid="undo">
@@ -218,49 +236,12 @@ function TopBar() {
             ↷ やり直し
           </button>
         </div>
-        <div className="top-group">
-          <button
-            onClick={() => window.confirm('新しいゲームを始めますか？（小さな飛行場・初期資金から。現在の空港と経営データは失われます）') && newGame('career')}
-            data-testid="new-career"
-          >
-            新しいゲーム（小さな飛行場から）
-          </button>
-          <button
-            onClick={() => window.confirm('サンドボックスを始めますか？（サンプル空港・潤沢な資金。現在の空港と経営データは失われます）') && newGame('sandbox')}
-            data-testid="new-sandbox"
-          >
-            サンドボックス
-          </button>
-          <button onClick={actions.loadSample} data-testid="load-sample" title="現在の資金で建設（キャリアでは建設費がかかる）">サンプル空港を生成</button>
-          <button onClick={actions.newEmpty} data-testid="new-empty">空の敷地</button>
           <button
             onClick={() => applyOp(setBuildState(layout, 'operational'))}
             title={career ? '計画中の施設をすべて着工する（工期を待って完成）' : '計画・建設中の施設をすべて運用中にする'}
           >
             {career ? '全施設を着工' : '全施設を完成'}
           </button>
-        </div>
-        <div className="top-group">
-          <button onClick={() => gameSetupUi.open('new')} title={GAME_UI.setupNewTitle} data-testid="new-game-setup">
-            {GAME_UI.setupNew}
-          </button>
-          <button onClick={() => gameSetupUi.open('settings')} title={GAME_UI.setupSettingsTitle} data-testid="tab-settings">
-            {GAME_UI.setupSettings}
-          </button>
-          <button onClick={download}>書き出し</button>
-          <button onClick={() => fileRef.current?.click()}>読み込み</button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".json,application/json"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void upload(f);
-              e.target.value = '';
-            }}
-          />
-        </div>
         </>
       )}
       <div className="top-group">
@@ -316,7 +297,26 @@ function TopBar() {
           </div>
         </details>
       </div>
-      {mode === 'operate' && <OpsNav />}
+      {mode === 'operate' && page === 'operations' && <OpsNav />}
+      <details className="settings-pop" open={settingsOpen} onToggle={(e) => setSettingsOpen(e.currentTarget.open)} data-testid="settings-menu">
+        <summary>⚙ メニュー</summary>
+        <div className="settings-menu-body">
+          <strong>ゲーム設定・保存</strong>
+          <div className="settings-menu-actions">
+            <button onClick={() => { if (!window.confirm(mode === 'operate' ? '運航を停止して新しいゲームを始めますか？現在の運航状態は失われます。' : '新しいゲームを始めますか？現在の空港と経営データは置き換わります。')) return; if (mode === 'operate') ops.stop(); newGame('career'); setPage('construction'); setSettingsOpen(false); }} data-testid="new-career">新しいゲーム</button>
+            <button onClick={() => { if (!window.confirm(mode === 'operate' ? '運航を停止してサンドボックスを始めますか？現在の運航状態は失われます。' : 'サンドボックスを始めますか？現在の空港と経営データは置き換わります。')) return; if (mode === 'operate') ops.stop(); newGame('sandbox'); setPage('construction'); setSettingsOpen(false); }} data-testid="new-sandbox">サンドボックス</button>
+            <button disabled={mode === 'operate'} onClick={() => { if (window.confirm('サンプル空港で現在の配置を置き換えますか？')) { actions.loadSample(); setSettingsOpen(false); } }} data-testid="load-sample">サンプル空港</button>
+            <button disabled={mode === 'operate'} onClick={() => { if (window.confirm('空の敷地で現在の空港を置き換えますか？')) { actions.newEmpty(); setSettingsOpen(false); } }} data-testid="new-empty">空の敷地</button>
+            <button onClick={() => { gameSetupUi.open('new'); setSettingsOpen(false); }} title={GAME_UI.setupNewTitle} data-testid="new-game-setup">新規ゲーム設定</button>
+            <button onClick={() => { gameSetupUi.open('settings'); setSettingsOpen(false); }} title={GAME_UI.setupSettingsTitle} data-testid="tab-settings">難易度・ルール</button>
+            <button onClick={download} data-testid="export-project">空港を保存</button>
+            <button onClick={() => fileRef.current?.click()} data-testid="import-project">空港を読み込む</button>
+            <button onClick={() => { onSavedProjects(); setSettingsOpen(false); }} data-testid="saved-projects">セーブデータ管理へ</button>
+          </div>
+          <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ''; }} />
+          <p className="muted small">ゲーム全体を置き換える操作は確認後に実行します。保存済みスロットは「経営 → プロジェクト・保存」で管理できます。</p>
+        </div>
+      </details>
     </header>
   );
 }

@@ -1,7 +1,7 @@
 import type { SimEvent } from '../../core/sim/types';
 
 /** カードに出さない記録（毎回出る状態変化・作業完了など）。全件は「イベント」オーバーレイ */
-const MINOR: readonly SimEvent['kind'][] = ['spawn', 'state', 'taskDone', 'finance', 'scheduleGenerated', 'boardingOpen', 'boardingClosed'];
+const MINOR: readonly SimEvent['kind'][] = ['spawn', 'state', 'taskDone', 'finance', 'scheduleGenerated', 'boardingOpen', 'boardingClosed', 'standAssigned'];
 export const EVENT_CARD_LIMIT = 8;
 
 export function importantEvents(events: readonly SimEvent[], limit = EVENT_CARD_LIMIT): SimEvent[] {

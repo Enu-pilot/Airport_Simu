@@ -405,7 +405,7 @@ function ReviewFlightDetail({ flight: f, review }: { flight: ReviewFlight; revie
 }
 
 function eventLabel(kind: string): string {
-  const labels: Record<string, string> = { hold: '待機', goAround: '着陸復行', diverted: 'ダイバート', cannotOperate: '運航不能', taskBlocked: '地上作業停止', taskDone: '地上作業完了', boardingOpen: '搭乗開始', boardingClosed: '搭乗締切', boardingOpened: '搭乗開始', flightLanded: '着陸', blockIn: '駐機開始', bagsReady: '手荷物受取開始', groundReady: '地上作業完了', blockOut: 'プッシュバック', takeoff: '離陸', paxMissed: '乗り遅れ', busRescue: 'バス救援', disruption: '障害' };
+  const labels: Record<string, string> = { hold: '待機', goAround: '着陸復行', diverted: 'ダイバート', cannotOperate: '運航不能', taskBlocked: '地上作業停止', taskDone: '地上作業完了', boardingOpen: '搭乗開始', boardingClosed: '搭乗締切', boardingOpened: '搭乗開始', flightLanded: '着陸', blockIn: '駐機開始', bagsReady: '手荷物受取開始', groundReady: '地上作業完了', blockOut: 'プッシュバック', takeoff: '離陸', paxMissed: '乗り遅れ', busRescue: 'バス救援', standAssigned: 'スポット割当', disruption: '障害' };
   return labels[kind] ?? kind;
 }
 

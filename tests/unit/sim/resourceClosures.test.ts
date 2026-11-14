@@ -75,6 +75,7 @@ describe('スポット・誘導路の使用停止', () => {
 
     const legacy = structuredClone(project);
     delete (legacy.sim!.state as typeof sim.state).closureReasons;
+    delete (legacy.sim!.state as typeof sim.state).airlineStandHomes;
     legacy.formatVersion = 1;
     legacy.versions.format = 1;
     const legacyImport = validateProject(serializeProject(legacy), opts);

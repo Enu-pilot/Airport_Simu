@@ -9,6 +9,7 @@ import { BALANCE } from './balance';
 import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
 import { airlineDef, destinationDef } from './registry';
 import { cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedPassengers } from './city';
+import { resolveBusGateForStand } from '../terminal/busGateAssignment';
 
 /**
  * 運航計画（docs/14_management_rules.md §4）。
@@ -171,7 +172,7 @@ export interface PlanIssue {
 }
 
 export interface PlanAnalysis {
-  assignments: Record<string, { standId: string | null; gateId: string | null; terminalId: string | null }>;
+  assignments: Record<string, { standId: string | null; gateId: string | null; terminalId: string | null; busGateId?: string | null }>;
   issues: PlanIssue[];
   /** 時間ごとの離着陸回数・出発旅客数（保安検査を通る時間帯）と、その処理能力 */
   hourly: { movements: number[]; depPax: number[] };
@@ -201,6 +202,8 @@ export interface PlanAnalysis {
 const SIZE_RANK: Record<SizeClass, number> = { S: 1, M: 2, L: 3 };
 
 function processingPerHour(ctx: SimContext, terminalId: string, kind: 'security' | 'checkIn'): number {
+  // Planned or in-construction terminals do not contribute operational throughput.
+  if (ctx.layout.facilities[terminalId]?.buildState !== 'operational') return 0;
   let cap = 0;
   for (const id of ctx.terminal.byTerminal[terminalId] ?? []) {
     const node = ctx.terminal.areas[id]!;
@@ -211,27 +214,6 @@ function processingPerHour(ctx: SimContext, terminalId: string, kind: 'security'
     cap += (servers * 3600) / sec;
   }
   return Math.round(cap);
-}
-
-/** バスゲート選択前の計画値。搭乗口があり、スポットから最短の運用中バスゲートを使う。 */
-function nearestBusTerminal(ctx: SimContext, standId: string): { terminalId: string | null; invalid: boolean } {
-  const stand = ctx.layout.stands[standId];
-  if (!stand || stand.remoteBoarding === 'none') return { terminalId: null, invalid: false };
-  if (stand.remoteBoarding === 'bus') {
-    const id = stand.busGateId;
-    const gate = id ? ctx.terminal.gates[id] : undefined;
-    const valid = !!id && ctx.busGates.includes(id) && !!gate?.terminalId && !!gate.boarding && !!gate.deplane;
-    return { terminalId: valid ? gate!.terminalId : null, invalid: !valid };
-  }
-  const node = ctx.network.nodes[ctx.stands[standId]?.node ?? ''];
-  if (!node) return { terminalId: null, invalid: false };
-  const candidates = ctx.busGates.filter((id) => !!ctx.terminal.gates[id]?.terminalId && !!ctx.terminal.gates[id]?.boarding && !!ctx.terminal.gates[id]?.deplane).map((id) => {
-    const gate = ctx.layout.facilities[id]!;
-    const distance = Math.hypot(gate.origin.x + 0.5 - node.pos.x, gate.origin.y + 0.5 - node.pos.y);
-    return { id, terminalId: ctx.terminal.gates[id]!.terminalId, distance };
-  }).filter((x) => x.terminalId !== null);
-  candidates.sort((a, b) => a.distance - b.distance || compareIds(a.id, b.id));
-  return { terminalId: candidates[0]?.terminalId ?? null, invalid: false };
 }
 
 /** 地上支援で同時に扱える折り返しの目安 */
@@ -245,7 +227,7 @@ export function turnaroundCapacity(ctx: SimContext): number {
   );
 }
 
-export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
+export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds: readonly string[] = []): PlanAnalysis {
   const operable = new Set(operableTypes(ctx));
   const issues: PlanIssue[] = [];
   const add = (code: PlanIssueCode, severity: PlanIssue['severity'], key: string, detail?: string) => {
@@ -278,16 +260,27 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
     }
     freeAt.set(s.id, f.departureAt + STAND_GAP_SEC);
     const gateId = ctx.standGate[s.id] ?? null;
-    // Contact gate terminal is authoritative. Remote stands use the nearest
-    // available bus-gate terminal for planning estimates; live dispatch balances load.
-    const busTerminal = gateId ? { terminalId: null, invalid: false } : nearestBusTerminal(ctx, s.id);
-    const explicitRemote = s.remoteBoarding !== undefined;
-    const terminalId = (gateId ? ctx.terminal.gates[gateId]?.terminalId : null) ?? busTerminal.terminalId ?? (explicitRemote ? null : ctx.paxTerminal);
-    assignments[f.key] = { standId: s.id, gateId, terminalId };
+    // A contact gate owns the passenger terminal. Remote stands use the shared
+    // preview/live selector, so their bus gate and terminal are fixed together.
+    const standPoint = ctx.network.nodes[ctx.stands[s.id]?.node ?? '']?.pos ?? null;
+    const busAssignment = !ctx.stands[s.id]?.contact
+      ? resolveBusGateForStand(ctx.layout, ctx.terminal, s.id, standPoint, ctx.busGates, closedBusGateIds)
+      : null;
+    const terminalId = gateId
+      ? ctx.terminal.gates[gateId]?.terminalId ?? null
+      : busAssignment?.terminalId ?? (s.remoteBoarding === undefined && ctx.busGates.length === 0 && Object.keys(ctx.terminal.byTerminal).length === 1 ? ctx.paxTerminal : null);
+    assignments[f.key] = {
+      standId: s.id,
+      gateId,
+      terminalId,
+      ...(!ctx.stands[s.id]?.contact && s.remoteBoarding !== 'none' ? { busGateId: busAssignment?.gateId ?? null } : {}),
+    };
     if (!gateId) {
-      if (busTerminal.invalid) add('INVALID_BUS_GATE', 'error', f.key, s.busGateId ? `指定ゲート ${s.busGateId} が搭乗・降機の双方で利用できません` : '接続するバスゲートを選択してください');
+      if (busAssignment?.failure === 'invalidGate') add('INVALID_BUS_GATE', 'error', f.key, `指定ゲート ${s.busGateId} が運用中で、同一ターミナルの搭乗口・降機口へ接続されている必要があります`);
+      else if (!busAssignment?.gateId && s.remoteBoarding !== 'none' && ctx.busGates.length > 0) add('INVALID_BUS_GATE', 'error', f.key, '利用可能なバスゲートがありません。運用状態・ターミナル接続・搭乗口・降機口を確認してください');
       else if (s.remoteBoarding === 'none') add('NO_GATE', 'warning', f.key, 'このリモートスポットはバス搭乗を無効にしています');
-      else if (busTerminal.terminalId) add('BUS_BOARDING', 'info', f.key);
+      else if (busAssignment?.terminalId) add('BUS_BOARDING', 'info', f.key);
+      else if (busAssignment?.gateId) add('BUS_BOARDING', 'info', f.key);
       else add('NO_GATE', 'warning', f.key);
     }
   }

@@ -9,7 +9,7 @@ export function useScorecard(): AirlineScore[] | null {
     const company = sim.company;
     if (!company) return null;
     const plan = planDayWithDemand(company, company.day, sim.state.access?.factor ?? 1, sim.ctx.types);
-    const analysis = analyzeDayPlan(plan, sim.ctx);
+    const analysis = analyzeDayPlan(plan, sim.ctx, sim.state.closures.gates);
     return airlineScorecard({ company, ctx: sim.ctx, records: sim.state.analytics.records, plan, analysis });
   });
 }

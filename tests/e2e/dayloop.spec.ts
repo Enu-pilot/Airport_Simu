@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settingsAction } from './settings';
 import { createSandboxCompany } from '../../src/core/economy/company';
 import { buildProject, serializeProject } from '../../src/core/io/project';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
@@ -87,7 +88,7 @@ test('締めの直後に「建設モードに戻る」と、空の日報を作�
   await page.getByTestId('speed-60').click();
   await expect(page.getByTestId('day-review')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId('review-build').click();
-  await expect(page.getByTestId('start-ops')).toBeVisible();
+  await expect(page.getByTestId('page-operations')).toBeVisible();
   await expect(page.getByTestId('day-review')).toBeHidden();
   await expect(page.getByTestId('company-day')).toHaveText('2日目');
   await page.getByTestId('tab-finance').click();
@@ -120,7 +121,7 @@ test('設定で「0:00 で一時停止」を切ると止まらずに 2 日目へ
 });
 
 test('途中で建設モードに戻る（stop-ops）は従来どおりその日を途中で締める', async ({ page }) => {
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await page.getByTestId('speed-600').click();
   await expect(page.getByTestId('stat-arrivals')).not.toHaveText('0', { timeout: 45_000 });
   await page.getByTestId('stop-ops').click();
@@ -131,8 +132,8 @@ test('途中で建設モードに戻る（stop-ops）は従来どおりその日
 
 test('1 日スキップ: 進捗バーが出て、締めの振り返りが出る。次の日へ進むと 2 日目の朝から続く。所要時間を記録', async ({ page }) => {
   test.setTimeout(180_000);
-  await page.getByTestId('new-sandbox').click();
-  await page.getByTestId('start-ops').click();
+  await settingsAction(page, 'new-sandbox');
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   const t0 = Date.now();
   await page.getByTestId('skip-day').click();
@@ -153,8 +154,8 @@ test('1 日スキップ: 進捗バーが出て、締めの振り返りが出る�
 });
 
 test('スキップを中止すると、その時刻で一時停止の運航になり、振り返りは出ない', async ({ page }) => {
-  await page.getByTestId('new-sandbox').click();
-  await page.getByTestId('start-ops').click();
+  await settingsAction(page, 'new-sandbox');
+  await page.getByTestId('page-operations').click();
   await page.getByTestId('skip-day').click();
   await expect(page.getByTestId('skip-overlay')).toBeVisible();
   await page.getByTestId('skip-cancel').click();

@@ -200,6 +200,24 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   GATE_BUS_HAS_STAND: (n) => `${n[0]} はバスゲートなので、紐付けたスポットは使われません`,
   GATE_BUS_NO_VEHICLES: (n) => `${n[0]} はバスゲートですが、運用中の GSE 基地にランプバスがありません（旅客を運べません）`,
   BUS_GATE_NO_REMOTE_STAND: (n) => `${n[0]} はバスゲートですが、リモートスポット（ゲートのないスポット）がありません`,
+  STAND_BUS_GATE_INVALID: (n, p) => {
+    const why: Record<string, string> = {
+      missing: 'ゲートが未設定または存在しません',
+      notBusGate: '指定先がバスゲートではありません',
+      building: 'ゲートが建設中です',
+      closed: 'ゲートが閉鎖されています',
+      unconnected: 'ゲートがターミナルに接続されていません',
+      missingBoarding: '出発旅客の搭乗口がありません',
+      missingDeplane: '到着旅客の降機口がありません',
+      crossTerminal: '搭乗口・降機口が同じターミナルに接続されていません',
+      missingDepartureRoute: '入口・チェックイン・保安検査から搭乗口までの経路がありません',
+      missingArrivalRoute: '降機口から手荷物受取所・出口までの経路がありません',
+    };
+    const gate = n[1] ?? (p.gateId ? String(p.gateId) : 'バスゲート');
+    return `${n[0]} の接続先 ${gate} は利用できません（${why[String(p.problem)] ?? '接続設定を確認してください'}）。運用中で、同一ターミナルの搭乗口と降機口があるバスゲートを指定してください`;
+  },
+  STAND_BUS_NO_GATE: (n) => `${n[0]} に利用可能なバスゲートがありません。運用中のバスゲートをターミナルに接続し、搭乗口・降機口の両方を用意してください`,
+  STAND_BUS_NO_VEHICLES: (n) => `${n[0]} は ${n[1]} を利用しますが、運用中の GSE 基地にランプバスがありません。基地にランプバスを配置してください`,
   GATE_CONNECTION_INVALID: (n) => `${n[0]} の接続先がターミナルではありません（存在しない・別の種類の施設）`,
   GATE_CONNECTOR_CROSSES_RUNWAY: (n) => `${n[0]} の連絡通路が滑走路 ${n[1]} の滑走路・着陸帯を横切っています（旅客が滑走路を歩くことになります）`,
   GATE_CONNECTOR_LONG: (n, p) => `${n[0]} と ${n[1]} をつなぐ通路が長すぎます（約 ${p.tiles} タイル。歩行に時間がかかります）`,
@@ -392,6 +410,8 @@ export function eventText(e: SimEvent, callsign: (id: string) => string): string
       return `💴 ${e.note}`;
     case 'busRescue':
       return `ランプバスの救援: ${e.note}`;
+    case 'standAssigned':
+      return `スポット割当: ${e.note ?? `${who} → ${e.standId ?? '不明'}`}`;
     case 'disruption':
       return `⚠ ${e.note}`;
   }

@@ -2,7 +2,8 @@ import { useState, type ReactNode } from 'react';
 import { Field, Info, NumberInput, Section, TextInput } from './fields';
 import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
 import { FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
-import { connectedTerminal, gateMode } from '../core/model/gates';
+import { apronBusesOf, connectedTerminal, gateMode } from '../core/model/gates';
+import { busGateStatus, resolveBusGateForStand } from '../core/terminal/busGateAssignment';
 import { sortedValues } from '../core/model/ids';
 import {
   BUILD_STATES,
@@ -257,6 +258,7 @@ function FieldsetIf({ readOnly, children }: { readOnly: boolean; children: React
 
 function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; id: string; readOnly?: boolean }) {
   const analysis = useAnalysis();
+  const sim = editorStore.getState().ops?.sim;
   const net = analysis.network;
   const type = entityTypeOf(id);
 
@@ -418,8 +420,19 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
     const s = layout.stands[id]!;
     const link = net.standLinks[id];
     const gates = sortedValues(layout.facilities).filter((f) => f.kind === 'gate' && f.props.standId === id);
-    const selectedBusGate = s.busGateId ? analysis.terminal.gates[s.busGateId] : undefined;
-    const busGateInvalid = s.remoteBoarding === 'bus' && !!s.busGateId && (!selectedBusGate?.terminalId || !selectedBusGate.boarding || !selectedBusGate.deplane);
+    const availableBusGateIds = sortedValues(layout.facilities)
+      .filter((facility) => facility.kind === 'gate' && gateMode(facility) === 'bus' && facility.buildState === 'operational')
+      .map((facility) => facility.id);
+    const busAssignment = resolveBusGateForStand(
+      layout, analysis.terminal, id, net.nodes[`${id}:P`]?.pos ?? null, availableBusGateIds, sim?.state.closures.gates ?? [],
+    );
+    const selectedBusGateId = s.remoteBoarding === 'bus' ? s.busGateId ?? null : busAssignment.gateId;
+    const selectedBusAccess = selectedBusGateId ? analysis.terminal.gates[selectedBusGateId] : undefined;
+    const selectedBusStatus = busGateStatus(layout, analysis.terminal, selectedBusGateId, sim?.state.closures.gates ?? []);
+    const busGateInvalid = s.remoteBoarding === 'bus' && !selectedBusStatus.usable;
+    const rampBusCount = sortedValues(layout.facilities)
+      .filter((facility) => facility.kind === 'gseBase' && facility.buildState === 'operational')
+      .reduce((count, facility) => count + apronBusesOf(facility), 0);
     const entry = standEntry(s);
     return (
       <>
@@ -447,23 +460,33 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
           <>
             <Field label="リモート搭乗">
               <select value={s.remoteBoarding ?? 'auto'} onChange={(e) => update(layout, id, { remoteBoarding: e.target.value })} data-testid="prop-remoteBoarding">
-                <option value="auto">自動割当（旧版互換）</option>
+                <option value="auto">自動割当（利用可能な最寄りゲート）</option>
                 <option value="bus">バス搭乗を使用</option>
                 <option value="none">使用しない</option>
               </select>
             </Field>
+            <Info label="接続先ターミナル">{selectedBusStatus.terminalId ? displayName(layout, selectedBusStatus.terminalId) : s.remoteBoarding === 'none' ? 'バスを使用しない設定' : '利用可能な接続先なし'}</Info>
+            <Info label="使用するバスゲート">{selectedBusGateId ? <EntityLink layout={layout} id={selectedBusGateId} /> : s.remoteBoarding === 'none' ? 'なし' : '利用可能なゲートなし'}</Info>
+            <Info label="搭乗・降機">{`${selectedBusAccess?.boarding ? '搭乗可' : '搭乗不可'} / ${selectedBusAccess?.deplane ? '降機可' : '降機不可'}`}</Info>
+            <Info label="ランプバス">{rampBusCount > 0 ? `運行可能（${rampBusCount} 台）` : '運行不可（運用中のランプバスなし）'}</Info>
             {(s.remoteBoarding === 'bus') && (
               <Field label="接続バスゲート">
                 <select value={s.busGateId ?? ''} onChange={(e) => update(layout, id, { busGateId: e.target.value || null })} data-testid="prop-busGateId">
                   <option value="">選択してください</option>
-                  {sortedValues(layout.facilities).filter((f) => f.kind === 'gate' && gateMode(f) === 'bus').map((g) => (
-                    <option key={g.id} value={g.id}>{displayName(layout, g.id)}{analysis.terminal.gates[g.id]?.terminalId ? ` · ${displayName(layout, analysis.terminal.gates[g.id]!.terminalId!)}` : ' · ターミナル未接続'}</option>
-                  ))}
+                  {sortedValues(layout.facilities).filter((f) => f.kind === 'gate' && gateMode(f) === 'bus').map((g) => {
+                    const access = analysis.terminal.gates[g.id];
+                    const status = busGateStatus(layout, analysis.terminal, g.id, sim?.state.closures.gates ?? []);
+                    const terminal = access?.terminalId ? ` · ${displayName(layout, access.terminalId)}` : ' · ターミナル未接続';
+                    const capability = `${access?.boarding ? '搭乗可' : '搭乗不可'} / ${access?.deplane ? '降機可' : '降機不可'}`;
+                    const state = status.usable ? '利用可能' : status.problem === 'closed' ? '閉鎖中' : status.problem === 'building' ? '建設中' : '接続不備';
+                    return <option key={g.id} value={g.id} disabled={!status.usable}>{displayName(layout, g.id)}{terminal} · {capability} · {state}</option>;
+                  })}
                 </select>
               </Field>
             )}
+            {s.remoteBoarding === 'bus' && s.busGateId && sim?.state.closures.gates.includes(s.busGateId) && <div className="reason ng-text">選択中のバスゲートは運航中に閉鎖されています。再開するまで旅客を割り当てられません。</div>}
             {s.remoteBoarding === 'bus' && !s.busGateId && <div className="reason ng-text">接続バスゲートが未設定です。このスポットの旅客は生成されません。</div>}
-            {busGateInvalid && <div className="reason ng-text">指定したバスゲートにターミナル・搭乗口・降機口の接続がありません。このスポットの旅客は生成されません。</div>}
+            {busGateInvalid && !!s.busGateId && <div className="reason ng-text">指定したバスゲートは利用できません（{selectedBusStatus.problem}）。運用中で、同一ターミナルの搭乗口・降機口に接続されたゲートを選んでください。</div>}
           </>
         )}
       </>

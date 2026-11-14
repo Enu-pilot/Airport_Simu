@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
   uncaught.set(page, list);
   await page.goto('/');
   await expect(page.getByTestId('map-canvas')).toBeVisible();
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
 });
 
 test.afterEach(async ({ page }) => {

@@ -29,6 +29,7 @@ import { CONNECTOR_DETOUR, areaRectTiles, buildTerminalModel, type TerminalModel
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
 import { ACCESS_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTiles } from '../access/landside';
+import { busGateStatus } from '../terminal/busGateAssignment';
 
 /**
  * 配置エラー・接続エラーの検出と、各エンティティの運用可否の判定。
@@ -77,6 +78,9 @@ export type IssueCode =
   | 'GATE_BUS_HAS_STAND'
   | 'GATE_BUS_NO_VEHICLES'
   | 'BUS_GATE_NO_REMOTE_STAND'
+  | 'STAND_BUS_GATE_INVALID'
+  | 'STAND_BUS_NO_GATE'
+  | 'STAND_BUS_NO_VEHICLES'
   // 施設・道路
   | 'NO_AIRSIDE_ACCESS'
   | 'TERMINAL_NO_ROAD'
@@ -147,6 +151,9 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   GATE_BUS_HAS_STAND: 'info',
   GATE_BUS_NO_VEHICLES: 'warning',
   BUS_GATE_NO_REMOTE_STAND: 'info',
+  STAND_BUS_GATE_INVALID: 'error',
+  STAND_BUS_NO_GATE: 'error',
+  STAND_BUS_NO_VEHICLES: 'warning',
   NO_AIRSIDE_ACCESS: 'warning',
   TERMINAL_NO_ROAD: 'warning',
   TERMINAL_NO_GATE: 'info',
@@ -934,6 +941,39 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
         !!findPaxRoute(model, { from: claim, goals: exits }),
       );
       if (claims.length > 0 && !hasBaggageRoute) sink.add('GATE_ARRIVAL_NO_BAGGAGE_ROUTE', [g.id], {}, g.origin);
+    }
+  }
+
+  // A remote stand's configured terminal is the bus gate's terminal. Check
+  // assignments against the same two-direction access rule used at runtime.
+  const busGateIds = sortedValues(layout.facilities)
+    .filter((f) => f.kind === 'gate' && gateMode(f) === 'bus')
+    .map((f) => f.id);
+  const usableBusGateIds = busGateIds.filter((id) => busGateStatus(layout, model, id).usable);
+  const remoteStands = sortedValues(layout.stands).filter((stand) =>
+    !sortedValues(layout.facilities).some((gate) => gate.kind === 'gate' && gateMode(gate) !== 'bus' && gate.props.standId === stand.id),
+  );
+  const hasRampBuses = sortedValues(layout.facilities)
+    .filter((f) => f.kind === 'gseBase' && f.buildState === 'operational')
+    .some((base) => apronBusesOf(base) > 0);
+  for (const stand of remoteStands) {
+    if (stand.remoteBoarding === 'none') continue;
+    const explicitlyConfigured = stand.remoteBoarding === 'bus';
+    const mustResolve = explicitlyConfigured || stand.remoteBoarding === 'auto' || terminals.length > 1;
+    if (explicitlyConfigured) {
+      const status = busGateStatus(layout, model, stand.busGateId);
+      if (!status.usable) {
+        const targets = [stand.id, ...(stand.busGateId && layout.facilities[stand.busGateId] ? [stand.busGateId] : [])];
+        sink.add('STAND_BUS_GATE_INVALID', targets, { problem: status.problem ?? 'missing', gateId: stand.busGateId ?? '' }, stand.origin);
+        continue;
+      }
+    } else if (mustResolve && usableBusGateIds.length === 0) {
+      sink.add('STAND_BUS_NO_GATE', [stand.id], {}, stand.origin);
+      continue;
+    }
+    if (mustResolve && !hasRampBuses && usableBusGateIds.length > 0) {
+      const gateId = explicitlyConfigured ? stand.busGateId! : usableBusGateIds[0]!;
+      sink.add('STAND_BUS_NO_VEHICLES', [stand.id, gateId], {}, stand.origin);
     }
   }
 }

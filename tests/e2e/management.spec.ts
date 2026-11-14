@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settingsAction } from './settings';
 
 // 初期カメラ（src/editor/store.ts）: 左上 (10, 20)、9px/タイル
 const CAM = { x: 10, y: 20, zoom: 9 };
@@ -17,7 +18,7 @@ test.beforeEach(async ({ page }) => {
   uncaught.set(page, list);
   await page.goto('/');
   await expect(page.getByTestId('map-canvas')).toBeVisible();
-  await page.getByTestId('new-career').click();
+  await settingsAction(page, 'new-career');
   await expect(page.getByTestId('company-badge')).toContainText('キャリア');
 });
 
@@ -45,13 +46,13 @@ test('建設すると建設費を支払い、元に戻すと同額が戻る。�
   await page.getByTestId('undo').click();
   await expect(page.getByTestId('cash')).toContainText('4,000,000 cr');
   // サンプル空港の建設費は初期資金を大きく超える
-  await page.getByTestId('load-sample').click();
+  await settingsAction(page, 'load-sample');
   await expect(page.getByTestId('toast')).toContainText('資金不足');
   await expect(page.getByTestId('cash')).toContainText('4,000,000 cr');
 });
 
 test('運航すると収入・費用が計上され、運航を終えるとその日を締めて日報が残る', async ({ page }) => {
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await page.getByTestId('speed-600').click();
   await page.getByTestId('tab-finance').click();

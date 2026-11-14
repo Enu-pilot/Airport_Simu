@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settingsAction } from './settings';
 import { createSandboxCompany } from '../../src/core/economy/company';
 import { defaultGame } from '../../src/core/economy/game';
 import { buildProject, serializeProject } from '../../src/core/io/project';
@@ -62,7 +63,7 @@ test('新しいゲーム（設定）で難易度を選ぶと、資金・難易�
   await expect(page.getByTestId('company-day')).toHaveText('1日目');
   await expect(page.getByTestId('game-difficulty')).toContainText('難しい');
   await expect(page.getByTestId('cash')).toContainText('3,000,000'); // 4,000,000 × 0.75
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   // 最初の日は晴れ（段階 0）。上部バー・天候カードに段階が出て、明日の予報（3 区間）が見える
   await expect(page.getByTestId('weather-level')).toHaveAttribute('data-level', '0');
@@ -76,7 +77,7 @@ test('新しいゲーム（設定）で難易度を選ぶと、資金・難易�
 test('標準の新しいゲーム（new-career）は従来の資金のまま。サンドボックスの初回起動は従来のルールで天候の段階・予報を出さない', async ({ page }) => {
   // 初回起動 = 従来のサンドボックス（game なし）
   await expect(page.getByTestId('game-difficulty')).toContainText('従来');
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await expect(page.getByTestId('card-weather')).toBeVisible();
   await expect(page.getByTestId('weather-level')).toHaveCount(0);
@@ -84,7 +85,7 @@ test('標準の新しいゲーム（new-career）は従来の資金のまま。�
   await expect(page.getByTestId('weather-forecast')).toHaveCount(0);
   await page.getByTestId('stop-ops').click();
   // 標準の新しいゲーム: 資金は従来の 4,000,000 cr、新しいルール（難易度 標準）
-  await page.getByTestId('new-career').click();
+  await settingsAction(page, 'new-career');
   await expect(page.getByTestId('cash')).toContainText('4,000,000');
   await expect(page.getByTestId('game-difficulty')).toContainText('標準');
 });
@@ -105,7 +106,7 @@ test('既存の会社に「ゲーム設定」で新しいルールを付け外�
 test('悪天の日（段階 4）は段階が上部バー・天候カードに出て、運航表の行メニューから先行欠航できる', async ({ page }) => {
   test.setTimeout(90_000);
   await load(page, gameProject({ day: 10, difficulty: 'expert', climate: 'humid' }));
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await expect(page.getByTestId('weather-level')).toHaveAttribute('data-level', '4');
   await expect(page.getByTestId('weather-level-top')).toHaveAttribute('data-level', '4');
@@ -199,7 +200,7 @@ test('目標を達成すると報酬が付与され、振り返り・アラー�
 });
 
 test('従来のサンドボックスには目標・空港の格・不満の表示がない', async ({ page }) => {
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await expect(page.getByTestId('goals-card')).toHaveCount(0);
   await expect(page.getByTestId('airport-tier')).toHaveCount(0);

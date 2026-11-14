@@ -144,6 +144,7 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     flights: {},
     aircraft: {},
     standAssignments: {},
+    airlineStandHomes: { day: Math.floor((opts.startTime ?? SIM_START_SEC) / DAY_SEC), byAirline: {} },
     nodeReservations: {},
     edgeReservations: {},
     scheduledDays: [],
@@ -399,7 +400,7 @@ function generateContractSchedule(sim: Simulation, day: number): void {
   const { state, ctx } = sim;
   // 需要にはアクセス係数（前日の混雑を反映）が掛かる。運航計画タブのプレビューも同じ値を使う
   const plan = planDayWithDemand(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!), ctx.types);
-  const analysis = analyzeDayPlan(plan, ctx);
+  const analysis = analyzeDayPlan(plan, ctx, state.closures.gates);
   const earliest = state.now + 20 * 60;
   for (const p of plan.flights) {
     const arrivalAt = Math.max(day * DAY_SEC + p.arrivalAt, Math.ceil(earliest / 60) * 60);
@@ -572,7 +573,25 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     .filter((id) => runwayUsable(sim, id, type, 'arr'));
   if (runways.length === 0) return 'noRunway';
   const SIZE_RANK: Record<SizeClass, number> = { S: 1, M: 2, L: 3 };
-  const planned = state.flights[ac.arrivalFlightId]!.plannedStandId;
+  const arrival = state.flights[ac.arrivalFlightId]!;
+  const planned = arrival.plannedStandId;
+  const airlineId = arrival.airlineId;
+  const day = Math.floor(state.now / DAY_SEC);
+  if (!state.airlineStandHomes || state.airlineStandHomes.day !== day) state.airlineStandHomes = { day, byAirline: {} };
+  const homes = airlineId ? (state.airlineStandHomes.byAirline[airlineId] ??= []) : [];
+  const homeSet = new Set(homes);
+  const homeOwners = new Map<string, string[]>();
+  for (const [owner, ids] of Object.entries(state.airlineStandHomes.byAirline)) {
+    for (const id of ids) homeOwners.set(id, [...(homeOwners.get(id) ?? []), owner]);
+  }
+  const homeDistance = (id: string) => {
+    const node = ctx.network.nodes[ctx.stands[id]?.node ?? ''];
+    if (!node || homes.length === 0) return Infinity;
+    return Math.min(...homes.map((homeId) => {
+      const homeNode = ctx.network.nodes[ctx.stands[homeId]?.node ?? ''];
+      return homeNode ? Math.hypot(node.pos.x - homeNode.pos.x, node.pos.y - homeNode.pos.y) : Infinity;
+    }));
+  };
   const candidates = Object.values(ctx.stands)
     .filter(
       (s) =>
@@ -584,7 +603,11 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     .sort(
       (a, b) =>
         Number(gateClosed(sim, a.id)) - Number(gateClosed(sim, b.id)) ||
-        Number(b.id === planned) - Number(a.id === planned) ||
+        Number(!homeSet.has(a.id)) - Number(!homeSet.has(b.id)) ||
+        Number(!!homeOwners.get(a.id)?.some((owner) => owner !== airlineId)) - Number(!!homeOwners.get(b.id)?.some((owner) => owner !== airlineId)) ||
+        (homeSet.has(a.id) && homeSet.has(b.id) ? homes.indexOf(a.id) - homes.indexOf(b.id) : 0) ||
+        (homes.length > 0 ? homeDistance(a.id) - homeDistance(b.id) : 0) ||
+        (homeSet.size === 0 ? Number(b.id === planned) - Number(a.id === planned) : 0) ||
         SIZE_RANK[a.size] - SIZE_RANK[b.size] ||
         Number(b.contact) - Number(a.contact) ||
         compareIds(a.id, b.id),
@@ -614,6 +637,36 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     arr.standId = s.id;
     arr.runwayId = best.runwayId;
     state.flights[ac.departureFlightId]!.standId = s.id;
+    if (airlineId) {
+      const fromExistingHome = homeSet.has(s.id);
+      if (!fromExistingHome) {
+        const occupiedUsableHome = homes.some((id) => !!state.standAssignments[id] && ctx.stands[id]?.operational && !state.closures.stands.includes(id) && checkStand(type, ctx.layout.stands[id]!, ctx.network).status === 'ok');
+        const reason: NonNullable<SimState['events'][number]['standAssignmentReason']> = homes.length === 0
+          ? 'initial'
+          : occupiedUsableHome ? 'overflow' : 'fallback';
+        if (reason === 'fallback') homes.unshift(s.id);
+        else homes.push(s.id);
+        logEvent(state, {
+          t: state.now,
+          kind: 'standAssigned',
+          aircraftId: ac.id,
+          airlineId,
+          standId: s.id,
+          standAssignmentReason: reason,
+          note: `${ac.callsign}: ${reason === 'initial' ? '初回ホームスポット' : reason === 'overflow' ? '同社便の追加スポット' : 'ホームスポット利用不能の代替'}として ${s.id} を割当`,
+        });
+      } else {
+        logEvent(state, {
+          t: state.now,
+          kind: 'standAssigned',
+          aircraftId: ac.id,
+          airlineId,
+          standId: s.id,
+          standAssignmentReason: 'home',
+          note: `${ac.callsign}: ${s.id} は ${airlineId} のホームスポット`,
+        });
+      }
+    }
     return null;
   }
   return anyRoute ? 'noStand' : 'noRoute';
@@ -624,6 +677,7 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
 export function stepSimulation(sim: Simulation): void {
   const { state } = sim;
   const day = Math.floor(state.now / DAY_SEC);
+  if (!state.airlineStandHomes || state.airlineStandHomes.day !== day) state.airlineStandHomes = { day, byAirline: {} };
   if (sim.company) {
     // 0:00 に日次締めを行い、その日の運航計画を作る
     if (stepEconomy(sim, (key) => serversOf(sim, key)) && state.settings.autoSchedule) generateDaySchedule(sim, day);

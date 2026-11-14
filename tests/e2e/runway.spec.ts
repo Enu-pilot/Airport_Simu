@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settingsAction } from './settings';
 
 // Phase 12: 自由方位・実寸の滑走路。初期カメラ（src/editor/store.ts）: 左上 (10, 20)、9px/タイル
 const CAM = { x: 10, y: 20, zoom: 9 };
@@ -45,6 +46,7 @@ const uncaught = new WeakMap<Page, string[]>();
 
 test.beforeEach(async ({ page }) => {
   const list: string[] = [];
+  page.on('dialog', (d) => void d.accept());
   page.on('pageerror', (e) => list.push(e.message));
   uncaught.set(page, list);
   await page.goto('/');
@@ -56,7 +58,7 @@ test.afterEach(async ({ page }) => {
 });
 
 test('自由形の滑走路を任意の方位で置き、番号が決まり、磁気偏角を変えると番号が変わる', async ({ page }) => {
-  await page.getByTestId('new-empty').click();
+  await settingsAction(page, 'new-empty');
   await selectFreeNumeric(page);
   await placeNumeric(page, [80, 60], 37, 1800);
 
@@ -94,7 +96,7 @@ test('自由形の滑走路を任意の方位で置き、番号が決まり、�
 });
 
 test('ドラッグで自由形を置き、端のハンドルで回転し、R キーでも回せる', async ({ page }) => {
-  await page.getByTestId('new-empty').click();
+  await settingsAction(page, 'new-empty');
   await page.getByTestId('tool-runway').click();
   await page.getByTestId('opt-runwayAlignment').selectOption('free');
   await page.getByTestId('opt-angleSnap').selectOption('5');
@@ -167,7 +169,7 @@ test('従来形の向きの選択肢は、磁気偏角を設定すると磁方�
 });
 
 test('交差する自由形の滑走路 2 本は重なりエラーにならず、交差が認識される', async ({ page }) => {
-  await page.getByTestId('new-empty').click();
+  await settingsAction(page, 'new-empty');
   await selectFreeNumeric(page);
   await placeNumeric(page, [80, 60], 90, 2000);
   await placeNumeric(page, [80, 60], 30, 2000);
@@ -188,7 +190,7 @@ test('自由形の滑走路を含む空港で運航を開始できる（ペー�
   await page.getByTestId('convert-to-free').click();
   await page.getByTestId('convert-do').click();
   await expect(page.getByTestId('badge-free')).toBeVisible();
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await page.getByTestId('speed-240').click();
   await expect(page.getByTestId('sim-clock')).not.toContainText('06:00', { timeout: 20_000 });
@@ -196,7 +198,7 @@ test('自由形の滑走路を含む空港で運航を開始できる（ペー�
 });
 
 test('交差する自由形の滑走路を 2D と 3D で描ける（エラーなし）', async ({ page }) => {
-  await page.getByTestId('new-empty').click();
+  await settingsAction(page, 'new-empty');
   await selectFreeNumeric(page);
   await placeNumeric(page, [80, 60], 90, 2000);
   await placeNumeric(page, [80, 60], 30, 2000);

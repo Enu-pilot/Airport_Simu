@@ -27,7 +27,7 @@ async function loadBusProject(page: Page) {
 }
 
 async function startOps(page: Page) {
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
 }
 

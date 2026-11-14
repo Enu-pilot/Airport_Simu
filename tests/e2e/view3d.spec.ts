@@ -10,7 +10,7 @@ test('2D/3D を切り替えても運航は止まらず、3D に機体が表示�
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await expect(page.getByTestId('map-canvas')).toBeVisible();
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   for (let i = 0; i < 20; i++) await page.getByTestId('add-arrival').click();
   await page.getByTestId('speed-60').click();
   await page.getByTestId('view-toggle').click();

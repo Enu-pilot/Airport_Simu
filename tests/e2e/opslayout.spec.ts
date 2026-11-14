@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settingsAction } from './settings';
 
 /** 12B-1: 運航モードの画面（常設カード・案内板風の運航表・アラート・大きなオーバーレイ・航空会社の評価） */
 
@@ -18,7 +19,7 @@ test.afterEach(async ({ page }) => {
 });
 
 async function startOps(page: Page) {
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
 }
 
@@ -156,7 +157,7 @@ test('あまり使わないパネルは大きなオーバーレイで開き、�
 });
 
 test('航空会社の評価カードが点数と「足りないもの」を表示する（キャリア）', async ({ page }) => {
-  await page.getByTestId('new-career').click();
+  await settingsAction(page, 'new-career');
   await expect(page.getByTestId('company-badge')).toContainText('キャリア');
   await startOps(page);
   await expect(page.getByTestId('card-airline-RJ')).toBeVisible();

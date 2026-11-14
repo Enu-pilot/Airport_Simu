@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settingsAction } from './settings';
 
 const uncaught = new WeakMap<Page, string[]>();
 
@@ -25,7 +26,7 @@ test('保存したプロジェクトを開くと、変更前の空港・会社�
   await page.getByTestId('project-save').click();
   await expect(page.getByTestId('project-slot-テスト空港')).toBeVisible();
   await expect(status(page)).toContainText('滑走路 1');
-  await page.getByTestId('new-empty').click();
+  await settingsAction(page, 'new-empty');
   await expect(status(page)).toContainText('滑走路 0');
   await page.getByTestId('project-slot-テスト空港').getByTestId('project-load').click();
   await expect(status(page)).toContainText('滑走路 1');
@@ -35,7 +36,7 @@ test('保存したプロジェクトを開くと、変更前の空港・会社�
 
 test('運航中に保存すると運航状態を含み、開くと同じ時刻から一時停止で再開する', async ({ page }) => {
   test.setTimeout(90_000);
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await page.getByTestId('speed-600').click();
   await expect(page.getByTestId('stat-arrivals')).not.toHaveText('0', { timeout: 45_000 });
   await page.keyboard.press('Space');
@@ -46,7 +47,7 @@ test('運航中に保存すると運航状態を含み、開くと同じ時刻�
   await page.getByTestId('project-save').click();
   await expect(page.getByTestId('project-slot-運航中')).toContainText('あり');
   await page.getByTestId('stop-ops').click();
-  await expect(page.getByTestId('start-ops')).toBeVisible();
+  await expect(page.getByTestId('page-operations')).toBeVisible();
   await page.getByTestId('tab-project').click();
   await page.getByTestId('project-slot-運航中').getByTestId('project-load').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
@@ -60,7 +61,7 @@ test('運航中に保存すると運航状態を含み、開くと同じ時刻�
 });
 
 test('壊れたファイル・参照切れのファイルは読み込まず、開いているプロジェクトを変えない', async ({ page }) => {
-  await page.getByTestId('new-empty').click();
+  await settingsAction(page, 'new-empty');
   await expect(status(page)).toContainText('滑走路 0');
   await page.getByTestId('tab-project').click();
   await page.getByTestId('project-file').setInputFiles({ name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from('{ not json') });
@@ -80,7 +81,7 @@ test('JSON に書き出したファイルを読み込むと同じ空港に戻る
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('project-export').click()]);
   const path = await download.path();
   expect(download.suggestedFilename()).toMatch(/\.skyport\.json$/);
-  await page.getByTestId('new-empty').click();
+  await settingsAction(page, 'new-empty');
   await expect(status(page)).toContainText('滑走路 0');
   await page.getByTestId('project-file').setInputFiles(path!);
   await expect(page.getByTestId('project-report')).toContainText('読み込みました');

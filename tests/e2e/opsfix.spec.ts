@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
   errors.set(page, list);
   await page.goto('/');
   await expect(page.getByTestId('map-canvas')).toBeVisible();
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
 });
 test.afterEach(async ({ page }) => {

@@ -39,7 +39,7 @@ test('ターミナル内部のエリアを階を選んで配置し、選択し�
 });
 
 test('運航中のターミナル表で旅客数・待ち時間を確認し、施設を閉鎖できる', async ({ page }) => {
-  await page.getByTestId('start-ops').click();
+  await page.getByTestId('page-operations').click();
   await page.getByTestId('speed-600').click();
   await page.getByTestId('tab-terminal').click();
   const board = page.getByTestId('terminal-board');

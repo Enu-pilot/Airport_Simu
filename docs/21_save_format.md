@@ -4,7 +4,7 @@
 
 ## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1` または 2）
 
-**版の書き方（Phase 12B-3a/3b/4）**: `formatVersionOf(p)` が、新しい項目（ゲートの `boardingMode: 'bus'`・`connectedTo`、スポットの `remoteBoarding`・`busGateId`、GSE 基地の `apronBuses > 0`、運航状態の `bus`・`wx`・閉鎖理由台帳 `closureReasons`、会社の `game`・`airlineEval`・`goals`・`city`、任意の `journal`）を **1 つでも使うときだけ 2**、使わないときは 1 のまま書く（`buildProject` と `validateProject` の作り直しの両方。`versions.format` も同じ値）。読み込みは 2 まで許可し、3 以上は拒否する（v1 → v2 は恒等）。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`。従来のファイルの内容・ゴールデン（`project.golden.json` は直列化の sha256）は変わらない。`SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない。厳格な形の検査: `checkLayout`（`boardingMode`・`connectedTo`・`apronBuses`・リモートスポットの設定）、`checkSim`（`bus` の運行参照・`closureReasons` と閉鎖配列・外部遅延秒数、復元後の BU1〜BU4）、`checkJournal`（任意のスポッティング・記録）。旧運航状態は既存の閉鎖配列と発生中の障害から閉鎖理由台帳を再構築する。外部遅延は原因名から推定せず、運航に実際に加えた秒数だけを記録する。
+**版の書き方（Phase 12B-3a/3b/4）**: `formatVersionOf(p)` が、新しい項目（ゲートの `boardingMode: 'bus'`・`connectedTo`、スポットの `remoteBoarding`・`busGateId`、GSE 基地の `apronBuses > 0`、運航状態の `bus`・`wx`・閉鎖理由台帳 `closureReasons`・`airlineStandHomes`、会社の `game`・`airlineEval`・`goals`・`city`、任意の `journal`）を **1 つでも使うときだけ 2**、使わないときは 1 のまま書く（`buildProject` と `validateProject` の作り直しの両方。`versions.format` も同じ値）。読み込みは 2 まで許可し、3 以上は拒否する（v1 → v2 は恒等）。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`。新フィールドは任意で、旧 v1 のレイアウト・会社・日報は引き続き読める。厳格な形の検査: `checkLayout`（`boardingMode`・`connectedTo`・`apronBuses`・リモートスポットの設定）、`checkSim`（`bus` の運行参照・`airlineStandHomes` の日付・スポット ID・重複・`closureReasons` と閉鎖配列・外部遅延秒数、復元後の BU1〜BU4）、`checkJournal`（任意のスポッティング・記録）。旧運航状態に `airlineStandHomes` がなければ、復元時に当日の空状態で初期化する。旧運航状態は既存の閉鎖配列と発生中の障害から閉鎖理由台帳を再構築する。外部遅延は原因名から推定せず、運航に実際に加えた秒数だけを記録する。
 
 `Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。`FlightRecord` の形式は変更しない。便別レビューの締め時点の原因・実時刻・機体状態・作業・施設名、航空会社評価要素・EMA/満足度前後・不満/要望は `DayReview` に集約し、日ごとの IndexedDB 履歴の `review` に保存する。会社状態やプロジェクトJSONには追加しないため、プロジェクト保存形式・シミュレーションモデルの版は上げない。古い保存済みレビューにない項目は推測せず欠落として表示する。
 
@@ -30,7 +30,7 @@
 | 保存形式 | `PROJECT_FORMAT_VERSION = 1` | ファイルの構造を変えたとき（移行処理を追加する） |
 | 機種カタログ | `CATALOG_VERSION`（現在 2026.11.0） | 収録機種・値を変えたとき |
 | 3D アセット | `ASSET_VERSION`（現在 2026.11.0） | 3D の形を変えたとき（表示だけに影響） |
-| シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.0` | 運航の計算を変えたとき |
+| シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.1` | 運航の計算を変えたとき |
 
 ### 版の方針（Phase 11 で明文化。詳細は [22](22_geometry_architecture.md) §7）
 
@@ -45,6 +45,7 @@
   以前に漏れた運航を記録したシナリオの結果は、同じ版の表記のまま再実行すると結果が変わる。
 - `SIM_MODEL_VERSION` は **既存の（現行版のレイアウトで表現できる）レイアウトの運航結果が変わるときだけ** 上げる。上げると保存済みの運航状態は復元されず、建設モードで開く。
   この規則はゴールデンで機械的に守る: 運航ゴールデンは、版を上げずに内容を変える再採取を拒否する（docs/22 §5）。
+- **今回 `SIM_MODEL_VERSION` を `skyport-sim-10.1` に更新した**。航空会社別ホーム優先がスポット選択を変え、バスゲート選択が計画・運航間で統一されるため。既存プロジェクト自体は読み込めるが、10.0 の進行中シミュレーションは既存規則どおり復元せず建設モードで開く。レイアウト・会社・過去の日報は保持する。旧シミュレーション保存に `airlineStandHomes` がない場合も、同一モデルとして復元されるケースでは空の当日割当に移行する。
 - レイアウトの版を上げると、`exportLayout` と `serializeProject` の出力（`schemaVersion` を含む）が変わる。ゴールデンには `schemaVersion` を除いた版非依存のハッシュがあり、
   版更新の前後でこれが一致すれば、版番号以外の変化はない。
 

@@ -455,12 +455,16 @@ export type SimEventKind =
   | 'bagsLeftBehind'
   | 'finance'
   | 'busRescue'
+  | 'standAssigned'
   | 'disruption';
 
 export interface SimEvent {
   t: number;
   kind: SimEventKind;
   aircraftId?: string;
+  airlineId?: string;
+  standId?: string;
+  standAssignmentReason?: 'initial' | 'home' | 'overflow' | 'fallback';
   state?: AircraftState;
   reason?: HoldReason;
   note?: string;
@@ -506,6 +510,8 @@ export interface SimState {
   aircraft: Record<string, Aircraft>;
   /** スポットID → 割り当て機体（単一情報源。1スポットに高々1機） */
   standAssignments: Record<string, string>;
+  /** 日次の航空会社別ホームスポット。実際の占有は standAssignments が管理する。旧セーブでは未定義可。 */
+  airlineStandHomes?: { day: number; byAirline: Record<string, string[]> };
   /** 予約: ネットワークのノード/エッジID → 機体ID（排他） */
   nodeReservations: Record<string, string>;
   edgeReservations: Record<string, string>;

@@ -58,12 +58,12 @@ describe('バス搭乗の保存', () => {
     bad((d) => delete d.sim.state.bus, /バスの運行（bus）がありません/);
   });
 
-  it('従来の運航の保存は formatVersion 1 のままで、バスの状態・項目を含まない', { timeout: 300_000 }, () => {
+  it('バスを使わない運航も日次ホーム情報を含む formatVersion 2 として保存できる', { timeout: 300_000 }, () => {
     const l = busLayout({ gate: 'none', buses: 0 });
     const a = createSimulation(l, { seed: 'legacy', settings: { flightsPerDay: 60 } });
     for (let i = 0; i < 3600; i++) stepSimulation(a);
     const p = buildProject({ name: 'legacy', savedAt: NOW, layout: l, company: createSandboxCompany(), pin: null, scenarios: [], sim: a });
-    expect(p.formatVersion).toBe(1);
+    expect(p.formatVersion).toBe(2);
     expect(JSON.stringify(p)).not.toContain('apronBus');
     expect(validateProject(serializeProject(p), opts).ok).toBe(true);
   });

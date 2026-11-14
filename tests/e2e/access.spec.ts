@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settingsAction } from './settings';
 
 // 初期カメラ（src/editor/store.ts）: 左上 (10, 20)、9px/タイル。矢印キー1回でカメラが4タイル動く
 const ZOOM = 9;
@@ -55,7 +56,7 @@ test('土地を購入すると敷地が広がり、拡張計画に購入面積�
 });
 
 test('キャリアで施設を一時閉鎖すると拡張計画に工事として表示され、元に戻すと取り消される', async ({ page }) => {
-  await page.getByTestId('new-career').click();
+  await settingsAction(page, 'new-career');
   await expect(page.getByTestId('company-badge')).toContainText('キャリア');
   await clickTile(page, { x: 10, y: 20 }, 49, 43); // スポット 1
   await expect(page.getByTestId('prop-title')).toHaveText('スポット 1');
