@@ -76,6 +76,23 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 
 空港能力ダッシュボード: 経営画面の「空港能力」は運航計画から時間帯別の滑走路・旅客・駐機需要を算出し、チェックイン/保安検査の設定処理能力、運用時間を反映した理論日次値、既存地上支援の同時折り返し上限を表示する。滑走路 30 回/時は計画用の基準値。誘導路、ゲート、プッシュバック、ランプバスの時間レートなど現行モデルで算出できない能力は未算出とする。契約・増便の仮想チェックは複製した会社状態と決定的な計画生成を使い、現行セーブや運航を変更しない。詳細と前提は [docs/33](docs/33_capacity_dashboard.md) を参照。
 
+## 2026-11-14 の追加・変更仕様
+
+本日の機能追加・統合内容は、概要だけでなく判定基準・データ上の責務・未実装範囲を含めて以下の文書に整理した。
+
+- **空港能力ダッシュボード・画面ナビゲーション**: [docs/33](docs/33_capacity_dashboard.md)、[docs/37](docs/37_management_navigation.md)。滑走路・スポット・ターミナル・折り返し能力の算出式、80%/100%の判定、算出できない能力の扱い、仮想契約チェックの非破壊性を定義。
+- **航空会社別ホームスポット・リモートスポット**: [docs/32](docs/32_airline_stand_homes.md)。日次候補、占有予約との分離、代替スポットの優先、バスゲートの選択条件を定義。
+- **都市・アクセス・騒音**: [docs/31](docs/31_city_models.md)。都市プロファイル、需要上限、アクセス時間、人口成長、騒音ポイント、夜間制限の式と仮定値を定義。
+- **多層交通・ターミナル間連絡設備**: [docs/34](docs/34_vertical_transport.md)。階層範囲、接続設備、勾配・距離条件、リンクの区域・方向・能力、保存互換性を定義。
+- **複数ターミナル旅客処理・監視**: [docs/35](docs/35_multi_terminal_passenger_flow.md)。便・ゲート・ターミナルの所属判定、区域制約、経路計画 API、到達不能・滞留の監視閾値を定義。
+- **日次振り返り・便別実績分析**: [docs/36](docs/36_daily_review_and_flight_analysis.md)。実績遅延と評価対象遅延、便別時系列、航空会社評価スナップショット、前日比較、翌日見通しの分離を定義。
+
+### 実装済みと未実装の区別
+
+ターミナル間の経路を計画する API と連絡設備のデータ構造は実装済みだが、既存の旅客グループを実際に別ターミナルへ移動させる処理は未実装。多層道路・鉄道の構造と階層間コネクタも実装されているが、個別の道路車両・列車の走行、旅客グループの階層移動、設備別混雑実績は未実装である。これらを完成済みとして扱わない。詳細は [docs/34](docs/34_vertical_transport.md)・[docs/35](docs/35_multi_terminal_passenger_flow.md) を参照。
+
+日次レビューは保存済みの運航記録を根拠にする。旧形式の記録に存在しない時刻・原因・評価根拠は推測で補完せず、欠損として扱う。翌日の計画は当日の評価根拠と分離する（[docs/36](docs/36_daily_review_and_flight_analysis.md)）。
+
 ## ソース構成
 
 | ディレクトリ | 役割 |
@@ -119,6 +136,10 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 31 | [docs/31_city_models.md](docs/31_city_models.md) | 都市プロフィール・アクセス時間・旅客需要上限・人口成長（Phase 12B-3b の一部） |
 | 32 | [docs/32_airline_stand_homes.md](docs/32_airline_stand_homes.md) | 航空会社別の日次ホームスポットとバスゲート接続の割当規則 |
 | 33 | [docs/33_capacity_dashboard.md](docs/33_capacity_dashboard.md) | 空港能力ダッシュボードの計算式・表示範囲・未算出項目 |
+| 34 | [docs/34_vertical_transport.md](docs/34_vertical_transport.md) | 多層交通・ターミナル間連絡設備の構造、接続、保存、未実装範囲 |
+| 35 | [docs/35_multi_terminal_passenger_flow.md](docs/35_multi_terminal_passenger_flow.md) | 複数ターミナル旅客の所属判定、区域・経路、監視基準、未実装の旅客移動 |
+| 36 | [docs/36_daily_review_and_flight_analysis.md](docs/36_daily_review_and_flight_analysis.md) | 日次振り返り、便別実績、遅延評価、航空会社評価根拠、履歴互換性 |
+| 37 | [docs/37_management_navigation.md](docs/37_management_navigation.md) | 建設・経営・運行ナビゲーション、状態遷移、能力表示の判定基準 |
 | 26 | [docs/26_validation_rules.md](docs/26_validation_rules.md) | 滑走路に関する検証コードと適用条件（従来 / 実寸、classic / realistic） |
 | 27 | [docs/27_migration_and_compatibility.md](docs/27_migration_and_compatibility.md) | スキーマ v1→v2→v3、版の方針、互換性、ゴールデンの戦略 |
 | 22 | [docs/22_geometry_architecture.md](docs/22_geometry_architecture.md) | 幾何基盤（座標フレーム・角度規約・許容誤差・ゴールデン基準値）とデータモデルの計画（Phase 11） |
