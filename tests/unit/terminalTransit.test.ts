@@ -87,6 +87,7 @@ describe('ターミナル間連絡設備', () => {
     })).layout;
     const forward = findTerminalTransferRoute(layout, { fromAreaId: a1, toAreaId: a2, zone: 'departure' });
     expect(forward).toMatchObject({ areas: [a1, a2], travelSec: 90, distanceM: 240, capacityPerHour: 1200 });
+    expect(findTerminalTransferRoute(layout, { fromAreaId: a1, toAreaId: a2, zone: 'departure', stepFree: true })).not.toBeNull();
     expect(findTerminalTransferRoute(layout, { fromAreaId: a2, toAreaId: a1, zone: 'departure' })).toBeNull();
     expect(findTerminalTransferRoute(layout, { fromAreaId: a1, toAreaId: a2, zone: 'arrival' })).toBeNull();
     expect(findTerminalTransferRoute(layout, { fromAreaId: a1, toAreaId: a2, zone: 'departure', uncleared: true })).toBeNull();
