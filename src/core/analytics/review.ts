@@ -62,6 +62,17 @@ export interface ReviewDisruption {
   resolvedBy: 'time' | 'player' | null;
 }
 
+export interface ReviewBottleneck {
+  cause: string;
+  flights: number;
+  flightNumbers: string[];
+  /** 実発生時刻を個別に記録していない原因は、運航記録の時刻で概況を示す */
+  firstRecordAt: number;
+  lastRecordAt: number;
+  evidence: string;
+  recommendation: string;
+}
+
 /** プレイヤーの対応の回数（UI が数える。シミュレーションには入れない） */
 export interface ReviewResponses {
   delays: number;
@@ -82,6 +93,8 @@ export interface DayReview {
   prev: DailyReport | null;
   compare: ReviewCompareRow[];
   delayCauses: { cause: string; flights: number }[];
+  /** 日中に終了記録が作られた便の実ログに基づく原因・影響便・対応案 */
+  bottlenecks: ReviewBottleneck[];
   disruptions: ReviewDisruption[];
   responses: ReviewResponses;
   airlines: {
@@ -149,6 +162,48 @@ export function delayCauseCounts(records: readonly FlightRecord[], from: number,
   return [...n].map(([cause, flights]) => ({ cause, flights })).sort((a, b) => b.flights - a.flights || (a.cause < b.cause ? -1 : 1));
 }
 
+const recordTime = (r: FlightRecord): number => r.takeoffAt ?? r.blockOut ?? r.landedAt ?? r.depScheduled;
+
+/** 保存済みの実便記録だけを使う。設定値から不足台数や処理能力を推定しない。 */
+export function buildReviewBottlenecks(records: readonly FlightRecord[], from: number, to: number): ReviewBottleneck[] {
+  const groups = new Map<string, FlightRecord[]>();
+  for (const r of records) {
+    if (recordTime(r) < from || recordTime(r) >= to) continue;
+    for (const cause of new Set(r.causes)) groups.set(cause, [...(groups.get(cause) ?? []), r]);
+  }
+  const meanMin = (values: number[]): number | null => values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length / 60 * 10) / 10 : null;
+  return [...groups.entries()].map(([cause, rs]) => {
+    const times = rs.map(recordTime).sort((a, b) => a - b);
+    const taxi = meanMin(rs.map((r) => r.taxiOutSec));
+    const stops = meanMin(rs.map((r) => r.groundStopSec));
+    const taskWait = meanMin(rs.map((r) => r.taskBlockedSec));
+    const busWait = meanMin(rs.flatMap((r) => r.busWaitSec === undefined ? [] : [r.busWaitSec]));
+    let evidence = `対象 ${rs.length}便`;
+    if (cause === 'apronBus') evidence += busWait === null ? '・バス待ち時間の記録なし' : `・平均バス待ち ${busWait}分`;
+    else if (cause === 'taxiCongestion') evidence += `・平均出発地上走行 ${taxi ?? 0}分・平均地上停止 ${stops ?? 0}分`;
+    else if (cause === 'turnaround' || cause === 'groundHandling') evidence += `・平均作業待ち ${taskWait ?? 0}分`;
+    else if (cause === 'runwayQueue') evidence += `・平均地上停止 ${stops ?? 0}分`;
+    const recommendation = cause === 'apronBus'
+      ? 'ピーク時のバス待ちと配車を確認し、バス配置または便の時間を調整してください。'
+      : cause === 'taxiCongestion'
+        ? '記録便の地上走行・停止を確認し、誘導路の経路または便の時間を見直してください。'
+        : cause === 'runwayQueue'
+          ? '滑走路の待機と離着陸の集中を確認し、運用方向または便の時間を調整してください。'
+          : cause === 'turnaround' || cause === 'groundHandling'
+            ? '機種別の作業記録を確認し、不足する人員・車両を補うか折り返し時刻を分散してください。'
+            : '対象便の運航記録とイベントを確認して原因を切り分けてください。';
+    return {
+      cause,
+      flights: rs.length,
+      flightNumbers: [...new Set(rs.map((r) => `${r.arrNumber}/${r.depNumber}`))].sort(),
+      firstRecordAt: times[0]!,
+      lastRecordAt: times[times.length - 1]!,
+      evidence,
+      recommendation,
+    };
+  }).sort((a, b) => b.flights - a.flights || (a.cause < b.cause ? -1 : 1));
+}
+
 export function buildDayReview(input: ReviewInput): DayReview {
   const { sim, company, dayStart, airlinesBefore, responses, access } = input;
   const reports = company.reports;
@@ -193,6 +248,7 @@ export function buildDayReview(input: ReviewInput): DayReview {
     prev: prev ? structuredClone(prev) : null,
     compare: compareReports(prev, report),
     delayCauses: delayCauseCounts(records, dayStart, end),
+    bottlenecks: buildReviewBottlenecks(records, dayStart, end),
     disruptions,
     responses: { ...responses },
     airlines,

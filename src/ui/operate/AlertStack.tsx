@@ -7,6 +7,27 @@ import { ALERT_VISIBLE, deriveAlerts, type Alert, type AlertAction } from './ale
 import { focusTarget, selectAircraftAndFocus } from './focus';
 import { opsUi, useOpsUi } from './opsUi';
 
+interface FlowHistoryEntry {
+  key: string;
+  title: string;
+  openedAt: number;
+  resolvedAt: number | null;
+}
+
+function historyKey(projectId: string | null, seed: string, since: number): string {
+  return `skyport.pax-flow-history.v1:${projectId ?? seed}:${since}`;
+}
+
+function readFlowHistory(key: string): FlowHistoryEntry[] {
+  try {
+    const value: unknown = JSON.parse(globalThis.localStorage?.getItem(key) ?? '[]');
+    if (!Array.isArray(value)) return [];
+    return value.filter((x): x is FlowHistoryEntry => !!x && typeof x === 'object' && typeof x.key === 'string' && typeof x.title === 'string' && Number.isFinite(x.openedAt) && (x.resolvedAt === null || Number.isFinite(x.resolvedAt))).slice(-100);
+  } catch {
+    return [];
+  }
+}
+
 function jump(a: Alert): void {
   if (a.target.kind === 'aircraft' && a.target.id) selectAircraftAndFocus(a.target.id);
   else if (a.target.kind === 'unit') opsUi.openOverlay('ground');
@@ -41,16 +62,58 @@ export function AlertStack() {
   const dismissed = useOpsUi((s) => s.dismissed);
   const expanded = useOpsUi((s) => s.alertsExpanded);
   const result = o ? deriveAlerts(o.sim, company, dismissed) : { alerts: [], keys: [] };
+  const allAlerts = o ? deriveAlerts(o.sim, company) : result;
+  const historyStorageKey = o ? historyKey(o.sim.ctx.layout.name, o.sim.state.seed, o.sim.state.analytics.since) : '';
+  const flowAlerts = allAlerts.alerts.filter((a) => a.key.startsWith('paxFlow:') || a.key.startsWith('paxStructure:') || a.key.startsWith('airsideStructure:'));
+  const now = o?.sim.state.now ?? 0;
+  const history = (() => {
+    if (!historyStorageKey) return [];
+    const current = readFlowHistory(historyStorageKey);
+    const active = new Set(flowAlerts.map((a) => a.key));
+    let next = current;
+    for (let i = 0; i < current.length; i++) {
+      const entry = current[i]!;
+      if (entry.resolvedAt === null && !active.has(entry.key)) {
+        if (next === current) next = current.slice();
+        next[i] = { ...entry, resolvedAt: now };
+      }
+    }
+    for (const alert of flowAlerts) {
+      const index = next.findIndex((entry) => entry.key === alert.key && entry.resolvedAt === null);
+      if (index < 0) {
+        if (next === current) next = current.slice();
+        next.push({ key: alert.key, title: alert.title, openedAt: now, resolvedAt: null });
+      } else if (next[index]!.title !== alert.title) {
+        if (next === current) next = current.slice();
+        next[index] = { ...next[index]!, title: alert.title };
+      }
+    }
+    return next === current ? current : next.slice(-100);
+  })();
+  const serializedHistory = JSON.stringify(history);
+  useEffect(() => {
+    if (!historyStorageKey) return;
+    try {
+      if (globalThis.localStorage?.getItem(historyStorageKey) !== serializedHistory) globalThis.localStorage?.setItem(historyStorageKey, serializedHistory);
+    } catch {
+      // 履歴の保存に失敗しても現在の運航監視は継続する
+    }
+  }, [historyStorageKey, serializedHistory]);
   const staleCount = dismissed.filter((k) => !result.keys.includes(k)).length;
   // 解消したアラートの「閉じた」記録は消す（同じ key で再び起きたら、また通知する）
   useEffect(() => {
     if (staleCount > 0) opsUi.patch({ dismissed: dismissed.filter((k) => result.keys.includes(k)) });
   }, [staleCount, dismissed, result.keys]);
-  if (!o || result.alerts.length === 0) return null;
+  if (!o) return null;
   const shown = expanded ? result.alerts : result.alerts.slice(0, ALERT_VISIBLE);
   const more = result.alerts.length - shown.length;
+  const critical = result.alerts.filter((a) => a.severity === 'critical').length;
+  const warnings = result.alerts.length - critical;
   return (
     <div className="alert-stack" data-testid="alert-stack">
+      <button className="alert-status" onClick={() => opsUi.patch({ alertsExpanded: !expanded })} aria-expanded={expanded} data-testid="alert-status">
+        旅客動線・運用状況: {result.alerts.length === 0 ? '問題なし' : `重大 ${critical} · 警告 ${warnings}`}
+      </button>
       {shown.map((a) => (
         <div key={a.key} className={`alert ${a.severity}`} data-testid={`alert-${a.key}`}>
           <button className="alert-main" onClick={() => jump(a)} title={OPS_UI.jump} data-testid={`alert-focus-${a.key}`}>
@@ -58,6 +121,7 @@ export function AlertStack() {
             <span className="alert-title">{a.title}</span>
             {a.count > 1 && <span className="alert-count">×{a.count}</span>}
           </button>
+          {a.detail && <div className="alert-detail">{a.detail}</div>}
           <span className="alert-actions">
             {a.actions
               .filter((x) => x !== 'focus')
@@ -72,6 +136,14 @@ export function AlertStack() {
           </span>
         </div>
       ))}
+      {expanded && history.some((entry) => entry.resolvedAt !== null) && (
+        <div className="alert-history" data-testid="pax-flow-history">
+          <strong>解消済みの動線エラー</strong>
+          {history.filter((entry) => entry.resolvedAt !== null).slice(-10).reverse().map((entry, i) => (
+            <div key={`${entry.key}:${entry.openedAt}:${i}`}>{entry.title} · {Math.round((entry.resolvedAt! - entry.openedAt) / 60)}分で解消</div>
+          ))}
+        </div>
+      )}
       {(more > 0 || expanded) && (
         <span className="alert-more-row">
           <button className="alert-more" onClick={() => opsUi.patch({ alertsExpanded: !expanded })} aria-expanded={expanded} data-testid="alert-more">

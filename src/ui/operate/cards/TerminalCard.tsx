@@ -1,5 +1,6 @@
 import { compareIds } from '../../../core/model/ids';
-import { areaOccupancy, facilityLoad } from '../../../core/sim/passengers';
+import { areaOccupancy, facilityLoad, serversOf } from '../../../core/sim/passengers';
+import { serviceSecPerPax } from '../../../core/terminal/capacity';
 import { OPS_UI, displayName } from '../../../i18n/ja';
 import { Card, CardRow, useSecondly } from '../Card';
 import { focusTarget } from '../focus';
@@ -12,6 +13,31 @@ export function TerminalCard() {
     const { state, ctx } = o.sim;
     const occ = areaOccupancy(state);
     const inTerminal = [...occ.values()].reduce((s, n) => s + n, 0);
+    const terminals = Object.keys(ctx.terminal.byTerminal).sort(compareIds).map((terminalId) => {
+      const ids = ctx.terminal.byTerminal[terminalId]!;
+      const occupants = ids.reduce((sum, id) => sum + (occ.get(id) ?? 0), 0);
+      const capacity = (kind: 'security' | 'checkIn') => ids.reduce((sum, id) => {
+        const area = ctx.terminal.areas[id]!;
+        if (area.kind !== kind) return sum;
+        const source = ctx.layout.terminalAreas[id]!;
+        const serviceSec = serviceSecPerPax(area.kind, source.props);
+        return sum + serversOf(o.sim, id) * 3600 / serviceSec;
+      }, 0);
+      const facilities = ids
+        .filter((id) => ['checkIn', 'security'].includes(ctx.terminal.areas[id]!.kind))
+        .map((id) => state.facilities[id])
+        .filter((f) => f !== undefined);
+      const served = facilities.reduce((sum, f) => sum + f.served, 0);
+      const wait = facilities.reduce((sum, f) => sum + f.waitTotal, 0);
+      return {
+        id: terminalId,
+        name: displayName(ctx.layout, terminalId),
+        occupants,
+        securityPerHour: Math.round(capacity('security')),
+        checkInPerHour: Math.round(capacity('checkIn')),
+        avgWaitMin: served ? Math.round(wait / served / 6) / 10 : 0,
+      };
+    });
     const rows = Object.values(ctx.terminal.areas)
       .filter((a) => PROCESSING.includes(a.kind) && state.facilities[a.id])
       .map((a) => {
@@ -30,7 +56,7 @@ export function TerminalCard() {
       .sort((a, b) => b.queued - a.queued || b.avgWaitMin - a.avgWaitMin || compareIds(a.id, b.id))
       .slice(0, 4);
     const busWait = state.bus ? state.activePax.reduce((n, id) => (state.paxGroups[id]!.state === 'waitingBus' ? n + state.paxGroups[id]!.count : n), 0) : null;
-    return { inTerminal, missed: state.paxStats.missed, busWait, rows };
+    return { inTerminal, missed: state.paxStats.missed, busWait, rows, terminals };
   });
   return (
     <Card id="terminal" title={OPS_UI.terminalTitle} open="terminal" badge={data ? OPS_UI.inTerminal(data.inTerminal) : undefined}>
@@ -44,6 +70,12 @@ export function TerminalCard() {
               {data.busWait}
             </CardRow>
           )}
+          {data.terminals.map((t) => (
+            <div key={t.id} className="card-item" data-testid={`terminal-summary-${t.id}`}>
+              <span>{t.name}</span>
+              <span className="muted">館内 {t.occupants}人 · 保安 {t.securityPerHour}/時 · チェックイン {t.checkInPerHour}/時 · 平均待ち {t.avgWaitMin}分</span>
+            </div>
+          ))}
           {data.rows.length === 0 && <div className="card-sub">{OPS_UI.noTerminal}</div>}
           {data.rows.map((r) => (
             <div key={r.id} className="card-item" data-testid={`card-terminal-${r.id}`}>

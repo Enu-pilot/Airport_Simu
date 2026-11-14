@@ -101,6 +101,8 @@ export type IssueCode =
   | 'GATE_NO_ARRIVAL_ACCESS'
   | 'GATE_UNREACHABLE'
   | 'GATE_ARRIVAL_NO_EXIT'
+  | 'TERMINAL_DEPARTURE_ROUTE'
+  | 'GATE_ARRIVAL_NO_BAGGAGE_ROUTE'
   // 空港全体
   | 'NO_RUNWAY'
   | 'NO_TOWER'
@@ -166,6 +168,8 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   GATE_NO_ARRIVAL_ACCESS: 'warning',
   GATE_UNREACHABLE: 'warning',
   GATE_ARRIVAL_NO_EXIT: 'warning',
+  TERMINAL_DEPARTURE_ROUTE: 'warning',
+  GATE_ARRIVAL_NO_BAGGAGE_ROUTE: 'warning',
   NO_RUNWAY: 'warning',
   NO_TOWER: 'warning',
   NO_GSE_BASE: 'warning',
@@ -864,6 +868,25 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
   for (const t of terminals) {
     const kinds = new Set((model.byTerminal[t.id] ?? []).map((id) => model.areas[id]!.kind));
     for (const [kind, code] of required) if (!kinds.has(kind)) sink.add(code, [t.id], {}, t.origin);
+
+    // 施設の個数ではなく、旅客が実際に使えるサービスと経路の連鎖を検査する。
+    const ids = model.byTerminal[t.id] ?? [];
+    const usable = (id: string) => {
+      const a = layout.terminalAreas[id]!;
+      const configured = Number(a.props.counters ?? a.props.lanes ?? a.props.fixtures ?? a.props.capacity ?? 0);
+      return a.kind !== 'checkIn' && a.kind !== 'security' || configured > 0;
+    };
+    const entrances = ids.filter((id) => model.areas[id]!.kind === 'entrance');
+    const checkIns = ids.filter((id) => model.areas[id]!.kind === 'checkIn' && usable(id));
+    const securities = ids.filter((id) => model.areas[id]!.kind === 'security' && usable(id));
+    const hasDepartureRoute = entrances.some((entry) => checkIns.some((ci) =>
+      !!findPaxRoute(model, { from: entry, goals: new Map([[ci, 0]]) }) && securities.some((sec) =>
+        !!findPaxRoute(model, { from: ci, goals: new Map([[sec, 0]]), uncleared: true }),
+      ),
+    ));
+    if (entrances.length > 0 && checkIns.length > 0 && securities.length > 0 && !hasDepartureRoute) {
+      sink.add('TERMINAL_DEPARTURE_ROUTE', [t.id], {}, t.origin);
+    }
   }
 
   // 保安検査場は一般区域と出発区域の両方に接している
@@ -905,6 +928,12 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     } else {
       const exits = new Map(ofKind('exit').map((id) => [id, 0] as const));
       if (!findPaxRoute(model, { from: access.deplane, goals: exits })) sink.add('GATE_ARRIVAL_NO_EXIT', [g.id], {}, g.origin);
+      const claims = ofKind('baggageClaim').filter((id) => Number(layout.terminalAreas[id]!.props.belts ?? 0) > 0);
+      const hasBaggageRoute = claims.some((claim) =>
+        !!findPaxRoute(model, { from: access.deplane!, goals: new Map([[claim, 0]]) }) &&
+        !!findPaxRoute(model, { from: claim, goals: exits }),
+      );
+      if (claims.length > 0 && !hasBaggageRoute) sink.add('GATE_ARRIVAL_NO_BAGGAGE_ROUTE', [g.id], {}, g.origin);
     }
   }
 }

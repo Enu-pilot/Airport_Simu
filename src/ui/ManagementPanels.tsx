@@ -238,9 +238,17 @@ export function PlanPanel() {
             {c.day + 1}日目のスケジュール（予定）
             <span className="muted small">
               {' '}
-              処理能力の目安: 離着陸 {analysis.capacity.movementsPerHour}回/時・保安検査 {analysis.capacity.securityPerHour}人/時・同時折り返し {analysis.capacity.turnarounds}機（ピーク {analysis.peakTurnarounds}機）
+              滑走路基準 {analysis.capacity.movementsPerHour}回/時・保安検査 {analysis.capacity.securityPerHour}人/時・同時折り返し目安 {analysis.capacity.turnarounds}機（計画ピーク {analysis.peakTurnarounds}機）
             </span>
           </h4>
+          <div className="muted small" data-testid="plan-capacity-details">
+            駐機可能スポット {analysis.capacity.totalStands}（ターミナル直結 {analysis.capacity.contactStands} / リモート {analysis.capacity.remoteStands}）。滑走路基準は運用中の滑走路数 × 30回/時、折り返し目安は配置済み地上支援数による静的概算です。
+            {Object.entries(analysis.terminalCapacity).map(([id, capacity]) => (
+              <span key={id}>{' · '}{displayName(layout, id)}: チェックイン {capacity.checkInPerHour}人/時・保安検査 {capacity.securityPerHour}人/時。</span>
+            ))}
+            <br />
+            算出条件不足: プッシュバック同時数・誘導路通過能力・バス輸送能力・1日処理能力。保有台数から時間能力を推定していません。
+          </div>
           {analysis.issues.length > 0 && (
             <ul className="plan-issues" data-testid="plan-issues">
               {analysis.issues.map((i) => (

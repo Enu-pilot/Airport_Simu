@@ -347,6 +347,21 @@ export function checkPaxInvariants(sim: Simulation, full: boolean): string[] {
     const g = state.paxGroups[id]!;
     if (g.area && !ctx.terminal.areas[g.area]) out.push(`P5 ${g.id} の所在エリア ${g.area} が存在しない`);
     const a = g.area ? ctx.terminal.areas[g.area] : undefined;
+    if (g.terminalId && a && a.terminalId !== g.terminalId) out.push(`P6 ${g.id} がターミナル ${g.terminalId} から別ターミナル ${a.terminalId} のエリア ${a.id} に入っている`);
+    if (g.terminalId && g.route.some((areaId) => ctx.terminal.areas[areaId]?.terminalId !== g.terminalId)) {
+      out.push(`P6 ${g.id} の経路が割当てターミナル ${g.terminalId} の外へ出ている`);
+    }
+    if (g.facility?.startsWith('gate:')) {
+      const gateId = g.facility.slice('gate:'.length);
+      const gateTerminal = ctx.terminal.gates[gateId]?.terminalId;
+      if (g.terminalId && gateTerminal && gateTerminal !== g.terminalId) out.push(`P6 ${g.id} が割当てターミナル外の搭乗口 ${gateId} を利用している`);
+    } else if (g.facility && ctx.terminal.areas[g.facility]?.terminalId !== g.terminalId) {
+      out.push(`P6 ${g.id} が割当てターミナル外の施設 ${g.facility} を利用している`);
+    }
+    const flight = state.flights[g.flightId];
+    const gateId = flight?.direction === 'departure' ? flight.pax.gateId : null;
+    const gateTerminal = gateId ? ctx.terminal.gates[gateId]?.terminalId : null;
+    if (g.terminalId && gateTerminal && gateTerminal !== g.terminalId) out.push(`P6 ${g.id} のターミナル ${g.terminalId} と便ゲート ${gateId} のターミナル ${gateTerminal} が不一致`);
     if (g.direction === 'departure' && a && a.zone === 'departure' && a.kind !== 'security' && !g.securityCleared) {
       out.push(`P4 ${g.id} が保安検査を通らずに出発区域 ${a.id} にいる`);
     }

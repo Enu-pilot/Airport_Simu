@@ -334,3 +334,13 @@ E2E: `tests/e2e/access.spec.ts`（アクセスの画面とタクシー乗り場�
 `gameModels` / `weatherSim` / `airlineEvalGoals` / `gameSave` の単体テスト、`golden.gameWeather` / `golden.gameModels`、e2e `gamemodels.spec.ts`。実測（Phase 12B-3a Part B 完了時）: Vitest 74 ファイル・674 テスト、Playwright 67 テスト（すべて通過）。
 
 実測（PR #5 の最終確認、監査・レビューの修正後。2026-11-13）: 型チェック・Lint エラー 0、Vitest 74 ファイル・683 テスト、Playwright 67 テスト（いずれも全件通過）。
+
+## 21. 複数ターミナル・継続動線監視・能力表示の回帰
+
+| ファイル | 内容 |
+|---|---|
+| `tests/unit/sim/multiTerminalPassengers.test.ts` | 単一 / 複数ターミナル、出発・到着の実状態遷移、別ターミナル施設への混入、ターミナル別の計画能力、入口の経路到達可能性、構造検証、運用中閉鎖と集約・解消、ゲート未割当て、保存・復元を確認する |
+| `tests/unit/ops12b.test.ts` | 航空機動線の構造異常が重大アラートになり対象を選択できること、既存アラートの集約・解消・状態不変を確認する |
+| `tests/unit/review.test.ts` | 日次の実便記録から遅延原因・影響便・時間・バス待ち等の証拠と対応案をまとめ、期間外記録を除外する |
+
+能力値に運用シフト・動的な人員配分・道路往復レートがない場合は `null` を検査し、台数だけでプッシュバック・バス・日量を数値化しない。専用の曲線誘導路・実寸航空機運動・地下施設のテストは各機能が未実装のため、この回帰群には含めない。

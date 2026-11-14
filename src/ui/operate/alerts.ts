@@ -1,9 +1,12 @@
 import type { CompanyState } from '../../core/economy/company';
+import { ISSUE_SEVERITY, analyzeLayout, type Issue } from '../../core/validation/validate';
+import { passengerFlowIssues } from '../../core/terminal/flowDiagnostics';
+import { serviceSecPerPax } from '../../core/terminal/capacity';
 import type { SimContext } from '../../core/sim/context';
 import type { Disruption, DisruptionKind, SimEvent, SimState } from '../../core/sim/types';
 import { BUS_SHORTAGE_ALERT_SEC } from '../../core/sim/busRules';
 import { airlineDef } from '../../core/economy/registry';
-import { GAME_UI, SCORE_LABEL, DISRUPTION_KIND_LABEL, OPS_UI, HOLD_REASON_LABEL, WEATHER_LABEL, displayName } from '../../i18n/ja';
+import { GAME_UI, SCORE_LABEL, DISRUPTION_KIND_LABEL, OPS_UI, HOLD_REASON_LABEL, WEATHER_LABEL, displayName, issueText } from '../../i18n/ja';
 import type { OverlayKey } from './opsUi';
 
 /**
@@ -29,6 +32,8 @@ export interface Alert {
   flightId?: string;
   /** 'openPanel' で開くオーバーレイ */
   panel?: OverlayKey;
+  /** 原因・影響・推奨対応などの補足 */
+  detail?: string;
 }
 
 /** 直近のイベントをアラートに含める時間（ゲーム内の秒） */
@@ -42,6 +47,16 @@ export const ALERT_VISIBLE = 3;
 const CRITICAL_DISRUPTION: readonly DisruptionKind[] = ['runwayClosed'];
 const SHOWN_DISRUPTION: readonly DisruptionKind[] = ['weather', 'runwayClosed', 'taxiwayClosed', 'standClosed', 'gateFailure', 'baggageFailure', 'vehicleFailure', 'maintenance', 'staffAbsence'];
 const REPAIRABLE: readonly DisruptionKind[] = ['runwayClosed', 'taxiwayClosed', 'standClosed', 'gateFailure', 'baggageFailure', 'vehicleFailure', 'staffAbsence', 'maintenance'];
+const TERMINAL_ISSUES = new Set(['TERMINAL_NO_ENTRANCE', 'TERMINAL_NO_EXIT', 'TERMINAL_NO_CHECKIN', 'TERMINAL_NO_SECURITY', 'TERMINAL_NO_BAGGAGE_CLAIM', 'SECURITY_NOT_CONNECTED', 'GATE_NO_BOARDING_ACCESS', 'GATE_NO_ARRIVAL_ACCESS', 'GATE_UNREACHABLE', 'GATE_ARRIVAL_NO_EXIT', 'TERMINAL_DEPARTURE_ROUTE', 'GATE_ARRIVAL_NO_BAGGAGE_ROUTE']);
+const AIRSIDE_ISSUES = new Set(['RUNWAY_TOO_SHORT', 'RUNWAY_NO_TAXIWAY', 'TAXIWAY_ON_RUNWAY', 'TAXIWAY_CROSSES_RUNWAY_NO_ENTRY', 'TAXIWAY_CROSSING_NO_JUNCTION', 'STAND_NOT_CONNECTED', 'STAND_NO_RUNWAY_ROUTE', 'STAND_ROUTE_SIZE_LIMITED', 'STAND_ONE_WAY_TRAP', 'GATE_NO_STAND', 'GATE_STAND_TOO_FAR', 'GATE_CONNECTION_INVALID', 'GATE_BUS_NO_VEHICLES', 'BUS_GATE_NO_REMOTE_STAND']);
+const structureCache = new WeakMap<object, Issue[]>();
+
+function airsideRecommendation(code: string): string {
+  if (code.startsWith('RUNWAY')) return '滑走路の運用状態・機種適合・誘導路との接続を確認してください';
+  if (code.startsWith('TAXIWAY')) return '交差点ノードと誘導路の接続・運用状態を確認してください';
+  if (code.startsWith('STAND')) return 'スポットから滑走路までの運用中経路と機種別サイズ制約を確認してください';
+  return 'ゲート・スポットの接続、バスゲートと運用車両を確認してください';
+}
 
 function targetKindOf(d: Disruption): AlertTargetKind {
   switch (d.kind) {
@@ -99,6 +114,56 @@ export function deriveAlerts(sim: { state: SimState; ctx: SimContext }, company:
     });
   }
 
+  // 静的な動線検証は運航中も常時参照できるようアラート一覧に載せる。
+  // レイアウトは運航中に不変なので、詳細な空港検証はレイアウト単位で一度だけ行う。
+  let structural = structureCache.get(layout);
+  if (!structural) {
+    structural = analyzeLayout(layout).issues.filter((i) => TERMINAL_ISSUES.has(i.code) || AIRSIDE_ISSUES.has(i.code));
+    structureCache.set(layout, structural);
+  }
+  for (const i of structural) {
+    const target = i.targets[0] ?? null;
+    if (TERMINAL_ISSUES.has(i.code)) {
+      add({
+        key: `paxStructure:${i.key}`,
+        severity: ISSUE_SEVERITY[i.code] === 'error' ? 'critical' : 'warning',
+        t: state.now,
+        title: `旅客動線: ${issueText(layout, i)}`,
+        detail: '影響: 該当ターミナルの便が旅客工程を完了できない可能性があります。推奨: 同一ターミナル内で施設・通路を接続し、必要な処理能力を確保してください。',
+        target: { kind: 'area', id: target },
+        actions: [...(target ? (['focus'] as const) : []), 'openPanel'],
+        panel: 'terminal',
+      });
+    } else if (AIRSIDE_ISSUES.has(i.code)) {
+      add({
+        key: `airsideStructure:${i.key}`,
+        severity: ISSUE_SEVERITY[i.code] === 'error' ? 'critical' : 'warning',
+        t: state.now,
+        title: `航空機動線: ${issueText(layout, i)}`,
+        detail: `影響: 対象の機種または便がスポット・滑走路間を走行できない可能性があります。推奨: ${airsideRecommendation(i.code)}。`,
+        target: { kind: 'area', id: target },
+        actions: [...(target ? (['focus'] as const) : []), 'openPanel'],
+        panel: 'ground',
+      });
+    }
+  }
+
+  // 実際の旅客状態から、到達不能・長時間の施設待ち・誤ったターミナル割当てを検出する。
+  for (const issue of passengerFlowIssues(sim)) {
+    const terminal = issue.terminalId ? displayName(layout, issue.terminalId) : 'ターミナル未割当て';
+    const flights = issue.flightIds.map((id) => state.flights[id]?.number ?? id).join(', ');
+    add({
+      key: issue.key,
+      severity: issue.severity,
+      t: issue.since,
+      title: `${terminal} · ${issue.stage}: ${issue.reason}`,
+      detail: `影響 ${issue.pax}人 / 便 ${flights}。対応: ${issue.recommendation}`,
+      target: { kind: 'area', id: issue.targetId ?? issue.terminalId },
+      actions: [...(issue.targetId || issue.terminalId ? (['focus'] as const) : []), 'openPanel'],
+      panel: 'terminal',
+    });
+  }
+
   // 直近のイベント（新しいものから）
   const since = state.now - ALERT_EVENT_WINDOW_SEC;
   for (let i = state.events.length - 1; i >= 0; i--) {
@@ -151,7 +216,7 @@ export function deriveAlerts(sim: { state: SimState; ctx: SimContext }, company:
     const fac = state.facilities[a.id];
     const props = layout.terminalAreas[a.id]?.props ?? {};
     const lanes = Math.max(1, Number(props.lanes ?? props.counters ?? 1));
-    const sec = Math.max(1, Number(props.serviceSecPerPax ?? 30));
+    const sec = serviceSecPerPax('security', props);
     const queued = (fac?.queue ?? []).reduce((s, id) => s + (state.paxGroups[id]?.count ?? 0), 0);
     const waitMin = (queued * sec) / lanes / 60;
     if (waitMin >= ALERT_QUEUE_MIN) add({ key: `queue:${a.id}`, severity: 'warning', t: state.now, title: `${displayName(layout, a.id).replace(/^\dF /, '')} の待ち 約${Math.round(waitMin)}分`, target: { kind: 'area', id: a.id }, actions: ['focus', 'openPanel'], panel: 'terminal' });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
+import { placeStand } from '../../src/core/layout/operations';
 import { createSandboxCompany, contractsOf, type CompanyState } from '../../src/core/economy/company';
 import { computeKpi } from '../../src/core/economy/ops';
 import { analyzeDayPlan, planDay, type DayPlan, type PlanAnalysis } from '../../src/core/economy/planning';
@@ -10,7 +11,7 @@ import { addTurnaround, createSimulation, stepSimulation } from '../../src/core/
 import type { SimEvent } from '../../src/core/sim/types';
 import { deriveAlerts, ALERT_VISIBLE } from '../../src/ui/operate/alerts';
 import { importantEvents } from '../../src/ui/operate/events';
-import { emptyLayout } from './helpers';
+import { emptyLayout, must } from './helpers';
 
 /** 12B-1（運航モードの画面）で使う、読み取り専用の導出関数のテスト */
 
@@ -112,10 +113,19 @@ describe('12B-1: アラート（deriveAlerts）', () => {
     const r = deriveAlerts(sim, sim.company);
     expect(r.alerts[0]).toMatchObject({ key: `diverted:${ac.id}`, severity: 'critical', target: { kind: 'aircraft', id: ac.id } });
   });
+
+  it('航空機のスポット〜滑走路間に経路がない構造問題を常設アラートにし、対象をマップ選択できる', () => {
+    const disconnected = must(placeStand(createSampleAirport(), { x: 10, y: 10 }, 'M'));
+    const standId = disconnected.created[0]!;
+    const sim = createSimulation(disconnected.layout, { company: createSandboxCompany() });
+    const alert = deriveAlerts(sim, sim.company).alerts.find((item) => item.key.includes(standId));
+    expect(alert).toMatchObject({ severity: 'critical', target: { kind: 'area', id: standId }, actions: expect.arrayContaining(['focus']) });
+    expect(alert?.title).toContain('航空機動線');
+  });
 });
 
 describe('12B-1: 航空会社の評価カード（airlineScorecard）', () => {
-  const emptyAnalysis = (): PlanAnalysis => ({ assignments: {}, issues: [], hourly: { movements: [], depPax: [] }, capacity: { movementsPerHour: 0, securityPerHour: 0, checkInPerHour: 0, turnarounds: 0 }, peakTurnarounds: 0 });
+  const emptyAnalysis = (): PlanAnalysis => ({ assignments: {}, issues: [], hourly: { movements: [], depPax: [] }, capacity: { movementsPerHour: 0, securityPerHour: 0, checkInPerHour: 0, turnarounds: 0, totalStands: 0, contactStands: 0, remoteStands: 0, simultaneousPushbacks: null, taxiwayMovementsPerHour: null, dailyMovements: null, busPaxPerHour: null }, terminalCapacity: {}, hourlyByTerminal: {}, peakTurnarounds: 0 });
   const noPlan = (day = 0): DayPlan => ({ day, flights: [], dropped: [] });
   const input = (company: CompanyState, layout = createSampleAirport(), plan = noPlan(), analysis = emptyAnalysis()) => ({ company, ctx: createContext(layout), records: [], plan, analysis });
   const get = (list: ReturnType<typeof airlineScorecard>, id: string, key: string) => list.find((s) => s.airlineId === id)!.components.find((c) => c.key === key)!;

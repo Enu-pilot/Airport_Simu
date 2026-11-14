@@ -1,5 +1,6 @@
 import { Rng } from '../rng';
 import { compareIds } from '../model/ids';
+import { serviceSecPerPax } from '../terminal/capacity';
 import type { SizeClass } from '../model/types';
 import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
 import { checkStand } from '../aircraft/compat';
@@ -157,28 +158,59 @@ export interface PlanIssue {
 }
 
 export interface PlanAnalysis {
-  assignments: Record<string, { standId: string | null; gateId: string | null }>;
+  assignments: Record<string, { standId: string | null; gateId: string | null; terminalId: string | null }>;
   issues: PlanIssue[];
   /** 時間ごとの離着陸回数・出発旅客数（保安検査を通る時間帯）と、その処理能力 */
   hourly: { movements: number[]; depPax: number[] };
-  capacity: { movementsPerHour: number; securityPerHour: number; checkInPerHour: number; turnarounds: number };
+  capacity: {
+    movementsPerHour: number;
+    securityPerHour: number;
+    checkInPerHour: number;
+    turnarounds: number;
+    totalStands: number;
+    contactStands: number;
+    remoteStands: number;
+    /** 機材数は把握できるが、同じ作業員の重複稼働を除いた同時数はモデル化されていない */
+    simultaneousPushbacks: null;
+    /** 誘導路の通過レートがモデル化されていないため未算出 */
+    taxiwayMovementsPerHour: null;
+    /** 実際の滑走路処理能力は時間帯・構成差を含むため未算出 */
+    dailyMovements: null;
+    /** バスの定員・往復時間・道路所要時間を合わせたレートがないため未算出 */
+    busPaxPerHour: null;
+  };
+  /** ターミナルごとの処理能力。出発需要の警告もこの単位で比較する。 */
+  terminalCapacity: Record<string, { securityPerHour: number; checkInPerHour: number }>;
+  hourlyByTerminal: Record<string, number[]>;
   peakTurnarounds: number;
 }
 
 const SIZE_RANK: Record<SizeClass, number> = { S: 1, M: 2, L: 3 };
 
-function processingPerHour(ctx: SimContext, kind: 'security' | 'checkIn'): number {
-  if (!ctx.paxTerminal) return 0;
+function processingPerHour(ctx: SimContext, terminalId: string, kind: 'security' | 'checkIn'): number {
   let cap = 0;
-  for (const id of ctx.terminal.byTerminal[ctx.paxTerminal] ?? []) {
+  for (const id of ctx.terminal.byTerminal[terminalId] ?? []) {
     const node = ctx.terminal.areas[id]!;
     if (node.kind !== kind) continue;
     const a = ctx.layout.terminalAreas[id]!;
     const servers = Number(a.props.counters ?? a.props.lanes ?? 0);
-    const sec = Math.max(1, Number(a.props.serviceSecPerPax ?? 30));
+    const sec = serviceSecPerPax(node.kind, a.props);
     cap += (servers * 3600) / sec;
   }
   return Math.round(cap);
+}
+
+/** バスゲート選択前の計画値。搭乗口があり、スポットから最短の運用中バスゲートを使う。 */
+function nearestBusTerminal(ctx: SimContext, standId: string): string | null {
+  const node = ctx.network.nodes[ctx.stands[standId]?.node ?? ''];
+  if (!node) return null;
+  const candidates = ctx.busGates.filter((id) => !!ctx.terminal.gates[id]?.boarding).map((id) => {
+    const gate = ctx.layout.facilities[id]!;
+    const distance = Math.hypot(gate.origin.x + 0.5 - node.pos.x, gate.origin.y + 0.5 - node.pos.y);
+    return { id, terminalId: ctx.terminal.gates[id]!.terminalId, distance };
+  }).filter((x) => x.terminalId !== null);
+  candidates.sort((a, b) => a.distance - b.distance || compareIds(a.id, b.id));
+  return candidates[0]?.terminalId ?? null;
 }
 
 /** 地上支援で同時に扱える折り返しの目安 */
@@ -211,7 +243,7 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
   const assignments: PlanAnalysis['assignments'] = {};
   for (const f of plan.flights) {
     if (!operable.has(f.typeId)) {
-      assignments[f.key] = { standId: null, gateId: null };
+      assignments[f.key] = { standId: null, gateId: null, terminalId: null };
       add('SIZE_UNSUPPORTED', 'error', f.key);
       continue;
     }
@@ -219,13 +251,16 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
     const type = resolveType(ctx.types, f.typeId);
     const s = stands.find((x) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt);
     if (!s) {
-      assignments[f.key] = { standId: null, gateId: null };
+      assignments[f.key] = { standId: null, gateId: null, terminalId: null };
       add('STAND_CONFLICT', 'error', f.key);
       continue;
     }
     freeAt.set(s.id, f.departureAt + STAND_GAP_SEC);
     const gateId = ctx.standGate[s.id] ?? null;
-    assignments[f.key] = { standId: s.id, gateId };
+    // Contact gate terminal is authoritative. Remote stands use the nearest
+    // available bus-gate terminal for planning estimates; live dispatch balances load.
+    const terminalId = (gateId ? ctx.terminal.gates[gateId]?.terminalId : null) ?? (ctx.busGates.length ? nearestBusTerminal(ctx, s.id) : null) ?? ctx.paxTerminal;
+    assignments[f.key] = { standId: s.id, gateId, terminalId };
     if (!gateId) {
       if (ctx.busGates.length > 0) add('BUS_BOARDING', 'info', f.key);
       else add('NO_GATE', 'warning', f.key);
@@ -236,18 +271,35 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
   // 時間帯ごとの需要
   const movements = new Array<number>(24).fill(0);
   const depPax = new Array<number>(24).fill(0);
+  const terminalIds = Object.keys(ctx.terminal.byTerminal).sort(compareIds);
+  const terminalCapacity = Object.fromEntries(terminalIds.map((id) => [id, {
+    securityPerHour: processingPerHour(ctx, id, 'security'),
+    checkInPerHour: processingPerHour(ctx, id, 'checkIn'),
+  }]));
+  const hourlyByTerminal = Object.fromEntries(terminalIds.map((id) => [id, new Array<number>(24).fill(0)]));
   const hourOf = (sec: number) => Math.min(23, Math.max(0, Math.floor(sec / 3600)));
   for (const f of plan.flights) {
     movements[hourOf(f.arrivalAt + f.inboundDelaySec)]!++;
     movements[hourOf(f.departureAt)]!++;
     depPax[hourOf(f.departureAt - PAX_PROCESS_LEAD_SEC)]! += f.depPax;
+    // A single-terminal airport has an unambiguous fallback even when stand
+    // planning failed. In multi-terminal airports, never guess a terminal.
+    const terminalId = assignments[f.key]?.terminalId ?? (terminalIds.length === 1 ? terminalIds[0] : undefined);
+    if (terminalId && hourlyByTerminal[terminalId]) hourlyByTerminal[terminalId]![hourOf(f.departureAt - PAX_PROCESS_LEAD_SEC)]! += f.depPax;
   }
   const runways = Object.values(ctx.runways).filter((r) => r.operational).length;
   const capacity = {
     movementsPerHour: runways * RUNWAY_HOURLY_CAPACITY,
-    securityPerHour: processingPerHour(ctx, 'security'),
-    checkInPerHour: processingPerHour(ctx, 'checkIn'),
+    securityPerHour: Object.values(terminalCapacity).reduce((sum, c) => sum + c.securityPerHour, 0),
+    checkInPerHour: Object.values(terminalCapacity).reduce((sum, c) => sum + c.checkInPerHour, 0),
     turnarounds: turnaroundCapacity(ctx),
+    totalStands: stands.length,
+    contactStands: stands.filter((s) => s.contact).length,
+    remoteStands: stands.filter((s) => !s.contact).length,
+    simultaneousPushbacks: null,
+    taxiwayMovementsPerHour: null,
+    dailyMovements: null,
+    busPaxPerHour: null,
   };
   const flightsInHour = (h: number, pred: (f: PlannedFlight) => boolean) => plan.flights.filter(pred).map((f) => f.key);
   for (let h = 0; h < 24; h++) {
@@ -255,10 +307,14 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
     if (movements[h]! > capacity.movementsPerHour) {
       for (const k of flightsInHour(h, (f) => hourOf(f.arrivalAt + f.inboundDelaySec) === h || hourOf(f.departureAt) === h)) add('RUNWAY_OVERLOAD', 'warning', k, label);
     }
-    if (ctx.paxTerminal && depPax[h]! > 0) {
-      const inHour = flightsInHour(h, (f) => hourOf(f.departureAt - PAX_PROCESS_LEAD_SEC) === h);
-      if (depPax[h]! > capacity.securityPerHour * 0.9) for (const k of inHour) add('SECURITY_OVERLOAD', 'warning', k, label);
-      if (depPax[h]! * CHECKIN_SHARE > capacity.checkInPerHour * 0.9) for (const k of inHour) add('CHECKIN_OVERLOAD', 'warning', k, label);
+    for (const terminalId of terminalIds) {
+      const pax = hourlyByTerminal[terminalId]![h]!;
+      if (pax <= 0) continue;
+      const inHour = flightsInHour(h, (f) => hourOf(f.departureAt - PAX_PROCESS_LEAD_SEC) === h && assignments[f.key]?.terminalId === terminalId);
+      const detail = terminalIds.length > 1 ? `${terminalId} ${label}` : label;
+      const c = terminalCapacity[terminalId]!;
+      if (pax > c.securityPerHour * 0.9) for (const k of inHour) add('SECURITY_OVERLOAD', 'warning', k, detail);
+      if (pax * CHECKIN_SHARE > c.checkInPerHour * 0.9) for (const k of inHour) add('CHECKIN_OVERLOAD', 'warning', k, detail);
     }
   }
   // 同時に折り返す機数のピーク
@@ -276,7 +332,7 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext): PlanAnalysis {
     if (p.d > 0 && cur > capacity.turnarounds) overloaded.push(p.key);
   }
   for (const k of overloaded) add('GROUND_OVERLOAD', capacity.turnarounds === 0 ? 'error' : 'warning', k);
-  return { assignments, issues, hourly: { movements, depPax }, capacity, peakTurnarounds: peak };
+  return { assignments, issues, hourly: { movements, depPax }, capacity, terminalCapacity, hourlyByTerminal, peakTurnarounds: peak };
 }
 
 /** 時間帯（日内の分）がピークかどうか */

@@ -5,7 +5,7 @@ import { planDay } from '../../src/core/economy/planning';
 import { createSimulation } from '../../src/core/sim/simulation';
 import { stepTicks } from '../../src/core/sim/dayloop';
 import { KPI_DIRECTION } from '../../src/core/scenario/scenario';
-import { buildDayReview, compareReports, delayCauseCounts, emptyResponses, REVIEW_DIRECTION } from '../../src/core/analytics/review';
+import { buildDayReview, buildReviewBottlenecks, compareReports, delayCauseCounts, emptyResponses, REVIEW_DIRECTION } from '../../src/core/analytics/review';
 import type { FlightRecord } from '../../src/core/analytics/records';
 
 function oneDay() {
@@ -49,6 +49,32 @@ describe('振り返りのデータ', () => {
     const mk = (t: number, causes: string[]) => ({ takeoffAt: t, blockOut: t, landedAt: t, depScheduled: t, causes }) as unknown as FlightRecord;
     const r = delayCauseCounts([mk(10, ['a', 'b', 'a']), mk(20, ['b']), mk(30, ['b', 'c']), mk(999, ['z'])], 0, 100);
     expect(r).toEqual([{ cause: 'b', flights: 3 }, { cause: 'a', flights: 1 }, { cause: 'c', flights: 1 }]);
+  });
+
+  it('日次の制約分析は便記録の根拠・影響便・時刻を示し、該当ログがない日を除外する', () => {
+    const record = {
+      takeoffAt: 90,
+      blockOut: 80,
+      landedAt: 10,
+      depScheduled: 60,
+      arrNumber: 'SK101',
+      depNumber: 'SK102',
+      causes: ['apronBus'],
+      taxiOutSec: 600,
+      groundStopSec: 120,
+      taskBlockedSec: 0,
+      busWaitSec: 300,
+    } as unknown as FlightRecord;
+    expect(buildReviewBottlenecks([record], 0, 100)).toEqual([{
+      cause: 'apronBus',
+      flights: 1,
+      flightNumbers: ['SK101/SK102'],
+      firstRecordAt: 90,
+      lastRecordAt: 90,
+      evidence: '対象 1便・平均バス待ち 5分',
+      recommendation: 'ピーク時のバス待ちと配車を確認し、バス配置または便の時間を調整してください。',
+    }]);
+    expect(buildReviewBottlenecks([record], 100, 200)).toEqual([]);
   });
 
   it('1 日運航の後: 日報・前日・明日の便数・障害・航空会社が既存データと一致し、状態を変えない', { timeout: 120_000 }, () => {

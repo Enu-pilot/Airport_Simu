@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { actions, editorStore } from '../editor/store';
+import { actions, editorStore, useEditor } from '../editor/store';
 import { ops as opsActions } from '../editor/simRunner';
 import { Scene3D, type PerfStats } from './three/Scene3D';
 
@@ -15,6 +15,8 @@ export function View3D() {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene3D | null>(null);
   const [stats, setStats] = useState<PerfStats | null>(null);
+  const [pilotFollow, setPilotFollow] = useState(false);
+  const selectedAircraft = useEditor((s) => s.ops?.selectedAircraft ?? null);
 
   useEffect(() => {
     const host = hostRef.current!;
@@ -49,6 +51,10 @@ export function View3D() {
     };
   }, []);
 
+  useEffect(() => {
+    sceneRef.current?.setPilotFollow(pilotFollow && selectedAircraft !== null);
+  }, [pilotFollow, selectedAircraft]);
+
   const down = useRef<{ x: number; y: number } | null>(null);
   return (
     <div
@@ -71,6 +77,17 @@ export function View3D() {
         }
       }}
     >
+      <button
+        className="pilot-follow-toggle"
+        type="button"
+        disabled={!selectedAircraft}
+        aria-pressed={pilotFollow && selectedAircraft !== null}
+        onClick={() => setPilotFollow((value) => !value)}
+        title="選択中の機体に追従する簡易コックピット視点"
+        data-testid="pilot-follow-toggle"
+      >
+        {pilotFollow && selectedAircraft ? '追従中' : '機体に追従'}
+      </button>
       {stats && (
         <div className="perf-hud" data-testid="perf-3d">
           {stats.fps} fps · {stats.frameMs} ms · 描画 {stats.drawCalls} 回 · 三角形 {Math.round(stats.triangles / 1000)}k · 機体 {stats.aircraft} · 車両 {stats.units}

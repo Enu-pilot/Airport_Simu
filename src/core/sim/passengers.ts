@@ -2,6 +2,7 @@ import { Rng } from '../rng';
 import { compareIds } from '../model/ids';
 import { WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
 import { findPaxRoute, linkBetween } from '../terminal/route';
+import { serviceSecPerPax } from '../terminal/capacity';
 import { resolveType } from './aircraftTypes';
 import { demandFactorAt } from './disruptions';
 import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt } from './baggage';
@@ -120,7 +121,7 @@ function perPaxSec(sim: Simulation, key: string): number {
   if (a.kind === 'restroom') return RESTROOM_SEC / 2;
   if (a.kind === 'shop') return BALANCE.retail.shopSec / 3;
   if (a.kind === 'restaurant') return BALANCE.retail.restaurantSec / 3;
-  return Number(a.props.serviceSecPerPax ?? 30);
+  return serviceSecPerPax(a.kind, a.props);
 }
 
 /** 待ち行列の見込み待ち時間（秒） */
@@ -191,13 +192,22 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
     if (p.boarding !== 'closed') closeBoarding(sim, f, 'cancelled');
     return;
   }
-  // 旅客の生成（出発3時間前）
-  if (!p.generated && state.now >= f.scheduled - PAX_GENERATE_LEAD_SEC) generateDeparturePax(sim, f);
+  const requiresTerminalAssignment = Object.keys(ctx.terminal.byTerminal).length > 1;
+  // Keep the single-terminal update order byte-for-byte compatible: historically
+  // passenger generation ran before the current stand's gate was copied to FlightPax.
+  if (!requiresTerminalAssignment && !p.generated && state.now >= f.scheduled - PAX_GENERATE_LEAD_SEC) generateDeparturePax(sim, f);
   // 搭乗ゲートは機体のスポットで決まる
   if (ac.standId && p.boarding !== 'closed') {
+    const previousGateId = p.gateId;
     p.gateId = ctx.standGate[ac.standId] ?? null;
+    if (requiresTerminalAssignment && p.generated && previousGateId !== p.gateId) reconcileDepartureGate(sim, f, p.gateId);
     // バスゲートがある運航: ゲートのないスポットの便はバスゲートで搭乗し、ランプバスで運ぶ（sim/apronBus.ts）
     if (state.bus) applyBusDeparture(sim, f, ac);
+  }
+  // 複数ターミナルでは、ゲート所属先が確定してから旅客を作る。
+  // 単一ターミナル空港では従来どおり、便の生成時刻に旅客を作る。
+  if (requiresTerminalAssignment && !p.generated && ac.standId && state.now >= f.scheduled - PAX_GENERATE_LEAD_SEC) {
+    generateDeparturePax(sim, f);
   }
 
   if (p.boarding === 'notStarted') {
@@ -280,8 +290,9 @@ function generateDeparturePax(sim: Simulation, f: Flight): void {
   const { state, ctx } = sim;
   const p = f.pax;
   p.generated = true;
-  const terminal = ctx.paxTerminal;
-  if (!terminal) return; // ターミナル（入口）が無い空港では旅客なし
+  const terminalCount = Object.keys(ctx.terminal.byTerminal).length;
+  const terminal = (p.gateId ? ctx.terminal.gates[p.gateId]?.terminalId : null) ?? (terminalCount === 1 ? ctx.paxTerminal : null);
+  if (terminalCount === 0) return; // ターミナルのない空港では従来どおり旅客なし
   const seats = f.seats ?? resolveType(sim.ctx.types, state.aircraft[f.aircraftId]!.typeId).seats;
   // 需要の急増（障害）で予約が増える。座席数が上限
   const surge = demandFactorAt(state);
@@ -298,17 +309,44 @@ function generateDeparturePax(sim: Simulation, f: Flight): void {
   });
 }
 
+/** Reassigns passengers after an operational gate change without moving them between terminals. */
+function reconcileDepartureGate(sim: Simulation, f: Flight, gateId: string | null): void {
+  const terminalCount = Object.keys(sim.ctx.terminal.byTerminal).length;
+  const terminalId = (gateId ? sim.ctx.terminal.gates[gateId]?.terminalId : null) ?? (terminalCount === 1 ? sim.ctx.paxTerminal : null);
+  for (const g of groupsOf(sim.state, f.id)) {
+    if (PAX_FINAL_STATES.includes(g.state)) continue;
+    if (g.state === 'toAirport' && g.area === null) {
+      g.terminalId = terminalId;
+      continue;
+    }
+    if (g.terminalId !== terminalId) {
+      leaveFacility(sim.state, g);
+      g.route = [];
+      g.state = 'stranded';
+      g.reason = 'unreachable';
+      continue;
+    }
+    if (g.steps[g.stepIndex] !== 'gate') continue;
+    if (g.facility?.startsWith('gate:')) leaveFacility(sim.state, g);
+    g.route = [];
+    g.legProgress = 0;
+    g.legLength = 0;
+    if (g.area) planStep(sim, g);
+  }
+}
+
 /** 出発旅客グループを追加する（テスト・デバッグ用にも公開） */
 export function addDepartureGroup(sim: Simulation, flightId: string, count: number, appearAt: number, bags = 0): PaxGroup | null {
   const f = sim.state.flights[flightId];
-  const terminal = sim.ctx.paxTerminal;
-  if (!f || f.direction !== 'departure' || !terminal) return null;
+  const terminalCount = Object.keys(sim.ctx.terminal.byTerminal).length;
+  const terminal = (f?.pax.gateId ? sim.ctx.terminal.gates[f.pax.gateId]?.terminalId : null) ?? (terminalCount === 1 ? sim.ctx.paxTerminal : null);
+  if (!f || f.direction !== 'departure' || terminalCount === 0) return null;
   f.pax.generated = true;
   f.pax.booked += count;
   return withRng(sim.state, (rng) => addGroup(sim, rng, f, count, appearAt, terminal, bags));
 }
 
-function addGroup(sim: Simulation, rng: Rng, f: Flight, count: number, appearAt: number, terminalId: string, bagsFixed?: number): PaxGroup {
+function addGroup(sim: Simulation, rng: Rng, f: Flight, count: number, appearAt: number, terminalId: string | null, bagsFixed?: number): PaxGroup {
   const { state } = sim;
   let bags = 0;
   for (let i = 0; i < count; i++) if (rng.next() < BAG_PROB) bags++;
@@ -408,6 +446,8 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
         id,
         flightId: f.id,
         direction: 'arrival',
+        // 到着側は便のゲートが決めたターミナルだけを使う。ゲート未割当て時は
+        // 出発用の既定ターミナルへ流さず、降機口なしとして stranded にする。
         terminalId: access?.terminalId ?? null,
         count: size,
         bags,
@@ -455,6 +495,11 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
       if (state.now >= g.appearAt) {
         const f = state.flights[g.flightId]!;
         if (f.pax.boarding === 'closed') return; // 締切後は closeBoarding が処理済み
+        if (!g.terminalId) {
+          g.state = 'stranded';
+          g.reason = 'noGate';
+          return;
+        }
         // 空港アクセス: 交通手段の制約（満車・混雑・満員）と徒歩で遅れることがある
         if (state.access && !g.accessDone) {
           const delay = accessDeparture(sim, g);
@@ -471,12 +516,42 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
           g.retryAt = state.now + PAX_RETRY_SEC;
           return;
         }
-        g.area = withRng(state, (rng) => entrances[rng.int(0, entrances.length - 1)]!);
+        // 複数入口は、次の必須工程まで実際に歩ける入口だけから選ぶ。
+        // 入口の並び順や距離だけで選ぶと、孤立した入口に旅客を流すことがある。
+        const model = sim.ctx.terminal;
+        const nextStep = g.steps.slice(g.stepIndex).find((step) => step !== 'shop' && step !== 'restroom');
+        const targets = nextStep === 'gate'
+          ? [f.pax.gateId ? model.gates[f.pax.gateId]?.boarding : null].filter((id): id is string => !!id)
+          : nextStep
+            ? (model.byTerminal[g.terminalId!] ?? []).filter((id) => model.areas[id]!.kind === STEP_KIND[nextStep])
+            : [];
+        const goals = new Map(targets.map((id) => [id, 0] as const));
+        const closed = new Set(state.closedAreas);
+        const reachable = goals.size > 0
+          ? entrances.filter((id) => !!findPaxRoute(model, { from: id, goals, closed, uncleared: uncleared(g) }))
+          : entrances;
+        if (reachable.length === 0) {
+          // 閉鎖が原因なら再開を待つ。構造的に接続されていない場合はすぐに到達不能として記録する。
+          const structurallyReachable = entrances.some((id) => !!findPaxRoute(model, { from: id, goals, uncleared: uncleared(g) }));
+          if (structurallyReachable || targets.some((id) => serversOf(sim, id) === 0)) {
+            g.state = 'waitingFacility';
+            g.retryAt = state.now + PAX_RETRY_SEC;
+          } else {
+            g.state = 'stranded';
+            g.reason = 'unreachable';
+          }
+          return;
+        }
+        g.area = withRng(state, (rng) => reachable[rng.int(0, reachable.length - 1)]!);
         state.paxStats.spawned += g.count;
         planStep(sim, g);
       }
       return;
     case 'walking':
+      if (g.route.some((areaId) => state.closedAreas.includes(areaId))) {
+        planStep(sim, g);
+        return;
+      }
       walk(sim, g, occupancy);
       return;
     case 'queuing':

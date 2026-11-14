@@ -130,6 +130,19 @@ export function ReviewBody({ review }: { review: DayReview }) {
             review.delayCauses.slice(0, 6).map((c) => <Row key={c.cause} label={causeLabel(c.cause)} value={DAY_LOOP.flightsN(c.flights)} />)
           )}
         </div>
+        {review.bottlenecks.length > 0 && (
+          <div className="card-sub" data-testid="review-bottlenecks">
+            <b>実運航ログから見た制約</b>
+            {review.bottlenecks.slice(0, 6).map((b) => (
+              <div key={b.cause} className="review-bottleneck">
+                <Row label={`${causeLabel(b.cause)} · ${hhmm(b.firstRecordAt)}〜${hhmm(b.lastRecordAt)}`} value={`${b.flights}便`} />
+                <div className="muted small">{b.evidence}。影響便: {b.flightNumbers.slice(0, 8).join('、')}{b.flightNumbers.length > 8 ? ` ほか${b.flightNumbers.length - 8}便` : ''}</div>
+                <div className="small">対応案: {b.recommendation}</div>
+              </div>
+            ))}
+            <div className="muted small">時刻は便記録の時刻です。現行ログで資源別の不足人数・不足台数を特定できない原因は、推測値を表示しません。</div>
+          </div>
+        )}
       </Section>
 
       <Section id="review-pax" title={DAY_LOOP.paxTitle}>

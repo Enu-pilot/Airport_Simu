@@ -74,6 +74,8 @@ export class Scene3D {
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
+  private hemisphere: THREE.HemisphereLight;
+  private sun: THREE.DirectionalLight;
   private staticGroup = new THREE.Group();
   private aircraftGroup = new THREE.Group();
   private units: THREE.InstancedMesh | null = null;
@@ -82,6 +84,7 @@ export class Scene3D {
   private layout: AirportLayout | null = null;
   private aircraftObjs = new Map<string, { obj: THREE.Object3D; key: string }>();
   private raycaster = new THREE.Raycaster();
+  private pilotFollow = false;
   private frameTimes: number[] = [];
   private last = 0;
   stats: PerfStats = { fps: 0, frameMs: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, aircraft: 0, units: 0, geometryCache: 0, heapMB: null };
@@ -97,10 +100,10 @@ export class Scene3D {
     this.controls.enableDamping = true;
     this.scene.background = new THREE.Color(0x9cc6e6);
     this.scene.fog = new THREE.Fog(0x9cc6e6, 8000, 30000);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x556644, 1.6));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-    sun.position.set(-3000, 6000, 2000);
-    this.scene.add(sun);
+    this.hemisphere = new THREE.HemisphereLight(0xffffff, 0x556644, 1.6);
+    this.sun = new THREE.DirectionalLight(0xffffff, 1.4);
+    this.sun.position.set(-3000, 6000, 2000);
+    this.scene.add(this.hemisphere, this.sun);
     this.scene.add(this.staticGroup, this.aircraftGroup);
     this.selRing = new THREE.Mesh(new THREE.RingGeometry(1, 1.15, 40), new THREE.MeshBasicMaterial({ color: 0xffd400, side: THREE.DoubleSide }));
     this.selRing.rotateX(-Math.PI / 2);
@@ -114,6 +117,12 @@ export class Scene3D {
     this.renderer.setSize(cw, ch);
     this.camera.aspect = cw / ch;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Enable a display-only cockpit approximation that follows the selected aircraft. */
+  setPilotFollow(enabled: boolean): void {
+    this.pilotFollow = enabled;
+    this.controls.enabled = !enabled;
   }
 
   /** 2D のカメラ中心から 3D のカメラ位置を決める（切り替え時に同じ場所を見る） */
@@ -328,6 +337,31 @@ export class Scene3D {
     this.stats.units = units.length;
   }
 
+  private updateLighting(ops: OpsState | null): void {
+    const hour = ops ? (ops.sim.state.now % 86400) / 3600 : 12;
+    const daylight = Math.max(0, Math.cos(((hour - 12) * Math.PI) / 12));
+    const nightColor = new THREE.Color(0x0b1830);
+    const dayColor = new THREE.Color(0x9cc6e6);
+    const atmosphere = nightColor.clone().lerp(dayColor, daylight);
+    this.scene.background = atmosphere;
+    if (this.scene.fog instanceof THREE.Fog) this.scene.fog.color.copy(atmosphere);
+    this.hemisphere.intensity = 0.45 + daylight * 1.15;
+    this.sun.intensity = 0.12 + daylight * 1.28;
+  }
+
+  private updatePilotCamera(s: EditorState): void {
+    if (!this.pilotFollow || !s.ops?.selectedAircraft) return;
+    const rec = this.aircraftObjs.get(s.ops.selectedAircraft);
+    const ac = s.ops.sim.state.aircraft[s.ops.selectedAircraft];
+    if (!rec || !ac) return;
+    const forwardX = Math.sin((ac.heading * Math.PI) / 180);
+    const forwardZ = -Math.cos((ac.heading * Math.PI) / 180);
+    const position = rec.obj.position;
+    const height = Math.max(2, position.y + 2.4);
+    this.camera.position.set(position.x + forwardX * 1.5, height, position.z + forwardZ * 1.5);
+    this.controls.target.set(position.x + forwardX * 220, height + 12, position.z + forwardZ * 220);
+  }
+
   draw(s: EditorState, layout: AirportLayout): void {
     if (layout !== this.layout) {
       this.layout = layout;
@@ -343,6 +377,8 @@ export class Scene3D {
       if (this.units) this.units.count = 0;
       this.stats.aircraft = this.stats.units = 0;
     }
+    this.updateLighting(s.ops ?? null);
+    this.updatePilotCamera(s);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this.measure();

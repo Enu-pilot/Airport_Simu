@@ -48,6 +48,7 @@ export class MapRenderer {
   private terrain = new Sprite();
   private buildable = new Sprite();
   private g = new Graphics();
+  private nightShade = new Graphics();
   private overlay = new Graphics();
   private labels = new Container();
   private textPool = new Map<string, Text>();
@@ -69,7 +70,7 @@ export class MapRenderer {
       resolution: window.devicePixelRatio || 1,
     });
     host.appendChild(this.app.canvas);
-    this.world.addChild(this.terrain, this.buildable, this.g, this.overlay);
+    this.world.addChild(this.terrain, this.buildable, this.g, this.nightShade, this.overlay);
     this.app.stage.addChild(this.world, this.labels);
   }
 
@@ -106,6 +107,7 @@ export class MapRenderer {
     if (s.overlays.interior) this.drawInterior(layout, s, cam);
     if (s.overlays.network) this.drawNetwork(analysis);
     if (s.overlays.issues) this.drawIssues(layout, analysis);
+    this.drawNightShade(layout, s);
 
     // 選択
     if (s.selection && !ghostIds.has(s.selection)) this.outline(o, layout, s.selection, COLOR.selection, 3);
@@ -128,6 +130,17 @@ export class MapRenderer {
     if (s.ops && s.overlays.congestion) this.drawCongestion(layout, s.ops, cam, s.overlays.labels);
     if (s.ops) this.drawOps(s.ops, cam, s.overlays.network);
     for (const [k, t] of this.textPool) t.visible = this.usedTexts.has(k);
+  }
+
+  /** Display-only game-time night tint; the simulation state and object colors remain unchanged. */
+  private drawNightShade(layout: AirportLayout, s: EditorState): void {
+    const now = s.mode === 'operate' && s.ops ? s.ops.sim.state.now : null;
+    const hour = now === null ? 12 : (now % 86400) / 3600;
+    const daylight = Math.max(0, Math.cos(((hour - 12) * Math.PI) / 12));
+    const alpha = now === null ? 0 : (1 - daylight) * 0.38;
+    this.nightShade.clear();
+    if (alpha <= 0.01) return;
+    this.nightShade.rect(0, 0, layout.site.width, layout.site.height).fill({ color: 0x0b1730, alpha });
   }
 
   // ------------------------------------------------------------ 地形
