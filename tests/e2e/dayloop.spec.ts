@@ -50,6 +50,8 @@ test('0:00 で自動的に一時停止し、収支・定時率・明日の見通
   const review = page.getByTestId('day-review');
   await expect(review).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('review-title')).toHaveText('1日目の振り返り');
+  await expect(page.getByTestId('today-kpi-delay')).toBeVisible();
+  await expect(page.getByTestId('today-kpi-actual-delay')).toBeVisible();
   await expect(page.getByTestId('review-revenue-total')).toContainText('cr');
   await expect(page.getByTestId('review-cost-total')).toContainText('cr');
   await expect(page.getByTestId('review-otp-value')).toContainText('%');
