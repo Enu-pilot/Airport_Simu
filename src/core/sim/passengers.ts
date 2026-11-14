@@ -368,17 +368,37 @@ function reconcileDepartureGate(sim: Simulation, f: Flight, gateId: string | nul
 }
 
 /** 出発旅客グループを追加する（テスト・デバッグ用にも公開） */
-export function addDepartureGroup(sim: Simulation, flightId: string, count: number, appearAt: number, bags = 0): PaxGroup | null {
+export interface PassengerAccess {
+  stepFree?: boolean;
+}
+
+export function addDepartureGroup(
+  sim: Simulation,
+  flightId: string,
+  count: number,
+  appearAt: number,
+  bags = 0,
+  access: PassengerAccess = {},
+): PaxGroup | null {
   const f = sim.state.flights[flightId];
   const terminalCount = Object.keys(sim.ctx.terminal.byTerminal).length;
   const terminal = (f?.pax.gateId ? sim.ctx.terminal.gates[f.pax.gateId]?.terminalId : null) ?? (terminalCount === 1 ? sim.ctx.paxTerminal : null);
   if (!f || f.direction !== 'departure' || terminalCount === 0) return null;
   f.pax.generated = true;
   f.pax.booked += count;
-  return withRng(sim.state, (rng) => addGroup(sim, rng, f, count, appearAt, terminal, bags));
+  return withRng(sim.state, (rng) => addGroup(sim, rng, f, count, appearAt, terminal, bags, access));
 }
 
-function addGroup(sim: Simulation, rng: Rng, f: Flight, count: number, appearAt: number, terminalId: string | null, bagsFixed?: number): PaxGroup {
+function addGroup(
+  sim: Simulation,
+  rng: Rng,
+  f: Flight,
+  count: number,
+  appearAt: number,
+  terminalId: string | null,
+  bagsFixed?: number,
+  access: PassengerAccess = {},
+): PaxGroup {
   const { state } = sim;
   let bags = 0;
   for (let i = 0; i < count; i++) if (rng.next() < BAG_PROB) bags++;
@@ -410,6 +430,7 @@ function addGroup(sim: Simulation, rng: Rng, f: Flight, count: number, appearAt:
     appearAt,
     finishedAt: null,
     securityCleared: false,
+    ...(access.stepFree ? { stepFree: true } : {}),
     boardedGate: null,
     waitSec: 0,
     walkSec: 0,
@@ -570,11 +591,11 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
         const goals = new Map(targets.map((id) => [id, 0] as const));
         const closed = new Set(state.closedAreas);
         const reachable = goals.size > 0
-          ? entrances.filter((id) => !!findPaxRoute(model, { from: id, goals, closed, uncleared: uncleared(g) }))
+          ? entrances.filter((id) => !!findPaxRoute(model, { from: id, goals, closed, uncleared: uncleared(g), stepFree: g.stepFree }))
           : entrances;
         if (reachable.length === 0) {
           // 閉鎖が原因なら再開を待つ。構造的に接続されていない場合はすぐに到達不能として記録する。
-          const structurallyReachable = entrances.some((id) => !!findPaxRoute(model, { from: id, goals, uncleared: uncleared(g) }));
+          const structurallyReachable = entrances.some((id) => !!findPaxRoute(model, { from: id, goals, uncleared: uncleared(g), stepFree: g.stepFree }));
           if (structurallyReachable || targets.some((id) => serversOf(sim, id) === 0)) {
             g.state = 'waitingFacility';
             g.retryAt = state.now + PAX_RETRY_SEC;
@@ -666,7 +687,7 @@ function planStep(sim: Simulation, g: PaxGroup): void {
   const candidates = step === 'claim' ? ids.filter((id) => id === state.flights[g.flightId]!.pax.claimAreaId) : ids;
   const usable = candidates.filter((id) => !closed.has(id) && (step === 'exit' || step === 'claim' || serversOf(sim, id) > 0));
   const goals = new Map(usable.map((id) => [id, step === 'exit' || step === 'claim' ? 0 : expectedWait(sim, id)] as const));
-  const route = goals.size > 0 ? findPaxRoute(model, { from: g.area, goals, closed, uncleared: uncleared(g) }) : null;
+  const route = goals.size > 0 ? findPaxRoute(model, { from: g.area, goals, closed, uncleared: uncleared(g), stepFree: g.stepFree }) : null;
   if (route) {
     startRoute(sim, g, route.areas);
     return;
@@ -678,7 +699,7 @@ function planStep(sim: Simulation, g: PaxGroup): void {
     return;
   }
   // 閉鎖が原因なら待機、構造的に行けないなら到達不能
-  const ignoringClosure = candidates.length > 0 && findPaxRoute(model, { from: g.area, goals: new Map(candidates.map((id) => [id, 0] as const)), uncleared: uncleared(g) });
+  const ignoringClosure = candidates.length > 0 && findPaxRoute(model, { from: g.area, goals: new Map(candidates.map((id) => [id, 0] as const)), uncleared: uncleared(g), stepFree: g.stepFree });
   setWaiting(state, g, ignoringClosure || candidates.some((id) => closed.has(id) || serversOf(sim, id) === 0) ? 'waitingFacility' : 'stranded');
 }
 
@@ -699,12 +720,12 @@ function planGate(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
       else dwell(state, g);
       return;
     }
-    const route = findPaxRoute(model, { from: g.area!, goals: new Map([[boarding, 0]]), closed });
+    const route = findPaxRoute(model, { from: g.area!, goals: new Map([[boarding, 0]]), closed, stepFree: g.stepFree });
     if (route) {
       startRoute(sim, g, route.areas);
       return;
     }
-    const structural = !findPaxRoute(model, { from: g.area!, goals: new Map([[boarding, 0]]) });
+    const structural = !findPaxRoute(model, { from: g.area!, goals: new Map([[boarding, 0]]), stepFree: g.stepFree });
     setWaiting(state, g, structural ? 'stranded' : 'waitingFacility');
     return;
   }
@@ -714,7 +735,7 @@ function planGate(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
     const waits = new Map(
       (model.byTerminal[g.terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === 'waiting' && model.areas[id]!.zone === 'departure' && !closed.has(id)).map((id) => [id, 0] as const),
     );
-    const route = waits.size > 0 ? findPaxRoute(model, { from: g.area!, goals: waits, closed }) : null;
+    const route = waits.size > 0 ? findPaxRoute(model, { from: g.area!, goals: waits, closed, stepFree: g.stepFree }) : null;
     if (route && route.areas.length > 1) {
       startRoute(sim, g, route.areas);
       return;
@@ -742,7 +763,7 @@ function planShop(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
       if (w <= 10 * 60) goals.set(id, w);
     }
   }
-  const route = goals.size > 0 ? findPaxRoute(sim.ctx.terminal, { from: g.area!, goals, closed, uncleared: uncleared(g) }) : null;
+  const route = goals.size > 0 ? findPaxRoute(sim.ctx.terminal, { from: g.area!, goals, closed, uncleared: uncleared(g), stepFree: g.stepFree }) : null;
   if (route) {
     startRoute(sim, g, route.areas);
     return;
@@ -780,14 +801,15 @@ function startLeg(sim: Simulation, g: PaxGroup): void {
   g.legProgress = 0;
   g.legLength = link ? link.lengthM + link.travelSec * WALK_SPEED_MPS : 0;
   const transferLinkId = link?.transferLinkId;
-  if (!transferLinkId) {
+  const transportId = transferLinkId ?? (link?.verticalTransportId ? `vertical:${link.verticalTransportId}` : undefined);
+  if (!transportId) {
     delete g.terminalLinkId;
     delete g.terminalLinkWaitingId;
     return;
   }
-  if (g.terminalLinkId === transferLinkId) return;
-  const layoutLink = sim.ctx.layout.terminalLinks?.[transferLinkId];
-  if (!layoutLink) {
+  if (g.terminalLinkId === transportId) return;
+  const layoutLink = transferLinkId ? sim.ctx.layout.terminalLinks?.[transferLinkId] : undefined;
+  if (transferLinkId && !layoutLink) {
     g.state = 'stranded';
     g.reason = 'unreachable';
     return;
@@ -798,15 +820,18 @@ function startLeg(sim: Simulation, g: PaxGroup): void {
     sim.state.terminalTransit = { hour, passengersByLink: {} };
   }
   const usage = sim.state.terminalTransit!.passengersByLink;
-  const used = usage[transferLinkId] ?? 0;
-  if (used + g.count > terminalLinkCapacityPerHour(layoutLink)) {
+  const used = usage[transportId] ?? 0;
+  const capacity = layoutLink
+    ? terminalLinkCapacityPerHour(layoutLink)
+    : link?.capacityPerHour ?? 1;
+  if (used + g.count > capacity) {
     g.state = 'waitingTransport';
-    g.terminalLinkWaitingId = transferLinkId;
+    g.terminalLinkWaitingId = transportId;
     g.retryAt = (hour + 1) * 3600;
     return;
   }
-  usage[transferLinkId] = used + g.count;
-  g.terminalLinkId = transferLinkId;
+  usage[transportId] = used + g.count;
+  g.terminalLinkId = transportId;
   delete g.terminalLinkWaitingId;
 }
 
@@ -833,7 +858,7 @@ function walk(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): voi
   g.legProgress += speed;
   g.walkSec++;
   if (g.legProgress >= g.legLength) {
-    const completedTransfer = link.transferLinkId === g.terminalLinkId;
+    const completedTransfer = (link.transferLinkId ?? (link.verticalTransportId ? `vertical:${link.verticalTransportId}` : undefined)) === g.terminalLinkId;
     g.area = next;
     const nextTerminal = ctx.terminal.areas[next]?.terminalId;
     if (nextTerminal && nextTerminal !== g.terminalId) {

@@ -7,6 +7,7 @@ export interface TerminalTransferQuery {
   toAreaId: string;
   zone: PaxZone;
   uncleared?: boolean;
+  stepFree?: boolean;
   closedAreaIds?: ReadonlySet<string>;
   closedLinkIds?: ReadonlySet<string>;
 }
@@ -73,6 +74,7 @@ export function findTerminalTransferRoute(layout: AirportLayout, q: TerminalTran
     for (const hop of outgoing.get(current) ?? []) {
       const next = model.areas[hop.to];
       if (!next || q.closedAreaIds?.has(next.id)) continue;
+      if (q.stepFree && (node.kind === 'stairs' || next.kind === 'stairs')) continue;
       if (hop.connectionId) {
         // An uncleared departing passenger must complete security in the current terminal first.
         if (q.uncleared) continue;

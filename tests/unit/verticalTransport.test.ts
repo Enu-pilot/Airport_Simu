@@ -36,6 +36,57 @@ describe('階層交通ネットワーク', () => {
     expect(findPaxRoute(buildTerminalModel(restored), { from: lower, goals: new Map([[upper, 0]]) })?.areas).toEqual([lower, stairs, upper]);
   });
 
+  it('エレベーターの時間当たり能力と所要時間を上下階の経路に載せる', () => {
+    let layout = emptyLayout(30, 30);
+    layout = must(placeFacility(layout, 'terminal', { x: 2, y: 2 }, { w: 12, h: 8, props: { levels: 2 } })).layout;
+    const terminalId = Object.values(layout.facilities).find((f) => f.kind === 'terminal')!.id;
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'hall', { x: 5, y: 5 }, { w: 1, h: 1 })).layout;
+    layout = must(placeTerminalArea(layout, terminalId, 1, 'hall', { x: 6, y: 5 }, { w: 1, h: 1 })).layout;
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'elevator', { x: 6, y: 5 }, {
+      w: 1,
+      h: 1,
+      props: { travelSec: 25, capacityPerHour: 90 },
+    })).layout;
+    const areas = Object.values(layout.terminalAreas);
+    const lower = areas.find((area) => area.kind === 'hall' && area.level === 0)!.id;
+    const upper = areas.find((area) => area.kind === 'hall' && area.level === 1)!.id;
+    const elevator = areas.find((area) => area.kind === 'elevator')!.id;
+    const model = buildTerminalModel(layout);
+    expect(findPaxRoute(model, { from: lower, goals: new Map([[upper, 0]]) })?.areas).toEqual([lower, elevator, upper]);
+    expect(model.links[elevator]!.find((link) => link.to === upper)).toMatchObject({
+      verticalTransportId: elevator,
+      capacityPerHour: 90,
+      travelSec: 25,
+    });
+  });
+
+  it('段差のない経路では階段を避け、エレベーターを選択する', () => {
+    let layout = emptyLayout(30, 30);
+    layout = must(placeFacility(layout, 'terminal', { x: 2, y: 2 }, { w: 12, h: 8, props: { levels: 2 } })).layout;
+    const terminalId = Object.values(layout.facilities).find((f) => f.kind === 'terminal')!.id;
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'hall', { x: 4, y: 5 }, { w: 1, h: 1 })).layout;
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'hall', { x: 5, y: 5 }, { w: 2, h: 2 })).layout;
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'stairs', { x: 7, y: 5 }, {
+      w: 1,
+      h: 1,
+      props: { travelSec: 5 },
+    })).layout;
+    layout = must(placeTerminalArea(layout, terminalId, 0, 'elevator', { x: 7, y: 6 }, {
+      w: 1,
+      h: 1,
+      props: { travelSec: 80 },
+    })).layout;
+    layout = must(placeTerminalArea(layout, terminalId, 1, 'hall', { x: 7, y: 5 }, { w: 1, h: 2 })).layout;
+    const areas = Object.values(layout.terminalAreas);
+    const from = areas.find((area) => area.kind === 'hall' && area.level === 0 && area.origin.x === 4)!.id;
+    const to = areas.find((area) => area.kind === 'hall' && area.level === 1)!.id;
+    const model = buildTerminalModel(layout);
+
+    expect(findPaxRoute(model, { from, goals: new Map([[to, 0]]) })?.areas).toContain(areas.find((area) => area.kind === 'stairs')!.id);
+    expect(findPaxRoute(model, { from, goals: new Map([[to, 0]]), stepFree: true })?.areas).toContain(areas.find((area) => area.kind === 'elevator')!.id);
+    expect(findPaxRoute(model, { from, goals: new Map([[to, 0]]), stepFree: true })?.areas).not.toContain(areas.find((area) => area.kind === 'stairs')!.id);
+  });
+
   it('同じ平面座標でも地上・地下ノードを分離し、垂直接続の有無を歩行経路に反映する', () => {
     let layout = emptyLayout(30, 30);
     layout = must(addRoadPath(layout, [{ x: 10, y: 10 }, { x: 10, y: 20 }], { roadClass: 'walkway', level: 0, capacityPerHour: 500 })).layout;

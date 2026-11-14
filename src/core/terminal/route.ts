@@ -14,6 +14,8 @@ export interface PaxRouteQuery {
    * 一般区域へ戻ることはできるが、目的地の保安検査場以外の出発区域には入れない。
    */
   uncleared?: boolean;
+  /** 階段を利用できない場合、階段エリアを経路から除外する。 */
+  stepFree?: boolean;
 }
 
 export interface PaxRoute {
@@ -43,6 +45,7 @@ export function findPaxRoute(model: TerminalModel, q: PaxRouteQuery): PaxRoute |
     for (const link of model.links[cur] ?? []) {
       const next = model.areas[link.to]!;
       if (q.closed?.has(next.id)) continue;
+      if (q.stepFree && (node.kind === 'stairs' || next.kind === 'stairs')) continue;
       if (q.uncleared) {
         if (next.zone === 'departure' && !(next.kind === 'security' && q.goals.has(next.id))) continue;
         if (!(node.kind === 'security' && next.zone === 'landside') && !canMove(node, next)) continue;

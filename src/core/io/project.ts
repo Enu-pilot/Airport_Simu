@@ -290,6 +290,11 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
   }
   if (errors.length) return errors;
   const state = s as unknown as SimState;
+  for (const [id, group] of Object.entries(state.paxGroups)) {
+    if (!isObj(group) || (group.stepFree !== undefined && typeof group.stepFree !== 'boolean')) {
+      errors.push(`運航状態: 旅客グループ ${id} の段差なし経路設定が不正です`);
+    }
+  }
   if (s.airlineStandHomes !== undefined) {
     const homes = s.airlineStandHomes;
     if (!isObj(homes) || !Number.isInteger(homes.day) || !isObj(homes.byAirline) || Object.values(homes.byAirline).some((ids) =>

@@ -13,7 +13,8 @@ import {
   type ProjectFile,
 } from '../../src/core/io/project';
 import { CATALOG, CATALOG_VERSION } from '../../src/core/aircraft/catalog';
-import { createSimulation, stepSimulation } from '../../src/core/sim/simulation';
+import { addTurnaround, createSimulation, stepSimulation } from '../../src/core/sim/simulation';
+import { addDepartureGroup } from '../../src/core/sim/passengers';
 import { checkInvariants } from '../../src/core/sim/invariants';
 import { createScenario, catalogDiff, SIM_MODEL_VERSION } from '../../src/core/scenario/scenario';
 import { buildTypeTable } from '../../src/core/sim/aircraftTypes';
@@ -27,6 +28,37 @@ function baseProject(extra: Partial<Parameters<typeof buildProject>[0]> = {}): P
 }
 
 describe('プロジェクトの保存形式', () => {
+  it('段差なし経路設定を運航セーブで保存・復元し、不正な値を拒否する', () => {
+    const sim = createSimulation(createSampleAirport(), { company: createSandboxCompany() });
+    const standId = Object.keys(sim.ctx.layout.stands).sort()[0]!;
+    const aircraft = addTurnaround(sim, 'narrow180', sim.state.now + 20 * 60, {
+      departureAt: sim.state.now + 3 * 3600,
+      plan: { contractId: 'test', destinationId: 'north', arrPax: 100, depPax: 100, standId, seats: 180 },
+    });
+    const departure = sim.state.flights[aircraft.departureFlightId]!;
+    const group = addDepartureGroup(sim, departure.id, 2, sim.state.now, 0, { stepFree: true })!;
+    const project = buildProject({
+      name: 'step-free', savedAt: NOW, layout: sim.ctx.layout, company: createSandboxCompany(), pin: null, scenarios: [], sim,
+    });
+
+    const restored = validateProject(serializeProject(project), opts);
+    expect(restored.errors).toEqual([]);
+    const simulation = restoreSimulation(
+      restored.project!.layout,
+      restored.project!.sim!,
+      effectiveModels(restored.project!.catalog),
+    ).sim;
+    expect(simulation.state.paxGroups[group.id]?.stepFree).toBe(true);
+
+    const malformed = JSON.parse(serializeProject(project)) as {
+      sim: { state: { paxGroups: Record<string, Record<string, unknown>> } };
+    };
+    malformed.sim.state.paxGroups[group.id]!.stepFree = 'yes';
+    expect(validateProject(JSON.stringify(malformed), opts).errors).toContain(
+      `運航状態: 旅客グループ ${group.id} の段差なし経路設定が不正です`,
+    );
+  });
+
   it('建物内設備の親・階情報を保存して復元する', () => {
     const layout = createSampleAirport();
     const terminal = Object.values(layout.facilities).find((f) => f.kind === 'terminal')!;

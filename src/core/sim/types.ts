@@ -379,6 +379,8 @@ export interface PaxGroup {
   finishedAt: number | null;
   /** 保安検査を通過済み */
   securityCleared: boolean;
+  /** 階段を避ける必要がある旅客向けの経路制約 */
+  stepFree?: boolean;
   boardedGate: string | null;
   /** 累計の待ち時間・歩行時間（秒） */
   waitSec: number;

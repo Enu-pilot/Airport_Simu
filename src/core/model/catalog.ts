@@ -238,15 +238,18 @@ export const TERMINAL_AREA_SPECS: Record<TerminalAreaKind, TerminalAreaSpec> = {
   hall: { defaultW: 4, defaultH: 4, minW: 1, minH: 1, zone: 'landside', zoneEditable: true, props: [], defaults: {} },
   stairs: {
     defaultW: 2, defaultH: 1, minW: 1, minH: 1, zone: 'landside', zoneEditable: true,
-    props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }], defaults: { travelSec: 45 },
+    props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }, { key: 'capacityPerHour', type: 'int', min: 1, max: 100000 }],
+    defaults: { travelSec: 45 },
   },
   escalator: {
     defaultW: 2, defaultH: 1, minW: 1, minH: 1, zone: 'landside', zoneEditable: true,
-    props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }], defaults: { travelSec: 30 },
+    props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }, { key: 'capacityPerHour', type: 'int', min: 1, max: 100000 }],
+    defaults: { travelSec: 30 },
   },
   elevator: {
     defaultW: 1, defaultH: 1, minW: 1, minH: 1, zone: 'landside', zoneEditable: true,
-    props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }], defaults: { travelSec: 60 },
+    props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }, { key: 'capacityPerHour', type: 'int', min: 1, max: 100000 }],
+    defaults: { travelSec: 60 },
   },
   shop: {
     defaultW: 3, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: true,

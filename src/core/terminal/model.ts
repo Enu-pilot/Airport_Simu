@@ -43,6 +43,10 @@ export interface AreaLink {
   via: Vec2;
   /** ターミナル間連絡設備を通る場合、その設備 ID */
   transferLinkId?: string;
+  /** ターミナル内の階層移動設備を通る場合、その設備 ID */
+  verticalTransportId?: string;
+  /** 階層移動設備の時間当たり輸送能力 */
+  capacityPerHour?: number;
 }
 
 export interface GateAccess {
@@ -124,7 +128,20 @@ export function buildTerminalModel(layout: AirportLayout): TerminalModel {
         } else if (Math.abs(a.level - b.level) === 1) {
           const lift = isLift(a.kind) ? a : isLift(b.kind) ? b : null;
           const via = overlapCenter(a, b);
-          if (lift && via) addLink(links, a, b, via, Number(layout.terminalAreas[lift.id]!.props.travelSec ?? 30));
+          if (lift && via) {
+            const area = layout.terminalAreas[lift.id]!;
+            addLink(
+              links,
+              a,
+              b,
+              via,
+              Number(area.props.travelSec ?? 30),
+              {
+                verticalTransportId: lift.id,
+                capacityPerHour: Number(area.props.capacityPerHour ?? defaultVerticalCapacityPerHour(lift.kind)),
+              },
+            );
+          }
         }
       }
     }
@@ -256,11 +273,27 @@ function connectIndependentGate(
 
 const isLift = (k: TerminalAreaKind): boolean => k === 'stairs' || k === 'escalator' || k === 'elevator';
 
-function addLink(links: Record<string, AreaLink[]>, a: AreaNode, b: AreaNode, via: Vec2, travelSec: number): void {
+function defaultVerticalCapacityPerHour(kind: TerminalAreaKind): number {
+  switch (kind) {
+    case 'stairs': return 1800;
+    case 'escalator': return 2400;
+    case 'elevator': return 600;
+    default: return 1;
+  }
+}
+
+function addLink(
+  links: Record<string, AreaLink[]>,
+  a: AreaNode,
+  b: AreaNode,
+  via: Vec2,
+  travelSec: number,
+  transport: Pick<AreaLink, 'verticalTransportId' | 'capacityPerHour'> = {},
+): void {
   const d = (p: Vec2, q: Vec2) => Math.hypot(p.x - q.x, p.y - q.y) * TILE_M;
   const lengthM = d(a.center, via) + d(via, b.center);
-  links[a.id]!.push({ to: b.id, lengthM, travelSec, via });
-  links[b.id]!.push({ to: a.id, lengthM, travelSec, via });
+  links[a.id]!.push({ to: b.id, lengthM, travelSec, via, ...transport });
+  links[b.id]!.push({ to: a.id, lengthM, travelSec, via, ...transport });
 }
 
 /** 同じ階の2つの矩形が辺を共有していれば、共有部分の中点 */

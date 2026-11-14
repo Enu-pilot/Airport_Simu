@@ -44,6 +44,22 @@ describe('ターミナル間連絡設備', () => {
     expect(restored.terminalLinks).toEqual(layout.terminalLinks);
   });
 
+  it('段差なし経路では階段エリアを端点とするターミナル間リンクも利用しない', () => {
+    const { layout: base, t1, a2 } = twoTerminals();
+    const placed = must(placeTerminalArea(base, t1, 0, 'stairs', { x: 20, y: 8 }, { zone: 'departure', w: 1, h: 1 }));
+    const stairs = placed.created[0]!;
+    const layout = must(addTerminalTransitLink(placed.layout, {
+      kind: 'walkway',
+      fromAreaId: stairs,
+      toAreaId: a2,
+      distanceM: 100,
+      travelSec: 30,
+      allowedZones: ['departure'],
+    })).layout;
+    expect(findTerminalTransferRoute(layout, { fromAreaId: stairs, toAreaId: a2, zone: 'departure' })).not.toBeNull();
+    expect(findTerminalTransferRoute(layout, { fromAreaId: stairs, toAreaId: a2, zone: 'departure', stepFree: true })).toBeNull();
+  });
+
   it('保安区域をまたぐリンクと同一ターミナル内のリンクは作れない', () => {
     const { layout: base, t1, a1, a2 } = twoTerminals();
     const sameTerminal = must(placeTerminalArea(base, t1, 0, 'waiting', { x: 20, y: 20 })).layout;

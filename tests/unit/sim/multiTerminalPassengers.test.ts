@@ -312,4 +312,87 @@ describe('複数ターミナルの旅客処理', () => {
     expect(passengers.some((group) => group.walkSec > 120)).toBe(true);
     expect(checkPaxInvariants(sim, true)).toEqual([]);
   });
+
+  it('ターミナル間連絡通路の時間帯能力を超えた旅客は待機し、次の時間帯に移動する', { timeout: 300_000 }, () => {
+    const { layout: initial, first, second, standA, standB } = twoTerminalAirport();
+    const departureArea = (terminalId: string) =>
+      Object.values(initial.terminalAreas).find((area) => area.terminalId === terminalId && area.kind === 'waiting')!;
+    const layout = must(addTerminalTransitLink(initial, {
+      kind: 'walkway',
+      fromAreaId: departureArea(second).id,
+      toAreaId: departureArea(first).id,
+      distanceM: 250,
+      travelSec: 120,
+      capacityPerHour: 40,
+      bidirectional: true,
+      allowedZones: ['departure'],
+    })).layout;
+    const sim = createSimulation(layout, { seed: 'terminal-link-capacity-wait', settings: manual });
+    const start = sim.state.now;
+    const ac = addTurnaround(sim, 'narrow180', start + 20 * 60, { departureAt: start + 5 * 3600, plan: contractPlan(standB) });
+    const dep = sim.state.flights[ac.departureFlightId]!;
+    runUntil(sim, () => dep.pax.gateId !== null, 60);
+    const origin = departureArea(second).id;
+    const firstGroup = addDepartureGroup(sim, dep.id, 30, sim.state.now)!;
+    const secondGroup = addDepartureGroup(sim, dep.id, 20, sim.state.now)!;
+    for (const group of [firstGroup, secondGroup]) {
+      group.steps = ['gate'];
+      group.stepIndex = 0;
+      group.securityCleared = true;
+      group.area = origin;
+      group.state = 'dwelling';
+      group.retryAt = sim.state.now;
+    }
+
+    expect(reassignStand(sim, ac.id, standA)).toEqual({ ok: true });
+    runUntil(sim, () => firstGroup.terminalLinkId !== undefined && secondGroup.state === 'waitingTransport', 20 * 60);
+    expect(sim.state.terminalTransit?.passengersByLink).toEqual({ [Object.keys(layout.terminalLinks!)[0]!]: 30 });
+    const retryAt = secondGroup.retryAt;
+    runUntil(sim, () => secondGroup.terminalLinkId !== undefined, 70 * 60);
+    expect(secondGroup.retryAt).toBe(retryAt);
+    expect(secondGroup.walkSec).toBeGreaterThan(0);
+    expect([first, second]).toContain(firstGroup.terminalId);
+    expect(checkPaxInvariants(sim, true)).toEqual([]);
+  });
+
+  it('上下移動設備の時間帯能力を超えた旅客は待機し、次の時間帯に移動する', { timeout: 300_000 }, () => {
+    let layout = createSampleAirport();
+    const terminalId = Object.values(layout.facilities).find((facility) => facility.kind === 'terminal')!.id;
+    const escalator = Object.values(layout.terminalAreas).find((area) => area.terminalId === terminalId && area.kind === 'escalator')!;
+    layout = must(updateEntity(layout, escalator.id, { props: { capacityPerHour: 40 } })).layout;
+
+    const lower = Object.values(layout.terminalAreas).find((area) => area.terminalId === terminalId && area.kind === 'entrance')!;
+    const upper = Object.values(layout.terminalAreas).find((area) => area.terminalId === terminalId && area.kind === 'waiting')!;
+    const sim = createSimulation(layout, { seed: 'vertical-capacity-wait', settings: manual });
+    const start = sim.state.now;
+    const stand = Object.keys(layout.stands).sort()[0]!;
+    const aircraft = addTurnaround(sim, 'narrow180', start + 20 * 60, {
+      departureAt: start + 5 * 3600,
+      plan: contractPlan(stand),
+    });
+    const departure = sim.state.flights[aircraft.departureFlightId]!;
+    runUntil(sim, () => departure.pax.gateId !== null, 3600);
+    const firstGroup = addDepartureGroup(sim, departure.id, 30, sim.state.now)!;
+    const secondGroup = addDepartureGroup(sim, departure.id, 20, sim.state.now)!;
+
+    for (const group of [firstGroup, secondGroup]) {
+      group.steps = ['gate'];
+      group.stepIndex = 0;
+      group.securityCleared = true;
+      group.area = lower.id;
+      group.route = [escalator.id, upper.id];
+      group.legLength = 0.1;
+      group.state = 'walking';
+    }
+
+    runUntil(sim, () => firstGroup.terminalLinkId !== undefined && secondGroup.state === 'waitingTransport', 60);
+    expect(firstGroup.terminalLinkId).toBe(`vertical:${escalator.id}`);
+    expect(secondGroup.terminalLinkWaitingId).toBe(`vertical:${escalator.id}`);
+    expect(sim.state.terminalTransit?.passengersByLink).toEqual({ [`vertical:${escalator.id}`]: 30 });
+
+    runUntil(sim, () => secondGroup.terminalLinkId !== undefined, 70 * 60);
+    expect(secondGroup.terminalLinkId).toBe(`vertical:${escalator.id}`);
+    expect(secondGroup.walkSec).toBeGreaterThan(0);
+    expect(checkPaxInvariants(sim, true)).toEqual([]);
+  });
 });
