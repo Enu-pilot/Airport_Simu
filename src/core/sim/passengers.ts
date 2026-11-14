@@ -42,6 +42,7 @@ export const PAX_GENERATE_LEAD_SEC = 3 * 3600;
 export const PAX_ARRIVAL_MIN = { earliest: 150, mode: 90, latest: 45 };
 export const LOAD_FACTOR = { min: 0.65, max: 0.9 };
 export const MAX_GROUP_SIZE = 5;
+const STEP_FREE_GROUP_RATE = 0.05;
 /** 1人あたり手荷物を預ける確率 */
 export const BAG_PROB = 0.5;
 /** 手荷物のない旅客がチェックインカウンターに寄る確率（残りはオンラインチェックイン） */
@@ -93,6 +94,11 @@ function nextId(state: SimState, prefix: string): string {
   const n = (state.counters[prefix] ?? 0) + 1;
   state.counters[prefix] = n;
   return `${prefix}_${n}`;
+}
+
+function needsStepFreeRoute(seed: string, groupId: string): boolean {
+  // Use a separate per-group stream so this feature does not shift operational RNG results.
+  return new Rng(`${seed}:step-free:${groupId}`).next() < STEP_FREE_GROUP_RATE;
 }
 
 function log(state: SimState, e: SimState['events'][number]): void {
@@ -431,7 +437,7 @@ function addGroup(
     appearAt,
     finishedAt: null,
     securityCleared: false,
-    ...(access.stepFree ? { stepFree: true } : {}),
+    ...((access.stepFree ?? needsStepFreeRoute(state.seed, id)) ? { stepFree: true } : {}),
     boardedGate: null,
     waitSec: 0,
     walkSec: 0,
@@ -527,6 +533,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
         appearAt: state.now,
         finishedAt: null,
         securityCleared: false,
+        ...(needsStepFreeRoute(state.seed, id) ? { stepFree: true } : {}),
         boardedGate: null,
         waitSec: 0,
         walkSec: 0,

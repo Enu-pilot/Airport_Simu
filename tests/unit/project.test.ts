@@ -57,6 +57,11 @@ describe('プロジェクトの保存形式', () => {
     expect(validateProject(JSON.stringify(malformed), opts).errors).toContain(
       `運航状態: 旅客グループ ${group.id} の段差なし経路設定が不正です`,
     );
+    malformed.sim.state.paxGroups[group.id]!.stepFree = true;
+    malformed.sim.state.paxGroups[group.id]!.terminalLinkReservedHour = -1;
+    expect(validateProject(JSON.stringify(malformed), opts).errors).toContain(
+      `運航状態: 旅客グループ ${group.id} の連絡設備予約時刻が不正です`,
+    );
   });
 
   it('建物内設備の親・階情報を保存して復元する', () => {

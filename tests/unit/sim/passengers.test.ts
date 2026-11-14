@@ -25,6 +25,19 @@ function oneTurnaround(layout: AirportLayout, seed = 'pax') {
 const departed = (ac: Aircraft) => () => ac.state === 'departed';
 
 describe('出発旅客', () => {
+  it('通常生成グループにも段差なし需要を決定的に割り当て、明示的な設定を優先する', () => {
+    const { sim, dep } = oneTurnaround(createSampleAirport(), 'step-free-groups');
+    const generated = Array.from({ length: 100 }, () => addDepartureGroup(sim, dep.id, 1, sim.state.now)!);
+    const stepFree = generated.filter((group) => group.stepFree);
+    expect(stepFree.length).toBeGreaterThan(0);
+    expect(stepFree.length).toBeLessThan(20);
+
+    const explicitlyAccessible = addDepartureGroup(sim, dep.id, 1, sim.state.now, 0, { stepFree: true })!;
+    const explicitlyStandard = addDepartureGroup(sim, dep.id, 1, sim.state.now, 0, { stepFree: false })!;
+    expect(explicitlyAccessible.stepFree).toBe(true);
+    expect(explicitlyStandard.stepFree).toBeUndefined();
+  });
+
   it('正常な搭乗: 予約旅客が入口→チェックイン→保安検査→ゲートを経て搭乗し、便の搭乗人数と一致する', () => {
     const { sim, ac, dep } = oneTurnaround(createSampleAirport());
     runUntil(sim, departed(ac), 6 * 3600);
@@ -161,6 +174,12 @@ describe('施設の閉鎖', () => {
 });
 
 describe('到着旅客', () => {
+  it('到着旅客にも通常生成時の段差なし需要を割り当てる', () => {
+    const { sim, arr } = oneTurnaround(createSampleAirport(), 'step-free-arrivals');
+    runUntil(sim, () => arr.pax.deplaned >= 100, 4 * 3600);
+    expect(groups(sim, arr.id).some((group) => group.stepFree)).toBe(true);
+  });
+
   it('降機 → 到着通路 → 手荷物受取（手荷物ありのみ）→ 出口へ。全員が退出し、受取は手荷物が出てから', () => {
     const { sim, arr } = oneTurnaround(createSampleAirport());
     runUntil(sim, () => arr.pax.generated && arr.pax.deplaneRemaining === 0 && arr.pax.exited === arr.pax.deplaned, 4 * 3600);
