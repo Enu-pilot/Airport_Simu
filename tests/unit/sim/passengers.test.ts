@@ -38,6 +38,14 @@ describe('出発旅客', () => {
     expect(explicitlyStandard.stepFree).toBeUndefined();
   });
 
+  it('段差なし属性の割当で運航用乱数列を消費しない', () => {
+    const automatic = oneTurnaround(createSampleAirport(), 'step-free-rng');
+    const explicit = oneTurnaround(createSampleAirport(), 'step-free-rng');
+    addDepartureGroup(automatic.sim, automatic.dep.id, 3, automatic.sim.state.now);
+    addDepartureGroup(explicit.sim, explicit.dep.id, 3, explicit.sim.state.now, 0, { stepFree: false });
+    expect(automatic.sim.state.rng).toEqual(explicit.sim.state.rng);
+  });
+
   it('正常な搭乗: 予約旅客が入口→チェックイン→保安検査→ゲートを経て搭乗し、便の搭乗人数と一致する', () => {
     const { sim, ac, dep } = oneTurnaround(createSampleAirport());
     runUntil(sim, departed(ac), 6 * 3600);
