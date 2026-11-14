@@ -30,6 +30,9 @@ export function TodayKpiCard() {
           <CardRow label={OPS_UI.kpiDelay}>
             <b data-testid="today-kpi-delay">{data.kpi.avgDelayMin}分</b>
           </CardRow>
+          <CardRow label={OPS_UI.kpiActualDelay}>
+            <b data-testid="today-kpi-actual-delay">{data.kpi.actualAvgDelayMin ?? '—'}分</b>
+          </CardRow>
           <CardRow label={OPS_UI.kpiPax}>
             <b data-testid="today-kpi-pax">{data.kpi.paxDeparted + data.kpi.paxArrived}</b>
           </CardRow>
