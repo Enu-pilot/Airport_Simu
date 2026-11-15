@@ -3,6 +3,7 @@ import { createSandboxCompany } from '../../../src/core/economy/company';
 import { buildProject, effectiveModels, restoreSimulation, serializeProject, validateProject } from '../../../src/core/io/project';
 import { updateEntity } from '../../../src/core/layout/operations';
 import type { AirportLayout } from '../../../src/core/model/types';
+import { SIM_MODEL_VERSION } from '../../../src/core/scenario/scenario';
 import { DAY_SEC } from '../../../src/core/sim/rules';
 import { addTurnaround, createSimulation, stepSimulation, type Simulation } from '../../../src/core/sim/simulation';
 import { setManualResourceClosure } from '../../../src/core/sim/disruptions';
@@ -67,17 +68,33 @@ describe('航空会社別ホームスポット', () => {
     expect(sim.state.airlineStandHomes).toEqual({ day: 1, byAirline: {} });
   });
 
-  it('ホーム割当フィールドのない旧運航保存を読み込み、次の保存で初期化できる', () => {
+  it('ホーム割当フィールドのない同一モデルの運航保存を読み込み、次の保存で初期化できる', () => {
     const layout = limitedLayout();
     const sim = createSimulation(layout, { seed: 'airline-home-old-save', settings: manual });
     const project = buildProject({ name: 'old save', savedAt: '2026-11-14T00:00:00Z', layout, company: createSandboxCompany(), pin: null, scenarios: [], sim });
     const raw = JSON.parse(serializeProject(project)) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
     delete raw.sim.state.airlineStandHomes;
-    raw.versions.simModel = 'skyport-sim-10.1';
+    raw.versions.simModel = SIM_MODEL_VERSION;
     const loaded = validateProject(JSON.stringify(raw), { fallbackCompany: createSandboxCompany() });
     expect(loaded.ok).toBe(true);
     const restored = restoreSimulation(loaded.project!.layout, loaded.project!.sim!, effectiveModels(loaded.project!.catalog));
     expect(restored.violations).toEqual([]);
     expect(restored.sim.state.airlineStandHomes).toEqual({ day: Math.floor(sim.state.now / DAY_SEC), byAirline: {} });
+  });
+
+  it('旧シミュレーション版の進行中状態は破棄し、空港と会社を保持する', () => {
+    const layout = limitedLayout();
+    const company = createSandboxCompany();
+    const sim = createSimulation(layout, { seed: 'older-simulation-version', settings: manual });
+    const project = buildProject({ name: 'older simulation', savedAt: '2026-11-14T00:00:00Z', layout, company, pin: null, scenarios: [], sim });
+    const raw = JSON.parse(serializeProject(project)) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+    raw.versions.simModel = 'skyport-sim-10.1';
+
+    const loaded = validateProject(JSON.stringify(raw), { fallbackCompany: createSandboxCompany() });
+    expect(loaded.ok).toBe(true);
+    expect(loaded.project?.sim).toBeNull();
+    expect(loaded.project?.layout).toEqual(layout);
+    expect(loaded.project?.company).toEqual(company);
+    expect(loaded.warnings.some((warning) => warning.includes('skyport-sim-10.1'))).toBe(true);
   });
 });
