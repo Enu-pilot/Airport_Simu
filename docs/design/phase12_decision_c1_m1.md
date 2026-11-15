@@ -123,9 +123,8 @@ New tests:
 7. Re-run the audit stress matrix (A–F, seeds a/b/c, 80/150) as a non-CI check. Expect R* = 0 and no orphan ticks.
 
 ## 4. Other unsafe points in the crossing model (follow-ups, not in this fix)
-1. **A crossing near an intersection is not grouped.** Only a crossing exactly at the intersection node reserves both runways. A taxiway crossing S within H of the intersection X stands in R's protected area. Runway operations now block while a partner runway is occupied by a crossing, but a crossing on S can still be granted while R is already occupied.
-   - Remaining fix (free layouts only): add to the group any free runway whose centreline segment lies within its H of the crossing node.
-   - The M1 walk then uses the same set.
+1. **A crossing near an intersection is grouped (follow-up fix).** The crossing group now includes the runway pair when a runway crossing node is within the pair's stop-position protection distance of the intersection. This prevents a crossing grant while its partner is already occupied.
+   - The M1 walk uses the same set.
 2. **Dependent mode relies on time gaps after liftoff.** The takeoff occupant is released at `takeoffDistanceM`. Partner ops are then separated only by `SEPARATION_SEC` and `ARRIVAL_AFTER_DEPARTURE_SEC`, counted from roll start. If X lies beyond the liftoff point, a partner roll through X can start while the departing aircraft is still climbing over X.
    - Acceptable as a game abstraction. Document it, and consider holding the partner while the departure is airborne within the threshold-to-X distance.
    - R6 ignores crossings and airborne aircraft. Low risk.

@@ -76,6 +76,16 @@ describe('交差する自由形の滑走路: 文脈（S7）', () => {
     expect(legacy.crossingNodeRunways).toEqual({});
     expect(legacy.freeRunways).toEqual({});
   });
+
+  it('交差点の停止位置保護範囲内にある別の横断点も滑走路組全体を予約する', () => {
+    const layout = must(addTaxiwayPath(crossingFreeAirport(), [{ x: 78, y: 25 }, { x: 78, y: 38 }])).layout;
+    const ctx = createContext(layout);
+    const nearby = Object.values(ctx.network.nodes).find(
+      (node) => node.runwayIds.length === 1 && node.runwayIds.includes('rwy_1') && node.pos.x === 78 && node.pos.y === 30,
+    );
+    expect(nearby).toBeDefined();
+    expect(ctx.crossingNodeRunways[nearby!.id]).toEqual(['rwy_1', 'rwy_2']);
+  });
 });
 
 describe('交差する自由形の滑走路: 運航（S7）', () => {

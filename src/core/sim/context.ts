@@ -14,6 +14,7 @@ import { isFreeRunway } from '../model/types';
 import type { RunwayConfig, UnitKind } from './types';
 import { rotatedDims } from '../layout/footprint';
 import { hydrantConnectedStands } from '../layout/fuelHydrants';
+import { HOLD_SHORT_M } from './rules';
 
 /**
  * シミュレーションが参照する、レイアウトから導出した不変の情報。
@@ -90,7 +91,7 @@ export interface SimContext {
   /** 滑走路どうしの交差。自由形が関与するものだけ（従来形だけなら []） */
   crossings: RunwayCrossing[];
   crossingsByRunway: Record<string, RunwayCrossing[]>;
-  /** 交差点ノード → そこで交わる滑走路（ID 順）。誘導路ノードが交差点にあるとき、横断で両方を予約する */
+  /** 交差点または保護範囲内の滑走路ノード → 横断で予約する滑走路（ID 順） */
   crossingNodeRunways: Record<string, string[]>;
   /** 自由形の滑走路 ID → 停止位置の情報（従来形だけなら空） */
   freeRunways: Record<string, FreeRunwayInfo>;
@@ -137,6 +138,17 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
     (crossingsByRunway[c.b] ??= []).push(x);
     const set = new Set([...(crossingNodeRunways[c.nodeId] ?? []), c.a, c.b]);
     crossingNodeRunways[c.nodeId] = [...set].sort(compareIds);
+  }
+  for (const c of crossings) {
+    const intersection = network.nodes[c.nodeId];
+    if (!intersection) continue;
+    const protectedM = Math.max(HOLD_SHORT_M, freeRunways[c.a]?.holdingM ?? 0, freeRunways[c.b]?.holdingM ?? 0);
+    for (const node of Object.values(network.nodes)) {
+      if (node.id === c.nodeId || !node.runwayIds.some((id) => id === c.a || id === c.b)) continue;
+      if (distance(node.pos, intersection.pos) * TILE_M > protectedM) continue;
+      const set = new Set([...(crossingNodeRunways[node.id] ?? []), c.a, c.b]);
+      crossingNodeRunways[node.id] = [...set].sort(compareIds);
+    }
   }
   const contactStands = new Set(
     Object.values(layout.facilities)
