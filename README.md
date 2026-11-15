@@ -107,6 +107,8 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 
 ## 設計文書
 
+テストの実行・拡張では [docs/08_test_plan.md](docs/08_test_plan.md) を基準とし、Claude Fable への領域別テスト・不足項目実装の依頼には [docs/38_comprehensive_test_prompts.md](docs/38_comprehensive_test_prompts.md) を使用する。
+
 | # | 文書 | 内容 |
 |---|------|------|
 | 00 | [docs/00_survey.md](docs/00_survey.md) | 既存環境の調査結果 |
@@ -141,6 +143,7 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 35 | [docs/35_multi_terminal_passenger_flow.md](docs/35_multi_terminal_passenger_flow.md) | 複数ターミナル旅客の所属判定、区域・経路、監視基準、未実装の旅客移動 |
 | 36 | [docs/36_daily_review_and_flight_analysis.md](docs/36_daily_review_and_flight_analysis.md) | 日次振り返り、便別実績、遅延評価、航空会社評価根拠、履歴互換性 |
 | 37 | [docs/37_management_navigation.md](docs/37_management_navigation.md) | 建設・経営・運行ナビゲーション、状態遷移、能力表示の判定基準 |
+| 38 | [docs/38_comprehensive_test_prompts.md](docs/38_comprehensive_test_prompts.md) | 総合テスト・不足項目実装を Claude Fable に依頼するための共通指示と21項目の個別プロンプト |
 | 26 | [docs/26_validation_rules.md](docs/26_validation_rules.md) | 滑走路に関する検証コードと適用条件（従来 / 実寸、classic / realistic） |
 | 27 | [docs/27_migration_and_compatibility.md](docs/27_migration_and_compatibility.md) | スキーマ v1→v2→v3、版の方針、互換性、ゴールデンの戦略 |
 | 22 | [docs/22_geometry_architecture.md](docs/22_geometry_architecture.md) | 幾何基盤（座標フレーム・角度規約・許容誤差・ゴールデン基準値）とデータモデルの計画（Phase 11） |
