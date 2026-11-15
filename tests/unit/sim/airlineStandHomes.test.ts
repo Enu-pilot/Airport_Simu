@@ -88,13 +88,13 @@ describe('航空会社別ホームスポット', () => {
     const sim = createSimulation(layout, { seed: 'older-simulation-version', settings: manual });
     const project = buildProject({ name: 'older simulation', savedAt: '2026-11-14T00:00:00Z', layout, company, pin: null, scenarios: [], sim });
     const raw = JSON.parse(serializeProject(project)) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-    raw.versions.simModel = 'skyport-sim-10.1';
+    raw.versions.simModel = 'skyport-sim-10.2';
 
     const loaded = validateProject(JSON.stringify(raw), { fallbackCompany: createSandboxCompany() });
     expect(loaded.ok).toBe(true);
     expect(loaded.project?.sim).toBeNull();
     expect(loaded.project?.layout).toEqual(layout);
     expect(loaded.project?.company).toEqual(company);
-    expect(loaded.warnings.some((warning) => warning.includes('skyport-sim-10.1'))).toBe(true);
+    expect(loaded.warnings.some((warning) => warning.includes('skyport-sim-10.2'))).toBe(true);
   });
 });

@@ -366,6 +366,7 @@ function reconcileDepartureGate(sim: Simulation, f: Flight, gateId: string | nul
     }
     releaseUnstartedTransportReservation(sim, g);
     delete g.terminalLinkWaitingId;
+    delete g.terminalLinkPaxAccumulated;
     delete g.replanAfterTerminalLink;
     g.route = [];
     g.legProgress = 0;
@@ -796,6 +797,7 @@ function setWaiting(state: SimState, g: PaxGroup, s: 'stranded' | 'waitingFacili
 function startRoute(sim: Simulation, g: PaxGroup, areas: string[]): void {
   g.route = areas.slice(1);
   delete g.terminalLinkWaitingId;
+  delete g.terminalLinkPaxAccumulated;
   delete g.replanAfterTerminalLink;
   if (g.route.length === 0) {
     arrive(sim, g);
@@ -815,9 +817,11 @@ function startLeg(sim: Simulation, g: PaxGroup): void {
     delete g.terminalLinkId;
     delete g.terminalLinkReservedHour;
     delete g.terminalLinkWaitingId;
+    delete g.terminalLinkPaxAccumulated;
     return;
   }
   if (g.terminalLinkId === transportId) return;
+  if (g.terminalLinkWaitingId !== transportId) delete g.terminalLinkPaxAccumulated;
   const layoutLink = transferLinkId ? sim.ctx.layout.terminalLinks?.[transferLinkId] : undefined;
   if (transferLinkId && !layoutLink) {
     g.state = 'stranded';
@@ -834,20 +838,34 @@ function startLeg(sim: Simulation, g: PaxGroup): void {
   const capacity = layoutLink
     ? terminalLinkCapacityPerHour(layoutLink)
     : link?.capacityPerHour ?? 1;
-  if (used + g.count > capacity) {
+  const alreadyReserved = g.terminalLinkPaxAccumulated ?? 0;
+  const remaining = Math.max(0, g.count - alreadyReserved);
+  const available = Math.max(0, capacity - used);
+  const reservedNow = g.count > capacity
+    ? Math.min(remaining, available)
+    : (alreadyReserved === 0 && g.count <= available ? g.count : 0);
+  if (reservedNow > 0) usage[transportId] = used + reservedNow;
+  const totalReserved = alreadyReserved + reservedNow;
+  if (totalReserved < g.count) {
+    if (totalReserved > 0) g.terminalLinkPaxAccumulated = totalReserved;
+    else delete g.terminalLinkPaxAccumulated;
     g.state = 'waitingTransport';
     g.terminalLinkWaitingId = transportId;
     g.retryAt = (hour + 1) * 3600;
     return;
   }
-  usage[transportId] = used + g.count;
   g.terminalLinkId = transportId;
   g.terminalLinkReservedHour = hour;
   delete g.terminalLinkWaitingId;
+  delete g.terminalLinkPaxAccumulated;
 }
 
 function releaseUnstartedTransportReservation(sim: Simulation, g: PaxGroup): void {
-  if (!g.terminalLinkId || g.legProgress > 0) return;
+  if (g.legProgress > 0) return;
+  if (!g.terminalLinkId) {
+    delete g.terminalLinkPaxAccumulated;
+    return;
+  }
   const runtime = sim.state.terminalTransit;
   if (runtime && runtime.hour === g.terminalLinkReservedHour) {
     const used = runtime.passengersByLink[g.terminalLinkId] ?? 0;

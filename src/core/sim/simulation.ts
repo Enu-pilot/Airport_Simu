@@ -767,7 +767,7 @@ function departureBlocked(sim: Simulation, rid: string, type: AircraftType, airc
   const partners = partnersOf(sim, rid);
   for (const p of partners) {
     const ps = state.runways[p]!;
-    if (ps.occupant && ps.occupant.purpose !== 'crossing') return 'intersection';
+    if (ps.occupant) return 'intersection';
     if (ps.booking && ps.booking.eta - state.now < DEPARTURE_WINDOW_SEC) return 'intersection';
   }
   const wx = weatherEffects(state).separation;
@@ -790,8 +790,9 @@ function approachBlocked(sim: Simulation, ac: Aircraft, rid: string, eta: number
   const partners = partnersOf(sim, rid);
   for (const p of partners) {
     const ps = state.runways[p]!;
-    if (ps.booking) return 'separation';
-    if (ps.occupant && ps.occupant.purpose !== 'crossing') return 'runwayBusy';
+    if (ps.booking) return 'intersection';
+    if (ps.occupant?.purpose === 'crossing') return 'intersection';
+    if (ps.occupant) return 'runwayBusy';
   }
   const group = partners.length === 0 ? null : [rid, ...partners];
   const inGroup = (id: string | null): boolean => (group ? id !== null && group.includes(id) : id === rid);

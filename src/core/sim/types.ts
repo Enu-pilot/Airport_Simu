@@ -396,6 +396,8 @@ export interface PaxGroup {
   terminalLinkId?: string;
   terminalLinkReservedHour?: number;
   terminalLinkWaitingId?: string;
+  /** Capacity already consumed in prior hourly windows while this indivisible group waits to enter a constrained link. */
+  terminalLinkPaxAccumulated?: number;
   replanAfterTerminalLink?: boolean;
 }
 

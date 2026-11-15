@@ -345,6 +345,14 @@ export function checkPaxInvariants(sim: Simulation, full: boolean): string[] {
   const ids = full ? Object.keys(state.paxGroups) : state.activePax;
   for (const id of ids) {
     const g = state.paxGroups[id]!;
+    if (g.terminalLinkPaxAccumulated !== undefined &&
+      (!Number.isInteger(g.terminalLinkPaxAccumulated) ||
+        g.terminalLinkPaxAccumulated <= 0 ||
+        g.terminalLinkPaxAccumulated >= g.count ||
+        g.state !== 'waitingTransport' ||
+        !g.terminalLinkWaitingId)) {
+      out.push(`P7 ${g.id} の連絡設備能力予約が不正`);
+    }
     if (g.area && !ctx.terminal.areas[g.area]) out.push(`P5 ${g.id} の所在エリア ${g.area} が存在しない`);
     const a = g.area ? ctx.terminal.areas[g.area] : undefined;
     if (g.terminalId && a && a.terminalId !== g.terminalId && g.targetTerminalId !== a.terminalId) {

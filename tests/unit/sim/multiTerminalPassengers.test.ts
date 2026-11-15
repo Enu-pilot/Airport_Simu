@@ -355,6 +355,53 @@ describe('複数ターミナルの旅客処理', () => {
     expect(checkPaxInvariants(sim, true)).toEqual([]);
   });
 
+  it('グループ人数が時間帯能力を超える場合、複数時間に分けて通路へ入る', { timeout: 300_000 }, () => {
+    const { layout: initial, first, second, standA, standB } = twoTerminalAirport();
+    const departureArea = (terminalId: string) =>
+      Object.values(initial.terminalAreas).find((area) => area.terminalId === terminalId && area.kind === 'waiting')!;
+    const layout = must(addTerminalTransitLink(initial, {
+      kind: 'walkway',
+      fromAreaId: departureArea(second).id,
+      toAreaId: departureArea(first).id,
+      distanceM: 250,
+      travelSec: 120,
+      capacityPerHour: 20,
+      bidirectional: true,
+      allowedZones: ['departure'],
+    })).layout;
+    const sim = createSimulation(layout, { seed: 'terminal-link-oversized-group', settings: manual });
+    const start = sim.state.now;
+    const ac = addTurnaround(sim, 'narrow180', start + 20 * 60, { departureAt: start + 5 * 3600, plan: contractPlan(standB) });
+    const dep = sim.state.flights[ac.departureFlightId]!;
+    runUntil(sim, () => dep.pax.gateId !== null, 60);
+    const group = addDepartureGroup(sim, dep.id, 30, sim.state.now)!;
+    group.steps = ['gate'];
+    group.stepIndex = 0;
+    group.securityCleared = true;
+    group.area = departureArea(second).id;
+    group.state = 'dwelling';
+    group.retryAt = sim.state.now;
+
+    expect(reassignStand(sim, ac.id, standA)).toEqual({ ok: true });
+    runUntil(sim, () => group.terminalLinkPaxAccumulated === 20, 90 * 60);
+    expect(group.state).toBe('waitingTransport');
+    expect(group.terminalLinkId).toBeUndefined();
+    const project = buildProject({ name: 'oversized transfer', savedAt: '2026-11-14T00:00:00Z', layout, company: createSandboxCompany(), pin: null, scenarios: [], sim });
+    const saved = validateProject(serializeProject(project), { fallbackCompany: createSandboxCompany() });
+    expect(saved.errors).toEqual([]);
+    const restored = restoreSimulation(saved.project!.layout, saved.project!.sim!, effectiveModels(saved.project!.catalog));
+    expect(restored.violations).toEqual([]);
+    const resumed = restored.sim;
+    const resumedGroup = resumed.state.paxGroups[group.id]!;
+    expect(resumedGroup.terminalLinkPaxAccumulated).toBe(20);
+    runUntil(resumed, () => resumedGroup.terminalLinkId !== undefined, 70 * 60);
+    const linkId = Object.keys(layout.terminalLinks!)[0]!;
+    expect(resumedGroup.terminalLinkReservedHour).toBeGreaterThan(0);
+    expect(resumed.state.terminalTransit?.passengersByLink[linkId]).toBe(10);
+    runUntil(resumed, () => resumedGroup.terminalId === first, 30 * 60);
+    expect(checkPaxInvariants(resumed, true)).toEqual([]);
+  });
+
   it('通路へ入る前に経路が閉鎖された場合は未使用の能力予約を戻す', { timeout: 300_000 }, () => {
     const { layout: initial, first, second, standA, standB } = twoTerminalAirport();
     const departureArea = (terminalId: string) =>
