@@ -146,6 +146,7 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 38 | [docs/38_comprehensive_test_prompts.md](docs/38_comprehensive_test_prompts.md) | 総合テスト・不足項目実装を Claude Fable に依頼するための共通指示と21項目の個別プロンプト |
 | 39 | [docs/39_comprehensive_test_audit_and_handover.md](docs/39_comprehensive_test_audit_and_handover.md) | 総合テスト・監査の結果、再現済みの不具合、未実装・未検証の一覧、ゲームデザイン提案、引き継ぎ事項（2026-11-16） |
 | 40 | [docs/40_departure_time_limit.md](docs/40_departure_time_limit.md) | 出発時刻の制限と最終便の遅れ抑制の仕様案（未実装）。夜間の離着陸制限の現状、要求、受け入れ基準、決めること |
+| 41 | [docs/41_capacity_expansion_plan.md](docs/41_capacity_expansion_plan.md) | 空港能力の拡張計画（未実装）。誘導路を途中まで進む地上走行（区間ごとの進入可能機数）、アクセス・離発着・折り返しの能力、拠点空港（滞泊・整備）、ハブ空港（乗継）の計画と受け入れ基準 |
 | 26 | [docs/26_validation_rules.md](docs/26_validation_rules.md) | 滑走路に関する検証コードと適用条件（従来 / 実寸、classic / realistic） |
 | 27 | [docs/27_migration_and_compatibility.md](docs/27_migration_and_compatibility.md) | スキーマ v1→v2→v3、版の方針、互換性、ゴールデンの戦略 |
 | 22 | [docs/22_geometry_architecture.md](docs/22_geometry_architecture.md) | 幾何基盤（座標フレーム・角度規約・許容誤差・ゴールデン基準値）とデータモデルの計画（Phase 11） |
