@@ -1,0 +1,13 @@
+{
+ "saved": {
+  "seconds": 10800,
+  "then": 7200,
+  "now": 39600
+ },
+ "hashes": {
+  "original": "04a4afb6dacd36c3b7c8473cbd0bffba0456c3e8dffa6053962cf12c79bfd357",
+  "restored": "04a4afb6dacd36c3b7c8473cbd0bffba0456c3e8dffa6053962cf12c79bfd357"
+ },
+ "violations": [],
+ "projectLength": 423389
+}

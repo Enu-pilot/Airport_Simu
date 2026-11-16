@@ -1,0 +1,511 @@
+{
+ "simModelVersion": "skyport-sim-10.3",
+ "runs": {
+  "day0-normal": {
+   "day": 0,
+   "kpi": {
+    "flights": 38,
+    "movements": 38,
+    "paxDeparted": 2096,
+    "paxArrived": 2104,
+    "otp": 1,
+    "avgDelayMin": 0.2,
+    "actualAvgDelayMin": 2.4,
+    "runwayUtil": 0.07037037037037037,
+    "gateUtil": 0.15979595336076818,
+    "facilityUtil": 0.09834413580246913,
+    "avgWaitMin": 3.3,
+    "avgWalkMin": 9.5,
+    "avgGroundMin": 43.8,
+    "unprocessedPax": 0,
+    "missedPax": 0,
+    "leftBags": 0,
+    "diverted": 0,
+    "cancelled": 0,
+    "paxSatisfaction": 93.2,
+    "airlineSatisfaction": 61.2,
+    "rating": 60.5,
+    "modePax": {
+     "car": 1626,
+     "dropoff": 2562,
+     "taxi": 0,
+     "bus": 0,
+     "rail": 0,
+     "walk": 12
+    },
+    "parkingFull": 0,
+    "roadDelayMin": 0,
+    "transitWaitMin": 0,
+    "accessFactor": 1.00187668174666
+   },
+   "grants": 300000,
+   "airlines": {
+    "SK": 61.2,
+    "NP": 61.16,
+    "RJ": 61.12,
+    "AQ": 61.2,
+    "HB": 61.2,
+    "ML": 60
+   },
+   "airlineEval": {
+    "SK": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 72,
+      "stand": 72,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 72,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "NP": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 72,
+      "stand": 72,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 69,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "RJ": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 63.9,
+      "stand": 72,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 72,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "AQ": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 72,
+      "stand": 72,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 72,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "HB": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 72,
+      "stand": 72,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 72,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "AS": {
+     "ema": {
+      "fees": 72,
+      "aircraft": 72
+     },
+     "low": {
+      "fees": 0,
+      "aircraft": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "NW": {
+     "ema": {
+      "fees": 72,
+      "aircraft": 72
+     },
+     "low": {
+      "fees": 0,
+      "aircraft": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "ML": {
+     "ema": {
+      "fees": 72,
+      "aircraft": 72
+     },
+     "low": {
+      "fees": 0,
+      "aircraft": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    }
+   },
+   "goals": {
+    "done": {
+     "flights10": 0,
+     "firstHeavy": 0,
+     "noMiss": 0
+    },
+    "streaks": {
+     "otp85x3": 1,
+     "otp95x7": 1,
+     "tier": 1
+    },
+    "tier": 0,
+    "grants": [
+     {
+      "day": 0,
+      "id": "flights10",
+      "amount": 300000
+     },
+     {
+      "day": 0,
+      "id": "firstHeavy",
+      "amount": 0
+     },
+     {
+      "day": 0,
+      "id": "noMiss",
+      "amount": 0
+     }
+    ],
+    "boostUntil": 31
+   },
+   "cash": 1000984136,
+   "rating": 60.5,
+   "weatherCancels": 0
+  },
+  "bad-winter-hard": {
+   "day": 108,
+   "kpi": {
+    "flights": 36,
+    "movements": 36,
+    "paxDeparted": 2063,
+    "paxArrived": 2078,
+    "otp": 0.9210526315789473,
+    "avgDelayMin": 1.3,
+    "actualAvgDelayMin": 2.9,
+    "runwayUtil": 0.06666666666666667,
+    "gateUtil": 0.15058641975308643,
+    "facilityUtil": 0.09612268518518519,
+    "avgWaitMin": 3.6,
+    "avgWalkMin": 9.8,
+    "avgGroundMin": 42,
+    "unprocessedPax": 0,
+    "missedPax": 0,
+    "leftBags": 0,
+    "diverted": 0,
+    "cancelled": 1,
+    "paxSatisfaction": 91.6,
+    "airlineSatisfaction": 60.7,
+    "rating": 59.8,
+    "modePax": {
+     "car": 1578,
+     "dropoff": 2550,
+     "taxi": 0,
+     "bus": 0,
+     "rail": 0,
+     "walk": 13
+    },
+    "parkingFull": 0,
+    "roadDelayMin": 0.1,
+    "transitWaitMin": 0,
+    "accessFactor": 1.00187668174666
+   },
+   "grants": 300000,
+   "airlines": {
+    "SK": 61.2,
+    "NP": 61.11,
+    "RJ": 58.7,
+    "AQ": 61.2,
+    "HB": 61.16,
+    "ML": 60
+   },
+   "airlineEval": {
+    "SK": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 72,
+      "stand": 72,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 72,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "NP": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 72,
+      "stand": 69,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 69,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "RJ": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 72,
+      "stand": 72,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 72,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "AQ": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 72,
+      "stand": 72,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 72,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "HB": {
+     "ema": {
+      "otp": 72,
+      "turnaround": 69,
+      "stand": 72,
+      "fees": 72,
+      "slots": 72,
+      "aircraft": 72,
+      "pax": 72
+     },
+     "low": {
+      "otp": 0,
+      "turnaround": 0,
+      "stand": 0,
+      "fees": 0,
+      "slots": 0,
+      "aircraft": 0,
+      "pax": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "AS": {
+     "ema": {
+      "fees": 72,
+      "aircraft": 72
+     },
+     "low": {
+      "fees": 0,
+      "aircraft": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "NW": {
+     "ema": {
+      "fees": 72,
+      "aircraft": 72
+     },
+     "low": {
+      "fees": 0,
+      "aircraft": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    },
+    "ML": {
+     "ema": {
+      "fees": 72,
+      "aircraft": 72
+     },
+     "low": {
+      "fees": 0,
+      "aircraft": 0
+     },
+     "complaints": [],
+     "requests": [],
+     "boostUntil": 0,
+     "done": [],
+     "otpBadDays": 0
+    }
+   },
+   "goals": {
+    "done": {
+     "flights10": 108,
+     "firstHeavy": 108,
+     "noMiss": 108
+    },
+    "streaks": {
+     "otp85x3": 1,
+     "otp95x7": 0,
+     "tier": 1
+    },
+    "tier": 0,
+    "grants": [
+     {
+      "day": 108,
+      "id": "flights10",
+      "amount": 300000
+     },
+     {
+      "day": 108,
+      "id": "firstHeavy",
+      "amount": 0
+     },
+     {
+      "day": 108,
+      "id": "noMiss",
+      "amount": 0
+     }
+    ],
+    "boostUntil": 139
+   },
+   "cash": 1000970237,
+   "rating": 59.8,
+   "weatherCancels": 1
+  }
+ }
+}
