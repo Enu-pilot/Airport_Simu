@@ -95,3 +95,13 @@
 - [docs/34_vertical_transport.md](34_vertical_transport.md): 多層交通・階層接続の実装範囲
 - [docs/35_multi_terminal_passenger_flow.md](35_multi_terminal_passenger_flow.md): 複数ターミナル旅客処理の仕様と未実装範囲
 - [docs/29_remote_stands_and_bus_boarding.md](29_remote_stands_and_bus_boarding.md): リモートスポット・ランプバスの仕様
+
+## 9. 監査結果と引き継ぎ（2026-11-16）
+
+本書の ID 01〜21 を観点として総合監査を実施した（調査・テスト追加・文書化のみ。製品コード・既存の期待値・ゴールデンは変更していない）。結果・不具合の再現手順・未実装の一覧・設計提案・後続の完了基準は [docs/39_comprehensive_test_audit_and_handover.md](39_comprehensive_test_audit_and_handover.md) にまとめた。内容はここに複製しない。
+
+- 監査用テストは `tests/audit/` にあり、通常の `npm test` / `npm run test:e2e` には含めない。実行方法は docs/39 §1.2。
+- 再現済みの不具合は 7 件（バスゲート一時閉鎖後の旅客の取り残し、重なった滑走路閉鎖が解除されない、欠航便の手荷物、2 ターミナルに接するゲート、建設ツール箱のはみ出し、ゴールデンの不一致、`economy.test.ts` の 2 件）。再現テストは失敗するのが現状のため通常テストに混ぜていない。
+- 最終実行: 型検査・lint・ビルドは成功。`npm test` は 765 件中 16 失敗（ゴールデン 13、`economy.test.ts` 2、負荷による時間切れ 1）。E2E は 69 件中 6 失敗（既存 3、不安定 1、負荷による時間切れ 2）。監査テスト 202 件とブラウザ監査 7 件は合格。
+- ID 01〜07 では不具合は見つからなかった。ID 12〜14 は最小限の確認にとどまり、道路・鉄道の運用は未検証。
+- 以後の個別プロンプトの実行では、docs/39 §8 の優先度と §9 の確認事項を出発点にする。
