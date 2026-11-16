@@ -15,10 +15,20 @@
 ## 現在の作業
 - 状態: 進行中
 - 開始: 2026-11-16（ブランチ `claude/audit-39-comprehensive`）
-- 目的: 承認済みの修正計画の実装。フェーズ 1 = 現行機能の不具合修正と操作性・UI の改善（docs/42 §2）。
-- 対象: `docs/42_implementation_roadmap.md`（全体計画・テスト項目）、`docs/design/impl_phase1_plan.md`（実装計画）、`src/core/sim/`・`src/core/layout/`・`src/ui/`・`src/editor/`、`tests/`
-- 注意: ゴールデンは承認まで更新しない（docs/42 §5）。再現テストは修正後に通常テストへ移す。
-- 前回（能力の検証と計画）: 完了。docs/39 §12、docs/41。
+- 目的: 承認済みの修正計画の実装。フェーズ 1 = 現行機能の不具合修正と操作性・UI の改善（docs/42 §2）。並行してフェーズ 2〜4 の実装計画を作成。
+- 対象: `docs/42_implementation_roadmap.md`（全体計画・要件・テスト項目）、`docs/design/impl_phase1_plan.md`（実装計画）、`src/`、`tests/`
+- ゴールデン: 3 段階の手順（docs/42 §5）。第 1 段階は完了（`tests/golden-baseline/2026-11-16_pre-phase1/`）。更新の可否はコーディネーターが判断し、根拠を記録する。
+
+### 実行中の作業（複数エージェント。同じ作業ツリーで並行。未コミットの変更は各担当の作業途中）
+| 担当 | 内容 | 触るファイル | 成果物・報告 |
+|---|---|---|---|
+| 実装 S（Sonnet） | フェーズ 1 Track S: タスク S1〜S13（シミュレーション・経済） | `src/core/{sim,economy,access,aircraft,terminal,analytics}`、`tests/unit/sim`・`tests/unit/regression/s_*`・`tests/audit` | スクラッチ `phase1/S_report.md`、U への依頼 `phase1/S_requests_to_U.md` |
+| 実装 U（Sonnet） | フェーズ 1 Track U: タスク U1〜U13（配置・検証・エディタ・画面・E2E） | `src/core/{layout,validation,model,io}`、`src/{editor,ui,render,i18n}`、`tests/e2e`・`tests/unit/regression/u_*` | スクラッチ `phase1/U_report.md`、承認が要る提案 `phase1/U_proposals.md` |
+| 計画（Opus）×3 | フェーズ 2・3・4 の実装計画 | 各 1 ファイルのみ新規作成 | `docs/design/impl_phase2_plan.md`・`impl_phase3_plan.md`・`impl_phase4_plan.md` |
+
+- スクラッチの場所: セッションのスクラッチパッド配下 `phase1/`（リポジトリ外。セッションが切れると失われるので、完了時に要点を docs へ移す）。
+- 中断から再開するとき: `git status` で未コミットの変更を確認し、**消さずに** `npm run typecheck` と対象テストで状態を確かめる。タスクの完了状況は `docs/design/impl_phase1_plan.md` §4 のタスク表と、`tests/audit/known-issues/`・`tests/audit/e2e-known/` に残っている再現テスト（修正済みなら `tests/unit/regression/`・`tests/e2e/` へ移っている）で判断する。
+- 実装完了後の手順: Haiku による監査 → 品質ゲート一式 → コミット → ゴールデン第 2・第 3 段階 → docs/42 の状況欄を更新。
 
 ## 次の作業
 - 不具合は docs/39 §8・§10.5・§11.6・§12.10 の優先度順（最優先: V-1 道路ツール、V-2 階層接続、D-1 夜間待機後のダイバート、E-3 スポット変更、G-1 ゴールデン不一致、P-1 バスゲート、R-1 滑走路閉鎖）。
@@ -37,3 +47,4 @@
 - ファイル内容・仕様・要件定義を転載しない。参照先パスと必要な理由だけ記す。
 - 完了した作業の詳細は Git commit / Docs を正とし、本ファイルから削除する。
 - 状態は `未開始` / `進行中` / `中断` / `完了` のいずれか。完了と中断は区別する。
+- 複数のエージェント・バックグラウンド作業を動かしているときは、担当・内容・触るファイル・成果物を「実行中の作業」に書き、開始時と完了時に更新する。
