@@ -54,6 +54,8 @@ export interface GateAccess {
   /** 搭乗口（出発区域）と降機口（到着区域）。無ければ null */
   boarding: string | null;
   deplane: string | null;
+  /** 2 つ以上のターミナルに接し、所属を決められない（T-1） */
+  ambiguousTerminalIds?: string[];
 }
 
 /** 独立ゲート（ターミナルに隣接せず、連絡通路でつながるゲート）の接続 */

@@ -637,6 +637,7 @@ export const CONTRACT_ACTION_LABEL: Record<Exclude<ContractActionResult, { ok: t
 };
 
 export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
+  GROUND_SUPPORT_MISSING: '燃料施設・整備士・トーイングカーのいずれかがなく、折り返し（給油・点検・プッシュバック）ができない',
   SIZE_UNSUPPORTED: '運航できない機種（滑走路・スポットが未対応）',
   STAND_CONFLICT: 'スポット不足（到着時に空きスポットがない見込み）',
   NO_GATE: 'ゲートのないスポット（旅客が搭乗できない）',

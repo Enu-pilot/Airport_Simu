@@ -170,7 +170,9 @@ export function planDayWithDemand(
 // ---------------------------------------------------------------- 計画の分析
 
 export type PlanIssueCode =
-  | 'SIZE_UNSUPPORTED' // 運航できない機種（滑走路・スポットが対応していない）
+  | 'SIZE_UNSUPPORTED'
+  | 'GROUND_SUPPORT_MISSING'
+ // 運航できない機種（滑走路・スポットが対応していない）
   | 'STAND_CONFLICT' // 到着時に空きスポットがない
   | 'NO_GATE' // ゲートのないスポットに割り当て（旅客が搭乗できない）
   | 'BUS_BOARDING' // バスゲートがある空港のリモートスポット（ランプバスで搭乗。情報）

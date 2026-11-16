@@ -172,6 +172,8 @@ export interface Stand {
   codeF?: boolean;
   /** リモートスポットのバス運用。欠落/auto は旧版と同じ自動選択、bus は個別ゲート指定、none はバスを使わない */
   remoteBoarding?: 'auto' | 'bus' | 'none';
+  /** 所属ターミナル（K-1）。欠落 = 従来の自動選択 */
+  terminalId?: string;
   /** remoteBoarding=bus のときの専用バスゲート。複数スポットから共有可能 */
   busGateId?: string | null;
 }

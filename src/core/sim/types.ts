@@ -133,6 +133,8 @@ export interface Aircraft {
   crossing: CrossingGrant | null;
   /** 先に許可を得て、まだ尾部が抜けていない横断（crossing より前の滑走路ノード）。空なら書かない */
   heldCrossings?: CrossingGrant[];
+  /** 運航者が指定したスポット（reassignStand, E-3）。割り当てたら消す */
+  requestedStandId?: string;
   history: HistoryEntry[];
 }
 
