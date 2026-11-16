@@ -13,13 +13,11 @@
 7. 作業終了時（中断・引き継ぎを含む）は、実施内容・検証結果・残件を記録し、状態を `完了` または `中断` に更新する。記録更新後に終了する。
 
 ## 現在の作業
-- 状態: 完了
-- 開始/完了: 2026-11-16
-- 目的: HANDOFF の短縮テンプレートを標準化し、テスト基準を CLAUDE.md に集約。
-- 対象: `HANDOFF_PROMPT.md`、`CLAUDE.md`
-- 結果: HANDOFF を 1,200 tokens 目安の短期状態メモに整理。CLAUDE.md を新設し、開発ルール・テスト基準・品質ゲートを集約。
-- 検証: GitHub 上で両ファイルの保存内容を再取得して確認。Docs のみの変更のためコードテストは未実行。
-- コミット: `75a979c`（HANDOFF）、`4de983a`（CLAUDE）
+- 状態: 進行中
+- 開始: 2026-11-16（ブランチ `claude/audit-39-comprehensive`）
+- 目的: 総合テスト・監査・拡張提案（調査・テスト・Docs のみ。製品コード・既存期待値・ゴールデンは変更しない）。
+- 対象: `tests/audit/`、`vitest.audit.config.ts`、`docs/39_comprehensive_test_audit_and_handover.md`（新規）、`docs/38_comprehensive_test_prompts.md`、`README.md`
+- 結果・検証: 作業中（終了時に記録する）
 
 ## 次の作業
 - 次回の実装・調査テーマを開始時にここへ記録する。
