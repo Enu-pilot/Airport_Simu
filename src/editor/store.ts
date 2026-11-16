@@ -102,6 +102,8 @@ export interface Toast {
 export interface EditorState {
   history: History<AirportLayout>;
   selection: string | null;
+  /** 直近のクリックで重なっていた選択候補（優先順。2 つ以上のときだけプロパティに選択欄を出す） */
+  pickCandidates: string[];
   tool: ToolId;
   options: ToolOptions;
   camera: Camera;
@@ -262,6 +264,7 @@ function loadInitialLayout(): AirportLayout {
 export const editorStore = createStore<EditorState>(() => ({
   history: createHistory(loadInitialLayout()),
   selection: null,
+  pickCandidates: [],
   tool: 'select',
   options: {
     rotation: 0,
@@ -454,7 +457,7 @@ export function forgetCharges(): void {
   set((s) => ({ charges: { past: s.charges.past.map(() => null), future: s.charges.future.map(() => null) } }));
 }
 
-function entityExists(layout: AirportLayout, id: string): boolean {
+export function entityExists(layout: AirportLayout, id: string): boolean {
   return !!(
     layout.runways[id] ||
     layout.taxiNodes[id] ||
@@ -601,8 +604,8 @@ export const actions = {
       selection: s.selection && entityExists(history.present, s.selection) ? s.selection : null,
     });
   },
-  select(id: string | null): void {
-    set({ selection: id });
+  select(id: string | null, candidates: string[] = []): void {
+    set({ selection: id, pickCandidates: candidates });
   },
   setTool(tool: ToolId): void {
     set((s) => ({

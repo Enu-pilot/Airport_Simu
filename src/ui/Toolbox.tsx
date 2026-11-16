@@ -5,7 +5,8 @@ import { actions, useEditor, type ToolId } from '../editor/store';
 import { facilityKindOf } from '../editor/tools';
 import { useLayout } from '../editor/store';
 import { RunwayToolOptions } from './RunwayPanels';
-import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, ROAD_CLASS_LABEL } from '../i18n/ja';
+import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL } from '../i18n/ja';
+import { floorExistsInParent } from '../core/layout/levelRules';
 
 interface ToolDef {
   id: ToolId;
@@ -117,7 +118,7 @@ export function Toolbox() {
           <select value={options.interiorParentId ?? ''} onChange={(e) => actions.setOption('interiorParentId', e.target.value || null)} data-testid="facility-parent">
             <option value="">独立施設</option>
             {Object.values(layout.facilities).filter((f) => f.kind !== 'gate' && FACILITY_SPECS[f.kind].layer === 'building').sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)).map((f) => (
-              <option key={f.id} value={f.id}>{f.name || f.kind} · {f.id}</option>
+              <option key={f.id} value={f.id}>{f.name || FACILITY_LABEL[f.kind]} · {f.id}</option>
             ))}
           </select>
         </label>
@@ -125,7 +126,14 @@ export function Toolbox() {
           <label>
             建物内の階
             <select value={options.interiorFloorIndex} onChange={(e) => actions.setOption('interiorFloorIndex', Number(e.target.value))} data-testid="facility-floor">
-              {Array.from({ length: 8 }, (_, i) => i - 5).map((floor) => <option key={floor} value={floor}>{floor < 0 ? `地下${-floor}階` : `${floor + 1}階`}</option>)}
+              {Array.from({ length: 8 }, (_, i) => i - 5).map((floor) => {
+                const exists = floorExistsInParent(layout, options.interiorParentId!, floor);
+                return (
+                  <option key={floor} value={floor} title={exists ? undefined : PLACEMENT_PROBLEM_LABEL.floorOutOfRange}>
+                    {floor < 0 ? `地下${-floor}階` : `${floor + 1}階`}{exists ? '' : FLOOR_NOT_IN_PARENT_LABEL}
+                  </option>
+                );
+              })}
             </select>
           </label>
         )}

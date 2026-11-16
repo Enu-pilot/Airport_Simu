@@ -1,7 +1,7 @@
 /**
  * 監査 e / PART 3: 折り返し能力（作業員・車両・燃料・整備士 → 同時に処理できる便数・地上時間・出発遅れ）。
  * 仕様: docs/13_ground_handling_rules.md §1–2、docs/33_capacity_dashboard.md（地上支援・折り返し = 既存 turnaroundCapacity）、docs/34（燃料管ハイドラント = 給油車不要・作業 0.6 倍）。
- * 実装: src/core/economy/planning.ts turnaroundCapacity（staff/4・beltLoader・baggageTractor・fuelTruck×2・cleaningVan×2・cateringTruck×2 の最小値。tug・整備士・燃料施設は含まない）、
+ * 実装: src/core/economy/planning.ts turnaroundCapacity（staff/4・beltLoader・baggageTractor・fuelTruck×2＋ハイドラント接続スポット数・cleaningVan×2・cateringTruck×2 の最小値。tug・整備士・燃料施設は台数でなく有無で、どれかがなければ 0。計画 1-20）、
  *       src/core/sim/ground.ts / tasks.ts。
  * 構成: linearLayout（旅客なし・スポット 6）に 6 機を 90 秒刻みで到着させ、資源 1 種類だけを変える（他は豊富）。
  */
@@ -73,7 +73,7 @@ describe('ID-e3 資源の掃引: 少ない→豊富で、地上時間・出発�
     }, 300_000);
   }
 
-  it('整備士（点検の必要資源。整備施設の「整備士」）: 0 だと点検が終わらず出発できない。1 以上で出発する。dashboard の折り返し能力は整備士を含まない', () => {
+  it('整備士（点検の必要資源。整備施設の「整備士」）: 0 だと点検が終わらず出発できない。1 以上で出発する。dashboard の折り返し能力は整備士の有無だけを見る（計画 1-20）', () => {
     const rows = [0, 1, 3, 10].map((e) => {
       const l = withEngineers(rich(), e);
       const r = run(l);
@@ -83,7 +83,9 @@ describe('ID-e3 資源の掃引: 少ない→豊富で、地上時間・出発�
     expect(rows[0]!.departed).toBe(0);
     expect(rows[0]!.blocked.noEngineer).toBeGreaterThan(0);
     expect(rows[1]!.departed).toBe(N);
-    expect(new Set(rows.map((r) => r.cap)).size).toBe(1); // 能力値は整備士の有無で不変
+    // 計画 1-20 TA-2 で更新: 整備士 0 なら折り返し能力は 0、1 以上は台数によらず同じ（有無として扱う。旧: 全て同じ）
+    expect(rows[0]!.cap).toBe(0);
+    expect(new Set(rows.slice(1).map((r) => r.cap)).size).toBe(1);
     for (let i = 2; i < rows.length; i++) expect(rows[i]!.meanDelay).toBeLessThanOrEqual(rows[i - 1]!.meanDelay * 1.1 + 120);
   }, 300_000);
 
@@ -102,21 +104,25 @@ describe('ID-e3 資源の掃引: 少ない→豊富で、地上時間・出発�
 });
 
 describe('ID-e3 能力値（turnaroundCapacity）の定義: 含まれる資源と含まれない資源（B）', () => {
-  it('= min(staff/4, ベルトローダー, 手荷物牽引車, 給油車×2, 清掃車×2, ケータリング車×2)。トーイングカー・整備士・燃料施設の有無・燃料管は含まれない（docs/33 は「人員・車両制約」とのみ記述）', () => {
+  it('= min(staff/4, ベルトローダー, 手荷物牽引車, 給油車×2＋ハイドラント接続スポット数, 清掃車×2, ケータリング車×2)。トーイングカー・整備士・燃料施設のどれかがなければ 0（計画 1-20 / TA-2 で更新）', () => {
+    // 更新の理由（意図した仕様変更。弱体化ではない）: 旧版はトーイングカー 0・整備士 0・燃料施設なしでも能力値が変わらなかった（実際は運航が止まる）。
+    // 新版は「有無」として 0 を返す。1 台あたりの処理数は根拠がないので作らない。給油の制約にはハイドラント接続スポット 1 つ = 給油能力 1 を加える。
     const l = rich();
     const g = (props: Record<string, number>) => cap(withGse(l, props));
     expect(g({ staff: 20, beltLoaders: 3, baggageTractors: 3, fuelTrucks: 2, cateringTrucks: 2, cleaningVans: 2 })).toBe(3);
     expect(g({ staff: 11 })).toBe(2);
     expect(g({ beltLoaders: 1 })).toBe(1);
     expect(g({ fuelTrucks: 1 })).toBe(2);
-    expect(g({ tugs: 0 })).toBe(cap(l)); // トーイングカー 0 でも能力は変わらない（が、実際はプッシュバック不能）
-    expect(cap(withEngineers(l, 0))).toBe(cap(l));
-    // 燃料施設を撤去しても能力値は不変（実際には給油ができず出発不能）
+    expect(g({ tugs: 0 })).toBe(0); // 旧: cap(l)。トーイングカー 0 はプッシュバックができない
+    expect(g({ tugs: 1 })).toBe(cap(l)); // 台数は式に入れない（有無だけ）
+    expect(cap(withEngineers(l, 0))).toBe(0); // 旧: cap(l)。整備士 0 は点検ができない
+    // 燃料施設を撤去すると能力値は 0（給油ができず出発不能）
     const farm = Object.values(l.facilities).find((f) => f.kind === 'fuelFarm')!;
     const noFarm = must(deleteEntity(l, farm.id)).layout;
-    expect(cap(noFarm)).toBe(cap(l));
+    expect(cap(noFarm)).toBe(0); // 旧: cap(l)
     const snap = (x: AirportLayout) => { const s = createSimulation(x, { seed: 'e3-cap', settings: manual, company: createSandboxCompany('e3-cap') }); return analyzeAirportCapacity(s.company!, s.ctx).summary.find((m) => m.name === '地上支援・折り返し')!; };
-    expect(snap(noFarm).capacity).toBe(snap(l).capacity);
+    expect(snap(noFarm).capacity).toBe(0);
+    expect(snap(l).capacity).toBe(cap(l));
     logE('e3-capacity-def', { rich: cap(l), tugs0: g({ tugs: 0 }), noFuelFarm: cap(noFarm), engineers0: cap(withEngineers(l, 0)) });
   });
 
@@ -177,7 +183,7 @@ describe('ID-e3 燃料: 燃料施設なし・ハイドラント（燃料管）',
     return { standId: a.standId, hydrant: sim.ctx.hydrantStands.has(a.standId ?? ''), workSec: t.workSec, needsFuelTruck: t.needs.fuelTruck ?? 0 };
   }
 
-  it('ハイドラント接続スポット: 給油は給油車不要・作業時間 0.6 倍（docs/34）。給油車 0 台でも接続スポットの機体は出発でき、非接続では出発できない。ダッシュボードの折り返し能力は給油車 0 で 0 のまま（B）', () => {
+  it('ハイドラント接続スポット: 給油は給油車不要・作業時間 0.6 倍（docs/34）。給油車 0 台でも接続スポットの機体は出発でき、非接続では出発できない。ダッシュボードの折り返し能力はハイドラント接続スポット数（1）になる（計画 1-20）', () => {
     expect([...createContext(hydrantLayout(2, true)).hydrantStands]).toEqual(['std_1']);
     const plain = fuelTaskAt(hydrantLayout(2, false), 'e3-hyd');
     const hyd = fuelTaskAt(hydrantLayout(2, true), 'e3-hyd');
@@ -194,7 +200,9 @@ describe('ID-e3 燃料: 燃料施設なし・ハイドラント（燃料管）',
     logE('e3-hydrant-no-trucks', { withPipe: { departed: withPipe.departed, delay: withPipe.meanDepDelaySec }, noPipe: { departed: noPipe.departed, blocked: noPipe.blockReasons }, dashboardCapacity: { withPipe: cap(hydrantLayout(0, true)), noPipe: cap(hydrantLayout(0, false)) } });
     expect(withPipe.departed).toBe(1);
     expect(noPipe.departed).toBe(0);
-    expect(cap(hydrantLayout(0, true))).toBe(0);
+    // 計画 1-20 / TA-2 で更新: ハイドラント接続スポット 1 つを給油能力 1 として加える（旧: 給油車 0 で 0）。接続のない配置は 0 のまま
+    expect(cap(hydrantLayout(0, true))).toBe(1);
+    expect(cap(hydrantLayout(0, false))).toBe(0);
   }, 300_000);
 });
 

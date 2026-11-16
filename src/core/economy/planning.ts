@@ -2,7 +2,8 @@ import { Rng } from '../rng';
 import { compareIds } from '../model/ids';
 import { serviceSecPerPax } from '../terminal/capacity';
 import type { SizeClass } from '../model/types';
-import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
+import { AIRCRAFT_TYPES, resolveType, type AircraftType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
+import { taskNeeds } from '../sim/tasks';
 import { checkStand } from '../aircraft/compat';
 import { operableTypes, type SimContext } from '../sim/context';
 import { BALANCE } from './balance';
@@ -240,15 +241,40 @@ function processingPerHour(ctx: SimContext, terminalId: string, kind: 'security'
   return Math.round(cap);
 }
 
-/** 地上支援で同時に扱える折り返しの目安 */
-export function turnaroundCapacity(ctx: SimContext): number {
+function groundUnitTotals(ctx: SimContext): Record<string, number> {
   const u: Record<string, number> = {};
   for (const b of ctx.bases) for (const [k, n] of Object.entries(b.units)) u[k] = (u[k] ?? 0) + (n ?? 0);
+  return u;
+}
+
+/**
+ * 地上支援で同時に扱える折り返しの目安。
+ * 燃料施設・整備士・トーイングカーのいずれかがなければ 0（運航は給油・点検・プッシュバックで止まり続ける。ground.ts の noFuelFarm・noEngineer・noVehicle）。
+ * 給油の制約は 給油車 × 2 ＋ ハイドラントにつながったスポットの数（1 スポット = 給油能力 1）。1 台あたりの処理数は根拠がないので作らず、
+ * トーイングカー・整備士は「有無」として扱う。ランプバスは式に入れない（今後の課題。1-20 / TA-2）。
+ */
+export function turnaroundCapacity(ctx: SimContext): number {
+  const u = groundUnitTotals(ctx);
   const v = (k: string) => u[k] ?? 0;
+  if (!ctx.hasFuelFarm || v('engineer') <= 0 || v('tug') <= 0) return 0;
   return Math.max(
     0,
-    Math.min(Math.floor(v('staff') / STAFF_PER_TURNAROUND), v('beltLoader'), v('baggageTractor'), v('fuelTruck') * 2, v('cleaningVan') * 2, v('cateringTruck') * 2),
+    Math.min(Math.floor(v('staff') / STAFF_PER_TURNAROUND), v('beltLoader'), v('baggageTractor'), v('fuelTruck') * 2 + ctx.hydrantStands.size, v('cleaningVan') * 2, v('cateringTruck') * 2),
   );
+}
+
+/**
+ * 折り返しが無期限に止まる地上支援の不足（燃料施設・整備士・トーイングカー、ハイドラントがないときの給油車）の一覧。
+ * 運航側の停止条件（ground.ts: noFuelFarm / noEngineer / noVehicle）と同じ判定。空なら不足なし。
+ */
+export function groundBlockers(ctx: SimContext, type: AircraftType): string[] {
+  const u = groundUnitTotals(ctx);
+  const out: string[] = [];
+  if (!ctx.hasFuelFarm) out.push('燃料施設');
+  if ((taskNeeds(type, 'inspect').engineer ?? 0) > 0 && (u.engineer ?? 0) <= 0) out.push('整備士');
+  if ((taskNeeds(type, 'pushback').tug ?? 0) > 0 && (u.tug ?? 0) <= 0) out.push('トーイングカー');
+  if ((taskNeeds(type, 'fuel').fuelTruck ?? 0) > 0 && (u.fuelTruck ?? 0) <= 0 && ctx.hydrantStands.size === 0) out.push('給油車');
+  return out;
 }
 
 export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds: readonly string[] = []): PlanAnalysis {
@@ -276,6 +302,7 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     .filter((s) => s.operational && s.entry)
     .sort((a, b) => SIZE_RANK[a.size] - SIZE_RANK[b.size] || Number(b.contact) - Number(a.contact) || compareIds(a.id, b.id));
   const freeAt = new Map<string, number>();
+  const blockersByType = new Map<string, string[]>();
   const assignments: PlanAnalysis['assignments'] = {};
   for (const f of plan.flights) {
     if (!operable.has(f.typeId)) {
@@ -285,6 +312,10 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     }
     // スポットの適合性は aircraft/compat.ts の判定を使う（区分・コード F）
     const type = resolveType(ctx.types, f.typeId);
+    // 地上支援の不足（燃料施設・整備士・トーイングカー・給油車）: 運航では折り返しが止まり続けるのでエラー（canOperate / operableTypes は変えない。1-15 / E-2）
+    let blockers = blockersByType.get(f.typeId);
+    if (!blockers) blockersByType.set(f.typeId, (blockers = groundBlockers(ctx, type)));
+    if (blockers.length > 0) add('GROUND_SUPPORT_MISSING', 'error', f.key, blockers.join('・'));
     const s = stands.find((x) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt);
     if (!s) {
       assignments[f.key] = { standId: null, gateId: null, terminalId: null };

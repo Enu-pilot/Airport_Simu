@@ -35,3 +35,28 @@ test('建設・経営ページへ移動している間も運航シミュレー�
   await expect(clock).not.toHaveText(before ?? '', { timeout: 5_000 });
   await expect(page.getByTestId('stop-ops')).toBeVisible();
 });
+
+test('能力画面に、空港全体の離発着能力のカードと、制約になっている要素の名前が出る（1-19）', async ({ page }) => {
+  await page.getByTestId('page-management').click();
+  await page.getByTestId('management-capacity').click();
+  const overall = page.getByTestId('capacity-overall');
+  await expect(overall).toBeVisible();
+  await expect(overall).toContainText('空港全体の離発着能力');
+  await expect(overall).toContainText('回/時');
+  await expect(page.getByTestId('capacity-overall-limit')).toContainText(/制約: (滑走路|スポットの回転数|折り返し能力|未算出)/);
+  // 誘導路は未算出であることを根拠に明記する
+  await expect(overall).toContainText('誘導路は未算出');
+});
+
+test('運航中に滑走路を閉鎖すると、能力画面は閉鎖を反映する（1-19 / AS-5）', async ({ page }) => {
+  await page.getByTestId('page-operations').click();
+  await expect(page.getByTestId('ops-controls')).toBeVisible();
+  await page.getByTestId('tab-disruptions').click();
+  await page.getByTestId('disruption-kind').selectOption('runwayClosed');
+  await page.getByTestId('disruption-add').click();
+  await page.getByTestId('overlay-close').click();
+  await page.getByTestId('page-management').click();
+  await page.getByTestId('management-capacity').click();
+  await expect(page.getByTestId('capacity-panel')).toContainText('運航中の閉鎖を反映');
+  await expect(page.getByTestId('capacity-overall')).toBeVisible();
+});

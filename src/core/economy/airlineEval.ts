@@ -158,9 +158,10 @@ export function stepAirlineEval(c: CompanyState, input: EvalStepInput): EvalStep
           e.complaints.push({ key: k, sinceDay: c.day });
           events.push(`${a.name} に不満が生じました（${k}）`);
         }
-      } else if (v >= COMPLAINT_OFF) {
+      } else {
+        // 45 以上の締めで「続く」回数を戻す（帯 45〜55 でも。1-21 S-4）。すでにある不満は帯の間は維持し、55 以上で解消する
         e.low[k] = 0;
-        if (e.complaints.some((x) => x.key === k)) {
+        if (v >= COMPLAINT_OFF && e.complaints.some((x) => x.key === k)) {
           e.complaints = e.complaints.filter((x) => x.key !== k);
           events.push(`${a.name} の不満が解消しました（${k}）`);
         }

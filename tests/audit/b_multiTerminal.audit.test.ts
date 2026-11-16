@@ -161,8 +161,10 @@ describe('10 リモートスポット便の運航（2 ターミナル + 2 バス
     expect(Object.values(sim.state.paxGroups).filter((g) => g.terminalId === 'fac_21').length).toBe(0);
   });
 
-  it('【E・現行挙動の固定】auto で到着後に最寄りゲートが閉鎖: 同一スポット・同一機の出発旅客は別ターミナルへ再選択され、経路がなければ unreachable で乗り遅れる（人数保存・不変条件は維持）', { timeout: 300_000 }, () => {
-    const { layout, t1, t2 } = busTwoTerminalLayout();
+  it('【K-1・計画 1-11 で更新】auto で旅客生成後に最寄りゲートが閉鎖: 出発旅客は生成時のゲート（A）に固定され、閉鎖中は待機し、締切までに再開しなければ facilityClosed で乗り遅れる（別ターミナルへ回さない。人数保存・不変条件は維持）', { timeout: 300_000 }, () => {
+    // 旧（フェーズ 0 の特性固定）: 閉鎖のたびに別ターミナル（B）へ再選択され、1 便の出発旅客が 2 ターミナルにまたがり、経路がなければ unreachable で乗り遅れた。
+    // 新（docs/42 §K-1・impl_phase1_plan 1-11）: 旅客生成後のバスゲートは固定。意図した挙動変更のため期待値を更新（弱体化ではない）。
+    const { layout, t1 } = busTwoTerminalLayout();
     const sim = createSimulation(layout, { seed: 'b10-flip', settings: { autoSchedule: false } });
     const ac = addTurnaround(sim, 'narrow180', T0 + 20 * 60, { departureAt: T0 + 3 * 3600, plan: plan('std_8') });
     const arr = sim.state.flights[ac.arrivalFlightId]!;
@@ -174,12 +176,12 @@ describe('10 リモートスポット便の運航（2 ターミナル + 2 バス
       if (i % 30 === 0) expect(checkInvariants(sim)).toEqual([]);
     }
     expect(arr.pax.gateId).toBe('fac_10');
-    expect(dep.pax.gateId).toBe('fac_11');
+    expect(dep.pax.gateId).toBe('fac_10'); // 固定（旧: fac_11 へ再選択）
     expect(new Set(groupsOf(sim, arr.id).map((g) => g.terminalId))).toEqual(new Set([t1]));
-    expect(new Set(groupsOf(sim, dep.id).map((g) => g.terminalId))).toEqual(new Set([t1, t2])); // 1 便の出発旅客が 2 ターミナルにまたがる（docs/35 §7.1 と緊張）
+    expect(new Set(groupsOf(sim, dep.id).map((g) => g.terminalId))).toEqual(new Set([t1])); // 1 便の出発旅客は 1 ターミナル（docs/35 §7.1）
     expect(dep.pax.boarded + dep.pax.missed).toBe(dep.pax.booked);
     expect(dep.pax.missed).toBeGreaterThan(0);
-    expect(groupsOf(sim, dep.id).filter((g) => g.state === 'missed').every((g) => g.reason === 'unreachable')).toBe(true);
+    expect(groupsOf(sim, dep.id).filter((g) => g.state === 'missed').every((g) => g.reason === 'facilityClosed' || g.reason === 'late')).toBe(true);
   });
 });
 

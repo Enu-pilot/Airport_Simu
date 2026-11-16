@@ -5,7 +5,7 @@ import { findPaxRoute, linkBetween } from '../terminal/route';
 import { serviceSecPerPax } from '../terminal/capacity';
 import { resolveType } from './aircraftTypes';
 import { demandFactorAt } from './disruptions';
-import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt } from './baggage';
+import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt, reconcileDepartureBags } from './baggage';
 import { boardingAllowed } from './ground';
 import { applyBusArrival, applyBusDeparture, pickBusGate, stepBusBoarding } from './apronBus';
 import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './busRules';
@@ -224,7 +224,8 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
     p.gateId = ctx.standGate[ac.standId] ?? null;
     // バスゲートがある運航: ゲートのないスポットの便はバスゲートで搭乗し、ランプバスで運ぶ（sim/apronBus.ts）
     if (state.bus || explicitRemoteConfiguration) applyBusDeparture(sim, f, ac);
-    if (p.generated && previousGateId && previousGateId !== p.gateId) reconcileDepartureGate(sim, f, p.gateId);
+    // 付け直すのは「新しいゲートが決まった」とき（null から新ゲートへの変化も含む）。null へは付け直さない（1-07 / P-1）
+    if (p.generated && p.gateId && previousGateId !== p.gateId) reconcileDepartureGate(sim, f, p.gateId);
   }
   // 複数ターミナルでは、ゲート所属先が確定してから旅客を作る。
   // 単一ターミナル空港では従来どおり、便の生成時刻に旅客を作る。
@@ -303,6 +304,8 @@ function closeBoarding(sim: Simulation, f: Flight, forced: MissReason | null): v
   const { state } = sim;
   const p = f.pax;
   const missed = missGroups(sim, f, forced);
+  // 欠航便の預け手荷物は、地上作業が走らないので締め処理で終端状態（leftBehind / offloaded）にする（1-09 / B-1）
+  if (forced === 'cancelled') reconcileDepartureBags(sim, f.id, true);
   p.boarding = 'closed';
   log(state, { t: state.now, kind: 'boardingClosed', aircraftId: f.aircraftId, note: `${f.number} 搭乗 ${p.boarded} / 乗り遅れ ${p.missed}` });
   if (missed > 0) log(state, { t: state.now, kind: 'paxMissed', aircraftId: f.aircraftId, note: `${f.number} ${missed}人` });
@@ -660,6 +663,12 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
     case 'stranded':
     case 'waitingFacility':
       g.waitSec++;
+      // 防御（1-07 / P-1）: ゲート未確定で空港に着いただけ（まだ建物に入っていない）の旅客は、ターミナルが決まっていれば入口へ戻す（旧版の進行中データにも効く）
+      if (g.state === 'stranded' && !g.area && g.reason === 'noGate' && g.terminalId) {
+        g.state = 'toAirport';
+        g.reason = null;
+        return;
+      }
       if (state.now >= g.retryAt && g.area) planStep(sim, g);
       else if (state.now >= g.retryAt && g.state === 'waitingFacility' && !g.area) {
         g.state = 'toAirport';

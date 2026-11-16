@@ -88,6 +88,8 @@ export function busGateStatus(
 /** One deterministic spot-to-gate rule shared by preview and live operations.
  * Explicit assignments never fall back. Automatic assignments choose the
  * nearest usable gate, with gate ID as a stable tie breaker.
+ * `Stand.terminalId`（1-11 / K-1）: 'none' では無視。'bus' ではゲートの所属が一致するときだけ使い、不一致は invalidGate。
+ * 'auto' / 欠落では候補をそのターミナルのゲートに絞り、なければ unconfigured。固定スポット（ゲート付き）はこの関数を通らず、ゲートで決まる。
  */
 export function resolveBusGateForStand(
   layout: AirportLayout,
@@ -103,7 +105,9 @@ export function resolveBusGateForStand(
   if (stand.remoteBoarding === 'bus') {
     const gateId = stand.busGateId ?? null;
     const status = busGateStatus(layout, terminal, gateId, closedGateIds);
-    return status.usable
+    // 所属ターミナル（Stand.terminalId）の指定があるときは、ゲートの所属が一致するものだけ。食い違いは代わりを探さず invalidGate（1-11 / K-1）
+    const terminalMatches = !stand.terminalId || status.terminalId === stand.terminalId;
+    return status.usable && terminalMatches
       ? { gateId, terminalId: status.terminalId }
       : { gateId: null, terminalId: null, failure: gateId ? 'invalidGate' : 'unconfigured' };
   }
@@ -113,6 +117,8 @@ export function resolveBusGateForStand(
     const status = busGateStatus(layout, terminal, gateId, closedGateIds);
     const facility = layout.facilities[gateId];
     if (!status.usable || !facility) return [];
+    // 'auto' / 欠落 + 所属ターミナルの指定: そのターミナルのゲートだけを候補にする（別のターミナルへは移さない）
+    if (stand.terminalId && status.terminalId !== stand.terminalId) return [];
     const distance = Math.hypot(facility.origin.x + 0.5 - standPoint.x, facility.origin.y + 0.5 - standPoint.y);
     return [{ gateId, terminalId: status.terminalId, distance }];
   });

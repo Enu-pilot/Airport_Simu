@@ -2,7 +2,7 @@ import { Rng } from '../rng';
 import { compareIds, sortedValues } from '../model/ids';
 import type { AirportLayout, SizeClass } from '../model/types';
 import { canAircraftUse, otherEnd } from '../airside/network';
-import { resolveType, takeoffDistanceM, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
+import { resolveType, takeoffDistanceM, takeoffRollSec, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
 import { checkRunway, checkStand } from '../aircraft/compat';
 import { createContext, operableTypes, orderedRunway, type SimContext } from './context';
 import { findPath } from './pathfinding';
@@ -230,9 +230,12 @@ function setState(state: SimState, ac: Aircraft, next: AircraftState, note?: str
 
 function setHold(state: SimState, ac: Aircraft, reason: HoldReason | null): void {
   if (reason === ac.holdReason) return;
+  const prev = ac.holdReason;
   ac.holdReason = reason;
   if (reason) {
-    ac.waitSince ??= state.now;
+    // 夜間待機（noiseCurfew）から別の理由に変わったら、夜間待機の時間を HOLD_DIVERT_SEC の対象から除くため起点を取り直す（1-12 / D-1）
+    if (prev === 'noiseCurfew') ac.waitSince = state.now;
+    else ac.waitSince ??= state.now;
     logEvent(state, { t: state.now, kind: 'hold', aircraftId: ac.id, reason });
   } else {
     ac.waitSince = null;
@@ -604,6 +607,8 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     )
     .sort(
       (a, b) =>
+        // 運航者が reassignStand で指定したスポットは、ホームスポット等より先に評価する（1-14 / E-3）
+        Number(b.id === ac.requestedStandId) - Number(a.id === ac.requestedStandId) ||
         Number(gateClosed(sim, a.id)) - Number(gateClosed(sim, b.id)) ||
         Number(!homeSet.has(a.id)) - Number(!homeSet.has(b.id)) ||
         Number(!!homeOwners.get(a.id)?.some((owner) => owner !== airlineId)) - Number(!!homeOwners.get(b.id)?.some((owner) => owner !== airlineId)) ||
@@ -634,6 +639,7 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     if (!dep) continue;
     state.standAssignments[s.id] = ac.id;
     ac.standId = s.id;
+    if (ac.requestedStandId === s.id) delete ac.requestedStandId; // 指定したスポットへ割り当てられた
     ac.runwayId = best.runwayId;
     const arr = state.flights[ac.arrivalFlightId]!;
     arr.standId = s.id;
@@ -757,7 +763,7 @@ function departureBlocked(sim: Simulation, rid: string, type: AircraftType, airc
   const rs = state.runways[rid]!;
   if (sim.company?.city) {
     const lineUpSec = aircraft.route ? Math.max(0, routeLength(aircraft.route) - aircraft.dist) / LINEUP_SPEED : 0;
-    const takeoffSec = Math.sqrt((2 * takeoffDistanceM(type)) / Math.max(0.1, type.takeoffAccel));
+    const takeoffSec = takeoffRollSec(type);
     if (isCityNightMovement(state.now + lineUpSec + LINEUP_ALIGN_SEC + takeoffSec)) return 'noiseCurfew';
   }
   if (!runwayUsable(sim, rid, type, 'dep')) return 'runwayBusy';

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { analyzeAccess } from '../core/access/model';
 import { analyzeAirportCapacity, previewContractCapacity, type CapacityMetric, type CapacityPreview, type CapacityStatus } from '../core/economy/capacity';
 import { AIRLINES, DESTINATIONS, airlineDef, destinationDef, routeCapabilitiesForAirport } from '../core/economy/registry';
-import { PLAN_ISSUE_LABEL } from '../i18n/ja';
+import { OVERALL_CAPACITY_NOTE, OVERALL_CAPACITY_TITLE, OVERALL_LIMIT_LABEL, PLAN_ISSUE_LABEL } from '../i18n/ja';
 import { createContext } from '../core/sim/context';
 import { planDayWithDemand } from '../core/economy/planning';
 import { editorStore, useEditor, useLayout, actions } from '../editor/store';
@@ -40,7 +40,14 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
     () => planDayWithDemand(company, company.day, access.factor, ctx.types, routeCapabilitiesForAirport(layout.countryId)),
     [company, access.factor, ctx, layout.countryId],
   );
-  const snapshot = analyzeAirportCapacity(company, ctx, closedGates, plan, currentPaxByTerminal);
+  // 運航中は、閉鎖中の滑走路・スポットを数から除く（AS-5）
+  const live = simState
+    ? {
+        closedRunwayIds: Object.entries(simState.runwayConfig).filter(([, cfg]) => cfg.mode === 'closed').map(([id]) => id),
+        closedStandIds: [...simState.closures.stands],
+      }
+    : undefined;
+  const snapshot = analyzeAirportCapacity(company, ctx, closedGates, plan, currentPaxByTerminal, live);
   const [filter, setFilter] = useState('すべて');
   const [airlineId, setAirlineId] = useState(AIRLINES[0]?.id ?? '');
   const [destinationId, setDestinationId] = useState(DESTINATIONS[0]?.id ?? '');
@@ -75,6 +82,12 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
     </section> : <p className="ok-text">計画需要に対する算出可能な能力不足はありません。</p>}
     <section>
       <h4>空港全体</h4>
+      <article className="capacity-card capacity-overall" data-testid="capacity-overall" title={OVERALL_CAPACITY_NOTE}>
+        <header><strong>{OVERALL_CAPACITY_TITLE}</strong></header>
+        <b>{fmt(snapshot.overall.capacity)} <small>{unitLabel['movements/h']}</small></b>
+        <div data-testid="capacity-overall-limit">{snapshot.overall.limitedBy ? `制約: ${OVERALL_LIMIT_LABEL[snapshot.overall.limitedBy]}` : '制約: 未算出'}</div>
+        <small className="capacity-basis">{OVERALL_CAPACITY_NOTE}</small>
+      </article>
       <div className="capacity-grid">{snapshot.summary.map((item) => <MetricCard key={item.name} item={item} />)}</div>
     </section>
     <section className="capacity-detail">

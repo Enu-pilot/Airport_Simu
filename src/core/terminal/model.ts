@@ -170,13 +170,19 @@ export function buildTerminalModel(layout: AirportLayout): TerminalModel {
       tileKey(g.origin.x, g.origin.y + 1),
       tileKey(g.origin.x, g.origin.y - 1),
     ]);
-    const terminal = sortedValues(layout.facilities).find(
+    const adjacent = sortedValues(layout.facilities).filter(
       (f) => f.kind === 'terminal' && facilityTiles(f).some((t) => near.has(tileKey(t.x, t.y))),
     );
+    const terminal = adjacent[0];
     // 明示の接続先があり、隣接していなければ独立ゲート（連絡通路でつなぐ）。隣接していれば従来どおり
     const wanted = connectedTerminal(g, layout);
     if (wanted && terminal?.id !== wanted) {
       gates[g.id] = connectIndependentGate(layout, areas, links, byTerminal, g.id, wanted, connectors);
+      continue;
+    }
+    // 明示がなく 2 つ以上のターミナルに接するゲートは、所属を推測しない（terminalId=null。検証が GATE_TERMINAL_AMBIGUOUS を報告する。1-10 / T-1）
+    if (!wanted && adjacent.length > 1) {
+      gates[g.id] = { terminalId: null, boarding: null, deplane: null, ambiguousTerminalIds: adjacent.map((f) => f.id) };
       continue;
     }
     const access: GateAccess = { terminalId: terminal?.id ?? null, boarding: null, deplane: null };

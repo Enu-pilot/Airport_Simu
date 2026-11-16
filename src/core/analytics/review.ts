@@ -2,8 +2,9 @@ import type { CompanyState, DailyAirlineAnalysis, DailyReport } from '../economy
 import { analyzeDayPlan, planDayWithDemand, type PlanIssue } from '../economy/planning';
 import type { Simulation } from '../sim/simulation';
 import { dailyAirlineAnalysis } from '../economy/ops';
-import { forecastForDay, type WeatherForecast } from '../sim/weather';
-import type { AircraftState, DisruptionKind, TaskKind } from '../sim/types';
+import { forecastForDay, weatherPlan, type WeatherForecast } from '../sim/weather';
+import { DAY_SEC } from '../sim/rules';
+import type { AircraftState, DisruptionKind, TaskKind, WxLevel } from '../sim/types';
 import type { FlightRecord } from './records';
 import type { AirlineRequest, RequestKind } from '../economy/airlineEval';
 import type { ScoreComponent, ScoreKey } from '../economy/airlineScore';
@@ -168,6 +169,12 @@ export interface DayReview {
   /** 新しい記録形式では当日内の問題便と実時系列を含む。旧保存レビューでは欠落する。 */
   flights?: ReviewFlight[];
   disruptions: ReviewDisruption[];
+  /**
+   * その日の天候（5 段階）の変化（会社の game.weather === 'levels' のときだけ。旧保存レビュー・従来の天候では欠落）。
+   * 計画天候（weatherPlan）の 1 時間ごとの段階が前の時間と変わった時刻だけを並べる（最初の時間は直前を晴れ 0 として比べる）。
+   * 手動・シナリオの天候の障害による上書きは disruptions 側に出る。
+   */
+  weather?: { maxLevel: WxLevel; changes: { t: number; level: WxLevel }[] };
   responses: ReviewResponses;
   airlines: {
     id: string;
@@ -372,6 +379,19 @@ export function buildReviewFlights(input: {
   });
 }
 
+/** その日の計画天候（5 段階）の最大の段階と、段階が変わった時刻（S-2） */
+function weatherOfDay(company: CompanyState, day: number, dayStart: number): NonNullable<DayReview['weather']> {
+  const hours = weatherPlan(company.seed, day, company.game!.climate, company.game!.difficulty);
+  const base = Math.floor(dayStart / DAY_SEC) * DAY_SEC;
+  const changes: { t: number; level: WxLevel }[] = [];
+  let previous: WxLevel = 0;
+  hours.forEach((h, i) => {
+    if (h.level !== previous) changes.push({ t: base + i * 3600, level: h.level });
+    previous = h.level;
+  });
+  return { maxLevel: hours.reduce<WxLevel>((m, h) => (h.level > m ? h.level : m), 0), changes };
+}
+
 export function buildDayReview(input: ReviewInput): DayReview {
   const { sim, company, dayStart, airlinesBefore, responses, access } = input;
   const reports = company.reports;
@@ -449,6 +469,7 @@ export function buildDayReview(input: ReviewInput): DayReview {
   // Tomorrow's constraints are shown in their own section and are never used as today's evaluation reasons.
   const tomorrowPlan = planDayWithDemand(company, company.day, access, sim.ctx.types, routeCapabilitiesForAirport(sim.ctx.layout.countryId));
   const tomorrowAnalysis = analyzeDayPlan(tomorrowPlan, sim.ctx);
+  const weather = company.game?.weather === 'levels' ? weatherOfDay(company, report.day, dayStart) : undefined;
 
   return {
     day: report.day,
@@ -459,6 +480,7 @@ export function buildDayReview(input: ReviewInput): DayReview {
     bottlenecks: buildReviewBottlenecks(records, dayStart, end),
     flights,
     disruptions,
+    ...(weather ? { weather } : {}),
     responses: { ...responses },
     airlines,
     ...(company.goals

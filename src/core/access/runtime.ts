@@ -142,6 +142,9 @@ export function congestionDelayMin(baseMin: number, volume: number, capacity: nu
   return Math.min(M.congestionMaxMin, baseMin * 0.15 * (volume / capacity) ** 4);
 }
 
+/** バス・鉄道の定員の空きを探す先読み時間（時間）。これを超えて空きがなければ別の手段に切り替える */
+const TRANSIT_LOOKAHEAD_H = 24;
+
 const add = (acc: AccessRuntime, key: string, v: number) => (acc.hourly[key] = (acc.hourly[key] ?? 0) + v);
 
 function release(acc: AccessRuntime, now: number): void {
@@ -189,15 +192,22 @@ export function accessDeparture(sim: Simulation, g: PaxGroup): number {
     }
   }
   if (mode === 'bus' || mode === 'rail') {
-    // 1時間あたりの定員を超えたら次の便（時間帯）へ
+    // 1時間あたりの定員を超えたら次の便（時間帯）へ。24 時間先まで探して空きがなければ、定員を超えて受け入れず別の手段に切り替える（1-16 / E-1）
     const cap = mode === 'bus' ? acc.busesPerHour * M.busSeats : acc.trainsPerHour * M.trainSeats;
     let h = hour;
-    while (h < hour + 6 && (acc.hourly[`${mode}:${h}`] ?? 0) + g.count > cap) h++;
-    if (h > hour) {
+    const lastHour = hour + TRANSIT_LOOKAHEAD_H - 1;
+    if (cap > 0 && g.count <= cap) while (h <= lastHour && (acc.hourly[`${mode}:${h}`] ?? 0) + g.count > cap) h++;
+    if (cap <= 0 || g.count > cap || h > lastHour) {
+      // 満車の駐車場と同じ方式: 送迎・タクシー・徒歩へ切り替える（定員を超えて加算する経路はない）
       acc.stats.transitFull++;
-      delayMin += (h * 3600 - now) / 60;
+      mode = withRng(state, (rng) => choose(acc, rng.next(), ['dropoff', 'taxi', 'walk']));
+    } else {
+      if (h > hour) {
+        acc.stats.transitFull++;
+        delayMin += (h * 3600 - now) / 60;
+      }
+      add(acc, `${mode}:${h}`, g.count);
     }
-    add(acc, `${mode}:${h}`, g.count);
   }
   if (mode === 'car' || mode === 'dropoff' || mode === 'taxi') {
     // 道路: 自家用車 1台、送迎・タクシー 2台（往復）。バスは毎時の便数 × 2 を常に含む

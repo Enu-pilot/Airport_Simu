@@ -76,6 +76,18 @@ function configuredBusGate(sim: Simulation, f: Flight, standId: string, need: 'b
   return { gateId: assignment.gateId, ...(assignment.failure ? { failure: assignment.failure } : {}) };
 }
 
+/**
+ * 固定したゲートが今のスポットの設定を満たすか（閉鎖は無視）。'bus' なら busGateId と一致、そうでなければ所属ターミナルの指定がないか、ゲートの所属が一致。
+ * 満たさないとき（機体のスポットが変わった等）は選び直し、ターミナル間の移動は reconcileDepartureGate に任せる。
+ */
+function pinnedGateStillValid(sim: Simulation, standId: string, gateId: string): boolean {
+  if (!isBusGate(sim, gateId)) return false;
+  const layoutStand = sim.ctx.layout.stands[standId];
+  if (!layoutStand) return false;
+  if (layoutStand.remoteBoarding === 'bus') return gateId === layoutStand.busGateId;
+  return !layoutStand.terminalId || sim.ctx.terminal.gates[gateId]?.terminalId === layoutStand.terminalId;
+}
+
 /** 出発便: スポットがコンタクトでなければバスゲートを決める（搭乗開始前なら、使えなくなったゲートは選び直す）。p.gateId を設定する */
 export function applyBusDeparture(sim: Simulation, f: Flight, ac: Aircraft): void {
   const { state, ctx } = sim;
@@ -93,9 +105,12 @@ export function applyBusDeparture(sim: Simulation, f: Flight, ac: Aircraft): voi
     return;
   }
   const priorGate = p.bus?.gateId ?? null;
-  let gateId = p.boarding === 'notStarted' ? null : priorGate;
+  // 旅客を生成した後は、搭乗ゲートを固定する（1-07 / 1-11）。選び直さず、閉鎖中でも維持する（旅客はゲート工程で待ち、再開すれば搭乗する。
+  // 締切までに再開しなければ facilityClosed で乗り遅れ）。固定は、今のスポットの設定を満たすゲートだけ。状態を持たない判定なので保存項目は増えない。
+  const pinned = p.generated && !!priorGate && pinnedGateStillValid(sim, stand.id, priorGate);
+  let gateId = p.boarding === 'notStarted' && !pinned ? null : priorGate;
   let selectionFailure: 'disabled' | 'unconfigured' | 'invalidGate' | undefined;
-  if (p.boarding === 'notStarted') {
+  if (p.boarding === 'notStarted' && !pinned) {
     const assignment = configuredBusGate(sim, f, stand.id, 'boarding');
     gateId = assignment.gateId;
     selectionFailure = assignment.failure;

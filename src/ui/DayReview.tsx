@@ -205,8 +205,16 @@ export function ReviewBody({ review }: { review: DayReview }) {
       )}
 
       <Section id="review-disruptions" title={DAY_LOOP.disruptionsTitle}>
+        {(review.weather?.changes.length ?? 0) > 0 && (
+          <div data-testid="review-weather">
+            <Row label={DAY_LOOP.weatherTitle} value={DAY_LOOP.weatherMax(review.weather!.maxLevel)} tone={review.weather!.maxLevel >= 4 ? 'warn' : undefined} />
+            {review.weather!.changes.map((c) => (
+              <Row key={c.t} label={`${hhmm(c.t)} ${DAY_LOOP.weatherChange}`} value={`段階 ${c.level}`} />
+            ))}
+          </div>
+        )}
         {review.disruptions.length === 0 ? (
-          <div className="card-sub">{DAY_LOOP.noDisruptions}</div>
+          (review.weather?.changes.length ?? 0) > 0 ? null : <div className="card-sub">{DAY_LOOP.noDisruptions}</div>
         ) : (
           review.disruptions.map((d) => (
             <Row

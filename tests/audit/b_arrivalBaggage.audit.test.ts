@@ -40,7 +40,9 @@ describe('09 手荷物と到着旅客の保存則（複数シード）', () => {
       // 集計の整合: 終端状態の個数 = groundStats
       const count = (s: string) => bags.filter((b) => b.state === s).length;
       expect(count('collected')).toBe(state.groundStats.bagsCollected);
-      expect(count('leftBehind')).toBe(state.groundStats.bagsLeftBehind);
+      // 計画 1-09 で更新: 欠航便（旅客グループが cancelled）の手荷物は leftBehind になるが bagsLeftBehind には数えない
+      const cancelledLeft = bags.filter((b) => b.state === 'leftBehind' && state.paxGroups[b.paxGroupId]?.state === 'cancelled').length;
+      expect(count('leftBehind') - cancelledLeft).toBe(state.groundStats.bagsLeftBehind);
       // 積載は1回だけ。積載後に取り下ろされたものは offloaded
       const everLoaded = bags.filter((b) => b.history.some((h) => h.state === 'loaded')).length;
       expect(everLoaded).toBe(state.groundStats.bagsLoaded);

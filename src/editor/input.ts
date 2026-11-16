@@ -13,10 +13,10 @@ import {
   moveEntity,
   rotateEntity,
 } from '../core/layout/operations';
-import { pickAt } from '../core/layout/pick';
-import { actions, applyOp, editorStore, type EditorState } from './store';
-import { areaKindOf, computePreview, facilityKindOf, handleAt, nextPathPoint, nextTaxiPoint, snapPointW } from './tools';
-import { pickTerminalArea } from '../core/layout/pick';
+import { pickCandidatesAt, type PickView } from '../core/layout/pick';
+import { actions, applyOp, editorStore, showToast, type EditorState } from './store';
+import { PLACEMENT_PROBLEM_LABEL } from '../i18n/ja';
+import { areaKindOf, computeOp, computePreview, facilityKindOf, handleAt, nextPathPoint, nextTaxiPoint, snapPointW } from './tools';
 import { aircraftAt } from '../core/sim/query';
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { ops } from './simRunner';
@@ -60,12 +60,30 @@ function updateHover(s: EditorState, screen: Vec2): void {
   actions.setHover(tile, needsPrecise(s) ? worldAt(s, screen) : undefined);
 }
 
+/** 描画と同じ条件（表示中の階・内部表示）で選択候補を絞る（1-03） */
+export function pickViewOf(s: Pick<EditorState, 'mapLevel' | 'overlays' | 'interiorLevel'>): PickView {
+  return { mapLevel: s.mapLevel, interior: { shown: s.overlays.interior, level: s.interiorLevel } };
+}
+
+/** クリック位置の先頭の候補を選び、重なった候補（2 つ以上）はプロパティの選択欄に渡す */
+function selectAtWorld(s: EditorState, world: WorldPoint): string | null {
+  const candidates = pickCandidatesAt(s.history.present, world, pickViewOf(s));
+  const id = candidates[0] ?? null;
+  actions.select(id, candidates.length >= 2 ? candidates : []);
+  return id;
+}
+
 /** 現在のプレビュー（カーソル位置を tile・World 座標として）を確定する */
 function commitPreview(tile: Tile, world: WorldPoint, opts: { select?: boolean } = {}): boolean {
   const s = get();
-  const preview = computePreview({ ...s, hover: tile, hoverW: world });
-  if (!preview) return false;
-  return applyOp(preview.result, opts);
+  const attempt = computeOp({ ...s, hover: tile, hoverW: world });
+  if (!attempt) return false;
+  // 失敗したときは理由を出す（エディタ側で導いた階・範囲の理由を優先。1-04）
+  if (!attempt.result.ok && attempt.problem && s.mode !== 'operate') {
+    showToast(PLACEMENT_PROBLEM_LABEL[attempt.problem], 'error');
+    return false;
+  }
+  return applyOp(attempt.result, opts);
 }
 
 export function finishPath(): void {
@@ -77,7 +95,7 @@ export function finishPath(): void {
     const o = s.options;
     applyOp(
       s.tool === 'road'
-        ? addRoadPath(s.history.present, pts, { roadClass: o.roadClass, oneWay: o.oneWay, buildState: o.buildState, level: o.roadLevel, capacityPerHour: o.roadCapacityPerHour })
+        ? addRoadPath(s.history.present, pts, { roadClass: o.roadClass, oneWay: o.oneWay, buildState: o.buildState, level: o.roadLevel, ...(o.roadCapacityPerHour > 0 ? { capacityPerHour: o.roadCapacityPerHour } : {}) })
         : addTaxiwayPath(s.history.present, pts, { widthClass: o.taxiWidth, oneWay: o.oneWay, buildState: o.buildState }),
       { quietNoChange: true },
     );
@@ -101,7 +119,7 @@ export function onPointerDown(screen: Vec2, button: number, mods: { shift?: bool
     const world = screenToWorld(s.camera, screen);
     const ac = aircraftAt(s.ops.sim.state, world);
     ops.selectAircraft(ac);
-    if (!ac) actions.select((s.overlays.interior ? pickTerminalArea(s.history.present, world, s.interiorLevel) : null) ?? pickAt(s.history.present, world));
+    if (!ac) selectAtWorld(s, world);
     return;
   }
 
@@ -116,8 +134,7 @@ export function onPointerDown(screen: Vec2, button: number, mods: { shift?: bool
         return;
       }
       // 内部表示中は、表示している階のエリアを優先して選ぶ
-      const id = (s.overlays.interior ? pickTerminalArea(s.history.present, world, s.interiorLevel) : null) ?? pickAt(s.history.present, world);
-      actions.select(id);
+      const id = selectAtWorld(s, world);
       if (id) actions.setDraft({ kind: 'move', id, start: tile });
       return;
     }

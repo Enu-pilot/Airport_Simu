@@ -19,6 +19,7 @@
 | GSE 基地 | `apronBuses` | ランプバスの台数 0〜30（欠落 = 0） |
 | リモートスポット | `remoteBoarding` | `'auto'`（欠落 = 旧プール方式）/ `'bus'` / `'none'` |
 | リモートスポット | `busGateId` | `'bus'` のときに使うバスゲート ID。複数スポットから同一ゲートを共有可能 |
+| リモートスポット | `terminalId` | 所属ターミナルの ID（K-1、フェーズ 1）。欠落 = 従来の自動選択（キーを書かない。null は保存しない）。`'bus'` ではゲートの所属との一致の条件、`'auto'` では候補を所属ターミナルのゲートに絞る。保存形式の版は上げない（既存の 2 で書く）。§3.1 |
 | 運航状態 | `state.bus` | `{ trips, active, stats }`（バスゲートがある運航だけ） |
 | 便 | `pax.bus` | `{ gateId, gateClosedAt, paxCarried, waitPaxSec }`（バス扱いの便だけ） |
 | ユニット | `trip` | 担当している運行 ID（バスだけ） |
@@ -37,11 +38,29 @@
   → waitingBus（搭乗口に滞在）→ onBus（乗車中）→ boarded（スポットで降車 → タラップで機内へ）
 ```
 
-1. **バスゲートの選択**: スポットが決まりコンタクトでなければ、スポットの設定を参照する。`'bus'` は指定ゲートだけ、`'none'` はバスなし、`'auto'` または旧データは運用中・未閉鎖で両方向に接続する候補のうち、スポットに最も近いゲートを選ぶ。計画分析と運航は同じ規則を使う。候補がなければ旅客を生成せず、便に `busFailure` を記録する。ゲートが未接続、閉鎖中、建設中、搭乗口または降機口がない場合も不正な処理をせず、原因を運航イベントに残す。
+1. **バスゲートの選択**: スポットが決まりコンタクトでなければ、スポットの設定を参照する。`'bus'` は指定ゲートだけ、`'none'` はバスなし、`'auto'` または旧データは運用中・未閉鎖で両方向に接続する候補のうち、スポットに最も近いゲートを選ぶ。計画分析と運航は同じ規則を使う。候補がなければ旅客を生成せず、便に `busFailure` を記録する。ゲートが未接続、閉鎖中、建設中、搭乗口または降機口がない場合も不正な処理をせず、原因を運航イベントに残す。所属ターミナル（`terminalId`）を指定したスポットの規則は §3.1。
 2. **搭乗開始**は従来の条件に **+10 分**（S 30 / M 40 / L 50 分前）、最低の搭乗時間 20 分。
 3. **ゲートの締切**: 従来の締切（`max(出発予定 − 10 分, 開始 + 20 分)`、ゲートの列が空）に達すると、ゲートより前のグループを従来の理由（締切に間に合わず・到達不能・施設閉鎖）で乗り遅れにする。**バス待ち・乗車中のグループは乗り遅れにしない**。
 4. **バスが来ない**: ゲート締切から 15 分たっても配車されないグループは `noBus` で乗り遅れ。乗車中は必ず運ぶ。
 5. 全員が搭乗・乗り遅れで終わったら搭乗を締める → 機体はプッシュバックへ（遅延の理由に `apronBus` を加える）。
+
+### 3.1 所属ターミナル（`Stand.terminalId`）と生成後のゲート固定（K-1、フェーズ 1）
+
+決定規則は `resolveBusGateForStand`（`core/terminal/busGateAssignment.ts`）の 1 つ。計画分析・検証・プロパティ画面・運航が同じ関数を共有する。
+
+| `remoteBoarding` | `terminalId` | 結果 |
+|---|---|---|
+| `'none'` | 任意 | 従来どおりバスなし。`terminalId` は無視（検証は info `STAND_TERMINAL_IGNORED`） |
+| `'bus'` + `busGateId` | 未設定 | 従来どおり |
+| `'bus'` + `busGateId` | あり | ゲートの所属が一致するときだけ使う。不一致は `failure:'invalidGate'`（代わりは探さない。検証は `STAND_TERMINAL_MISMATCH`） |
+| `'auto'` / 欠落 | 未設定 | 従来どおり、最も近い使えるゲート |
+| `'auto'` / 欠落 | あり | 候補を所属がそのターミナルのゲートに絞り、その中で最も近いもの。なければ `failure:'unconfigured'`（別のターミナルへは移さない。検証は `STAND_TERMINAL_NO_BUS_GATE`） |
+| 固定スポット（ゲート付き） | 任意 | ゲートで決まる（属性は無視。検証は info `STAND_TERMINAL_IGNORED`） |
+
+- 旅客を生成した後のバスゲートは固定する（旅客生成後の選び直しをしない）。閉鎖されても外さず、旅客はゲート工程で待ち、再開すれば搭乗する。締切までに再開しなければ `facilityClosed` で乗り遅れる。機体のスポットが変わって固定したゲートが新しい設定を満たさないときだけ選び直す。運航側の詳細は docs/35 §2.3・§7（運航の実装は Track S）。
+- 所属ターミナルの指定がない旧データの決定規則は従来と同じ。変わるのは「生成後の固定」だけ。
+- 画面: リモートスポット（`remoteBoarding !== 'none'`）のプロパティに「所属ターミナル」（`prop-standTerminal`、「自動（バスゲートで決定）」と各ターミナル）。指定すると「接続バスゲート」の候補をそのターミナルのゲートに限る。運航中は「旅客を生成した後は搭乗ゲートを固定します（閉鎖中は再開を待ちます）」と注記する。
+- 操作: `updateEntity` の stand は `remoteBoarding ∈ {auto,bus,none}`・`busGateId`（null またはバスゲート）・`terminalId`（null でキーを削除、文字列ならターミナル）を検証して更新できる（以前はこれらの変更が必ず「値が不正です」になる不具合 Z-1 があった）。ターミナルを削除すると指していた `terminalId` はキーごと消す（`finalize`）。
 
 ## 4. 到着旅客の流れ
 
@@ -66,6 +85,8 @@
 - `buildTerminalModel` が独立ゲートごとに合成ノード 2 つ（`<gateId>:dep` 搭乗待合、`<gateId>:arr` 降機口）を作り（保存しない派生データ。`byTerminal` には入れない）、接続先ターミナルの出発区域・到着区域のエリア（保安検査・上下移動を除く、ゲートに最も近いもの）へ、直線距離 × 1.25 の歩行リンク（上下移動の時間なし）でつなぐ。`TerminalModel.connectors` に記録する。
 - 2D では連絡通路を破線で描く。実装した範囲は**徒歩の連絡通路だけ**（ピープルムーバー・サテライトターミナル・ターミナルからバスで運ぶ独立ラウンジは後続）。
 
+- 2 つ以上のターミナルに接し、`connectedTo` の指定もないゲートは、所属を推測しない（`GateAccess.terminalId` は null、`ambiguousTerminalIds`）。検証は `GATE_TERMINAL_AMBIGUOUS`（error、docs/26 §3b）。`connectedTo` を指定したときの扱いは従来どおり（T-1、フェーズ 1）。
+
 ## 7. 故障・不足の扱い
 
 | 状況 | 扱い |
@@ -73,13 +94,13 @@
 | バス不足 | 運行が `waiting` のまま → 乗車待ちが増え、ゲート締切から 15 分で `noBus` の乗り遅れ。機体は搭乗の締切待ちで遅延（`apronBus`・`boarding`）。UI は「ランプバス不足」のアラート |
 | バスの故障（`vehicleFailure`・ランダム故障・手動） | 配車前・乗車中: 乗客を乗車待ちに戻して運行を未配車にし、別のバスを配車。走行中・降車中: 運行を `stalled`（故障位置）にして救援のバスを最優先で送り、乗り換え（120 秒）後に再開（`stats.rescues`）。UI は「ランプバス故障」のアラート |
 | 運行中のバスの配置換え（`moveUnitToBase`） | `OCCUPIED` で拒否 |
-| ゲートの故障 | 列が進まない（既存）。搭乗開始前ならゲートを選び直す |
+| ゲートの故障・閉鎖 | 旅客生成前なら選び直す。生成後はゲートを固定して待機し、再開すれば搭乗する。締切までに再開しなければ `facilityClosed` で乗り遅れる（K-1、§3.1。実装は Track S） |
 | 欠航 | 運行を取り消し、バスは基地へ |
 
 ## 8. 不変条件・検証・互換性・経済・分析
 
 - 不変条件（`checkBusInvariants`、`state.bus` があるときだけ）: BU1 乗車中のグループはちょうど 1 つの未完了の運行にいる / BU2 運行の乗車人数 = グループの合計 ≤ 定員 / BU3 配車済みの運行のバスの `trip` が一致し 1 台が 2 つの運行を持たない（故障したバスの運行の組み替えは次ティックなので、故障中のバスが運行を持つ一瞬は許す。不変条件は故障中のバスが運行を持つこと自体は検査せず、`advance` が次のティックの先頭で決定的に組み替える。そのティックに保存しても、復元後の次のティックで同じ結果になる）/ BU4 バス待ち・乗車中のグループの便は `p.bus` を持つ。
-- 検証コード: `GATE_BUS_HAS_STAND`（info）・`GATE_BUS_NO_VEHICLES`（warning）・`BUS_GATE_NO_REMOTE_STAND`（info）・`GATE_CONNECTION_INVALID`（error）・`GATE_CONNECTOR_LONG`（warning、60 タイル超）・`GATE_CONNECTOR_CROSSES_RUNWAY`（warning、連絡通路が滑走路・着陸帯を横切る）に加え、`STAND_BUS_GATE_INVALID`（指定先の不在・非稼働・未接続・片方向接続）・`STAND_BUS_NO_GATE`（利用できる両方向ゲートなし）・`STAND_BUS_NO_VEHICLES`（ランプバスなし）でスポット単位の問題を示す。既存の `GATE_NO_BOARDING_ACCESS`、`GATE_NO_ARRIVAL_ACCESS`、`GATE_UNREACHABLE`、`GATE_ARRIVAL_NO_EXIT`、`GATE_ARRIVAL_NO_BAGGAGE_ROUTE` は各ターミナルの経路を検証する。バスゲートには `GATE_NO_STAND` を出さず、`STAND_REMOTE` の文言はバスゲートがあるときだけ分岐。docs/26 §6。
+- 検証コード: `GATE_BUS_HAS_STAND`（info）・`GATE_BUS_NO_VEHICLES`（warning）・`BUS_GATE_NO_REMOTE_STAND`（info）・`GATE_CONNECTION_INVALID`（error）・`GATE_CONNECTOR_LONG`（warning、60 タイル超）・`GATE_CONNECTOR_CROSSES_RUNWAY`（warning、連絡通路が滑走路・着陸帯を横切る）に加え、`STAND_BUS_GATE_INVALID`（指定先の不在・非稼働・未接続・片方向接続）・`STAND_BUS_NO_GATE`（利用できる両方向ゲートなし）・`STAND_TERMINAL_INVALID` / `STAND_TERMINAL_NO_BUS_GATE` / `STAND_TERMINAL_MISMATCH`（error）・`STAND_TERMINAL_IGNORED`（info）（所属ターミナル、§3.1）・`STAND_BUS_NO_VEHICLES`（ランプバスなし）でスポット単位の問題を示す。既存の `GATE_NO_BOARDING_ACCESS`、`GATE_NO_ARRIVAL_ACCESS`、`GATE_UNREACHABLE`、`GATE_ARRIVAL_NO_EXIT`、`GATE_ARRIVAL_NO_BAGGAGE_ROUTE` は各ターミナルの経路を検証する。バスゲートには `GATE_NO_STAND` を出さず、`STAND_REMOTE` の文言はバスゲートがあるときだけ分岐。docs/26 §6。
 - 互換性（`checkGate`）: バスゲートは運用中なら適合（理由 `GATE_BUS`）。運航計画の分析はリモートスポットの選択済み `busGateId` と所属ターミナルを派生割当として保持し、バスゲートがある空港のリモートスポットを `NO_GATE` の代わりに `BUS_BOARDING`（info）として示す。
 - 経済: ランプバスの購入費 250,000 cr/台、日次は運転士 1,500 cr + 車両維持費 300 cr、運行ごと 150 cr（`groundOps`）。料金の割引は入れない。
 - 分析: `FlightRecord` に `boarding: 'bus'`・`busWaitSec`、`AirportKpis.apronBus`（運行・旅客・平均待ち・不足・救援）、遅延理由 `apronBus`、乗り遅れの理由 `noBus`。

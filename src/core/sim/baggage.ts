@@ -193,10 +193,15 @@ export function reconcileDepartureBags(sim: Simulation, flightId: string, finalC
       b.loadedOn = null;
       moveBag(state, b, 'offloaded', `makeup:offload`);
       state.groundStats.bagsOffloaded++;
-    } else if ((paxGone || finalCutoff) && ['checkedIn', 'sorting', 'madeUp'].includes(b.state)) {
+    } else if ((paxGone || finalCutoff) && (['checkedIn', 'sorting', 'madeUp'].includes(b.state) || (g.state === 'cancelled' && b.state === 'onCart'))) {
+      // 欠航では積み込み作業が走らないので、搬送中（onCart）の手荷物も終端にする
       moveBag(state, b, 'leftBehind', b.location);
-      state.groundStats.bagsLeftBehind++;
-      left++;
+      // 欠航（旅客グループが cancelled）の手荷物は終端状態にするだけで、積み残しの集計・罰金には数えない（欠航の補償は別。1-09 / B-1）。
+      // 乗り遅れ（missed）は従来どおり数える。
+      if (g.state !== 'cancelled') {
+        state.groundStats.bagsLeftBehind++;
+        left++;
+      }
       if (!paxGone) onBagLeftBehind(sim);
     }
   }

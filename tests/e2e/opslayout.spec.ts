@@ -128,7 +128,9 @@ test('滑走路閉鎖の障害でアラートが出て、クリックで移動�
   // 修理ボタン（既存の disruptionActions.resolve）で解除され、アラートが消える
   await alert.locator('[data-testid^="alert-act-repair"]').click();
   await expect(page.getByTestId('toast')).toContainText('修理・解除しました');
-  await expect(stack).toHaveCount(0);
+  // alert-stack は常設の状況ボタン（alert-status。AlertStack.tsx）を常に描画するので、アラートの 0 件で検査する（承認済み 2026-11-16）
+  await expect(stack.locator('[data-testid^="alert-disruption:"]')).toHaveCount(0);
+  await expect(page.getByTestId('alert-status')).toContainText('問題なし');
 });
 
 test('あまり使わないパネルは大きなオーバーレイで開き、閉じるボタン・Esc・同じボタンで閉じる。時計と倍率は覆わない', async ({ page }) => {

@@ -73,6 +73,7 @@ export type IssueCode =
   | 'STAND_REMOTE'
   | 'STAND_MULTIPLE_GATES'
   | 'GATE_NOT_AT_TERMINAL'
+  | 'GATE_TERMINAL_AMBIGUOUS'
   | 'GATE_NO_STAND'
   | 'GATE_STAND_TOO_FAR'
   | 'GATE_CONNECTION_INVALID'
@@ -84,6 +85,10 @@ export type IssueCode =
   | 'STAND_BUS_GATE_INVALID'
   | 'STAND_BUS_NO_GATE'
   | 'STAND_BUS_NO_VEHICLES'
+  | 'STAND_TERMINAL_INVALID'
+  | 'STAND_TERMINAL_NO_BUS_GATE'
+  | 'STAND_TERMINAL_MISMATCH'
+  | 'STAND_TERMINAL_IGNORED'
   // 施設・道路
   | 'NO_AIRSIDE_ACCESS'
   | 'TERMINAL_NO_ROAD'
@@ -151,6 +156,7 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   STAND_REMOTE: 'info',
   STAND_MULTIPLE_GATES: 'warning',
   GATE_NOT_AT_TERMINAL: 'error',
+  GATE_TERMINAL_AMBIGUOUS: 'error',
   GATE_NO_STAND: 'warning',
   GATE_STAND_TOO_FAR: 'error',
   GATE_CONNECTION_INVALID: 'error',
@@ -162,6 +168,10 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   STAND_BUS_GATE_INVALID: 'error',
   STAND_BUS_NO_GATE: 'error',
   STAND_BUS_NO_VEHICLES: 'warning',
+  STAND_TERMINAL_INVALID: 'error',
+  STAND_TERMINAL_NO_BUS_GATE: 'error',
+  STAND_TERMINAL_MISMATCH: 'error',
+  STAND_TERMINAL_IGNORED: 'info',
   NO_AIRSIDE_ACCESS: 'warning',
   TERMINAL_NO_ROAD: 'warning',
   TERMINAL_NO_GATE: 'info',
@@ -350,6 +360,27 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
   const crossingPairs = new Set((net.crossings ?? []).map((c) => pairKey(c.a, c.b)));
   const RUNWAYISH = new Set<FootprintLayer>(['runway', 'strip', 'resa']);
 
+  /**
+   * 階層接続設備の端点（1-02）: 同じノードを共有する道路の辺どうしで、少なくとも一方が接続設備（connectorKind あり、
+   * または両端の階が異なる）、かつ重なりがそのノードのタイルであるときは、接続の継ぎ目なので重なりとして扱わない。
+   */
+  const roadJunction = (aId: string, bId: string, at: Tile): boolean => {
+    const a = layout.roads[aId];
+    const b = layout.roads[bId];
+    if (!a || !b) return false;
+    const isConnector = (e: typeof a): boolean =>
+      !!e.connectorKind || (layout.roadNodes[e.from]?.level ?? 0) !== (layout.roadNodes[e.to]?.level ?? 0);
+    if (!isConnector(a) && !isConnector(b)) return false;
+    for (const n of [a.from, a.to]) {
+      if (n !== b.from && n !== b.to) continue;
+      const node = layout.roadNodes[n];
+      if (!node) continue;
+      const [t] = rasterizeSegment(node.pos, node.pos);
+      if (t && t.x === at.x && t.y === at.y) return true;
+    }
+    return false;
+  };
+
   /** 2 つの占有の組を判定する（real = 自由形の多角形による判定） */
   const judge = (
     a: { ownerId: string; layer: FootprintLayer },
@@ -359,6 +390,7 @@ function checkPlacement(layout: AirportLayout, parts: FootprintPart[], sink: Iss
   ): void => {
     if (a.ownerId === b.ownerId) return;
     if (COMPATIBLE.has(`${a.layer}|${b.layer}`)) return;
+    if (roadJunction(a.ownerId, b.ownerId, at)) return;
     if (a.layer === 'taxiway' && b.layer === 'runway' && touches(a.ownerId, b.ownerId)) return;
     if (b.layer === 'taxiway' && a.layer === 'runway' && touches(b.ownerId, a.ownerId)) return;
     if (
@@ -997,6 +1029,11 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
   // ゲート: 搭乗口・降機口があり、入口から保安検査を経て到達でき、降機口から出口へ出られる
   for (const g of sortedValues(layout.facilities).filter((f) => f.kind === 'gate')) {
     const access = model.gates[g.id];
+    // 2 つ以上のターミナルに接し、接続先（connectedTo）の指定もないゲートは所属を決めない（1-10 / T-1）。対象はゲート、関連はターミナル群
+    if (access?.ambiguousTerminalIds && access.ambiguousTerminalIds.length > 1) {
+      sink.add('GATE_TERMINAL_AMBIGUOUS', [g.id], {}, g.origin, access.ambiguousTerminalIds);
+      continue;
+    }
     if (!access?.terminalId) continue;
     const ids = model.byTerminal[access.terminalId] ?? [];
     const ofKind = (k: TerminalAreaKind) => ids.filter((id) => model.areas[id]!.kind === k);
@@ -1040,10 +1077,26 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
   const hasRampBuses = sortedValues(layout.facilities)
     .filter((f) => f.kind === 'gseBase' && f.buildState === 'operational' && !f.parentFacilityId)
     .some((base) => apronBusesOf(base) > 0);
+  // 所属ターミナル（Stand.terminalId。1-11 / K-1）: 決定規則は resolveBusGateForStand（運航・計画・画面と共通）が唯一の仕様
+  const remoteIds = new Set(remoteStands.map((st) => st.id));
+  for (const stand of sortedValues(layout.stands)) {
+    if (stand.terminalId === undefined) continue;
+    const terminal = layout.facilities[stand.terminalId];
+    if (terminal?.kind !== 'terminal') {
+      sink.add('STAND_TERMINAL_INVALID', [stand.id], {}, stand.origin);
+    } else if (!remoteIds.has(stand.id)) {
+      sink.add('STAND_TERMINAL_IGNORED', [stand.id], { reason: 'fixed' }, stand.origin, [terminal.id]);
+    } else if (stand.remoteBoarding === 'none') {
+      sink.add('STAND_TERMINAL_IGNORED', [stand.id], { reason: 'none' }, stand.origin, [terminal.id]);
+    }
+  }
   for (const stand of remoteStands) {
     if (stand.remoteBoarding === 'none') continue;
     const explicitlyConfigured = stand.remoteBoarding === 'bus';
-    const mustResolve = explicitlyConfigured || stand.remoteBoarding === 'auto' || terminals.length > 1;
+    const pinned = stand.terminalId !== undefined && layout.facilities[stand.terminalId]?.kind === 'terminal' ? stand.terminalId : null;
+    const mustResolve = explicitlyConfigured || stand.remoteBoarding === 'auto' || terminals.length > 1 || pinned !== null;
+    // 所属ターミナルを指定したスポットは、そのターミナルのゲートだけを候補にする（別のターミナルへは移さない）
+    const candidateGateIds = pinned === null ? usableBusGateIds : usableBusGateIds.filter((id) => busGateStatus(layout, model, id).terminalId === pinned);
     if (explicitlyConfigured) {
       const status = busGateStatus(layout, model, stand.busGateId);
       if (!status.usable) {
@@ -1051,12 +1104,17 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
         sink.add('STAND_BUS_GATE_INVALID', targets, { problem: status.problem ?? 'missing', gateId: stand.busGateId ?? '' }, stand.origin);
         continue;
       }
-    } else if (mustResolve && usableBusGateIds.length === 0) {
-      sink.add('STAND_BUS_NO_GATE', [stand.id], {}, stand.origin);
+      if (pinned !== null && status.terminalId !== pinned) {
+        sink.add('STAND_TERMINAL_MISMATCH', [stand.id, stand.busGateId!], {}, stand.origin, [pinned]);
+        continue;
+      }
+    } else if (mustResolve && candidateGateIds.length === 0) {
+      if (pinned !== null) sink.add('STAND_TERMINAL_NO_BUS_GATE', [stand.id], {}, stand.origin, [pinned]);
+      else sink.add('STAND_BUS_NO_GATE', [stand.id], {}, stand.origin);
       continue;
     }
-    if (mustResolve && !hasRampBuses && usableBusGateIds.length > 0) {
-      const gateId = explicitlyConfigured ? stand.busGateId! : usableBusGateIds[0]!;
+    if (mustResolve && !hasRampBuses && candidateGateIds.length > 0) {
+      const gateId = explicitlyConfigured ? stand.busGateId! : candidateGateIds[0]!;
       sink.add('STAND_BUS_NO_VEHICLES', [stand.id, gateId], {}, stand.origin);
     }
   }
