@@ -145,6 +145,7 @@ npm run lint       # ESLint（レイヤー境界ルールを含む）
 | 37 | [docs/37_management_navigation.md](docs/37_management_navigation.md) | 建設・経営・運行ナビゲーション、状態遷移、能力表示の判定基準 |
 | 38 | [docs/38_comprehensive_test_prompts.md](docs/38_comprehensive_test_prompts.md) | 総合テスト・不足項目実装を Claude Fable に依頼するための共通指示と21項目の個別プロンプト |
 | 39 | [docs/39_comprehensive_test_audit_and_handover.md](docs/39_comprehensive_test_audit_and_handover.md) | 総合テスト・監査の結果、再現済みの不具合、未実装・未検証の一覧、ゲームデザイン提案、引き継ぎ事項（2026-11-16） |
+| 40 | [docs/40_departure_time_limit.md](docs/40_departure_time_limit.md) | 出発時刻の制限と最終便の遅れ抑制の仕様案（未実装）。夜間の離着陸制限の現状、要求、受け入れ基準、決めること |
 | 26 | [docs/26_validation_rules.md](docs/26_validation_rules.md) | 滑走路に関する検証コードと適用条件（従来 / 実寸、classic / realistic） |
 | 27 | [docs/27_migration_and_compatibility.md](docs/27_migration_and_compatibility.md) | スキーマ v1→v2→v3、版の方針、互換性、ゴールデンの戦略 |
 | 22 | [docs/22_geometry_architecture.md](docs/22_geometry_architecture.md) | 幾何基盤（座標フレーム・角度規約・許容誤差・ゴールデン基準値）とデータモデルの計画（Phase 11） |
