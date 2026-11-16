@@ -106,4 +106,8 @@
 - 未保存のプロジェクトは `unsaved` に残り、保存すると新しいスロット ID に付け替える。新しいゲーム・JSON の読み込みで `unsaved` は消す。スロットを削除するとそのスロットの履歴も消す。
 - **書き出し（JSON）に履歴は含めない**（端末・ブラウザごと）。サイズ（計測: サンプル空港＋サンドボックス会社、2 日分）: `projectJson` は 1 件あたり約 77〜78 KB、振り返りのデータは約 2〜3 KB。15 件でも約 1.2 MB で、IndexedDB の容量には十分収まる。
 
+**フェーズ 1（K-1）の追加項目**: リモートスポットの `Stand.terminalId`（所属ターミナル）は任意項目で、レイアウトに 1 つでもあれば `formatVersion 2`（`layoutUsesFormat2`）。**版は上げない**（旧版のアプリは属性を無視して従来の自動選択をするだけで壊れない）。欠落 = 従来の自動、null は保存しない（操作で null を渡すとキーを削除）。読み込み時は、施設がない・ターミナルでない・文字列でないものを `スポット <id> の所属ターミナル（terminalId）が不正です` で拒否する（`checkLayout`）。ターミナルの削除時は `finalize` が参照を掃除する。決定規則・検証は docs/29 §3.1・docs/26 §3b。`SIM_MODEL_VERSION` は変更していない（旅客生成後のゲート固定は運航側の挙動で、docs/42 §5 のとおり版の扱いは 1-23）。
+
+**フェーズ 1（E-3）の運航状態**: 機体の任意項目 `requestedStandId`（運航者が `reassignStand` で指定したスポット）は、値があるときだけ書く（割り当てに成功したら消える）。読み込み時に `運航状態: 機体 <id> の指定スポット（requestedStandId）が不正です` として、文字列でない・レイアウトにないスポットを拒否する。版は上げない。
+
 **Phase 12B-3a Part B / 3b**: 会社の `game`・`airlineEval`・`goals`・`city`、運航状態の `wx` を使うファイルは `formatVersion 2`。`checkGameFields` と `checkWxState` で既存項目を検査し、都市は `isCityConfig` で版・人口・距離・品質・住民満足度を検査する。`importCompany` は不正な任意項目を捨て、`validateProject` は不正な `city` を含むプロジェクトを拒否する。詳細は [docs/30](30_game_models.md)・[docs/31](31_city_models.md)。

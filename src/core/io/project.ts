@@ -41,7 +41,7 @@ const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !=
 
 /** レイアウトが保存形式 2 の項目（ゲートの boardingMode 'bus'・connectedTo、GSE 基地の apronBuses > 0）を使っているか */
 export function layoutUsesFormat2(l: AirportLayout): boolean {
-  if (Object.values(l.stands).some((s) => s.remoteBoarding !== undefined || s.busGateId !== undefined)) return true;
+  if (Object.values(l.stands).some((s) => s.remoteBoarding !== undefined || s.busGateId !== undefined || s.terminalId !== undefined)) return true;
   for (const f of Object.values(l.facilities)) {
     if (f.kind === 'gate' && (f.props.boardingMode === 'bus' || (f.props.connectedTo !== undefined && f.props.connectedTo !== null))) return true;
     if (f.kind === 'gseBase' && typeof f.props.apronBuses === 'number' && f.props.apronBuses > 0) return true;
@@ -263,6 +263,7 @@ function checkBusProps(layout: AirportLayout, where: string): string[] {
       const gate = layout.facilities[s.busGateId];
       if (typeof s.busGateId !== 'string' || gate?.kind !== 'gate' || gate.props.boardingMode !== 'bus') errors.push(`${where}: スポット ${s.id} の接続バスゲート（busGateId）が不正です`);
     }
+    if (s.terminalId !== undefined && (typeof s.terminalId !== 'string' || layout.facilities[s.terminalId]?.kind !== 'terminal')) errors.push(`${where}: スポット ${s.id} の所属ターミナル（terminalId）が不正です`);
   }
   return errors;
 }
@@ -350,6 +351,8 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
         }
       }
     }
+    // requestedStandId（運航者が指定したスポット。1-14 / E-3）: 値があるときだけ書く。存在するスポットを指す文字列
+    if (a.requestedStandId !== undefined && (typeof a.requestedStandId !== 'string' || !layout.stands[a.requestedStandId])) errors.push(`運航状態: 機体 ${id} の指定スポット（requestedStandId）が不正です`);
     if (!state.flights[a.arrivalFlightId] || !state.flights[a.departureFlightId]) errors.push(`運航状態: 機体 ${id} の便が見つかりません`);
   }
   errors.push(...checkBusState(state, layout));

@@ -247,6 +247,27 @@ describe('壊れたファイル・不正なファイルは読み込まない（�
     }
   });
 
+  it('requestedStandId（1-14 / E-3）: 存在するスポットを指す文字列だけ受け付け、保存・復元で保たれる。不正は読み込まない', { timeout: 60_000 }, () => {
+    const a = createSimulation(createSampleAirport(), { company: createSandboxCompany() });
+    for (let i = 0; i < 2 * 3600; i++) stepSimulation(a);
+    const p = JSON.parse(serializeProject(buildProject({ name: 'x', savedAt: NOW, layout: a.ctx.layout, company: a.company!, pin: null, scenarios: [], sim: a }))) as ProjectFile;
+    const id = Object.keys(p.sim!.state.aircraft)[0]!;
+    expect('requestedStandId' in p.sim!.state.aircraft[id]!).toBe(false); // 指定がなければキーを書かない
+    const standId = Object.keys(p.layout.stands)[0]!;
+    const good = structuredClone(p);
+    (good.sim!.state.aircraft[id] as unknown as Record<string, unknown>).requestedStandId = standId;
+    const r = validateProject(JSON.stringify(good), opts);
+    expect(r.errors).toEqual([]);
+    expect(r.project!.sim!.state.aircraft[id]!.requestedStandId).toBe(standId);
+    for (const bad of ['std_missing', 5, null, '']) {
+      const q = structuredClone(p);
+      (q.sim!.state.aircraft[id] as unknown as Record<string, unknown>).requestedStandId = bad;
+      const rr = validateProject(JSON.stringify(q), opts);
+      expect(rr.ok, String(bad)).toBe(false);
+      expect(rr.errors.join('\n')).toContain(`機体 ${id} の指定スポット（requestedStandId）が不正です`);
+    }
+  });
+
   it('シミュレーションの版が違う運航状態は復元せず、建設モードで開く（警告）', () => {
     const a = createSimulation(createSampleAirport(), { company: createSandboxCompany() });
     for (let i = 0; i < 600; i++) stepSimulation(a);

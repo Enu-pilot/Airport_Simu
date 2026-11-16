@@ -362,8 +362,9 @@ describe('運航の状況と KPI・収支', { timeout: 120_000 }, () => {
 
   it('増便すると収入は増えるが、スポット・地上支援が混雑して遅延や地上作業時間が増える', () => {
     const c = createCareerCompany();
-    contract(c, { airlineId: 'AQ', typeId: 'narrow180', perDay: 6, window: 'morning' });
-    contract(c, { airlineId: 'HB', typeId: 'regional70', perDay: 4, window: 'morning' });
+    // 評価対象の遅延（avgDelayMin）は外部要因・折り返し余裕超過分を控除する（docs/36）。6/4 では評価遅延 0・定時率 1 のため、需要を強めた。承認済み 2026-11-16
+    contract(c, { airlineId: 'AQ', typeId: 'narrow180', perDay: 10, window: 'morning' });
+    contract(c, { airlineId: 'HB', typeId: 'regional70', perDay: 8, window: 'morning' });
     const busy = lastReport(run(createStarterAirfield(), c).company!);
     expect(busy.kpi.flights).toBeGreaterThan(baseReport.kpi.flights);
     expect(busy.totalRevenue).toBeGreaterThan(baseReport.totalRevenue);
@@ -392,7 +393,8 @@ describe('運航の状況と KPI・収支', { timeout: 120_000 }, () => {
     // 折り返しが重なる計画で、作業員だけを減らして比べる
     const plan = () => {
       const c = createCareerCompany();
-      contract(c, { airlineId: 'AQ', typeId: 'narrow180', perDay: 4, window: 'morning' });
+      // 定時性の点数は定時率が航空会社の最低基準以上だと 100 で頭打ち（docs/36・airlineScore）。基準を下回るよう折り返しを増やした。承認済み 2026-11-16
+      contract(c, { airlineId: 'AQ', typeId: 'narrow180', perDay: 6, window: 'morning' });
       return c;
     };
     const full = run(createStarterAirfield(), plan());

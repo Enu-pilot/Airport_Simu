@@ -1,5 +1,5 @@
 import type { Disruption, DisruptionKind, WeatherKind, AircraftState, BagState, BlockReason, BusTripPhase, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent, TaskKind, TaskState, UnitKind, UnitStatus } from '../core/sim/types';
-import type { BuildState, EntityType, FacilityKind, PaxZone, RoadClass, SizeClass, TerminalAreaKind } from '../core/model/types';
+import type { BuildState, EntityType, FacilityKind, PaxZone, RoadClass, RoadConnectorKind, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/validation/validate';
 import type { OpFailure } from '../core/layout/operations';
@@ -131,6 +131,37 @@ export const OP_FAILURE_LABEL: Record<OpFailure, string> = {
   INVALID_CONNECTOR: '移動種別に合った接続設備を選び、勾配・端点距離を確認してください',
 };
 
+/** 階層接続設備の種別名（W-8）。保存データの name（内部名）は変えず、表示だけ和名にする */
+export const CONNECTOR_KIND_LABEL: Record<RoadConnectorKind, string> = {
+  stairs: '階段',
+  escalator: 'エスカレーター',
+  elevator: 'エレベーター',
+  ramp: 'スロープ',
+  railRamp: '鉄道の勾配区間',
+  pipeRiser: '燃料管の立ち上がり',
+};
+
+/** 配置・階数変更ができない理由（エディタ側で導く。コアの失敗コードは変えない。1-04） */
+export const PLACEMENT_PROBLEM_LABEL = {
+  floorOutOfRange: '選んだ階はこの建物にありません（建物の階数の範囲外です）',
+  outsideParent: '建物の範囲の外には置けません',
+  levelsInUse: '上の階にエリアや設備があるため、階数を減らせません',
+} as const;
+
+/** 空港全体の離発着能力カード（1-19） */
+export const OVERALL_CAPACITY_TITLE = '空港全体の離発着能力';
+export const OVERALL_LIMIT_LABEL = { runway: '滑走路', stand: 'スポットの回転数', turnaround: '折り返し能力' } as const;
+export const OVERALL_CAPACITY_NOTE = '滑走路・スポットの回転数・折り返し能力のうち最も小さい値。誘導路は未算出のため含めません。';
+
+/** 運航中のリモートスポットの注記（1-11 / K-1） */
+export const STAND_GATE_FIX_NOTE = '旅客を生成した後は搭乗ゲートを固定します（閉鎖中は再開を待ちます）';
+
+/** 選択欄・子の一覧（1-03） */
+export const PICK_CANDIDATES_LABEL = '重なっている対象:';
+export const INTERIOR_CHILDREN_LABEL = '建物内の設備';
+/** 親の階数を超える階の選択肢の注記（1-04） */
+export const FLOOR_NOT_IN_PARENT_LABEL = '（この建物にはありません）';
+
 /** エンティティの表示名（名前が無ければ種別名 + 番号） */
 export function displayName(layout: AirportLayout, id: string): string {
   const type = entityTypeOf(id);
@@ -142,8 +173,11 @@ export function displayName(layout: AirportLayout, id: string): string {
     }
     case 'taxiway':
       return layout.taxiways[id]?.name ? `誘導路 ${layout.taxiways[id]!.name}` : `誘導路 #${num}`;
-    case 'road':
-      return layout.roads[id]?.name || `道路 #${num}`;
+    case 'road': {
+      const r = layout.roads[id];
+      if (r?.connectorKind && (!r.name || r.name === r.connectorKind)) return `${CONNECTOR_KIND_LABEL[r.connectorKind]} #${num}`;
+      return r?.name || `道路 #${num}`;
+    }
     case 'taxiNode':
       return layout.taxiNodes[id]?.name ? `ノード ${layout.taxiNodes[id]!.name}` : `ノード #${num}`;
     case 'roadNode':
@@ -197,6 +231,7 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   STAND_REMOTE: (n, p) => (p.bus ? `${n[0]} はリモートスポットです（バスゲートのランプバスで搭乗）` : `${n[0]} にはゲートがありません（リモートスポット）`),
   STAND_MULTIPLE_GATES: (n) => `${n[0]} に複数のゲートが紐付いています`,
   GATE_NOT_AT_TERMINAL: (n) => `${n[0]} がターミナルに接していません`,
+  GATE_TERMINAL_AMBIGUOUS: (n) => `${n[0]} が複数のターミナル（${n.slice(1).join('・')}）に接しています。「接続先ターミナル」を指定してください`,
   GATE_NO_STAND: (n) => `${n[0]} にスポットが紐付いていません`,
   GATE_STAND_TOO_FAR: (n, p) => `${n[0]} と ${n[1]} が離れすぎています（${p.distance}タイル）`,
   GATE_BUS_HAS_STAND: (n) => `${n[0]} はバスゲートなので、紐付けたスポットは使われません`,
@@ -219,6 +254,10 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
     return `${n[0]} の接続先 ${gate} は利用できません（${why[String(p.problem)] ?? '接続設定を確認してください'}）。運用中で、同一ターミナルの搭乗口と降機口があるバスゲートを指定してください`;
   },
   STAND_BUS_NO_GATE: (n) => `${n[0]} に利用可能なバスゲートがありません。運用中のバスゲートをターミナルに接続し、搭乗口・降機口の両方を用意してください`,
+  STAND_TERMINAL_INVALID: (n) => `${n[0]} の所属ターミナルが見つからないか、ターミナルではありません`,
+  STAND_TERMINAL_NO_BUS_GATE: (n) => `${n[0]} の所属ターミナル ${n[1]} に、搭乗口・降機口の両方へ接続した使えるバスゲートがありません`,
+  STAND_TERMINAL_MISMATCH: (n) => `${n[0]} の接続バスゲート ${n[1]} は所属ターミナルと別のターミナルにあります`,
+  STAND_TERMINAL_IGNORED: (n, p) => `${n[0]} の所属ターミナルは使われません（${p.reason === 'fixed' ? '固定スポット' : 'バス不使用'}）`,
   STAND_BUS_NO_VEHICLES: (n) => `${n[0]} は ${n[1]} を利用しますが、運用中の GSE 基地にランプバスがありません。基地にランプバスを配置してください`,
   GATE_CONNECTION_INVALID: (n) => `${n[0]} の接続先がターミナルではありません（存在しない・別の種類の施設）`,
   GATE_CONNECTOR_CROSSES_RUNWAY: (n) => `${n[0]} の連絡通路が滑走路 ${n[1]} の滑走路・着陸帯を横切っています（旅客が滑走路を歩くことになります）`,
@@ -637,6 +676,7 @@ export const CONTRACT_ACTION_LABEL: Record<Exclude<ContractActionResult, { ok: t
 };
 
 export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
+  GROUND_SUPPORT_MISSING: '燃料施設・整備士・トーイングカーのいずれかがなく、折り返し（給油・点検・プッシュバック）ができない',
   SIZE_UNSUPPORTED: '運航できない機種（滑走路・スポットが未対応）',
   STAND_CONFLICT: 'スポット不足（到着時に空きスポットがない見込み）',
   NO_GATE: 'ゲートのないスポット（旅客が搭乗できない）',
@@ -1115,6 +1155,9 @@ export const REVIEW_METRIC_LABEL: Record<ReviewMetric, string> = {
 };
 
 export const DAY_LOOP = {
+  weatherTitle: '天候（5 段階）',
+  weatherMax: (l: number) => `この日の最大は段階 ${l}`,
+  weatherChange: '天候の段階が変わりました',
   skipDay: '▶▶ 1日スキップ',
   skipDayTitle: '残りの 1 日を画面を進めずに一気に進め、締めの振り返りを表示します（結果は画面で進めた場合と同じです）',
   prefPause: '0:00 で一時停止して振り返る',

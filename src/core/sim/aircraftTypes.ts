@@ -1,4 +1,5 @@
 import type { SizeClass } from '../model/types';
+import { TICK_SEC } from './rules';
 import { CATALOG, sizeClassOf, type AircraftModel, type GameProfile } from '../aircraft/catalog';
 
 /**
@@ -120,4 +121,22 @@ export function resolveType(types: TypeTable, id: AircraftTypeId): AircraftType 
 /** 浮揚までの離陸滑走距離（m） */
 export function takeoffDistanceM(t: AircraftType): number {
   return (t.rotateSpeed * t.rotateSpeed) / (2 * t.takeoffAccel);
+}
+
+/**
+ * 離陸滑走の所要時間（秒）。実際の積分（`speed += a·dt; dist += speed·dt` を 1 tick ずつ）が浮揚距離に届く最小の tick 数 × TICK_SEC。
+ * 連続式 sqrt(2D/a) より最大 1 tick 長い。夜間規制の予測（simulation.ts departureBlocked）と実際の離陸時刻を一致させるために使う（1-13 / D-2）。
+ */
+export function takeoffRollSec(t: AircraftType): number {
+  const accel = t.takeoffAccel;
+  const target = takeoffDistanceM(t);
+  let speed = 0;
+  let dist = 0;
+  let ticks = 0;
+  while (dist < target && ticks < 100_000) {
+    speed += accel * TICK_SEC;
+    dist += speed * TICK_SEC;
+    ticks++;
+  }
+  return ticks * TICK_SEC;
 }

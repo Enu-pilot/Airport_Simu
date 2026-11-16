@@ -4,7 +4,7 @@ import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, 
 import { FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
 import { apronBusesOf, connectedTerminal, gateMode } from '../core/model/gates';
 import { busGateStatus, resolveBusGateForStand } from '../core/terminal/busGateAssignment';
-import { sortedValues } from '../core/model/ids';
+import { compareIds, sortedValues } from '../core/model/ids';
 import {
   BUILD_STATES,
   HEADINGS,
@@ -20,6 +20,7 @@ import {
 import { distance } from '../core/geometry/vec';
 import { facilityDims, standEntry } from '../core/layout/footprint';
 import { facilityLevel } from '../core/model/levels';
+import { INTERIOR_MIN_FLOOR, levelsInUse } from '../core/layout/levelRules';
 import { edgesOfNode } from '../core/layout/network';
 import {
   deleteEntity,
@@ -33,7 +34,7 @@ import {
 } from '../core/layout/operations';
 import { designatorsOf } from '../core/layout/designators';
 import { runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
-import { applyOp, closeTemporarily, editorStore, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { actions, applyOp, closeTemporarily, editorStore, entityExists, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { ops } from '../editor/simRunner';
 import { closureReasonsFor } from '../core/sim/closureState';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
@@ -56,11 +57,16 @@ import {
   AREA_PROP_LABEL,
   ZONE_LABEL,
   RUNWAY_UI,
+  PICK_CANDIDATES_LABEL,
+  STAND_GATE_FIX_NOTE,
+  PLACEMENT_PROBLEM_LABEL,
+  INTERIOR_CHILDREN_LABEL,
 } from '../i18n/ja';
 
 export function PropertiesPanel() {
   useEditor((s) => s.ops?.uiVersion ?? -1);
   const selection = useEditor((s) => s.selection);
+  const pickCandidates = useEditor((s) => s.pickCandidates);
   const mode = useEditor((s) => s.mode);
   const layout = useLayout();
   if ((!selection || !entityTypeOf(selection)) && mode === 'operate') {
@@ -96,6 +102,21 @@ export function PropertiesPanel() {
   }
   return (
     <div className="properties" data-testid="properties" key={selection}>
+      {pickCandidates.length >= 2 && pickCandidates.includes(selection) && (
+        <div className="pick-candidates" data-testid="pick-candidates">
+          <span className="pick-candidates-title">{PICK_CANDIDATES_LABEL}</span>
+          {pickCandidates.filter((c) => entityExists(layout, c)).map((c) => (
+            <button
+              key={c}
+              className={c === selection ? 'small active' : 'small'}
+              onClick={() => actions.select(c, pickCandidates)}
+              data-testid={`pick-candidate-${c}`}
+            >
+              {displayName(layout, c)}
+            </button>
+          ))}
+        </div>
+      )}
       <EntityProperties layout={layout} id={selection} />
     </div>
   );
@@ -581,6 +602,17 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
                 <option value="none">使用しない</option>
               </select>
             </Field>
+            {s.remoteBoarding !== 'none' && (
+              <Field label="所属ターミナル">
+                <select value={s.terminalId ?? ''} onChange={(e) => update(layout, id, { terminalId: e.target.value || null })} data-testid="prop-standTerminal">
+                  <option value="">自動（バスゲートで決定）</option>
+                  {sortedValues(layout.facilities).filter((f) => f.kind === 'terminal').map((t) => (
+                    <option key={t.id} value={t.id}>{displayName(layout, t.id)}</option>
+                  ))}
+                  {s.terminalId && layout.facilities[s.terminalId]?.kind !== 'terminal' && <option value={s.terminalId}>{s.terminalId}（見つかりません）</option>}
+                </select>
+              </Field>
+            )}
             <Info label="接続先ターミナル">{selectedBusStatus.terminalId ? displayName(layout, selectedBusStatus.terminalId) : s.remoteBoarding === 'none' ? 'バスを使用しない設定' : '利用可能な接続先なし'}</Info>
             <Info label="使用するバスゲート">{selectedBusGateId ? <EntityLink layout={layout} id={selectedBusGateId} /> : s.remoteBoarding === 'none' ? 'なし' : '利用可能なゲートなし'}</Info>
             <Info label="搭乗・降機">{`${selectedBusAccess?.boarding ? '搭乗可' : '搭乗不可'} / ${selectedBusAccess?.deplane ? '降機可' : '降機不可'}`}</Info>
@@ -589,7 +621,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
               <Field label="接続バスゲート">
                 <select value={s.busGateId ?? ''} onChange={(e) => update(layout, id, { busGateId: e.target.value || null })} data-testid="prop-busGateId">
                   <option value="">選択してください</option>
-                  {sortedValues(layout.facilities).filter((f) => f.kind === 'gate' && gateMode(f) === 'bus').map((g) => {
+                  {sortedValues(layout.facilities).filter((f) => f.kind === 'gate' && gateMode(f) === 'bus' && (!s.terminalId || analysis.terminal.gates[f.id]?.terminalId === s.terminalId)).map((g) => {
                     const access = analysis.terminal.gates[g.id];
                     const status = busGateStatus(layout, analysis.terminal, g.id, sim?.state.closures.gates ?? []);
                     const terminal = access?.terminalId ? ` · ${displayName(layout, access.terminalId)}` : ' · ターミナル未接続';
@@ -600,6 +632,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
                 </select>
               </Field>
             )}
+            {sim && <div className="hint" data-testid="stand-gate-fix-note">{STAND_GATE_FIX_NOTE}</div>}
             {s.remoteBoarding === 'bus' && s.busGateId && sim?.state.closures.gates.includes(s.busGateId) && <div className="reason ng-text">選択中のバスゲートは運航中に閉鎖されています。再開するまで旅客を割り当てられません。</div>}
             {s.remoteBoarding === 'bus' && !s.busGateId && <div className="reason ng-text">接続バスゲートが未設定です。このスポットの旅客は生成されません。</div>}
             {busGateInvalid && !!s.busGateId && <div className="reason ng-text">指定したバスゲートは利用できません（{selectedBusStatus.problem}）。運用中で、同一ターミナルの搭乗口・降機口に接続されたゲートを選んでください。</div>}
@@ -674,12 +707,38 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         <NameField layout={layout} id={id} value={f.name} />
         <Info label="位置">{`(${f.origin.x}, ${f.origin.y})`}</Info>
         {f.parentFacilityId ? (
-          <Info label="建物内配置">{`${layout.facilities[f.parentFacilityId]?.name || f.parentFacilityId} · ${f.floorIndex! < 0 ? `地下${-f.floorIndex!}階` : `${f.floorIndex! + 1}階`}`}</Info>
+          <Field label={`建物内配置（${layout.facilities[f.parentFacilityId]?.name || f.parentFacilityId}）`}>
+            <select
+              value={f.floorIndex ?? 0}
+              disabled={readOnly}
+              onChange={(e) => update(layout, id, { floorIndex: Number(e.target.value) })}
+              data-testid="prop-floorIndex"
+            >
+              {Array.from({ length: Math.max(1, Number(layout.facilities[f.parentFacilityId]?.props.levels ?? 1)) - INTERIOR_MIN_FLOOR }, (_, i) => i + INTERIOR_MIN_FLOOR).map((floor) => (
+                <option key={floor} value={floor}>
+                  {floor < 0 ? `地下${-floor}階` : `${floor + 1}階`}
+                </option>
+              ))}
+            </select>
+          </Field>
         ) : f.kind !== 'gate' && (
           <Field label="階層">
             <NumberInput value={facilityLevel(f)} min={-5} max={10} onCommit={(v) => update(layout, id, { mapLevel: v })} testid="prop-mapLevel" />
           </Field>
         )}
+        {!f.parentFacilityId && (() => {
+          const children = Object.values(layout.facilities).filter((c) => c.parentFacilityId === id).sort((a, b) => (a.floorIndex ?? 0) - (b.floorIndex ?? 0) || compareIds(a.id, b.id));
+          if (children.length === 0) return null;
+          return (
+            <Info label={`${INTERIOR_CHILDREN_LABEL}（${children.length}）`}>
+              <span data-testid="interior-children">
+                {children.map((c) => (
+                  <EntityLink key={c.id} layout={layout} id={c.id} />
+                ))}
+              </span>
+            </Info>
+          );
+        })()}
         {spec.resizable ? (
           <>
             <Field label="幅（タイル）">
@@ -702,7 +761,13 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
                 value={(f.props[def.key] as number | undefined) ?? propDefault(def) as number}
                 min={def.min}
                 max={def.max}
-                onCommit={(v) => update(layout, id, { props: { [def.key]: v } })}
+                onCommit={(v) => {
+                  if (def.key === 'levels' && levelsInUse(layout, id, v)) {
+                    showToast(PLACEMENT_PROBLEM_LABEL.levelsInUse, 'error');
+                    return;
+                  }
+                  update(layout, id, { props: { [def.key]: v } });
+                }}
                 testid={`prop-${def.key}`}
               />
             )}

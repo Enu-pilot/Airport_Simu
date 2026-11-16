@@ -37,9 +37,19 @@ function nearMidnight(): string {
   return serializeProject(buildProject({ name: '0時前', savedAt: '2026-01-01T00:00:00.000Z', layout, company: sim.company!, pin: null, scenarios: [], sim }));
 }
 
+/**
+ * 1 日分のシミュレーションを進める計算（テスト側の CPU 処理、負荷の高い環境では 5 秒前後）を、テストごとの 30 秒の枠から外す。
+ * ワーカーごとに 1 回だけ beforeAll で作る（1-17: dayloop:47 の不安定の原因。製品側の競合ではなく、枠の大半を fixture の計算が使っていた）。
+ */
+let midnightProject: string | null = null;
+test.beforeAll(() => {
+  test.setTimeout(120_000);
+  midnightProject = nearMidnight();
+});
+
 async function loadNearMidnight(page: Page) {
   await page.getByTestId('tab-project').click();
-  await page.getByTestId('project-file').setInputFiles({ name: 'midnight.json', mimeType: 'application/json', buffer: Buffer.from(nearMidnight()) });
+  await page.getByTestId('project-file').setInputFiles({ name: 'midnight.json', mimeType: 'application/json', buffer: Buffer.from(midnightProject ?? nearMidnight()) });
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await expect(page.getByTestId('sim-clock')).toContainText('1日目 23:59');
 }

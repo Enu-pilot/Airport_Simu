@@ -122,6 +122,8 @@ function finalize(d: AirportLayout): AirportLayout {
     }
   }
   for (const s of Object.values(d.stands)) {
+    // 削除済み（またはターミナルでなくなった）施設を指す terminalId もキーごと消す（旧データはキーがないので不変）
+    if (s.terminalId !== undefined && d.facilities[s.terminalId]?.kind !== 'terminal') delete s.terminalId;
     if (s.busGateId && (d.facilities[s.busGateId]?.kind !== 'gate' || d.facilities[s.busGateId]?.props.boardingMode !== 'bus')) s.busGateId = null;
   }
   for (const [id, link] of Object.entries(d.terminalLinks ?? {})) {
@@ -1039,7 +1041,19 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
         if (Object.keys(rest).length === 0) return ok(finalize(d));
         return updateEntity(d, id, rest);
       }
-      err = apply<Stand>(s, { name: str, size, buildState: isBuildState, codeF: bool });
+      // K-1 / Z-1: リモートスポットの運用（remoteBoarding・busGateId）と所属ターミナル（terminalId。null = 自動に戻す＝キーを消す）
+      const isBusGate = (v: unknown) => v === null || (typeof v === 'string' && d.facilities[v]?.kind === 'gate' && d.facilities[v]?.props.boardingMode === 'bus');
+      const isTerminal = (v: unknown) => v === null || (typeof v === 'string' && d.facilities[v]?.kind === 'terminal');
+      err = apply<Stand>(s, {
+        name: str,
+        size,
+        buildState: isBuildState,
+        codeF: bool,
+        remoteBoarding: (v) => v === 'auto' || v === 'bus' || v === 'none',
+        busGateId: isBusGate,
+        terminalId: isTerminal,
+      });
+      if (!err && s && patch.terminalId === null) delete s.terminalId;
       break;
     }
     case 'terminalArea': {

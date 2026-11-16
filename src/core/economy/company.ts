@@ -516,7 +516,8 @@ export function updateContracts(c: CompanyState, results: Record<string, Airline
     if (ev) {
       // 評価要素から計算した変化（定時率・乗り遅れ・料金は要素に含まれる）。欠航のペナルティだけ従来どおり別に引く
       delta = (ev.deltas[a.id] ?? 0) + (ev.bonus[a.id] ?? 0);
-      if (r && r.flights > 0) delta -= cancelPenalty(r);
+      // 全便が欠航した日は flights が 0（欠航は flights に数えない）。欠航があれば引く（1-21 S-3）
+      if (r && (r.flights > 0 || r.cancelled > 0)) delta -= cancelPenalty(r);
     } else if (r && r.flights > 0) {
       const otp = r.onTime / r.flights;
       const minOtp = a.minOtp + otpAddOf(c);

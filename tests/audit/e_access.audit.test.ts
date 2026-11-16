@@ -56,15 +56,17 @@ describe('ID-e1 ダッシュボードのアクセス能力値（E: 単一の「�
     const snap = analyzeAirportCapacity(sim.company!, sim.ctx);
     const names = snap.summary.map((m) => m.name);
     const accessRows = names.filter((n) => /アクセス|道路|駐車|バス乗り場|タクシー|車寄せ|鉄道|駅/.test(n));
-    expect(accessRows).toEqual(['駅からターミナルへの連絡通路']);
+    // 計画 1-19 AC-1 で更新: 合計の行（使える手段の能力の合計。算出できない手段があれば capacity は null = 未算出）を追加した
+    expect(accessRows).toEqual(['駅からターミナルへの連絡通路', '空港アクセス（合計）', '空港アクセス（合計・1日）']);
     // 駅行は列車本数（trains/h）であり、旅客人数ではない
     const station = snap.facilities.find((f) => f.kind === '鉄道駅')!;
     expect(station.unit).toBe('trains/h');
     expect(station.capacity).toBe(4);
     expect(station.status).toBe('uncomputed');
-    // 駐車場・バス・タクシー乗り場・出入口の容量はダッシュボードの施設行にも出ない
+    // 計画 1-19 AC-2 で更新: 駐車場・バス・タクシー乗り場・出入口・車寄せの行を施設行に出す（容量は analyzeAccess の値、需要・実績は未算出。旧: 出さない）
     const kinds = new Set(snap.facilities.map((f) => f.kind));
-    for (const k of ['駐車場', 'バス乗り場', 'タクシー乗り場', '出入口']) expect(kinds.has(k), k).toBe(false);
+    for (const k of ['駐車場', 'バス乗り場', 'タクシー乗り場', '出入口', '車寄せ']) expect(kinds.has(k), k).toBe(true);
+    for (const f of snap.facilities.filter((x) => ['駐車場', 'バス乗り場', 'タクシー乗り場', '出入口', '車寄せ'].includes(x.kind))) expect([f.demand, f.status]).toEqual([null, 'uncomputed']);
     const a = analyzeAccess(sim.ctx.layout, {});
     logE('e1-dash', { summaryNames: names, accessModelOnly: { roadPerH: a.roadCapacityPerHour, curbPerH: a.curbCapacityPerHour, parking: a.parkingSpaces, busPerH: a.busesPerHour, trainsPerH: a.trainsPerHour, taxiBerths: a.taxiBerths, modePaxPerH: Object.fromEntries(Object.values(a.modes).map((m) => [m.mode, m.capacityPerHour])) } });
   });

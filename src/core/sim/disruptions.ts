@@ -285,7 +285,10 @@ function releaseInbound(sim: Simulation, d: Disruption | undefined, pred: (acId:
 function closeRunway(sim: Simulation, d: Disruption, runwayId: string): void {
   const cfg = sim.state.runwayConfig[runwayId];
   if (!cfg) return;
-  d.prev = cfg.mode;
+  // すでに閉鎖中で、同じ滑走路に有効な閉鎖障害があるときは、その障害が記録した「元の運用モード」を引き継ぐ
+  // （'closed' を記録すると、全障害の復旧後も閉鎖のまま残る。1-08 / R-1）。手動閉鎖だけのときは従来どおり 'closed'。
+  const overlapped = cfg.mode === 'closed' ? activeDisruptions(sim.state).find((x) => x.id !== d.id && x.targetId === runwayId && (x.kind === 'runwayClosed' || x.kind === 'maintenance') && x.prev !== undefined) : undefined;
+  d.prev = overlapped ? overlapped.prev! : cfg.mode;
   cfg.mode = 'closed';
   releaseInbound(sim, d, (_a, _s, r) => r === runwayId);
 }
@@ -335,6 +338,7 @@ export function reassignStand(sim: Simulation, acId: string, standId: string): R
   if (ac.standId && state.standAssignments[ac.standId] === acId) delete state.standAssignments[ac.standId];
   // 計画スポットを変更して、次の割り当てで使わせる（経路・滑走路は割り当て時に決める）
   ac.standId = null;
+  ac.requestedStandId = standId; // 割当済みのホームスポット等より優先して使わせる（assignStand。割当後に消す。1-14 / E-3）
   ac.runwayId = null;
   ac.retryAt = state.now;
   for (const f of [state.flights[ac.arrivalFlightId]!, state.flights[ac.departureFlightId]!]) {

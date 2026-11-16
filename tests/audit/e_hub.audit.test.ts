@@ -126,7 +126,9 @@ describe('ID-e5 ターミナル間連絡通路の能力: スポット変更で�
     const snap = analyzeAirportCapacity(sim.company!, sim.ctx);
     const row = snap.facilities.find((f) => f.id === lm.id)!;
     expect([row.unit, row.status, row.demand]).toEqual(['pax/h', 'uncomputed', null]);
-    expect(row.capacity).toBe(lm.capacityPerHour ?? null); // [B] 能力未指定の通路: ダッシュボードは null（未設定）、運航は幅×200=1200 人/時を適用
+    // 計画 1-19 HB-7 で更新: 能力未指定の通路は、運航で使う既定値（幅×200=1200 人/時）を表示し、根拠に「未設定」と書く（旧: null）
+    expect(row.capacity).toBe(lm.capacityPerHour ?? terminalLinkCapacityPerHour(lm));
+    if (lm.capacityPerHour === undefined) expect(row.basis).toContain('明示容量は未設定');
     const rw = findTerminalTransferRoute(walk.layout, { fromAreaId: walk.areaB, toAreaId: walk.areaA, zone: 'departure' });
     const rm = findTerminalTransferRoute(moving.layout, { fromAreaId: moving.areaB, toAreaId: moving.areaA, zone: 'departure' });
     logE('e5-link-kinds', { defaultCapacityPerH: terminalLinkCapacityPerHour(lw), dashboardRowCapacity: row.capacity, routeWalkway: rw ? { sec: rw.travelSec, cap: (rw as unknown as { capacityPerHour?: number }).capacityPerHour ?? null } : null, routeMoving: rm ? { sec: rm.travelSec } : null });

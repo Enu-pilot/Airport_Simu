@@ -144,7 +144,9 @@ describe('ID-e4 整備施設（maintenance）: 費用・警告だけではなく
     const b = snap(noMaint);
     const turn = (x: typeof a) => x.summary.find((m) => m.name === '地上支援・折り返し')!.capacity;
     logE('e4-maintenance-dashboard', { turnCapWith: turn(a), turnCapWithout: turn(b) });
-    expect(turn(b)).toBe(turn(a));
+    // 計画 1-20 TA-2 で更新: 整備士（整備施設）がなければ折り返し能力は 0（旧: 不変）
+    expect(turn(a)).toBeGreaterThan(0);
+    expect(turn(b)).toBe(0);
   });
 });
 

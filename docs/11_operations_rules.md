@@ -175,7 +175,8 @@ scheduled ─→ inbound ⇄ holding ─→ approach ─→ landing ─→ vacat
 | 条件 | 予定 |
 |------|------|
 | 地上作業の個別化（降機・清掃・給油・搭乗・GSE クルー） | **Phase 4 で実装**（[13](13_ground_handling_rules.md)） |
-| スポットの時間窓予約・手動割り当て・再割り当て | 後続（未実装） |
+| スポットの時間窓予約 | 後続（未実装） |
+| スポットの手動割り当て・再割り当て | **実装済み**（運航表の行メニュー・アラートから、運航中に `reassignStand`。`src/editor/simRunner.ts`、`src/ui/operate/flightActions.ts`。割当済みの到着機にも効く。docs/19） |
 | 航空会社・契約に基づく便の生成、欠航判断 | Phase 5 |
 | 旅客・手荷物と出発の連動（搭乗完了・手荷物積載待ち） | **Phase 3・4 で実装** |
 | 風向による滑走路方向の自動切り替え、天候、夜間運用制限 | 後続 |

@@ -54,7 +54,7 @@ async function load(page: Page, json: string) {
 }
 
 test('新しいゲーム（設定）で難易度を選ぶと、資金・難易度の表示が変わり、運航で天候の段階と明日の予報が出る', async ({ page }) => {
-  await page.getByTestId('new-game-setup').click();
+  await settingsAction(page, 'new-game-setup');
   await expect(page.getByTestId('game-setup-dialog')).toBeVisible();
   await page.getByTestId('setup-mode-career').check();
   await page.getByTestId('setup-difficulty-hard').check();
@@ -92,12 +92,12 @@ test('標準の新しいゲーム（new-career）は従来の資金のまま。�
 
 test('既存の会社に「ゲーム設定」で新しいルールを付け外しできる', async ({ page }) => {
   await expect(page.getByTestId('game-difficulty')).toContainText('従来');
-  await page.getByTestId('tab-settings').click();
+  await settingsAction(page, 'tab-settings');
   await page.getByTestId('setup-legacy').uncheck();
   await page.getByTestId('setup-difficulty-expert').check();
   await page.getByTestId('setup-apply').click();
   await expect(page.getByTestId('game-difficulty')).toContainText('上級');
-  await page.getByTestId('tab-settings').click();
+  await settingsAction(page, 'tab-settings');
   await page.getByTestId('setup-legacy').check();
   await page.getByTestId('setup-apply').click();
   await expect(page.getByTestId('game-difficulty')).toContainText('従来');
@@ -205,4 +205,19 @@ test('従来のサンドボックスには目標・空港の格・不満の表�
   await expect(page.getByTestId('goals-card')).toHaveCount(0);
   await expect(page.getByTestId('airport-tier')).toHaveCount(0);
   await expect(page.locator('[data-testid^="airline-complaint-"]')).toHaveCount(0);
+});
+
+test('振り返りの障害欄: 天候の段階の変化があれば review-weather を出し、「変化はありませんでした」は出さない（1-21 S-2）', async ({ page }) => {
+  test.setTimeout(90_000);
+  await load(page, gameProject({ day: 6, difficulty: 'normal', nearMidnight: true }));
+  await closeDay(page);
+  const weather = page.getByTestId('review-weather');
+  if (await weather.count()) {
+    await expect(weather).toContainText('段階');
+    await expect(page.getByTestId('review-disruptions')).not.toContainText('障害・天候の変化はありませんでした');
+  } else {
+    // 変化がなく障害もない日だけ「変化はありませんでした」が出る
+    const hasRows = await page.getByTestId('review-disruptions').locator('.card-row').count();
+    if (hasRows === 0) await expect(page.getByTestId('review-disruptions')).toContainText('障害・天候の変化はありませんでした');
+  }
 });

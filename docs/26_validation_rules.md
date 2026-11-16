@@ -21,6 +21,7 @@ issue が出るのは、少なくとも一方が自由形の組、または `rul
 |---|---|---|---|
 | `OUT_OF_BOUNDS` / `UNBUILDABLE_TERRAIN` | error | 滑走路の占有タイル（舗装。自由形は舗装 + 肩がかかるタイル）が敷地外・建設不可の土地にある | 着陸帯・RESA は対象外 |
 | `OVERLAP` | error | 占有が重なる（従来形どうしは従来のラスタ判定）。**従来形どうしの滑走路の交差も `OVERLAP`**（交差点を作らない） | 自由形が関与する場合の扱いは §3 |
+| `OVERLAP`（階層接続設備の端点） | — | 道路グラフの辺どうしが共有するノードのタイルでは、少なくとも一方が階層接続設備（`connectorKind` あり、または両端の階が異なる）のとき、重なりを報告しない（V-2。階段・エスカレーター・エレベーター・スロープの端点）。接続設備の途中のタイルや、ノードを共有しない無関係な通路との重なり、同じ階の通路どうしの交差は従来どおり `OVERLAP` | 実装: `validate.ts` の `roadJunction` |
 | `IN_RUNWAY_STRIP` | error | 誘導路・着陸帯以外の施設が着陸帯の中にある | 従来形は 87.5 m、自由形は半幅 140 m（既定） |
 | `RUNWAY_TOO_SHORT` | error | `runwayMaxSize` が無い（長さ 1,200 m 未満で、どの区分の機体も使えない）。自由形は `round(lengthM)` で判定 | 長さ・幅の区分は従来どおり |
 | `RUNWAY_NO_TAXIWAY` | error | 滑走路に誘導路が接続していない | 自由形は実数の位置のノードでも接続とみなす |
@@ -60,8 +61,13 @@ issue が出るのは、少なくとも一方が自由形の組、または `rul
 | `GATE_CONNECTOR_LONG` | warning | 独立ゲートの連絡通路が 60 タイル（1.5 km）超 |
 | `GATE_CONNECTOR_CROSSES_RUNWAY` | warning | 独立ゲートの連絡通路（ゲート中心から接続先エリア中心への直線）が滑走路の本体・着陸帯のタイルを通る。対象は [ゲート, 滑走路] |
 | `GATE_NOT_AT_TERMINAL` | error | ターミナルに接していない。**`connectedTo` が有効なときは出さない** |
+| `GATE_TERMINAL_AMBIGUOUS` | error | 明示の接続先（`connectedTo`）がなく、2 つ以上のターミナルに接するゲート（T-1）。所属は決めない（`GateAccess.terminalId` は null、`ambiguousTerminalIds` に隣接するターミナル）。対象は [ゲート]、関連は [ターミナル群]。`connectedTo` を指定すれば出ない |
+| `STAND_TERMINAL_INVALID` | error | スポットの `terminalId` の施設がない、またはターミナルでない（K-1） |
+| `STAND_TERMINAL_NO_BUS_GATE` | error | `'auto'`（欠落を含む）のリモートスポットに `terminalId` があり、そのターミナルに両方向とも使えるバスゲートがない。別のターミナルのゲートへは移さない。このとき `STAND_BUS_NO_GATE` は出さない（より具体的なこのコードだけ）。対象は [スポット]、関連は [ターミナル] |
+| `STAND_TERMINAL_MISMATCH` | error | `'bus'` の `busGateId` の所属ターミナルが `terminalId` と異なる。対象は [スポット, ゲート]、関連は [ターミナル] |
+| `STAND_TERMINAL_IGNORED` | info | 固定スポット（コンタクトゲート付き）または `'none'` に `terminalId` がある（使われない）。`params.reason` は `fixed` / `none` |
 
-`TERMINAL_NO_GATE` は接続された独立ゲートも数える。詳細は [docs/29](29_remote_stands_and_bus_boarding.md)。
+`TERMINAL_NO_GATE` は接続された独立ゲートも数える。`terminalId` を指定したスポットの `STAND_BUS_NO_VEHICLES` は、そのターミナルのゲートに絞った候補で判定する。決定規則は docs/29 §3.1。詳細は [docs/29](29_remote_stands_and_bus_boarding.md)。
 
 ## 4. 運用可否
 

@@ -17,6 +17,7 @@ import { resolveRunwayDims } from '../core/layout/runwayAreas';
 import { HOLD_SHORT_MAX_RATIO, SIN_MIN_HOLD } from '../core/sim/rules';
 import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
+import { visibleFacilityLabelIds, visibleInteriorFacilityIds } from './labels';
 import { computePreview, facilityKindOf, nextPathPoint, nextTaxiPoint, rectFromDrag } from '../editor/tools';
 import { getAnalysis, type EditorState, type OpsState } from '../editor/store';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../core/sim/aircraftTypes';
@@ -62,6 +63,7 @@ export class MapRenderer {
   /** 混雑マップの集計（毎フレーム集計しないよう、シミュレーション時刻が変わったときだけ更新） */
   private kpiCache: { now: number; sim: unknown; k: AirportKpis } | null = null;
   private interiorShown = false;
+  private mapLevel: number | 'all' = 0;
 
   async init(host: HTMLElement): Promise<void> {
     await this.app.init({
@@ -95,6 +97,7 @@ export class MapRenderer {
     this.world.position.set(-cam.x * cam.zoom, -cam.y * cam.zoom);
     this.usedTexts.clear();
     this.interiorShown = s.overlays.interior;
+    this.mapLevel = s.mapLevel;
 
     this.updateTerrain(layout.site);
     this.buildable.visible = s.overlays.buildable;
@@ -731,8 +734,8 @@ export class MapRenderer {
         const d = standDims(st);
         if (st.name) this.label(`std:${st.id}`, st.name, { x: st.origin.x + d.w / 2, y: st.origin.y + d.h / 2 }, cam, { size: 11 });
       }
-      for (const f of Object.values(layout.facilities)) {
-        if (!f.name || f.parentFacilityId || f.kind === 'gate' || (f.kind === 'terminal' && this.interiorShown)) continue;
+      for (const id of visibleFacilityLabelIds(layout, this.mapLevel, this.interiorShown)) {
+        const f = layout.facilities[id]!;
         const d = facilityDims(f);
         this.label(`fac:${f.id}`, f.name, { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 }, cam, { size: 11 });
       }
@@ -753,7 +756,6 @@ export class MapRenderer {
     const ops = s.ops;
     const occupancy = ops ? areaOccupancy(ops.sim.state) : null;
     const closed = new Set(ops?.sim.state.closedAreas ?? []);
-    const terminalIds = new Set(Object.values(layout.facilities).filter((f) => f.kind === 'terminal').map((f) => f.id));
     for (const t of Object.values(layout.facilities)) {
       if (t.kind !== 'terminal') continue;
       const d = facilityDims(t);
@@ -780,14 +782,6 @@ export class MapRenderer {
           g.stroke({ width: this.px(1.5), color: 0xff4d4f, alpha: 0.7 });
         }
       }
-      for (const f of Object.values(layout.facilities)) {
-        if (!f.parentFacilityId || !terminalIds.has(f.parentFacilityId)) continue;
-        if ((f.floorIndex ?? 0) !== level) continue;
-        const d = facilityDims(f);
-        g.rect(f.origin.x + 0.2, f.origin.y + 0.2, Math.max(0.6, d.w - 0.4), Math.max(0.6, d.h - 0.4))
-          .fill({ color: FACILITY_COLOR[f.kind], alpha: BUILD_ALPHA[f.buildState] });
-        if (s.overlays.labels && f.name) this.label(`interior-fac:${f.id}`, f.name, { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 }, cam, { size: 9, color: 0xffffff });
-      }
       if (s.overlays.labels && this.zoom >= 6) {
         let text = a.name || AREA_SHORT[a.kind];
         if (ops) {
@@ -797,6 +791,14 @@ export class MapRenderer {
         }
         this.label(`area:${a.id}`, text, { x: a.origin.x + a.w / 2, y: a.origin.y + a.h / 2 }, cam, { size: 10 });
       }
+    }
+    // 建物内の設備は、エリアの数に関係なく 1 度だけ描く（親の種類は問わない。その階にエリアが無くても描く）
+    for (const id of visibleInteriorFacilityIds(layout, level)) {
+      const f = layout.facilities[id]!;
+      const d = facilityDims(f);
+      g.rect(f.origin.x + 0.2, f.origin.y + 0.2, Math.max(0.6, d.w - 0.4), Math.max(0.6, d.h - 0.4))
+        .fill({ color: FACILITY_COLOR[f.kind], alpha: BUILD_ALPHA[f.buildState] });
+      if (s.overlays.labels && f.name) this.label(`interior-fac:${f.id}`, f.name, { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 }, cam, { size: 9, color: 0xffffff });
     }
     if (ops) this.drawPax(ops, level);
   }

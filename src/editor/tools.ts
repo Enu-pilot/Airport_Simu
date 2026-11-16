@@ -8,6 +8,7 @@ import { FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, TILE_M } from '../core/model/cata
 import { isFreeRunway, type RunwayFree } from '../core/model/types';
 import { runwayAxis } from '../core/layout/runway';
 import { rotatedDims } from '../core/layout/footprint';
+import { interiorPlacementProblem, terminalAreaLevelProblem, type PlacementProblem } from '../core/layout/levelRules';
 import {
   addRoadPath,
   addTaxiwayPath,
@@ -245,12 +246,28 @@ export interface Preview {
   ghostIds: string[];
 }
 
-/** 現在のツール状態でのプレビュー。表示すべきものが無ければ null */
-export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover' | 'hoverW' | 'draft' | 'history' | 'interiorLevel'>): Preview | null {
+/** 確定しようとした操作の結果（失敗も含む）。失敗の理由を画面に出すために使う */
+export interface OpAttempt {
+  result: OpResult;
+  /** プレビュー中の（新規・移動中の）エンティティのうち、created 以外 */
+  extra: string[];
+  /** 失敗したとき、エディタ側で導いた配置できない理由（コアの失敗コードは変えない。1-04） */
+  problem?: PlacementProblem;
+}
+
+type PreviewState = Pick<EditorState, 'tool' | 'options' | 'hover' | 'hoverW' | 'draft' | 'history' | 'interiorLevel'>;
+
+/** 現在のツール状態でのプレビュー。表示すべきものが無ければ（失敗のときも）null */
+export function computePreview(s: PreviewState): Preview | null {
+  const a = computeOp(s);
+  return a && a.result.ok ? { result: a.result, ghostIds: [...a.result.created, ...a.extra] } : null;
+}
+
+/** 現在のツール状態で確定したときの操作。失敗の結果も返す（何もする対象が無ければ null） */
+export function computeOp(s: PreviewState): OpAttempt | null {
   const layout: AirportLayout = s.history.present;
   const { hover, draft, options, tool } = s;
-  const wrap = (result: OpResult, extra: string[] = []): Preview | null =>
-    result.ok ? { result, ghostIds: [...result.created, ...extra] } : null;
+  const wrap = (result: OpResult, extra: string[] = [], problem?: PlacementProblem | null): OpAttempt | null => ({ result, extra, ...(!result.ok && problem ? { problem } : {}) });
 
   if (draft?.kind === 'rwyHandle') {
     const r = layout.runways[draft.id];
@@ -269,7 +286,10 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
 
   switch (tool) {
     case 'runway': {
-      if (options.runwayAlignment === 'free') return computeFreeRunwayPreview(s, layout);
+      if (options.runwayAlignment === 'free') {
+        const p = computeFreeRunwayPreview(s, layout);
+        return p && p.result.ok ? { result: p.result, extra: p.ghostIds.filter((id) => !(p.result.ok && p.result.created.includes(id))) } : null;
+      }
       if (draft?.kind !== 'runway') return null;
       const rw = runwayFromDrag(draft.start, hover);
       if (!rw) return null;
@@ -283,7 +303,7 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
       points.push(next);
       return tool === 'taxiway'
         ? wrap(addTaxiwayPath(layout, points, { widthClass: options.taxiWidth, oneWay: options.oneWay, buildState: options.buildState }))
-        : wrap(addRoadPath(layout, points, { roadClass: options.roadClass, oneWay: options.oneWay, buildState: options.buildState, level: options.roadLevel, capacityPerHour: options.roadCapacityPerHour }));
+        : wrap(addRoadPath(layout, points, { roadClass: options.roadClass, oneWay: options.oneWay, buildState: options.buildState, level: options.roadLevel, ...(options.roadCapacityPerHour > 0 ? { capacityPerHour: options.roadCapacityPerHour } : {}) }));
     }
     case 'land': {
       // 土地購入: ドラッグした矩形（クリックは1タイル）の未取得地
@@ -304,34 +324,53 @@ export function computePreview(s: Pick<EditorState, 'tool' | 'options' | 'hover'
         if (!terminal) return null;
         const spec = TERMINAL_AREA_SPECS[areaKind];
         const r = draft?.kind === 'rect' ? rectFromDrag(draft.start, hover) : { origin: hover, w: spec.defaultW, h: spec.defaultH };
-        return wrap(placeTerminalArea(layout, terminal, s.interiorLevel, areaKind, r.origin, { w: Math.max(r.w, spec.minW), h: Math.max(r.h, spec.minH) }));
+        return wrap(
+          placeTerminalArea(layout, terminal, s.interiorLevel, areaKind, r.origin, { w: Math.max(r.w, spec.minW), h: Math.max(r.h, spec.minH) }),
+          [],
+          terminalAreaLevelProblem(layout, terminal, s.interiorLevel),
+        );
       }
       const kind = facilityKindOf(tool);
       if (!kind) return null;
       const spec = FACILITY_SPECS[kind];
       if (spec.dragPlace && draft?.kind === 'rect') {
         const r = rectFromDrag(draft.start, hover);
+        const w = Math.max(r.w, spec.minW);
+        const h = Math.max(r.h, spec.minH);
         return wrap(
           placeFacility(layout, kind, r.origin, {
-            w: Math.max(r.w, spec.minW),
-            h: Math.max(r.h, spec.minH),
+            w,
+            h,
             buildState: options.buildState,
             mapLevel: options.roadLevel,
             ...(options.interiorParentId ? { parentFacilityId: options.interiorParentId, floorIndex: options.interiorFloorIndex } : {}),
             ...(kind === 'railStation' ? { props: { level: options.roadLevel } } : {}),
           }),
+          [],
+          interiorProblem(layout, options, r.origin, w, h),
         );
       }
       const dims = rotatedDims(spec.defaultW, spec.defaultH, options.rotation);
+      const origin = centeredOrigin(hover, dims.w, dims.h);
       return wrap(
-        placeFacility(layout, kind, centeredOrigin(hover, dims.w, dims.h), {
+        placeFacility(layout, kind, origin, {
           rotation: options.rotation,
           buildState: options.buildState,
           mapLevel: options.roadLevel,
           ...(options.interiorParentId ? { parentFacilityId: options.interiorParentId, floorIndex: options.interiorFloorIndex } : {}),
           ...(kind === 'railStation' ? { props: { level: options.roadLevel } } : {}),
         }),
+        [],
+        interiorProblem(layout, options, origin, dims.w, dims.h),
       );
     }
   }
+}
+
+/** 建物内に置くとき、その階・範囲で置けない理由（1-04）。独立施設なら null */
+function interiorProblem(layout: AirportLayout, options: ToolOptions, origin: Tile, w: number, h: number): PlacementProblem | null {
+  if (!options.interiorParentId) return null;
+  const tiles: Tile[] = [];
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) tiles.push({ x: origin.x + dx, y: origin.y + dy });
+  return interiorPlacementProblem(layout, options.interiorParentId, options.interiorFloorIndex, tiles);
 }

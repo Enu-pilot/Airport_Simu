@@ -1,0 +1,285 @@
+{
+ "simModelVersion": "skyport-sim-10.3",
+ "runs": {
+  "day0-normal": {
+   "day": 0,
+   "difficulty": "normal",
+   "plan": "000000000000000000000000",
+   "types": "cccccccccccccccccccccccc",
+   "forecast": {
+    "day": 0,
+    "blocks": [
+     {
+      "fromH": 6,
+      "toH": 12,
+      "level": 0,
+      "type": "clear"
+     },
+     {
+      "fromH": 12,
+      "toH": 18,
+      "level": 0,
+      "type": "clear"
+     },
+     {
+      "fromH": 18,
+      "toH": 24,
+      "level": 0,
+      "type": "clear"
+     }
+    ],
+    "accuracy": 0.9,
+    "summary": "6〜12時 晴れ（段階 0） / 12〜18時 晴れ（段階 0） / 18〜24時 晴れ（段階 0）"
+   },
+   "ticks": 64801,
+   "invariantViolations": 0,
+   "stats": {
+    "arrivals": 19,
+    "departures": 19,
+    "diverted": 0,
+    "cancelled": 0,
+    "goArounds": 0,
+    "conflicts": 0,
+    "taxiInSecTotal": 3152,
+    "taxiOutSecTotal": 4042
+   },
+   "weatherCancels": 0,
+   "weatherGoArounds": 0,
+   "randomDisruptions": [
+    "standClosed"
+   ],
+   "kpi": {
+    "flights": 38,
+    "movements": 38,
+    "paxDeparted": 2096,
+    "paxArrived": 2104,
+    "otp": 1,
+    "avgDelayMin": 0.2,
+    "actualAvgDelayMin": 2.4,
+    "runwayUtil": 0.07037037037037037,
+    "gateUtil": 0.15979595336076818,
+    "facilityUtil": 0.09934336419753087,
+    "avgWaitMin": 3.4,
+    "avgWalkMin": 9.9,
+    "avgGroundMin": 44.6,
+    "unprocessedPax": 0,
+    "missedPax": 0,
+    "leftBags": 0,
+    "diverted": 0,
+    "cancelled": 0,
+    "paxSatisfaction": 93,
+    "airlineSatisfaction": 62,
+    "rating": 59.6,
+    "modePax": {
+     "car": 1604,
+     "dropoff": 2583,
+     "taxi": 0,
+     "bus": 0,
+     "rail": 0,
+     "walk": 13
+    },
+    "parkingFull": 0,
+    "roadDelayMin": 0,
+    "transitWaitMin": 0,
+    "accessFactor": 1.00187668174666
+   },
+   "airlineSatisfaction": {
+    "SK": 62,
+    "NP": 62,
+    "RJ": 62,
+    "AQ": 62,
+    "HB": 62,
+    "ML": 60
+   },
+   "stateSha256": "84912b42e3f5f4215bcfddffe56cb24da24e668b26bd97f4063ae3c8241c4997",
+   "stateLength": 2244701
+  },
+  "bad-winter-normal": {
+   "day": 108,
+   "difficulty": "normal",
+   "plan": "233332232223344444443332",
+   "types": "ssssssssssssssssssssssss",
+   "forecast": {
+    "day": 108,
+    "blocks": [
+     {
+      "fromH": 6,
+      "toH": 12,
+      "level": 3,
+      "type": "snow"
+     },
+     {
+      "fromH": 12,
+      "toH": 18,
+      "level": 4,
+      "type": "snow"
+     },
+     {
+      "fromH": 18,
+      "toH": 24,
+      "level": 4,
+      "type": "snow"
+     }
+    ],
+    "accuracy": 0.9,
+    "summary": "6〜12時 雪（段階 3） / 12〜18時 雪（段階 4） / 18〜24時 雪（段階 4）"
+   },
+   "ticks": 64801,
+   "invariantViolations": 0,
+   "stats": {
+    "arrivals": 17,
+    "departures": 17,
+    "diverted": 0,
+    "cancelled": 2,
+    "goArounds": 2,
+    "conflicts": 0,
+    "taxiInSecTotal": 3817,
+    "taxiOutSecTotal": 5018
+   },
+   "weatherCancels": 2,
+   "weatherGoArounds": 2,
+   "randomDisruptions": [
+    "standClosed",
+    "inboundDelay"
+   ],
+   "kpi": {
+    "flights": 34,
+    "movements": 34,
+    "paxDeparted": 1923,
+    "paxArrived": 1932,
+    "otp": 0.868421052631579,
+    "avgDelayMin": 1.5,
+    "actualAvgDelayMin": 10.9,
+    "runwayUtil": 0.06296296296296296,
+    "gateUtil": 0.14282750342935527,
+    "facilityUtil": 0.09311496913580247,
+    "avgWaitMin": 3.6,
+    "avgWalkMin": 9.9,
+    "avgGroundMin": 44.6,
+    "unprocessedPax": 0,
+    "missedPax": 0,
+    "leftBags": 0,
+    "diverted": 0,
+    "cancelled": 2,
+    "paxSatisfaction": 91.4,
+    "airlineSatisfaction": 61,
+    "rating": 58.5,
+    "modePax": {
+     "car": 1518,
+     "dropoff": 2377,
+     "taxi": 0,
+     "bus": 0,
+     "rail": 0,
+     "walk": 7
+    },
+    "parkingFull": 0,
+    "roadDelayMin": 0,
+    "transitWaitMin": 0,
+    "accessFactor": 1.00187668174666
+   },
+   "airlineSatisfaction": {
+    "SK": 59.5,
+    "NP": 62,
+    "RJ": 59.5,
+    "AQ": 62,
+    "HB": 62,
+    "ML": 60
+   },
+   "stateSha256": "3dd5ce54db2ffce62865a732ba99404bf5b60c74b7a62ccd57e2771b6ac91251",
+   "stateLength": 2159877
+  },
+  "bad-humid-expert": {
+   "day": 10,
+   "difficulty": "expert",
+   "plan": "123234444443222223321101",
+   "types": "crrrrrrffrrrrrrrrrrrcccc",
+   "forecast": {
+    "day": 10,
+    "blocks": [
+     {
+      "fromH": 6,
+      "toH": 12,
+      "level": 4,
+      "type": "rain"
+     },
+     {
+      "fromH": 12,
+      "toH": 18,
+      "level": 2,
+      "type": "rain"
+     },
+     {
+      "fromH": 18,
+      "toH": 24,
+      "level": 4,
+      "type": "rain"
+     }
+    ],
+    "accuracy": 0.65,
+    "summary": "6〜12時 雨（段階 4） / 12〜18時 雨（段階 2） / 18〜24時 雨（段階 4）"
+   },
+   "ticks": 64801,
+   "invariantViolations": 0,
+   "stats": {
+    "arrivals": 19,
+    "departures": 19,
+    "diverted": 0,
+    "cancelled": 0,
+    "goArounds": 0,
+    "conflicts": 0,
+    "taxiInSecTotal": 3658,
+    "taxiOutSecTotal": 4548
+   },
+   "weatherCancels": 0,
+   "weatherGoArounds": 0,
+   "randomDisruptions": [
+    "standClosed"
+   ],
+   "kpi": {
+    "flights": 38,
+    "movements": 38,
+    "paxDeparted": 2165,
+    "paxArrived": 2087,
+    "otp": 1,
+    "avgDelayMin": 0.4,
+    "actualAvgDelayMin": 3.1,
+    "runwayUtil": 0.07037037037037037,
+    "gateUtil": 0.15528120713305898,
+    "facilityUtil": 0.10223842592592593,
+    "avgWaitMin": 3.5,
+    "avgWalkMin": 10.8,
+    "avgGroundMin": 43,
+    "unprocessedPax": 0,
+    "missedPax": 0,
+    "leftBags": 0,
+    "diverted": 0,
+    "cancelled": 0,
+    "paxSatisfaction": 91.7,
+    "airlineSatisfaction": 62,
+    "rating": 59.4,
+    "modePax": {
+     "car": 1748,
+     "dropoff": 2490,
+     "taxi": 0,
+     "bus": 0,
+     "rail": 0,
+     "walk": 14
+    },
+    "parkingFull": 0,
+    "roadDelayMin": 0.1,
+    "transitWaitMin": 0,
+    "accessFactor": 1.00187668174666
+   },
+   "airlineSatisfaction": {
+    "SK": 62,
+    "NP": 62,
+    "RJ": 62,
+    "AQ": 62,
+    "HB": 62,
+    "ML": 60
+   },
+   "stateSha256": "14b196016862b0853d4d0cc5cb1e9dbd04c63245be7e186b99a5586d9a35a7b6",
+   "stateLength": 2272934
+  }
+ }
+}
