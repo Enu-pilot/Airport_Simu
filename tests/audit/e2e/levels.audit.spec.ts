@@ -48,9 +48,12 @@ test('建物内に設備を置ける（格納庫 1 階・ターミナル 2 階�
   expect(await facilityCount(page)).toBe(before + 2);
   // 建物内の設備は「建物内配置」として親と階が表示される
   await page.getByTestId('tool-select').click();
+  // 1-03（V-3 の修正）: 内部表示がオフのときのクリックは親の建物を選ぶ（以前は表示されない内部設備が選ばれていた）。
+  // 内部設備は親のプロパティの「建物内の設備」一覧から選び、親と階は「建物内配置（親）」の階の選択欄で表示する（1-04）。
   await clickMap(page, HANGAR);
-  await expect(page.getByTestId('properties')).toContainText('建物内配置');
-  await expect(page.getByTestId('properties')).toContainText('格納庫 · 1階');
+  await page.getByTestId('interior-children').locator('button').first().click();
+  await expect(page.getByTestId('properties')).toContainText('建物内配置（格納庫');
+  await expect(page.getByTestId('prop-floorIndex')).toHaveValue('0');
   expect(errors).toEqual([]);
 });
 
