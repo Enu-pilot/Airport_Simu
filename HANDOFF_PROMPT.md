@@ -13,12 +13,11 @@
 7. 作業終了時（中断・引き継ぎを含む）は、実施内容・検証結果・残件を記録し、状態を `完了` または `中断` に更新する。記録更新後に終了する。
 
 ## 現在の作業
-- 状態: 完了
-- 開始/完了: 2026-11-16（ブランチ `claude/audit-39-comprehensive`、既定ブランチへは未マージ）
-- 目的: 総合テスト・監査・拡張提案（調査・テスト・Docs のみ。製品コード・既存期待値・ゴールデンは未変更）。
-- 対象: `tests/audit/`、`vitest.audit.config.ts`、`playwright.audit.config.ts`、`docs/39_comprehensive_test_audit_and_handover.md`、`docs/design/audit39_*.md`、`docs/38`、`README.md`
-- 結果: 監査テスト 202 件＋ブラウザ監査 7 件を追加（合格）。不具合の再現テスト 6 件（失敗が現状、通常テストには含めない）。
-- 検証: typecheck・lint・build 成功。`npm test` 765 件中 16 失敗、E2E 69 件中 6 失敗（内訳と区分は docs/39 §1.1。すべて監査前からの失敗か環境起因）。カバレッジは未計測。
+- 状態: 進行中
+- 開始: 2026-11-16（ブランチ `claude/audit-39-comprehensive`）
+- 目的: 建物・階層（地下/地上/高架/建物内部）の接続と UI の検証（調査・テスト・Docs のみ。製品コードは変更しない）。
+- 対象: `docs/34_vertical_transport.md`、`src/core/model/levels.ts`、`src/core/access/verticalWalk.ts`、階層 UI（Toolbox / Properties / MapRenderer）、`tests/audit/`、`docs/39`
+- 前回（総合監査）: 完了。結果は docs/39。
 
 ## 次の作業
 - docs/39 §8 の優先度順に判断・対応する（最優先: ゴールデン不一致 G-1 の扱いの決定、P-1 バスゲート、R-1 滑走路閉鎖の重なり）。
