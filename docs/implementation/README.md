@@ -19,7 +19,8 @@
 |---|---|---|---|
 | Phase 1 | completed | [completed/phase1_plan.md](completed/phase1_plan.md) | 2026-11-17 完了。docs/42 §2・§5.1 に完了根拠を記録 |
 | Phase 2 | active | [active/phase2_plan.md](active/phase2_plan.md) | 実装中。タスク・チェックポイント・未検証項目は計画書と HANDOFF を参照 |
-| Phase 3 | planned | [planned/phase3_plan.md](planned/phase3_plan.md) | 計画作成済み・実装未着手 |
+| Phase 2.5 | planned | [planned/phase2_5_map_expansion_plan.md](planned/phase2_5_map_expansion_plan.md) | マップ最大サイズ320×320タイル。Phase 2完了後・Phase 3開始前に実施 |
+| Phase 3 | planned | [planned/phase3_plan.md](planned/phase3_plan.md) | Phase 2.5 の受入完了後に着手 |
 | Phase 4 | planned | [planned/phase4_plan.md](planned/phase4_plan.md) | 計画作成済み・実装未着手 |
 | Phase 5 | backlog | — | docs/42 §3.4 の候補。着手時に要求・完了条件・詳細計画を整える |
 
