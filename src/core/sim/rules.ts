@@ -66,3 +66,21 @@ export const CROSSING_PENALTY_SEC = 120;
 
 /** 地上で動いている2機の最小距離（m）。これ未満は競合として記録する */
 export const MIN_GROUND_SEPARATION_M = 20;
+
+// ---------------------------------------------------------------- 区間ごとに進む地上走行（フェーズ 2、taxiMode 'block'）
+
+/** 追従時の機首〜前機の尾部の間隔（m）。MIN_GROUND_SEPARATION_M の 2 倍 */
+export const FOLLOW_GAP_M = 40;
+/** 区間内で 1 機が必要とする長さ（m）= 区分内の最大機体長 + FOLLOW_GAP_M を 10 m 単位に切り上げ。ゲーム内の値 */
+export const BLOCK_REQ_M: Record<SizeClass, number> = { S: 70, M: 90, L: 120 };
+/** 交差点・スポット入口の手前で止まる距離（m） */
+export const JUNCTION_STOP_M = 45;
+/** 確保を要求する距離: 停止位置までが「制動距離 + この値」未満になったら要求する（m） */
+export const BLOCK_REQUEST_AHEAD_M = 50;
+/** 逆向きを待つ機体がこの時間以上待ったら、同じ向きの新しい確保を止める（公平性。秒） */
+export const DIR_FAIRNESS_SEC = 120;
+/** 規則 4（停止の検出）: この時間以上待ったら閉路を探す / 待機機の経路の選び直しの間隔（秒） */
+export const STALL_SEC = 180;
+export const REROUTE_SEC = 60;
+/** 夜間: 予測離陸の余裕（秒） */
+export const NIGHT_DEP_MARGIN_SEC = 600;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSandboxCompany } from '../../src/core/economy/company';
-import { buildProject, formatVersionOf, serializeProject, validateProject, PROJECT_FORMAT_VERSION, PROJECT_FORMAT_VERSION_2, PROJECT_FORMAT_VERSION_3 } from '../../src/core/io/project';
+import { buildProject, formatVersionOf, serializeProject, validateProject, PROJECT_FORMAT_VERSION, PROJECT_FORMAT_VERSION_2, PROJECT_FORMAT_VERSION_3, PROJECT_FORMAT_MAX_READABLE } from '../../src/core/io/project';
 import { addRoadPath } from '../../src/core/layout/operations';
 import { must } from './helpers';
 import { defaultGame, startGame } from '../../src/core/economy/game';
@@ -46,7 +46,8 @@ describe('12B-3a A1: 保存形式の版は新しい項目を使うときだけ 2
     const r1 = validateProject(serializeProject(p1), opts);
     expect(r1.project!.formatVersion).toBe(1);
     expect(r1.migratedFrom).toBeNull();
-    const r4 = validateProject(JSON.stringify({ ...p2, formatVersion: 4 }), opts);
+    // 読めない新しい版は拒否する（版 4 はフェーズ 2 で読めるようになったので、読める最大の版 + 1 で確かめる。意図は変えていない）
+    const r4 = validateProject(JSON.stringify({ ...p2, formatVersion: PROJECT_FORMAT_MAX_READABLE + 1 }), opts);
     expect(r4.ok).toBe(false);
     // v2 を名乗るが新しい項目を使わないファイルは、再保存で 1 に戻る
     const r2plain = validateProject(JSON.stringify({ ...p1, formatVersion: 2 }), opts);

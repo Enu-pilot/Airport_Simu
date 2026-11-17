@@ -529,6 +529,8 @@ export interface SimState {
     locks: Record<string, { dir: 1 | -1; holders: string[] }>;
     oppWait?: Record<string, { acId: string; since: number }>;
     priority?: string;
+    /** 優先を始めた時刻（規則 4） */
+    priorityAt?: number;
     stats: { resolutions: number; reroutes: number; overruns: number; unresolved: number; nightStranded: number };
   };
   seed: string;

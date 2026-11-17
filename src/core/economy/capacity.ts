@@ -7,6 +7,10 @@ import { terminalLinkCapacityPerHour } from '../terminal/model';
 import { APRON_BUS_CAPACITY } from '../sim/busRules';
 import type { SimContext } from '../sim/context';
 import { operableTypes } from '../sim/context';
+import { taxiwayCapacityPerHour } from '../sim/taxiBlocks';
+import { BLOCK_REQ_M } from '../sim/rules';
+import { resolveType } from '../sim/aircraftTypes';
+import { cityOperatingHours } from './city';
 import type { CompanyState, Contract, TimeWindow } from './company';
 import { addContract } from './company';
 import { routeCapabilitiesForAirport } from './registry';
@@ -104,7 +108,9 @@ export interface LiveClosures {
 
 export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, closedBusGateIds: readonly string[] = [], plan = planDayWithDemand(company, company.day, 1, ctx.types, routeCapabilitiesForAirport(ctx.layout.countryId)), currentPaxByTerminal?: Readonly<Record<string, number>>, live?: LiveClosures): AirportCapacitySnapshot {
   const analysis = analyzeDayPlan(plan, ctx, closedBusGateIds);
-  const operatingHours = Math.max(0, (company.hours.closeMin - company.hours.openMin) / 60);
+  // 夜間の運用設定（最終出発時刻）があるときだけ、運用時間の終わりを最終出発時刻で切る（R17）。ないときは従来の値
+  const capHours = company.city?.nightOps ? cityOperatingHours(company.hours, company.city) : company.hours;
+  const operatingHours = Math.max(0, (capHours.closeMin - capHours.openMin) / 60);
   const peakMovements = peak(analysis.hourly.movements);
   const peakDepartingPax = peak(analysis.hourly.depPax);
   const closedRunways = new Set(live?.closedRunwayIds ?? []);
@@ -190,7 +196,19 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
     const open = r.buildState === 'operational' && !closedRunways.has(r.id);
     facilities.push({ id: r.id, name: r.name, kind: '滑走路', state: stateOf(r.buildState), capacity: open ? RUNWAY_HOURLY_CAPACITY : 0, demand: null, unit: 'movements/h', status: open ? 'uncomputed' : 'shortage', basis: open ? `計画基準 ${RUNWAY_HOURLY_CAPACITY} 回/時。便ごとの滑走路割当需要は未算出` : r.buildState === 'operational' ? '運航中の閉鎖' : '運用状態ではない' });
   }
-  for (const e of Object.values(ctx.layout.taxiways).sort((a, b) => compareIds(a.id, b.id))) facilities.push({ id: e.id, name: e.name, kind: '誘導路', state: stateOf(e.buildState), capacity: null, demand: null, unit: 'movements/h', status: 'uncomputed', basis: e.buildState === 'operational' ? '経路・閉鎖状態はシミュレーションで判定。時間当たり能力は未算出' : '運用状態ではない' });
+  // 誘導路: 区間ごとの走行（taxiMode 'block'）のときだけ能力を出す（plan 2-08）。従来方式は未算出のまま
+  const blockTaxiSpeed = ctx.blocks ? resolveType(ctx.types, 'narrow180').taxiSpeed : 0;
+  for (const e of Object.values(ctx.layout.taxiways).sort((a, b) => compareIds(a.id, b.id))) {
+    const open = e.buildState === 'operational';
+    const perHour = ctx.blocks && open ? taxiwayCapacityPerHour(ctx.blocks, [e.id], 'M', blockTaxiSpeed) : null;
+    facilities.push({
+      id: e.id, name: e.name, kind: '誘導路', state: stateOf(e.buildState), capacity: perHour === null ? null : Math.round(perHour * 10) / 10, demand: null, unit: 'movements/h', status: 'uncomputed',
+      basis: !open ? '運用状態ではない'
+        : perHour !== null ? `区間ごとの走行。M 機の通行能力 = min(進入可能機数 × 3600 ÷ 通過時間, 3600 × 地上走行速度 ÷ 必要長 ${BLOCK_REQ_M.M} m) の含む区間の最小（地上走行速度 ${blockTaxiSpeed} m/s）。需要・実績は未算出`
+          : ctx.blocks ? '区間ごとの走行。この誘導路は能力を持つ区間がない（滑走路手前の小片のみ）。需要・実績は未算出'
+            : '経路・閉鎖状態はシミュレーションで判定。時間当たり能力は未算出',
+    });
+  }
   for (const e of Object.values(ctx.layout.roads).sort((a, b) => compareIds(a.id, b.id))) {
     const a = ctx.layout.roadNodes[e.from];
     const b = ctx.layout.roadNodes[e.to];

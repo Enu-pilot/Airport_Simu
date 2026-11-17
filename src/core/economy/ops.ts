@@ -1,3 +1,4 @@
+import { nightDayReport } from './takeoffDelay';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../sim/aircraftTypes';
 import { attributeRevenue } from '../analytics/records';
 import { operableTypes, type SimContext } from '../sim/context';
@@ -612,6 +613,7 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
       eventDemandMultiplier: cityEvents?.demandMultiplier ?? 1,
       eventTrafficMultiplier: cityEvents?.trafficMultiplier ?? 1,
     } } : {}),
+    ...(cityStart?.nightOps ? { night: nightDayReport(sim, from, state.now) } : {}),
   };
   c.reports.push(report);
   if (c.reports.length > REPORT_LIMIT) c.reports.splice(0, c.reports.length - REPORT_LIMIT);

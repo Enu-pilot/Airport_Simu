@@ -1,6 +1,6 @@
-# 41. 空港能力の拡張計画（計画・未実装）
+# 41. 空港能力の拡張計画（計画・フェーズ 2 で §1 を実装中）
 
-- 状態: **計画**。本書の機能は未実装。要求と判定基準を定め、実装方式は固定しない（「方式の案」は選択肢であり決定ではない）。
+- 状態: **計画**。§1（区間ごとに進む地上走行）はフェーズ 2 で実装中で、実装の状況は末尾の「実装の記録（フェーズ 2）」。他の節は未実装。要求と判定基準を定め、実装方式は固定しない（「方式の案」は選択肢であり決定ではない）。
 - 数値はすべてゲーム内の値で、実在の空港の処理能力・安全基準を表さない。
 - 根拠となる現状の検証結果は [docs/39](39_comprehensive_test_audit_and_handover.md)（§11 地上走行、§12 能力）を参照し、ここに複製しない。
 - 共通の制約: 新しい設定があるときだけ働く（opt-in）。設定のない保存データの運航結果と既存のゴールデンは変えない。シミュレーションは決定的に保つ。版・保存形式・旧データの移行は実装時に CLAUDE.md §3 に従って判断する。
@@ -220,3 +220,20 @@ AC-5 は §1 の区間の考え方（区間ごとの上限値）と同じ形に�
 4. 整備の必要量（何回の運航ごとか）と、足りないときの影響の大きさ。
 5. 道路・線路の区間能力（AC-5）を入れるか、現在の集約モデルのまま表示だけ整えるか。
 6. 拠点・ハブの機能を、空港の格（docs/39 §7 の提案 A1）による解放の対象にするか。
+
+## 実装の記録（フェーズ 2、§1 区間ごとに進む地上走行）
+
+実装計画: [design/impl_phase2_plan.md](design/impl_phase2_plan.md)。既定値: 区間 10 タイル（250 m、範囲 4〜40）、必要長 S 70 / M 90 / L 120 m、追従 40 m、交差点の手前 45 m、誘導路ごとの上限 1〜10、新規ゲームの既定は従来方式（選択式）。
+
+| 項目 | 状態 | 実装・テスト |
+|---|---|---|
+| 設定（`taxiMode`・`taxiBlockTiles`・誘導路 `blockMaxAircraft`）の操作・検証・保存（版 4） | **実装済み**（建設モードだけ変更可） | `operations.ts`、`serialize.ts` `checkTaxiFields`、`project.ts`、`taxiSettings.test.ts`、`projectFormat4.test.ts`、`e2e/taxiBlocks.spec.ts` |
+| 運航状態 `taxiBlocks` の保存の検証 | **実装済み**（形・参照。B1〜B6 の意味の検証は復元後の不変条件） | `project.ts` `checkTaxiBlocksState`、`projectPhase2State.test.ts` |
+| 区間の分割・進入可能機数（2-01・2-02） | コアは実装者 A の作業 | `tests/unit/sim/taxiBlocks.partition.test.ts`・`taxiBlocks.capacity.test.ts` |
+| 走行・デッドロック回避・到着（2-03〜2-05） | コアは実装者 A の作業（CP2 で結果を追記） | `tests/unit/sim/taxiBlocks.run.test.ts`・`.deadlock.test.ts`・`.arrival.test.ts` |
+| 待機理由（2-06）の文言・運航表 | **実装済み**（文言 `blockFull`/`opposingTraffic`/`runwayQueue`、運航表・機体の詳細） | `ja.ts`、`holdReasonLabels.test.ts`、`e2e/taxiBlocks.spec.ts` |
+| 2D・3D の区間の表示（2-07） | **実装済み**: 2D は論理ネットワーク表示に区切りの印と「機数 / 進入可能機数（M）」、3D は区間ごとの線（運航中は占有で色分け） | `MapRenderer.ts`、`Scene3D.ts`、`core/layout/blockGraph.ts` |
+| 能力ダッシュボードの誘導路（2-08） | **実装済み**（block のときだけ値。従来は未算出）。飽和運航との比（0.8〜1.2）は**未計測** | `capacity.ts`、`taxiwayCapacity.test.ts` |
+| 性能（2-09） | コアは実装者 A の作業（`taxiBlocks.perf.test.ts`） | CP2 で数値を追記 |
+
+既知の制限: block の運航状態（`taxiBlocks`）は `edgeReservations` を使わないため、2D の「予約中の区間」の線は block では出ない（区間の占有の色分けで置き換え）。区間は M 機の値で表示する。

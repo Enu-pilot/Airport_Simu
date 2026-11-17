@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from 'react';
 import { CLIMATES, DIFFICULTIES, defaultGame, type GameSettings } from '../core/economy/game';
-import { CITY_TYPES, defaultCity, type CityType } from '../core/economy/city';
+import { CITY_TYPES, defaultCity, defaultCityNightOps, type CityType } from '../core/economy/city';
 import { editorStore, newGame, setCompanyCity, setGameSettings } from '../editor/store';
 import { GAME_UI, MODE_LABEL } from '../i18n/ja';
 
@@ -48,11 +48,13 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
   const submit = () => {
     if (kind === 'new') {
       if (!window.confirm(GAME_UI.setupConfirm)) return;
-      newGame(mode, legacy ? null : g, cityEnabled ? defaultCity(cityType) : null);
+      // 新規ゲームで都市を選んだときだけ、夜間の運用（最終出発時刻 21:15）を既定で有効にする。defaultCity 自体は変えない
+      newGame(mode, legacy ? null : g, cityEnabled ? { ...defaultCity(cityType), nightOps: defaultCityNightOps() } : null);
     } else {
       if (!window.confirm(GAME_UI.setupApplyConfirm)) return;
       setGameSettings(legacy ? null : g);
-      setCompanyCity(cityEnabled ? defaultCity(cityType) : null);
+      // 既存の夜間の運用設定は引き継ぐ（なければ足さない）
+      setCompanyCity(cityEnabled ? { ...defaultCity(cityType), ...(currentCompany.city?.nightOps ? { nightOps: currentCompany.city.nightOps } : {}) } : null);
     }
     gameSetupUi.close();
   };

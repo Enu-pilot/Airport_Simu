@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M } from '../core/model/catalog';
+import { FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, TAXI_BLOCK_TILES_DEFAULT, TAXI_BLOCK_TILES_MAX, TAXI_BLOCK_TILES_MIN } from '../core/model/catalog';
 import {
   FREE_RUNWAY_DEFAULT_BASIS,
   FREE_RUNWAY_DEFAULTS,
@@ -14,7 +14,8 @@ import { resolveRunwayDims } from '../core/layout/runwayAreas';
 import { convertRunwayToFree, snapRunwayToGrid, updateEntity, updateLayoutSettings } from '../core/layout/operations';
 import { runwayAxis, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
 import { actions, applyOp, useEditor, useLayout, type ToolOptions } from '../editor/store';
-import { MAG_VAR_LABEL, RUNWAY_DISCLAIMER, RUNWAY_UI, displayName } from '../i18n/ja';
+import { MAG_VAR_LABEL, RUNWAY_DISCLAIMER, RUNWAY_UI, TAXI_UI, displayName } from '../i18n/ja';
+import { blockGraphOf } from '../core/layout/blockGraph';
 import { DecimalInput, Field, Info, Section, TextInput } from './fields';
 
 const update = (layout: AirportLayout, id: string, patch: Record<string, unknown>) => applyOp(updateEntity(layout, id, patch));
@@ -350,6 +351,7 @@ export function AirportSettings() {
   const ruleSet = layout.ruleSet ?? 'classic';
   const runways = sortedValues(layout.runways);
   const disabled = mode === 'operate';
+  const taxiGraph = blockGraphOf(layout);
   return (
     <Section title={RUNWAY_UI.settingsTitle} testid="airport-settings">
       <Field label={RUNWAY_UI.magVar}>
@@ -377,6 +379,28 @@ export function AirportSettings() {
       <div className="muted small" data-testid="setting-ruleExplain">
         {RUNWAY_UI.ruleExplain}
       </div>
+      <Field label={TAXI_UI.mode}>
+        <select
+          value={layout.taxiMode ?? 'full'}
+          disabled={disabled}
+          onChange={(e) => applyOp(updateLayoutSettings(layout, { taxiMode: e.target.value as 'full' | 'block' }))}
+          data-testid="setting-taxiMode"
+        >
+          <option value="full">{TAXI_UI.modeFull}</option>
+          <option value="block">{TAXI_UI.modeBlock}</option>
+        </select>
+      </Field>
+      <div className="muted small" data-testid="setting-taxiExplain">{TAXI_UI.modeExplain}</div>
+      <Field label={TAXI_UI.tiles}>
+        {disabled ? (
+          <span>{layout.taxiBlockTiles ?? TAXI_BLOCK_TILES_DEFAULT}</span>
+        ) : (
+          <DecimalInput value={layout.taxiBlockTiles ?? TAXI_BLOCK_TILES_DEFAULT} min={TAXI_BLOCK_TILES_MIN} max={TAXI_BLOCK_TILES_MAX} step={1} onCommit={(v) => applyOp(updateLayoutSettings(layout, { taxiBlockTiles: v }))} testid="setting-taxiBlockTiles" />
+        )}
+      </Field>
+      <div className="muted small">{TAXI_UI.tilesHelp}</div>
+      {disabled && <div className="muted small" data-testid="setting-taxi-locked">{TAXI_UI.operateLocked}</div>}
+      {taxiGraph && <div className="muted small" data-testid="setting-taxiSummary">{TAXI_UI.summary(Object.keys(taxiGraph.blocks).length, Object.keys(taxiGraph.corridors).length)}</div>}
       <Disclaimer />
       <div className="prop-section-title">{RUNWAY_UI.numbersTitle}</div>
       <div data-testid="settings-designators">

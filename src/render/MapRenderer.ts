@@ -29,6 +29,9 @@ import { linkBetween } from '../core/terminal/route';
 import { AREA_KIND_LABEL } from '../i18n/ja';
 import { airportKpis, type AirportKpis } from '../core/analytics/kpi';
 import { daylight } from './daylight';
+import { blockGraphOf } from '../core/layout/blockGraph';
+import { blockCapacity } from '../core/sim/taxiBlocks';
+import { TILE_M } from '../core/model/catalog';
 
 /**
  * PixiJS による空港マップ描画。シミュレーション・編集の状態は一切変更せず、
@@ -112,6 +115,7 @@ export class MapRenderer {
     this.drawTerminalTransit(layout, s.selection);
     if (s.overlays.interior) this.drawInterior(layout, s, cam);
     if (s.overlays.network) this.drawNetwork(analysis);
+    if (s.overlays.network) this.drawTaxiBlocks(layout, s.ops, cam, s.overlays.labels);
     if (s.overlays.issues) this.drawIssues(layout, analysis);
     this.drawNightShade(layout, s);
 
@@ -579,6 +583,60 @@ export class MapRenderer {
     for (const n of Object.values(analysis.network.nodes)) {
       const p = c(n.pos);
       o.circle(p.x, p.y, this.px(4)).fill({ color: NODE_COLOR[n.kind] }).stroke({ width: this.px(1), color: 0x000000 });
+    }
+  }
+
+  /**
+   * 区間ごとに進む地上走行（taxiMode 'block'）の区切りの印と、運航中は区間の占有（機数 / 進入可能機数。M 機の値）。
+   * 論理ネットワーク表示（network）に重ねる。従来方式の配置では何も描かない。
+   */
+  private drawTaxiBlocks(layout: AirportLayout, ops: OpsState | null | undefined, cam: Camera, labels: boolean): void {
+    const graph = ops?.sim.ctx.blocks ?? blockGraphOf(layout);
+    if (!graph) return;
+    const o = this.overlay;
+    const occ = ops?.sim.state.taxiBlocks?.occ;
+    const at = (edgeId: string, m: number): Vec2 | null => {
+      const e = layout.taxiways[edgeId];
+      const a = e && layout.taxiNodes[e.from];
+      const b = e && layout.taxiNodes[e.to];
+      if (!e || !a || !b) return null;
+      const len = distance(a.pos, b.pos) * TILE_M;
+      const t = len > 0 ? Math.max(0, Math.min(1, m / len)) : 0;
+      return c({ x: a.pos.x + (b.pos.x - a.pos.x) * t, y: a.pos.y + (b.pos.y - a.pos.y) * t });
+    };
+    const tick = (edgeId: string, m: number, color: number) => {
+      const e = layout.taxiways[edgeId];
+      const a = e && layout.taxiNodes[e.from];
+      const b = e && layout.taxiNodes[e.to];
+      const p = at(edgeId, m);
+      if (!e || !a || !b || !p) return;
+      const dx = b.pos.x - a.pos.x;
+      const dy = b.pos.y - a.pos.y;
+      const n = Math.hypot(dx, dy) || 1;
+      const nx = -dy / n;
+      const ny = dx / n;
+      const h = 0.45;
+      o.moveTo(p.x - nx * h, p.y - ny * h).lineTo(p.x + nx * h, p.y + ny * h).stroke({ width: this.px(2), color, alpha: 0.95 });
+    };
+    for (const b of Object.values(graph.blocks)) {
+      const n = occ?.[b.id]?.length ?? 0;
+      const cap = b.entry ? 0 : blockCapacity(b, 1, 'M');
+      // 運航中: 空 = 緑、使用中 = 黄、満杯 = 赤。建設モード・入口の小片は区切りの色だけ
+      const color = !ops || b.entry ? 0x9fb4c8 : n === 0 ? 0x66bb6a : n < cap ? 0xffd400 : 0xff4d4f;
+      for (const sp of b.spans) {
+        if (ops && !b.entry) {
+          const pa = at(sp.edgeId, sp.fromM);
+          const pb = at(sp.edgeId, sp.toM);
+          if (pa && pb) o.moveTo(pa.x, pa.y).lineTo(pb.x, pb.y).stroke({ width: this.px(6), color, alpha: n > 0 ? 0.55 : 0.3 });
+        }
+        tick(sp.edgeId, sp.fromM, color);
+        tick(sp.edgeId, sp.toM, color);
+      }
+      if (labels && !b.entry && this.zoom >= 6 && b.spans.length > 0) {
+        const mid = b.spans[Math.floor(b.spans.length / 2)]!;
+        const p = at(mid.edgeId, (mid.fromM + mid.toM) / 2);
+        if (p) this.label(`blk:${b.id}`, ops ? `${n}/${cap}` : `${cap}`, { x: p.x, y: p.y - 0.55 }, cam, { size: 10, color: 0xd7e6f5 });
+      }
     }
   }
 

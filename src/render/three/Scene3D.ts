@@ -15,6 +15,8 @@ import type { EditorState, OpsState } from '../../editor/store';
 import { FACILITY_COLOR, TERRAIN_COLOR } from '../colors';
 import { aircraftObject, geometryCacheSize } from './aircraftMesh';
 import { daylight } from '../daylight';
+import { blockGraphOf } from '../../core/layout/blockGraph';
+import { blockCapacity } from '../../core/sim/taxiBlocks';
 
 /**
  * 3D 表示（Phase 9）。レイアウト（論理データ）から施設を組み立て、機体・車両の位置はシミュレーションの状態を
@@ -68,6 +70,8 @@ export class Scene3D {
   private unitCapacity = 0;
   private selRing: THREE.Mesh;
   private layout: AirportLayout | null = null;
+  /** 区間ごとに進む地上走行の区間の線（taxiMode 'block' のときだけ。運航中は占有で色を変える） */
+  private blockLines: { mesh: THREE.LineSegments; blockOfSegment: string[]; capOfSegment: number[] } | null = null;
   private aircraftObjs = new Map<string, { obj: THREE.Object3D; key: string }>();
   private raycaster = new THREE.Raycaster();
   private pilotFollow = false;
@@ -124,7 +128,69 @@ export class Scene3D {
 
   // ------------------------------------------------------------ 施設（レイアウトが変わったときだけ作り直す）
 
+  /** 区間の線を作り直す（レイアウトが変わったとき）。従来方式の配置は何も作らない */
+  private rebuildBlockLines(layout: AirportLayout): void {
+    if (this.blockLines) {
+      this.scene.remove(this.blockLines.mesh);
+      this.blockLines.mesh.geometry.dispose();
+      (this.blockLines.mesh.material as THREE.Material).dispose();
+      this.blockLines = null;
+    }
+    const graph = blockGraphOf(layout);
+    if (!graph) return;
+    const pos: number[] = [];
+    const blockOfSegment: string[] = [];
+    const capOfSegment: number[] = [];
+    const at = (edgeId: string, m: number) => {
+      const e = layout.taxiways[edgeId];
+      const a = e && layout.taxiNodes[e.from];
+      const b = e && layout.taxiNodes[e.to];
+      if (!e || !a || !b) return null;
+      const len = Math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y) * 25;
+      const t = len > 0 ? Math.max(0, Math.min(1, m / len)) : 0;
+      return worldToScene({ x: a.pos.x + (b.pos.x - a.pos.x) * t, y: a.pos.y + (b.pos.y - a.pos.y) * t }, 0.5);
+    };
+    for (const b of Object.values(graph.blocks)) {
+      if (b.entry) continue;
+      const cap = blockCapacity(b, 1, 'M');
+      for (const sp of b.spans) {
+        const p = at(sp.edgeId, sp.fromM);
+        const q = at(sp.edgeId, sp.toM);
+        if (!p || !q) continue;
+        pos.push(p.x, p.y, p.z, q.x, q.y, q.z);
+        blockOfSegment.push(b.id);
+        capOfSegment.push(cap);
+      }
+    }
+    if (pos.length === 0) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const colors = new Float32Array((pos.length / 3) * 3).fill(0.62);
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true }));
+    mesh.userData.blockLines = true;
+    mesh.renderOrder = 5;
+    this.scene.add(mesh);
+    this.blockLines = { mesh, blockOfSegment, capOfSegment };
+  }
+
+  /** 運航中は区間の占有（空 = 緑、使用中 = 黄、満杯 = 赤）で線の色を変える。建設モードは灰色 */
+  private updateBlockLines(ops: OpsState | null): void {
+    const bl = this.blockLines;
+    if (!bl) return;
+    const occ = ops?.sim.state.taxiBlocks?.occ;
+    const attr = bl.mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
+    for (let i = 0; i < bl.blockOfSegment.length; i++) {
+      const n = ops ? occ?.[bl.blockOfSegment[i]!]?.length ?? 0 : -1;
+      const cap = bl.capOfSegment[i]!;
+      const [r, g, b] = n < 0 ? [0.62, 0.7, 0.78] : n === 0 ? [0.4, 0.73, 0.42] : n < cap ? [1, 0.83, 0] : [1, 0.3, 0.31];
+      for (const v of [i * 2, i * 2 + 1]) attr.setXYZ(v, r, g, b);
+    }
+    attr.needsUpdate = true;
+  }
+
   private rebuildStatic(layout: AirportLayout): void {
+    this.rebuildBlockLines(layout);
     for (const c of [...this.staticGroup.children]) {
       this.staticGroup.remove(c);
       c.traverse((o) => {
@@ -448,6 +514,7 @@ export class Scene3D {
       }
     }
     this.selRing.visible = false;
+    this.updateBlockLines(s.ops);
     if (s.ops) {
       this.updateAircraft(s.ops);
       this.updateUnits(s.ops);

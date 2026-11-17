@@ -3,6 +3,13 @@ import type { FacilityKind, PaxZone, PropValue, SizeClass, TerminalAreaKind } fr
 /** 1タイルの実寸（m）。距離・滑走路長の換算に使う（定義は geometry/frames.ts） */
 export { TILE_M } from '../geometry/frames';
 
+/** 区間ごとに進む地上走行（フェーズ 2）の設定の範囲と既定（docs/41） */
+export const TAXI_BLOCK_TILES_MIN = 4;
+export const TAXI_BLOCK_TILES_MAX = 40;
+export const TAXI_BLOCK_TILES_DEFAULT = 10;
+/** 誘導路ごとの進入可能機数の上限の範囲 */
+export const TAXI_BLOCK_MAX_AIRCRAFT = 10;
+
 /**
  * 誘導路の描画幅（m）。ゲーム内の表示用の値であり、ICAO 等の実寸基準ではない（status: game）。
  * 2D・3D の両方がこの表を使う（実寸の値は Phase 12/13 で出典付きの別表を持つ）。

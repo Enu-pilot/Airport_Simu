@@ -65,9 +65,24 @@ interface CityConfig {
 - 夜間待機（`noiseCurfew`）で待った到着機は、待機の理由が別に変わった時点で待ち始めの時刻を取り直す。06:00 より前の夜間待機の時間は 45 分のダイバート条件（`HOLD_DIVERT_SEC`）に数えず、夜明けに複数機がダイバートすることはない（`setHold`）。
 - 離陸の夜間判定に使う離陸滑走時間は、実際の加速の積分と同じ tick 単位で求める（`takeoffRollSec`）。予測と実際の離陸時刻が一致し、06:00:00 より前に離陸しない。離着陸時刻に加えて出発時刻にも制限を設け、最終便の遅れによる翌朝への持ち越しを抑える仕様案は [docs/40](40_departure_time_limit.md)（未実装）。
 
+### 出発時刻の制限（フェーズ 2。`city.nightOps`）
+
+仕様と要件は [docs/40](40_departure_time_limit.md)、実装計画は [design/impl_phase2_plan.md](design/impl_phase2_plan.md) §1.5・§3。数値はすべてゲーム内の値。
+
+| 項目 | 状態 | 内容 |
+|---|---|---|
+| `CityConfig.nightOps`（任意） | **実装済み**（データ・検証・保存） | 欠落 = 従来どおり（計画の出発は 21:50 まで）。既存の保存データには自動で入れない（`defaultCity` も変えない）。新規ゲームで都市を選んだときだけ既定値（最終出発時刻 21:15）で入れる（`GameSetup`） |
+| `departureCutoffMin` | **実装済み** | 最終出発時刻（日内の分）。既定 1275（21:15 = 22:00 − 45 分）、範囲 1200〜1305（制限開始の 120〜15 分前）。`cityOperatingHours(hours, city)` が閉場を `min(閉場, 最終出発時刻)` にし、`planDay` の出発（= 到着 + 折り返し + 緩衝）が最終出発時刻以前に収まる。収まらない契約は `dropped` → `OUTSIDE_HOURS`（詳細に「最終出発時刻 21:15」） |
+| `inboundPolicy` | データのみ | `originHold`（出発地で待機）だけ。ダイバート・欠航を選ぶ方式はフェーズ 2 の範囲外 |
+| `airborneHoldMaxMin` / `warnLeadMin` / `prioritizeAtRisk` | 設定の入力・保存・検証は**実装済み** | 上空待機の上限（0〜120 分、既定 30）、離陸見込みの警告の前倒し（0〜120 分、既定 20）、持ち越し危険便の優先（既定 false）。運航での挙動は下の「運航側」を参照 |
+| 手動の便 | **実装済み**（警告のみ） | 運航画面の「便の追加」で、折り返し出発が最終出発時刻を過ぎる見込みなら警告を出す（`departureCutoffIssue`。禁止しない） |
+| 能力ダッシュボード | **実装済み** | `nightOps` があるとき、運用時間の終わりを最終出発時刻で切る（[docs/33](33_capacity_dashboard.md)） |
+
+検証: `isCityNightOps`（`isCityConfig` は `nightOps` を見ない。不正な都市設定を丸ごと捨てる既存の正規化 `company.ts` を巻き込まないため）。`project.ts` の `checkCompany` で読み込みエラーにする。`nightOps` を含むプロジェクトは保存形式 4（[docs/21](21_save_format.md)）。画面は経営 → 需要・運航計画の「夜間の運用」（建設モードだけ変更可）。テスト: `tests/unit/departureCutoff.test.ts`、`tests/unit/projectFormat4.test.ts`、`tests/e2e/nightOps.spec.ts`。
+
 ## 次の作業
 
-0. 出発時刻の制限と最終便の遅れ抑制（[docs/40](40_departure_time_limit.md)、未実装）。
+0. 出発時刻の制限と最終便の遅れ抑制（[docs/40](40_departure_time_limit.md)。計画側は上の表のとおり実装済み。運航側の状態は同書 §9）。
 
 1. 都市鉄道の投資・整備度をゲーム内費用と計画期間に結びつける。
 2. 騒音モデルを実測情報のある機種別データに拡張する。現状は実測値がないためゲーム内ポイントで扱う。

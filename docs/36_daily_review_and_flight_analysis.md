@@ -101,6 +101,12 @@
 - 旧形式レビューに便別詳細や評価スナップショットがない場合、欠損値は欠損のまま表示する。
 - レビュー生成のためだけに既存の FlightRecord やセーブ形式を変更しない。保存構造を変更する場合は [docs/21](21_save_format.md) の版・移行方針に従う。
 
+## 10.5 離陸の遅れ（フェーズ 2。`city.nightOps` があるときだけ）
+
+- 定義: `takeoffDelaySec = max(0, 実離陸 − (出発の予定 + 標準の離陸までの秒数))`。標準の離陸までの秒数（`nominalOutSec`）は、スポットと滑走路・機種から決まるプッシュバック開始〜浮揚の見積り（混雑を無視した最短経路）。スポットを離れた後の待機と夜間の待機を含むため、スポットで夜を明かした便は 480 分を超える。保存項目は増やさない。
+- 出発の実遅延（ブロックアウト基準）・評価対象の遅延とは**別の指標**で、置き換えない。振り返りの便別一覧に「離陸の遅れ」を別の行で出す。評価・補償（R16）にはまだ入れない（未実装）。
+- 日報 `DailyReport.night`（`city.nightOps` があるときだけ）: `lastDepartureDelayMin`（その日に予定された最後の出発。未離陸なら予測離陸から求める）、`standHeld`・`originHeld`・`carriedOver`・`diverted`・`cancelled`。持ち越し便はその便の予定日に数え、日付をまたぐ収入・費用の計上は従来どおり。実装: `src/core/economy/takeoffDelay.ts`、`ops.ts` `settleDay`、`DayReview.tsx`。テスト: `tests/unit/takeoffDelay.test.ts`。
+
 ## 11. テスト要件
 
 - 同じ入力から同じレビューが生成される。

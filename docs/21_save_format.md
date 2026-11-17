@@ -2,9 +2,9 @@
 
 実装: `src/core/io/project.ts`（形式・検証・復元）、`src/editor/project.ts`（保存先・操作）、`src/ui/ProjectPanel.tsx`（画面）。
 
-## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜3）
+## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜4）
 
-**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・階層施設／建物内設備・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜3 を読み、4 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
+**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・階層施設／建物内設備・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜4 を読み、5 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`、`PROJECT_FORMAT_VERSION_4 = 4`（フェーズ 2）。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
 
 `Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。`FlightRecord` の形式は変更しない。便別レビューの締め時点の原因・実時刻・機体状態・作業・施設名、航空会社評価要素・EMA/満足度前後・不満/要望は `DayReview` に集約し、日ごとの IndexedDB 履歴の `review` に保存する。会社状態やプロジェクトJSONには追加しないため、プロジェクト保存形式・シミュレーションモデルの版は上げない。古い保存済みレビューにない項目は推測せず欠落として表示する。
 
@@ -27,10 +27,10 @@
 
 | 版 | 定数 | 変わるとき |
 |---|---|---|
-| 保存形式 | `PROJECT_FORMAT_VERSION = 1`, `PROJECT_FORMAT_VERSION_2 = 2`, `PROJECT_FORMAT_VERSION_3 = 3` | 新しい任意データを含むファイルだけ版を上げ、旧アプリが誤読しないようにする |
+| 保存形式 | `PROJECT_FORMAT_VERSION = 1`, `PROJECT_FORMAT_VERSION_2 = 2`, `PROJECT_FORMAT_VERSION_3 = 3`, `PROJECT_FORMAT_VERSION_4 = 4` | 新しい任意データを含むファイルだけ版を上げ、旧アプリが誤読しないようにする |
 | 機種カタログ | `CATALOG_VERSION`（現在 2026.11.0） | 収録機種・値を変えたとき |
 | 3D アセット | `ASSET_VERSION`（現在 2026.11.0） | 3D の形を変えたとき（表示だけに影響） |
-| シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.3` | 運航の計算を変えたとき |
+| シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.4` | 運航の計算を変えたとき |
 
 ### 版の方針（Phase 11 で明文化。詳細は [22](22_geometry_architecture.md) §7）
 
@@ -44,9 +44,25 @@
   以前に漏れた運航を記録したシナリオの結果は、同じ版の表記のまま再実行すると結果が変わる。
 - `SIM_MODEL_VERSION` は **既存の（現行版のレイアウトで表現できる）レイアウトの運航結果が変わるときだけ** 上げる。上げると保存済みの運航状態は復元されず、建設モードで開く。
   この規則はゴールデンで機械的に守る: 運航ゴールデンは、版を上げずに内容を変える再採取を拒否する（docs/22 §5）。
-- `skyport-sim-10.1` では航空会社別ホーム優先とバスゲート選択を統一し、`skyport-sim-10.2` では通常生成グループの約 5% に決定的な段差なし経路需要を割り当てた。**現在の `SIM_MODEL_VERSION` は `skyport-sim-10.3`**。ターミナル間連絡設備・垂直移動設備の時間当たり能力より大きい旅客グループは、複数の時間帯に分けて通路へ入る。10.2 以前の進行中シミュレーションは復元せず建設モードで開く。レイアウト・会社・過去の日報は保持する。同一モデルの保存で `airlineStandHomes` が欠けている場合は空の当日割当に移行する。
+- `skyport-sim-10.1` では航空会社別ホーム優先とバスゲート選択を統一し、`skyport-sim-10.2` では通常生成グループの約 5% に決定的な段差なし経路需要を割り当てた。`skyport-sim-10.3` を経て、`skyport-sim-10.4` ではフェーズ 1 の不具合修正（欠航便の手荷物の終端処理など。docs/42 §5.1）を反映した。**現在の `SIM_MODEL_VERSION` は `skyport-sim-10.4`**。ターミナル間連絡設備・垂直移動設備の時間当たり能力より大きい旅客グループは、複数の時間帯に分けて通路へ入る。10.2 以前の進行中シミュレーションは復元せず建設モードで開く。レイアウト・会社・過去の日報は保持する。同一モデルの保存で `airlineStandHomes` が欠けている場合は空の当日割当に移行する。
 - レイアウトの版を上げると、`exportLayout` と `serializeProject` の出力（`schemaVersion` を含む）が変わる。ゴールデンには `schemaVersion` を除いた版非依存のハッシュがあり、
   版更新の前後でこれが一致すれば、版番号以外の変化はない。
+
+### 版 4（フェーズ 2。実装済み）
+
+次のどれかを含むときだけ `formatVersion 4`（`versions.format` も 4）で書く。**どれも含まないプロジェクトは従来の版（1〜3）のまま書き、バイト列は変わらない**（`tests/unit/projectFormat4.test.ts`、ゴールデン）。
+
+| 項目 | 場所 | 検証（読み込みエラーの条件） |
+|---|---|---|
+| `taxiMode: 'block'` | `layout`（シナリオのレイアウトを含む） | `'block'` 以外 |
+| `city.nightOps`（最終出発時刻など） | `company`（シナリオ・運航中の会社を含む） | 範囲外・型違い（最終出発時刻 1200〜1305 分、上空待機 0〜120 分、警告の前倒し 0〜120 分、`inboundPolicy` は `originHold`） |
+| `state.taxiBlocks`（区間の占有・向きの確保・対向待ち・優先・統計） | `sim.state` | 存在しない区間・回廊・機体、終了状態の機体、空・重複、向き、統計の型、`taxiMode` が `block` でないレイアウト |
+| `Flight.nightHold` | `sim.state.flights` | 種類・時刻の不正、`releaseAt < decidedAt`、`city.nightOps` のない会社 |
+
+- `taxiBlockTiles`・誘導路の `blockMaxAircraft` は `taxiMode` が欠落のときに従来方式の運航へ影響しないため、これらだけでは版を上げない（範囲 4〜40 / 1〜10 の検証は常に行う）。
+- 理由: 旧アプリ（最大 3 まで読める）が上の項目を無視して従来方式で運航を続けると、区間の途中状態が不変条件に反して読まれるため。4 にすれば旧アプリは「新しい版」として拒否する。版 1〜3 を名乗るファイルに版 4 の項目がある場合も拒否する。
+- `SCHEMA_VERSION`（レイアウト）・`state.version`・`SIM_MODEL_VERSION` は上げない（任意項目の追加だけ・新方式は opt-in で既存レイアウトの結果は変わらない。`tests/unit/sim/legacyFingerprint.test.ts` とゴールデンで確認）。旧データの移行は不要（欠落 = 従来方式）。判断の経緯は [design/impl_phase2_plan.md](design/impl_phase2_plan.md) §1.6。
+- 区間の構造（`ctx.blocks`）・経路 → 区間の対応は配置と経路から作り直す派生データで、保存しない。
 
 ## 機種データの固定（カタログ更新との互換性）
 

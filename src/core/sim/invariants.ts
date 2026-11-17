@@ -4,6 +4,7 @@ import { otherEnd } from '../airside/network';
 import { resolveType } from './aircraftTypes';
 import { checkStand } from '../aircraft/compat';
 import { edgeIndexAt } from './routes';
+import { checkBlockInvariants } from './blockControl';
 import { MIN_GROUND_SEPARATION_M, TICK_SEC } from './rules';
 import { APRON_BUS_CAPACITY } from './busRules';
 import type { Simulation } from './simulation';
@@ -162,6 +163,8 @@ export function checkInvariants(sim: Simulation): string[] {
         out.push(`T2 ${ac.id} の経路 ${i} 番目のエッジ ${r.edges[i]} が接続していない`);
       }
     }
+    // 区間ごとの走行（state.taxiBlocks）は edgeReservations を使わない。代わりに B1〜B6（checkBlockInvariants）で検査する
+    if (state.taxiBlocks) continue;
     if (!['taxiIn', 'taxiOut', 'docking', 'vacating', 'holdShort', 'lineUp'].includes(ac.state)) continue;
     const i = edgeIndexAt(r, ac.dist);
     const e = ctx.network.edges[r.edges[i]!]!;
@@ -189,6 +192,7 @@ export function checkInvariants(sim: Simulation): string[] {
     const vmax = ac.state === 'takeoff' || ac.state === 'landing' ? 100 : 20;
     if (moved > vmax * TICK_SEC + 1e-6) out.push(`M1 ${ac.id}(${ac.state}) が1ティックで ${moved.toFixed(1)}m 移動`);
   }
+  if (state.taxiBlocks) out.push(...checkBlockInvariants(sim));
   out.push(...checkPaxInvariants(sim, false));
   out.push(...checkGroundInvariants(sim, false));
   if (state.bus) out.push(...checkBusInvariants(sim));

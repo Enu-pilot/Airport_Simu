@@ -5,6 +5,7 @@ import type { SimContext } from './context';
 import { holdWalkLimitM, walkToClear, type HoldRunway } from '../layout/holdShort';
 import { HOLD_SHORT_M, HOLD_SHORT_MAX_RATIO, SIN_MIN_HOLD } from './rules';
 import type { Aircraft, Route, SimState } from './types';
+import { releaseTaxiBlocks } from './blockState';
 
 /**
  * 経路（ノード列）と、経路上の位置・予約の扱い。
@@ -192,6 +193,7 @@ export function reserve(state: SimState, acId: string, parts: { nodes: string[];
 export function releaseAll(state: SimState, acId: string): void {
   for (const [k, v] of Object.entries(state.nodeReservations)) if (v === acId) delete state.nodeReservations[k];
   for (const [k, v] of Object.entries(state.edgeReservations)) if (v === acId) delete state.edgeReservations[k];
+  if (state.taxiBlocks) releaseTaxiBlocks(state, acId);
 }
 
 /**

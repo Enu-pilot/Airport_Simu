@@ -200,6 +200,13 @@ export function ReviewBody({ review }: { review: DayReview }) {
           {r.city.residentsStart !== undefined && r.city.residentsEnd !== undefined && <Row label="住民満足度" value={`${r.city.residentsStart.toFixed(1)} → ${r.city.residentsEnd.toFixed(1)}（${(r.city.residentDelta ?? 0) >= 0 ? '+' : ''}${(r.city.residentDelta ?? 0).toFixed(2)}）`} tone={(r.city.residentDelta ?? 0) < 0 ? 'warn' : undefined} />}
           {(r.city.events?.length ?? 0) > 0 && <Row label="開催イベント" value={r.city.events!.map((event) => `${({ festival: '祭り', sports: 'スポーツ大会', conference: '会議・展示会' } as const)[event.kind]}（規模${event.scale}・${event.location === 'cityCenter' ? '市街地' : '空港周辺'}）`).join('、')} />}
           {(r.city.eventDemandMultiplier ?? 1) > 1 && <Row label="イベント需要係数" value={`×${r.city.eventDemandMultiplier!.toFixed(2)} / 道路混雑 ×${(r.city.eventTrafficMultiplier ?? 1).toFixed(2)}`} />}
+          {r.night && (
+            <>
+              <Row label="最後の出発の離陸の遅れ" value={r.night.lastDepartureDelayMin === null ? '—' : `${r.night.lastDepartureDelayMin} 分`} tone={(r.night.lastDepartureDelayMin ?? 0) >= 60 ? 'warn' : undefined} />
+              <Row label="夜間の保留（スポット待機 / 出発地待機）" value={`${r.night.standHeld} / ${r.night.originHeld} 便`} />
+              <Row label="翌朝への持ち越し / ダイバート / 欠航" value={`${r.night.carriedOver} / ${r.night.diverted} / ${r.night.cancelled} 便`} tone={r.night.carriedOver > 0 ? 'warn' : undefined} />
+            </>
+          )}
           <div className="muted small">騒音ポイントは機種サイズ・エンジン数を使ったゲーム内指標で、実測dBではありません。都市設定時は夜間の着陸・離陸を06:00まで待機させます。</div>
         </Section>
       )}
@@ -375,6 +382,7 @@ function ReviewFlightDetail({ flight: f, review }: { flight: ReviewFlight; revie
             <Row label="到着遅延（実績 / 評価対象）" value={`${duration(f.actualArrivalDelaySec)} / ${duration(f.evaluatedArrivalDelaySec)}`} />
             <Row label="出発予定 / ブロックアウト / 離陸" value={`${hhmm(f.depScheduled)} / ${f.blockOut === null ? '実績なし' : hhmm(f.blockOut)} / ${f.takeoffAt === null ? '実績なし' : hhmm(f.takeoffAt)}`} />
             <Row label="出発遅延（実績 / 評価対象）" value={`${duration(f.actualDepartureDelaySec)} / ${duration(f.evaluatedDepartureDelaySec)}`} />
+            {f.takeoffDelaySec !== undefined && <Row label="離陸の遅れ（出発の実遅延とは別・夜間の待機を含む）" value={duration(f.takeoffDelaySec)} />}
             {f.departureGraceSec !== null && <Row label="折返し出発猶予" value={duration(f.departureGraceSec)} />}
           </div>
           <div>

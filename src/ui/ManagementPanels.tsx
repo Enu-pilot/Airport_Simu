@@ -8,7 +8,8 @@ import { BALANCE } from '../core/economy/balance';
 import { forecastForDay } from '../core/sim/weather';
 import { analyzeAccess, type AccessMode } from '../core/access/model';
 import { companyActions } from '../editor/simRunner';
-import { addCityEvent, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
+import { addCityEvent, setCompanyCity, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
+import { NightOpsSettings } from './NightOpsSettings';
 import { CITY_EVENT_KINDS, type CityEventKind, type CityEventLocation } from '../core/economy/city';
 import {
   ACCESS_MODE_LABEL,
@@ -41,6 +42,7 @@ const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 1000) 
 
 export function PlanPanel() {
   const c = useCompany();
+  const mode = useEditor((s) => s.mode);
   const layout = useLayout();
   const ctx = useMemo(() => createContext(layout), [layout]);
   const operable = operableTypes(ctx);
@@ -71,6 +73,7 @@ export function PlanPanel() {
       </div>
       <div className="issues-list mgmt-grid">
         <CityEventPlanner company={c} />
+        {c.city && <NightOpsSettings city={c.city} readOnly={mode === 'operate'} onChange={(next) => { const { nightOps: _n, ...rest } = c.city!; void _n; setCompanyCity(next ? { ...rest, nightOps: next } : rest); }} />}
         <section>
           <h4>契約中の路線</h4>
           <table className="board" data-testid="contracts">
