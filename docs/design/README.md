@@ -1,15 +1,28 @@
-# docs/design — 設計メモ・決定記録・調査資料
+# docs/design — 設計判断・調査資料・履歴
 
-各フェーズの設計書（設計責任者が作成）、PO の要望と決定の記録、監査の未対応項目、調査資料の写し。
-仕様の正は docs/00〜30 で、ここは経緯と今後の計画の記録（作業用のパスが残っている箇所がある）。
+このディレクトリは、設計の経緯・判断理由・監査補助資料・外部調査の根拠を保持します。**現在の機能仕様や実装進捗の正本ではありません。** 実装計画書は [docs/implementation/](../implementation/README.md) で状態別に管理します。
 
-| ファイル | 内容 |
-|---|---|
-| phase11_design.md | Phase 11 幾何基盤の設計（座標フレーム・データモデルの方針・リスク） |
-| phase12_design.md / phase12_decision_c1_m1.md | Phase 12 滑走路の自由設計、横断の占有漏れ（C1）と停止位置（M1）の判断 |
-| phase12b_roadmap.md | Phase 12B（運営体験）の全体計画: 12B-1〜4、地下（U）、Phase 13〜16 との順序 |
-| phase12b_3a_design.md | 12B-3a の詳細設計（A: リモートスポット・ランプバス・独立ゲート、B: 天候・難易度・評価・目標） |
-| phase12b_po_requests.md | PO の要望と決定の記録 |
-| phase12b_3a_audit_open_items.md | 12B-2・12B-3a 前半の独立監査で出た未対応の指摘 |
-| research_ground_geometry.md | 機種別の脚配置・旋回半径（Phase 14 用。メーカー資料から。A380 は未取得） |
-| research_runway_reference.md | 滑走路の参考寸法（FAA AC 150/5300-13B、EASA CS-ADR-DSN） |
+## PO 要望・判断記録
+- [phase12b_po_requests.md](phase12b_po_requests.md): Phase 12B の PO 要望と判断の記録。設計経緯の参照資料。
+
+## 調査・参考根拠
+- [research_ground_geometry.md](research_ground_geometry.md): 機種別の脚配置・旋回半径に関する調査。Phase 14 の参考資料。
+- [research_runway_reference.md](research_runway_reference.md): 滑走路寸法の参考値（FAA / EASA 資料）。
+
+## 過去フェーズの設計記録
+- [phase11_design.md](phase11_design.md): Phase 11 幾何基盤の設計・座標フレーム・データモデル方針。
+- [phase12_design.md](phase12_design.md): Phase 12 滑走路の自由設計。
+- [phase12_decision_c1_m1.md](phase12_decision_c1_m1.md): 滑走路横断の占有漏れ（C1）と停止位置（M1）の判断記録。
+- [phase12b_roadmap.md](phase12b_roadmap.md): Phase 12B と地下・後続フェーズの当時の全体計画。
+- [phase12b_3a_design.md](phase12b_3a_design.md): Phase 12B-3a の詳細設計。
+- これらは設計履歴です。現行仕様と異なる箇所があれば、日付・対象コミットを確認し、現行の機能別仕様書と実装を照合してください。
+
+## 監査補助資料・旧引継ぎ
+- [phase1_audit.md](phase1_audit.md): Phase 1 の監査記録。
+- [phase12b_3a_audit_open_items.md](phase12b_3a_audit_open_items.md): Phase 12B の当時の監査未対応項目。
+- [audit39_game_design_analysis.md](audit39_game_design_analysis.md): Audit 39 時点のゲームデザイン分析。
+- [audit39_traceability_inventory.md](audit39_traceability_inventory.md): Audit 39 時点の仕様・実装・テスト対応表。
+- [HANDOVER.md](HANDOVER.md): 2026-11-13 時点の古い引継ぎ。現在の再開情報には [HANDOFF_PROMPT.md](../../HANDOFF_PROMPT.md) を使用してください。
+
+## 実装計画書の旧パス
+従来の `impl_phaseN_plan.md` は状態別管理に移行しました。旧ファイルは新しい正本への案内のみを残しています。計画の編集は [docs/implementation/README.md](../implementation/README.md) の一覧にある正本で行ってください。

@@ -56,18 +56,20 @@ export function TextInput({ value, onCommit, testid }: { value: string; onCommit
   );
 }
 
-/** 整数の入力。範囲外・整数でない値は元に戻す */
+/** 整数の入力。範囲外・整数でない値は元に戻す。値が有限でない（未設定の項目を Number() した NaN など）ときは空欄で表示する */
 export function NumberInput({ value, min, max, onCommit, testid }: { value: number; min: number; max: number; onCommit: (v: number) => void; testid?: string }) {
-  const [draft, setDraft] = useState(String(value));
+  const shown = Number.isFinite(value) ? String(value) : '';
+  const [draft, setDraft] = useState(shown);
   const [prev, setPrev] = useState(value);
-  if (prev !== value) {
+  // NaN は !== では常に「変わった」になるため、Object.is で比較する（描画中の setState が無限ループし React #301 で全体が落ちるのを防ぐ）
+  if (!Object.is(prev, value)) {
     setPrev(value);
-    setDraft(String(value));
+    setDraft(shown);
   }
   const commit = () => {
     const v = Number(draft);
     if (!Number.isInteger(v) || v < min || v > max) {
-      setDraft(String(value));
+      setDraft(shown);
       return;
     }
     if (v !== value) onCommit(v);
