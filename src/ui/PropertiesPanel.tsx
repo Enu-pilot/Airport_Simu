@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import { Field, Info, NumberInput, Section, TextInput } from './fields';
 import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
-import { FACILITY_SPECS, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
+import { FACILITY_SPECS, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
+import { blockCapacity } from '../core/sim/taxiBlocks';
+import { blockGraphOf } from '../core/layout/blockGraph';
 import { apronBusesOf, connectedTerminal, gateMode } from '../core/model/gates';
 import { busGateStatus, resolveBusGateForStand } from '../core/terminal/busGateAssignment';
 import { compareIds, sortedValues } from '../core/model/ids';
@@ -61,6 +63,7 @@ import {
   STAND_GATE_FIX_NOTE,
   PLACEMENT_PROBLEM_LABEL,
   INTERIOR_CHILDREN_LABEL,
+  TAXI_UI,
 } from '../i18n/ja';
 
 export function PropertiesPanel() {
@@ -123,6 +126,31 @@ export function PropertiesPanel() {
 }
 
 const update = (layout: AirportLayout, id: string, patch: Record<string, unknown>) => applyOp(updateEntity(layout, id, patch));
+
+/** 誘導路の「区間の進入可能機数の上限」（フェーズ 2。区間ごとに進む方式のときだけ効く） */
+function TaxiBlockFields({ layout, id, readOnly }: { layout: AirportLayout; id: string; readOnly: boolean }) {
+  const e = layout.taxiways[id]!;
+  const graph = blockGraphOf(layout);
+  const blocks = graph ? (graph.edgeBlocks[id] ?? []).map((bid) => graph.blocks[bid]!) : [];
+  const caps = blocks.filter((b) => !b.entry).map((b) => blockCapacity(b, 1, 'M'));
+  return (
+    <>
+      <Field label={TAXI_UI.blockMax} title={TAXI_UI.blockMaxHelp}>
+        <select
+          value={e.blockMaxAircraft ?? ''}
+          disabled={readOnly}
+          onChange={(ev) => update(layout, id, { blockMaxAircraft: ev.target.value === '' ? null : Number(ev.target.value) })}
+          data-testid="prop-blockMax"
+        >
+          <option value="">{TAXI_UI.blockMaxAuto}</option>
+          {Array.from({ length: TAXI_BLOCK_MAX_AIRCRAFT }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </Field>
+      {layout.taxiMode !== 'block' && <div className="muted small" data-testid="prop-blockMax-inactive">{TAXI_UI.blockMaxInactive}</div>}
+      {graph && blocks.length > 0 && <Info label="区間" testid="prop-blocks">{TAXI_UI.blocksOf(blocks.length, caps.length ? (Math.min(...caps) === Math.max(...caps) ? String(caps[0]) : `${Math.min(...caps)}〜${Math.max(...caps)}`) : '—')}</Info>}
+    </>
+  );
+}
 
 /** 工事の状況（キャリア）と一時閉鎖 */
 function ProjectInfo({ layout, id, buildState }: { layout: AirportLayout; id: string; buildState: BuildState | undefined }) {
@@ -478,6 +506,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             </button>
           )}
         </Field>
+        <TaxiBlockFields layout={layout} id={id} readOnly={readOnly} />
         <Info label="区間">
           <EntityLink layout={layout} id={e.from} /> {e.oneWay ? '→' : '↔'} <EntityLink layout={layout} id={e.to} />
         </Info>

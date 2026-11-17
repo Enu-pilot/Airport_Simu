@@ -7607,7 +7607,11 @@
       "x": 104,
       "y": 57
      }
-    ]
+    ],
+    "vertical": {
+     "minM": -0.2,
+     "maxM": 0.2
+    }
    }
   ],
   "rd_2": [
@@ -7811,7 +7815,11 @@
       "x": 110,
       "y": 105
      }
-    ]
+    ],
+    "vertical": {
+     "minM": -0.2,
+     "maxM": 0.2
+    }
    }
   ],
   "rd_3": [
@@ -7847,7 +7855,11 @@
       "x": 110,
       "y": 57
      }
-    ]
+    ],
+    "vertical": {
+     "minM": -0.2,
+     "maxM": 0.2
+    }
    }
   ],
   "rd_4": [
@@ -7895,7 +7907,11 @@
       "x": 104,
       "y": 57
      }
-    ]
+    ],
+    "vertical": {
+     "minM": -0.2,
+     "maxM": 0.2
+    }
    }
   ],
   "std_1": [
@@ -8458,6 +8474,11 @@
    {
     "ownerId": "fac_1",
     "layer": "apron",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 0.2
+    },
     "tiles": [
      {
       "x": 40,
@@ -10906,6 +10927,11 @@
    {
     "ownerId": "fac_2",
     "layer": "building",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 21.599999999999998
+    },
     "tiles": [
      {
       "x": 46,
@@ -12450,6 +12476,11 @@
    {
     "ownerId": "fac_3",
     "layer": "gate",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 49,
@@ -12462,6 +12493,11 @@
    {
     "ownerId": "fac_4",
     "layer": "gate",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 54,
@@ -12474,6 +12510,11 @@
    {
     "ownerId": "fac_5",
     "layer": "gate",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 59,
@@ -12486,6 +12527,11 @@
    {
     "ownerId": "fac_6",
     "layer": "gate",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 64,
@@ -12498,6 +12544,11 @@
    {
     "ownerId": "fac_7",
     "layer": "gate",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 69,
@@ -12510,6 +12561,11 @@
    {
     "ownerId": "fac_8",
     "layer": "gate",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 74,
@@ -12522,6 +12578,11 @@
    {
     "ownerId": "fac_9",
     "layer": "gate",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 79,
@@ -12534,6 +12595,11 @@
    {
     "ownerId": "fac_10",
     "layer": "gate",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 84,
@@ -12546,6 +12612,11 @@
    {
     "ownerId": "fac_11",
     "layer": "gate",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 90,
@@ -12558,6 +12629,11 @@
    {
     "ownerId": "fac_12",
     "layer": "building",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 45
+    },
     "tiles": [
      {
       "x": 120,
@@ -12582,6 +12658,11 @@
    {
     "ownerId": "fac_13",
     "layer": "area",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 101,
@@ -12910,6 +12991,11 @@
    {
     "ownerId": "fac_14",
     "layer": "building",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 6
+    },
     "tiles": [
      {
       "x": 101,
@@ -12954,6 +13040,11 @@
    {
     "ownerId": "fac_15",
     "layer": "building",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 10
+    },
     "tiles": [
      {
       "x": 105,
@@ -12998,6 +13089,11 @@
    {
     "ownerId": "fac_16",
     "layer": "building",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 9
+    },
     "tiles": [
      {
       "x": 25,
@@ -13042,6 +13138,11 @@
    {
     "ownerId": "fac_17",
     "layer": "building",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 24
+    },
     "tiles": [
      {
       "x": 31,
@@ -13170,6 +13271,11 @@
    {
     "ownerId": "fac_18",
     "layer": "building",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 14
+    },
     "tiles": [
      {
       "x": 36,
@@ -13226,6 +13332,11 @@
    {
     "ownerId": "fac_19",
     "layer": "building",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 10
+    },
     "tiles": [
      {
       "x": 42,
@@ -13298,6 +13409,11 @@
    {
     "ownerId": "fac_20",
     "layer": "area",
+    "level": 0,
+    "vertical": {
+     "minM": 0,
+     "maxM": 3
+    },
     "tiles": [
      {
       "x": 60,

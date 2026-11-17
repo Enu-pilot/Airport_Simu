@@ -138,7 +138,7 @@
 
 ### 4.1 再現済み
 
-再現テストは通常のテスト群に入れていない（§1.2 の `AUDIT_KNOWN=1`）。
+監査の時点では、再現テストは通常のテスト群に入れていなかった（§1.2 の `AUDIT_KNOWN=1`）。フェーズ 1（docs/42 §2）で修正したものは、回帰テストとして `tests/unit/regression/`・`tests/e2e/` へ移した（下表の「状況」列）。
 
 | # | 重大度 | 内容 | 再現 | 期待 | 実際 | 関連コード・仕様 | 状況 |
 |---|---|---|---|---|---|---|---|
@@ -147,7 +147,7 @@
 | B-1 | 中 | 欠航・ダイバートした出発便の預け手荷物が最終状態にならない | `known-issues/b_bagsCancelled.repro.test.ts`（1 日 120 便、ダイバート便の 80 個が `madeUp` のまま） | 旅客がいなくなった手荷物は積まずに処理を終える（docs/13 §3） | `madeUp` のまま残り続け、積み残し件数にも入らない。処理中の手荷物数が増え続ける | `src/core/sim/baggage.ts:186`（呼び出しは `ground.ts:419,577` の作業時のみ） | 修正済み（フェーズ 1、回帰テスト tests/unit/regression/s_bagsCancelled.test.ts） |
 | T-1 | 低〜中 | 2 つのターミナルに接するゲートが、警告なしで ID の小さい方に割り当てられる | `known-issues/b_gateTwoTerminals.repro.test.ts` | 一意に決まらないときは推測しない（docs/35 §2.1(4)） | 最初に見つかった方を採用し、検証の指摘も出ない | `src/core/terminal/model.ts`（ゲートの走査の `.find`） | 修正済み（フェーズ 1、回帰テスト tests/unit/regression/s_gateTerminalModel.test.ts、tests/unit/regression/u_gateTwoTerminals.test.ts） |
 | U-1 | 中 | 画面の高さが約 955px 未満だと建設ツール箱が下にはみ出し、スクロールできない | `e2e-known/toolbox.repro.spec.ts`。1280×720 と 1600×900 | すべての建設ツールにマウスで届く | 1280×720 では鉄道駅・職員駐車場・ホテル・用地・階層切替、1600×900 では階層「2」のボタンに届かない | `src/ui/styles.css:79,91`（`.left` / `.toolbox` にスクロール指定がなく、body は `overflow: hidden`） | 修正済み（フェーズ 1、回帰テスト tests/e2e/toolbox.spec.ts） |
-| G-1 | 中 | ゴールデンテストが不一致（旧レイアウトの結果が版を上げずに変わった） | `npx vitest run tests/golden`。§1.1 の失敗一覧 | 旧レイアウトの結果は 1 ビットも変わらない（docs/29、docs/22） | 下の「G-1 の経緯」を参照 | `tests/golden/`、`src/core/scenario/scenario.ts:21` | 対応中（ゴールデンは未更新。版の扱いは人の判断待ち） |
+| G-1 | 中 | ゴールデンテストが不一致（旧レイアウトの結果が版を上げずに変わった） | `npx vitest run tests/golden`。§1.1 の失敗一覧 | 旧レイアウトの結果は 1 ビットも変わらない（docs/29、docs/22） | 下の「G-1 の経緯」を参照 | `tests/golden/`、`src/core/scenario/scenario.ts:21` | 修正済み（2026-11-17。版 10.4 で再取得、docs/42 §5.1）（ゴールデンは未更新。版の扱いは人の判断待ち） |
 | X-1 | 中 | 既存の `tests/unit/economy.test.ts` の 2 件が単独実行でも失敗 | `npx vitest run tests/unit/economy.test.ts --testTimeout=300000` | 増便すると遅延が増える（371 行）／作業員を減らすと定時運航率が下がる（407 行） | 「0 より大きい」に対し 0、「64 未満」に対し 64 | 遅延の算定（評価対象の遅延と実績の遅延を分けた変更の後から）。テストの前提と仕様のどちらが正しいかは未判定 | 対応済み（フェーズ 1、1-18。オーナー承認のもとで `tests/unit/economy.test.ts` の 3 つの日次便数の前提を更新。コードの不具合は見つからず） |
 
 **G-1 の経緯**（コミットごとに既存ゴールデンと照合して特定。ゴールデンは更新していない）:

@@ -26,6 +26,8 @@ export interface PathQuery {
   /** 通れない（他機が予約中の）エッジ・ノード */
   blockedEdge?: (edgeId: string) => boolean;
   blockedNode?: (nodeId: string) => boolean;
+  /** fromNode から edgeId へ進む動きが通れないか（区間ごとの走行: 逆向きの回廊など。なければ従来どおり） */
+  blockedMove?: (edgeId: string, fromNode: string) => boolean;
 }
 
 export interface PathResult {
@@ -108,6 +110,7 @@ export function findPath(net: AirsideNetwork, q: PathQuery): PathResult | null {
       if (e.kind === 'standLink' && !allow.has(e.sourceId)) continue;
       if (!canAircraftUse(e, q.size, { operationalOnly: true, codeF: !!q.codeF })) continue;
       if (q.blockedEdge?.(eid)) continue;
+      if (q.blockedMove?.(eid, node)) continue;
       const next = otherEnd(e, node);
       if (q.blockedNode?.(next)) continue;
       const nextNode = net.nodes[next]!;

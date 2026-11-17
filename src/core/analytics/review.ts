@@ -8,6 +8,7 @@ import type { AircraftState, DisruptionKind, TaskKind, WxLevel } from '../sim/ty
 import type { FlightRecord } from './records';
 import type { AirlineRequest, RequestKind } from '../economy/airlineEval';
 import type { ScoreComponent, ScoreKey } from '../economy/airlineScore';
+import { takeoffDelaySec } from '../economy/takeoffDelay';
 import { evaluateDelayPair } from '../economy/delayEvaluation';
 import { resolveType } from '../sim/aircraftTypes';
 import { designatorsOf } from '../layout/designators';
@@ -109,6 +110,8 @@ export interface ReviewFlight {
   actualDepartureDelaySec: number | null;
   evaluatedDepartureDelaySec: number | null;
   departureGraceSec: number | null;
+  /** 離陸の遅れ（秒。city.nightOps があるときだけ。出発の実遅延・評価対象の遅延とは別の指標。docs/36） */
+  takeoffDelaySec?: number | null;
   arrivalCauses: string[] | null;
   departureCauses: string[] | null;
   causes: string[];
@@ -298,8 +301,10 @@ export function buildReviewFlights(input: {
   types: ReviewInput['sim']['ctx']['types'];
   airlineAnalysis?: DailyAirlineAnalysis;
   details?: Record<string, ReviewFlightDetails>;
+  /** 機体 ID → 離陸の遅れ（秒）。渡したときだけ各便に takeoffDelaySec を付ける */
+  takeoffDelays?: Record<string, number | null>;
 }): ReviewFlight[] {
-  const { records, from, to, types, airlineAnalysis, details = {} } = input;
+  const { records, from, to, types, airlineAnalysis, details = {}, takeoffDelays } = input;
   const all = records.filter((r) => inPeriod(r.landedAt, from, to) || inPeriod(r.blockOut, from, to) || inPeriod(r.takeoffAt, from, to) || (r.result !== 'completed' && inPeriod(recordTime(r), from, to)));
   const rows = all.map((r): ReviewFlight => {
     const detail = details[r.aircraftId] ?? {};
@@ -343,6 +348,7 @@ export function buildReviewFlights(input: {
       actualDepartureDelaySec: r.blockOut === null ? null : delay.actualDepartureSec,
       evaluatedDepartureDelaySec: r.blockOut === null ? null : delay.departureSec,
       departureGraceSec: r.blockOut === null ? null : delay.departureGraceSec,
+      ...(takeoffDelays ? { takeoffDelaySec: takeoffDelays[r.aircraftId] ?? null } : {}),
       arrivalCauses: detail.arrivalCauses ? [...detail.arrivalCauses] : null,
       departureCauses: detail.departureCauses ? [...detail.departureCauses] : null,
       causes: [...r.causes],
@@ -465,7 +471,11 @@ export function buildDayReview(input: ReviewInput): DayReview {
       ],
     };
   }
-  const flights = buildReviewFlights({ records, from: dayStart, to: end, types: sim.ctx.types, airlineAnalysis: airlineSnapshot, details });
+  // 離陸の遅れは夜間の運用設定（city.nightOps）があるときだけ付ける。従来のレビューは変わらない
+  const takeoffDelays = company.city?.nightOps
+    ? Object.fromEntries(records.map((r) => [r.aircraftId, takeoffDelaySec(sim, r.aircraftId)]))
+    : undefined;
+  const flights = buildReviewFlights({ records, from: dayStart, to: end, types: sim.ctx.types, airlineAnalysis: airlineSnapshot, details, takeoffDelays });
   // Tomorrow's constraints are shown in their own section and are never used as today's evaluation reasons.
   const tomorrowPlan = planDayWithDemand(company, company.day, access, sim.ctx.types, routeCapabilitiesForAirport(sim.ctx.layout.countryId));
   const tomorrowAnalysis = analyzeDayPlan(tomorrowPlan, sim.ctx);

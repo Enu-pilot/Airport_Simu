@@ -151,6 +151,8 @@ export interface DailyReport {
   kpi: DailyKpi;
   /** 目標の報酬の現金（営業収支には入れない。目標を有効にした会社で報酬があった日だけ） */
   grants?: number;
+  /** 夜間の運用（city.nightOps）があるときだけ（フェーズ 2、R15）。持ち越し便はその便の予定日に数える */
+  night?: { lastDepartureDelayMin: number | null; standHeld: number; originHeld: number; carriedOver: number; diverted: number; cancelled: number };
   city?: { type: CityType; populationStart: number; populationEnd: number; demandCeiling: number; expectedPax: number; actualPax: number; cityFactor: number; roadQuality: number; railQuality: number; residentsStart?: number; residentsEnd?: number; residentDelta?: number; noiseMovements?: number; nightMovements?: number; noisePoints?: number; events?: CityEvent[]; eventDemandMultiplier?: number; eventTrafficMultiplier?: number };
 }
 

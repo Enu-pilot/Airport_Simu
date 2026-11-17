@@ -1,4 +1,4 @@
-import { FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M } from '../model/catalog';
+import { FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, TAXI_BLOCK_MAX_AIRCRAFT, TAXI_BLOCK_TILES_MAX, TAXI_BLOCK_TILES_MIN } from '../model/catalog';
 import { runwayDimsProblem } from '../model/runwayReference';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
 import { COUNTRIES } from '../economy/registry';
@@ -121,6 +121,28 @@ export function checkRunwayFields(layout: AirportLayout, where: string): string[
   return errors;
 }
 
+/**
+ * 区間ごとに進む地上走行（フェーズ 2）の設定の検査。欠落は従来どおりで許す（従来のファイルは何も足さない）。
+ * 対象: layout.taxiMode・taxiBlockTiles、誘導路の blockMaxAircraft。
+ */
+export function checkTaxiFields(layout: AirportLayout, where: string): string[] {
+  const errors: string[] = [];
+  const raw = layout as unknown as { taxiMode?: unknown; taxiBlockTiles?: unknown };
+  if (raw.taxiMode !== undefined && raw.taxiMode !== 'block') errors.push(`${where}: 地上走行の方式（taxiMode）が不正です`);
+  const t = raw.taxiBlockTiles;
+  if (t !== undefined && (typeof t !== 'number' || !Number.isInteger(t) || t < TAXI_BLOCK_TILES_MIN || t > TAXI_BLOCK_TILES_MAX)) {
+    errors.push(`${where}: 区間の長さ（taxiBlockTiles）は ${TAXI_BLOCK_TILES_MIN}〜${TAXI_BLOCK_TILES_MAX} の整数が必要です`);
+  }
+  for (const [id, e] of Object.entries(layout.taxiways ?? {})) {
+    if (!isObj(e)) continue;
+    const v = (e as unknown as { blockMaxAircraft?: unknown }).blockMaxAircraft;
+    if (v !== undefined && (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > TAXI_BLOCK_MAX_AIRCRAFT)) {
+      errors.push(`${where}: 誘導路 ${id} の進入可能機数の上限（blockMaxAircraft）は 1〜${TAXI_BLOCK_MAX_AIRCRAFT} の整数が必要です`);
+    }
+  }
+  return errors;
+}
+
 /** JSON から読み込む。形式が不正な場合は例外 */
 export function importLayout(json: string): AirportLayout {
   const data = JSON.parse(json) as Partial<LayoutFile>;
@@ -134,7 +156,7 @@ export function importLayout(json: string): AirportLayout {
   const errors = validateLayoutData(l);
   if (errors.length) throw new Error(errors[0]);
   // Phase 12 の新しい項目だけの検査（localStorage の復元などもここを通る。従来形の有効なデータには何も足さない）
-  const fieldErrors = checkRunwayFields(l, 'レイアウト');
+  const fieldErrors = [...checkRunwayFields(l, 'レイアウト'), ...checkTaxiFields(l, 'レイアウト')];
   if (fieldErrors.length) throw new Error(fieldErrors[0]);
   return l;
 }

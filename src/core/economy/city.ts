@@ -29,6 +29,22 @@ export interface CityConfig {
   railQuality: 0 | 1 | 2 | 3 | 4 | 5;
   residents: number;
   events?: CityEvent[];
+  /** 出発時刻の制限と夜間の運用（フェーズ 2、docs/40）。欠落 = 従来どおり */
+  nightOps?: CityNightOps;
+}
+
+export interface CityNightOps {
+  version: 1;
+  /** 最終出発時刻（日内の分）。既定 1275（21:15）。範囲 1200〜1305 */
+  departureCutoffMin: number;
+  /** 夜間にかかる到着の扱い（R10）。フェーズ 2 は出発地で待機のみ */
+  inboundPolicy: 'originHold';
+  /** 上空の夜間待機の上限（分）。既定 30、範囲 0〜120 */
+  airborneHoldMaxMin: number;
+  /** 予測離陸が制限開始の何分前を越えたら警告するか。既定 20、範囲 0〜120 */
+  warnLeadMin: number;
+  /** 持ち越しの危険がある便を優先する。既定 false */
+  prioritizeAtRisk: boolean;
 }
 
 export const CITY_NIGHT_CURFEW = { fromMin: 22 * 60, toMin: 6 * 60 } as const;
@@ -45,8 +61,77 @@ export function nextCityMovementTime(at: number): number {
   return at < morning ? morning : morning + 86_400;
 }
 
-export function cityOperatingHours(hours: OperatingHours): OperatingHours {
-  return { ...hours, openMin: Math.max(hours.openMin, CITY_NIGHT_CURFEW.toMin), closeMin: Math.min(hours.closeMin, CITY_NIGHT_CURFEW.fromMin) };
+/** 最終出発時刻の既定・範囲（docs/40 R1・R2。既定は制限開始 22:00 の 45 分前 = 21:15） */
+export const NIGHT_OPS_DEFAULTS = {
+  departureCutoffMin: 1275,
+  airborneHoldMaxMin: 30,
+  warnLeadMin: 20,
+} as const;
+export const NIGHT_OPS_RANGES = {
+  departureCutoffMin: { min: 1200, max: 1305 },
+  airborneHoldMaxMin: { min: 0, max: 120 },
+  warnLeadMin: { min: 0, max: 120 },
+} as const;
+
+/** 夜間の運用設定の既定値。新規ゲームで都市を選んだときだけ画面から入れる（defaultCity は変えない） */
+export function defaultCityNightOps(): CityNightOps {
+  return { version: 1, ...NIGHT_OPS_DEFAULTS, inboundPolicy: 'originHold', prioritizeAtRisk: false };
+}
+
+const inRange = (v: unknown, r: { min: number; max: number }): boolean => typeof v === 'number' && Number.isInteger(v) && v >= r.min && v <= r.max;
+
+/** nightOps の形の検査。isCityConfig は見ない（不正な都市設定を丸ごと捨てる既存の正規化を巻き込まないため）。project.ts の検証で使う */
+export function isCityNightOps(value: unknown): value is CityNightOps {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const o = value as Record<string, unknown>;
+  return o.version === 1
+    && o.inboundPolicy === 'originHold'
+    && inRange(o.departureCutoffMin, NIGHT_OPS_RANGES.departureCutoffMin)
+    && inRange(o.airborneHoldMaxMin, NIGHT_OPS_RANGES.airborneHoldMaxMin)
+    && inRange(o.warnLeadMin, NIGHT_OPS_RANGES.warnLeadMin)
+    && typeof o.prioritizeAtRisk === 'boolean';
+}
+
+/** nightOps の各項目を範囲に収める（画面の入力用。整数に丸める） */
+export function clampNightOps(n: CityNightOps): CityNightOps {
+  const c = (v: number, r: { min: number; max: number }) => Math.max(r.min, Math.min(r.max, Math.round(Number.isFinite(v) ? v : r.min)));
+  return {
+    ...n,
+    departureCutoffMin: c(n.departureCutoffMin, NIGHT_OPS_RANGES.departureCutoffMin),
+    airborneHoldMaxMin: c(n.airborneHoldMaxMin, NIGHT_OPS_RANGES.airborneHoldMaxMin),
+    warnLeadMin: c(n.warnLeadMin, NIGHT_OPS_RANGES.warnLeadMin),
+  };
+}
+
+/**
+ * 都市設定があるときの運用時間。`city.nightOps` があれば閉店を最終出発時刻でも切る（フェーズ 2、R5）。
+ * 計画の出発 = 到着 + 折り返しなので、到着の上限が closeMin − 折り返し時間となり、出発は最終出発時刻以前に収まる。
+ * nightOps なしは従来と同じ（第 2 引数を省略しても同じ）。
+ */
+export function cityOperatingHours(hours: OperatingHours, city?: CityConfig): OperatingHours {
+  const closeMin = city?.nightOps
+    ? Math.min(hours.closeMin, CITY_NIGHT_CURFEW.fromMin, city.nightOps.departureCutoffMin)
+    : Math.min(hours.closeMin, CITY_NIGHT_CURFEW.fromMin);
+  return { ...hours, openMin: Math.max(hours.openMin, CITY_NIGHT_CURFEW.toMin), closeMin };
+}
+
+/** 最終出発時刻（日内の分）。nightOps がなければ null（制限なし = 従来どおり） */
+export function departureCutoffMin(city: CityConfig | undefined): number | null {
+  return city?.nightOps ? city.nightOps.departureCutoffMin : null;
+}
+
+/**
+ * 手動で足す便の出発が最終出発時刻を過ぎるときの警告（R7。禁止はしない）。nightOps がなければ null。
+ * `departureAt` は秒（日をまたぐ値でもよい。日内の分で見る）。
+ */
+export function departureCutoffIssue(city: CityConfig | undefined, departureAt: number): string | null {
+  const cutoff = departureCutoffMin(city);
+  if (cutoff === null) return null;
+  const minute = Math.floor((((departureAt % 86_400) + 86_400) % 86_400) / 60);
+  if (minute <= cutoff) return null;
+  const hh = String(Math.floor(cutoff / 60)).padStart(2, '0');
+  const mm = String(cutoff % 60).padStart(2, '0');
+  return `この出発は最終出発時刻 ${hh}:${mm} を過ぎています。夜間の制限で止まり、翌朝の出発になる可能性があります`;
 }
 
 /** 機種ごとのゲーム内騒音ポイント。dB値や現実の曝露量を表さない。 */

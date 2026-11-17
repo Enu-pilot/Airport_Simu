@@ -2,7 +2,7 @@ import { Rng } from '../rng';
 import { compareIds, sortedValues } from '../model/ids';
 import type { AirportLayout, SizeClass } from '../model/types';
 import { canAircraftUse, otherEnd } from '../airside/network';
-import { resolveType, takeoffDistanceM, takeoffRollSec, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
+import { resolveType, takeoffDistanceM, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
 import { checkRunway, checkStand } from '../aircraft/compat';
 import { createContext, operableTypes, orderedRunway, type SimContext } from './context';
 import { findPath } from './pathfinding';
@@ -22,6 +22,7 @@ import {
 } from './routes';
 import {
   APPROACH_SEC,
+  BLOCK_REQUEST_AHEAD_M,
   ARRIVAL_AFTER_DEPARTURE_SEC,
   CROSSING_WINDOW_SEC,
   DAY_SEC,
@@ -62,7 +63,7 @@ import {
   type SimState,
 } from './types';
 import { TILE_M } from '../model/catalog';
-import { completeExit, emptyFlightPax, serversOf, stepPassengers } from './passengers';
+import { BOARDING_LEAD_MIN, completeExit, emptyFlightPax, serversOf, stepPassengers } from './passengers';
 import { createAccessRuntime, refreshAccess, stepAccess } from '../access/runtime';
 import { stepDisruptions, weatherEffects, type ResponseResult } from './disruptions';
 import { createWx, rollWeatherGoAround, disruptionScaleFor, stepWeather } from './weatherStep';
@@ -72,11 +73,14 @@ import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEc
 import { analyzeDayPlan, planDayWithDemand } from '../economy/planning';
 import { routeCapabilitiesForAirport } from '../economy/registry';
 import { stepBaggage } from './baggage';
+import { atRiskForNight, lineUpToAirborneSec, nightOpsOf, predictTakeoffAt, standReleaseAt } from './nightOps';
+import { acquireNext, acquireRoute, blockMovementLimit, createTaxiBlockState, detectTaxiStall, noteOpposed, opposedMove, pendingChainDistance, releaseBlocksPassed, routeBlocks } from './blockControl';
 import { createApronBusRuntime, stepApronBuses } from './apronBus';
 import { isCityNightMovement, nextCityMovementTime } from '../economy/city';
 import { addExternalDelay } from '../economy/delayEvaluation';
 import {
   allTurnaroundDone,
+  cancelPushbackTask,
   cancelTasks,
   completePushback,
   createGroundUnits,
@@ -194,6 +198,8 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     if (wx) state.wx = wx;
   }
   createGroundUnits(sim);
+  // 区間ごとに進む地上走行（taxiMode 'block'）だけ占有の状態を持つ（従来の運航にはキー自体を作らない）
+  if (ctx.blocks) state.taxiBlocks = createTaxiBlockState();
   // バスゲートがある運航だけランプバスの運行の状態を持つ（従来の運航にはキー自体を作らない）
   if (ctx.busGates.length > 0) state.bus = createApronBusRuntime();
   if (state.settings.autoSchedule) generateDaySchedule(sim, Math.floor(state.now / DAY_SEC));
@@ -260,6 +266,9 @@ const HOLD_TO_DELAY: Partial<Record<HoldReason, DelayCause>> = {
   boarding: 'boarding',
   groundCrew: 'groundHandling',
   noiseCurfew: 'noiseRestriction',
+  blockFull: 'taxiCongestion',
+  opposingTraffic: 'taxiCongestion',
+  runwayQueue: 'runwayQueue',
 };
 
 const typeOf = (sim: Simulation, ac: Aircraft): AircraftType => resolveType(sim.ctx.types, ac.typeId);
@@ -503,6 +512,11 @@ function pathBlockers(sim: Simulation, acId: string, avoidTraffic: boolean) {
   const net = sim.ctx.network;
   const isClosed = (e: string) => closed.length > 0 && closed.includes(net.edges[e]!.sourceId);
   if (!avoidTraffic) return closed.length > 0 ? { blockedEdge: isClosed } : {};
+  if (sim.ctx.blocks) {
+    // 区間ごとの走行: 他機が逆向きに確保している回廊を避ける（交差点・区間の枠は確保の待ちで解決する）
+    const mv = { blockedMove: (e: string, from: string) => opposedMove(sim, acId, e, from) };
+    return closed.length > 0 ? { blockedEdge: isClosed, ...mv } : mv;
+  }
   const b = blockers(sim.state, acId);
   return { blockedEdge: (e: string) => isClosed(e) || b.blockedEdge(e), blockedNode: b.blockedNode };
 }
@@ -528,7 +542,7 @@ function arrivalPath(sim: Simulation, ac: Aircraft, runwayId: string, standId: s
   return { rw, exit, path };
 }
 
-function departurePath(sim: Simulation, ac: Aircraft, avoidTraffic: boolean) {
+export function departurePath(sim: Simulation, ac: Aircraft, avoidTraffic: boolean) {
   const type = typeOf(sim, ac);
   const stand = ac.standId ? sim.ctx.stands[ac.standId] : undefined;
   if (!stand) return null;
@@ -700,6 +714,15 @@ export function stepSimulation(sim: Simulation): void {
   stepDisruptions(sim);
   if (state.wx) stepWeather(sim, cancelTurnaround);
   runwayControl(sim);
+  if (state.taxiBlocks) {
+    taxiBlockControl(sim);
+    // 規則 4: 停止の検出と解消（5 秒ごと。待機機だけ）
+    if (state.now % RETRY_SEC === 0) {
+      for (const r of detectTaxiStall(sim)) {
+        if (r.action === 'unresolved') logEvent(state, { t: state.now, kind: 'disruption', aircraftId: r.aircraftId, note: `taxiGridlock: ${r.cycle.join(',')}` });
+      }
+    }
+  }
   for (const ac of all) stepAircraft(sim, ac);
   stepPassengers(sim);
   if (state.bus) stepApronBuses(sim);
@@ -711,6 +734,18 @@ export function stepSimulation(sim: Simulation): void {
   state.now += TICK_SEC;
 }
 
+/**
+ * 滑走路 rid の離陸待ちの列（先頭 = 次に離陸許可を得る機体）。待ち始めた順（同じなら ID 順）。
+ * nightOps.prioritizeAtRisk のときだけ、持ち越しの危険がある機体（予測離陸が制限開始の warnLeadMin 分前を越える）を先にする。既定 false では並びは変わらない。
+ */
+export function departureQueue(sim: Simulation, rid: string, aircraft: Aircraft[] = sortedValues(sim.state.aircraft)): Aircraft[] {
+  const queue = aircraft
+    .filter((a) => a.state === 'holdShort' && a.runwayId === rid)
+    .sort((a, b) => a.queuedSince! - b.queuedSince! || compareIds(a.id, b.id));
+  if (nightOpsOf(sim)?.prioritizeAtRisk) queue.sort((a, b) => Number(atRiskForNight(sim, b)) - Number(atRiskForNight(sim, a)) || a.queuedSince! - b.queuedSince! || compareIds(a.id, b.id));
+  return queue;
+}
+
 /** 滑走路ごとの出発・横断の許可（到着の進入許可は到着機側の処理で行う） */
 function runwayControl(sim: Simulation): void {
   const { state } = sim;
@@ -718,17 +753,23 @@ function runwayControl(sim: Simulation): void {
   for (const rid of Object.keys(state.runways).sort(compareIds)) {
     const rs = state.runways[rid]!;
     // 出発: 離陸待ちの先頭（到着順）
-    const queue = aircraft
-      .filter((a) => a.state === 'holdShort' && a.runwayId === rid)
-      .sort((a, b) => a.queuedSince! - b.queuedSince! || compareIds(a.id, b.id));
+    const queue = departureQueue(sim, rid, aircraft);
     const head = queue[0];
     if (head) {
-      const reason = departureBlocked(sim, rid, typeOf(sim, head), head);
+      let reason = departureBlocked(sim, rid, typeOf(sim, head), head);
+      // 区間ごとの走行: 整列の進入ノードを確保してから整列に入る（他機の横断・予約と重ならない）
+      if (!reason && sim.ctx.blocks && head.route) {
+        const node = head.route.nodes[head.route.nodes.length - 1]!;
+        if ((state.nodeReservations[node] ?? head.id) !== head.id) reason = 'runwayBusy';
+        else state.nodeReservations[node] = head.id;
+      }
       if (!reason) {
         rs.occupant = { aircraftId: head.id, purpose: 'takeoff', since: state.now };
         setHold(state, head, null);
         setState(state, head, 'lineUp');
       } else {
+        // 夜間のスポット待機の予測が外れて滑走路手前で夜間待機になった機体（取りこぼし）を数える（block のときだけ統計を持つ）
+        if (reason === 'noiseCurfew' && head.holdReason !== 'noiseCurfew' && nightOpsOf(sim) && state.taxiBlocks) state.taxiBlocks.stats.nightStranded++;
         setHold(state, head, reason);
         if (reason === 'noiseCurfew') addDelayCause(state.flights[head.departureFlightId]!, 'noiseRestriction');
         else if (state.now - head.queuedSince! > 5 * 60) addDelayCause(state.flights[head.departureFlightId]!, 'runwayQueue');
@@ -746,6 +787,8 @@ function runwayControl(sim: Simulation): void {
         const s = state.runways[id]!;
         return !s.occupant && (!s.booking || s.booking.eta - state.now >= CROSSING_WINDOW_SEC);
       }));
+      // 区間ごとの走行: 向こう側の入口の小片から、止まれる最初の区間までのチェーンを確保できるときだけ許可する（滑走路上で止まらない）
+      if (free && sim.ctx.blocks && ac.route && acquireNext(sim, ac, { allowAfterRunway: true }).ok === false) continue;
       if (free) {
         for (const c of chain) for (const id of [c.runwayId, ...(c.alsoRunwayIds ?? [])]) state.runways[id]!.occupant = { aircraftId: ac.id, purpose: 'crossing', since: state.now };
         if (ac.crossing) (ac.heldCrossings ??= []).push(ac.crossing);
@@ -757,14 +800,57 @@ function runwayControl(sim: Simulation): void {
   }
 }
 
+/**
+ * 区間ごとの走行（taxiMode 'block'）: 停止位置が近づいた機体の次のチェーンの確保を、待ち始めた順（同じなら ID 順）にまとめて試す。
+ * 確保できない機体は、止まっているときだけ待機の理由（blockFull）を付ける。
+ */
+function taxiBlockControl(sim: Simulation): void {
+  const { state } = sim;
+  const reqs: Aircraft[] = [];
+  for (const ac of sortedValues(state.aircraft)) {
+    if (!ac.route || !['taxiOut', 'taxiIn', 'vacating', 'landing'].includes(ac.state)) continue;
+    const d = pendingChainDistance(sim, ac);
+    if (d === null) continue;
+    const brake = (ac.speed * ac.speed) / (2 * TAXI_DECEL);
+    if (d < brake + BLOCK_REQUEST_AHEAD_M) reqs.push(ac);
+  }
+  reqs.sort((a, b) => (a.waitSince ?? state.now) - (b.waitSince ?? state.now) || compareIds(a.id, b.id));
+  for (const ac of reqs) {
+    const res = acquireNext(sim, ac);
+    if (res.ok === true) {
+      if (ac.holdReason === 'blockFull' || ac.holdReason === 'opposingTraffic') setHold(state, ac, null);
+    } else if (res.ok === false && ac.speed < 0.5) {
+      setHold(state, ac, res.reason);
+      const f = state.flights[ac.state === 'taxiOut' ? ac.departureFlightId : ac.arrivalFlightId];
+      if (f) addDelayCause(f, 'taxiCongestion');
+    }
+  }
+}
+
+/** 区間ごとの走行: 追従で止まっている機体の待機の理由（前の機体が滑走路手前の列なら runwayQueue、満杯の列なら blockFull）。動き出したら外す */
+function blockHoldReason(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  const bl = blockMovementLimit(sim, ac);
+  const stopped = ac.speed < 0.5 && ac.dist >= Math.min(bl.limit, Infinity) - 1;
+  if (bl.cause === 'follow' && stopped && bl.leader) {
+    const p = state.aircraft[bl.leader]!;
+    const reason: HoldReason | null = p.state === 'holdShort' || p.state === 'lineUp' || p.holdReason === 'runwayQueue' ? 'runwayQueue' : p.holdReason === 'blockFull' ? 'blockFull' : null;
+    if (reason) {
+      setHold(state, ac, reason);
+      const f = state.flights[ac.state === 'taxiOut' ? ac.departureFlightId : ac.arrivalFlightId];
+      if (f) addDelayCause(f, HOLD_TO_DELAY[reason]!);
+    }
+    return;
+  }
+  if (ac.speed >= 0.5 && ac.holdReason && ['blockFull', 'opposingTraffic', 'runwayQueue'].includes(ac.holdReason)) setHold(state, ac, null);
+}
+
 function departureBlocked(sim: Simulation, rid: string, type: AircraftType, aircraft: Aircraft): HoldReason | null {
   const size = type.size;
   const { state } = sim;
   const rs = state.runways[rid]!;
   if (sim.company?.city) {
-    const lineUpSec = aircraft.route ? Math.max(0, routeLength(aircraft.route) - aircraft.dist) / LINEUP_SPEED : 0;
-    const takeoffSec = takeoffRollSec(type);
-    if (isCityNightMovement(state.now + lineUpSec + LINEUP_ALIGN_SEC + takeoffSec)) return 'noiseCurfew';
+    if (isCityNightMovement(state.now + lineUpToAirborneSec(sim, aircraft))) return 'noiseCurfew';
   }
   if (!runwayUsable(sim, rid, type, 'dep')) return 'runwayBusy';
   if (rs.occupant) return 'runwayBusy';
@@ -851,6 +937,11 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
     case 'scheduled': {
       const arr = state.flights[ac.arrivalFlightId]!;
       if (state.now >= arr.estimated - INBOUND_LEAD_SEC) {
+        // 夜間にかかる到着は出発地で待機させ、朝に現れる（city.nightOps のときだけ。上空で一晩待たない）
+        if (nightOpsOf(sim) && isCityNightMovement(arr.estimated)) {
+          holdAtOrigin(sim, ac);
+          return;
+        }
         arr.status = 'active';
         setState(state, ac, 'inbound');
         logEvent(state, { t: state.now, kind: 'spawn', aircraftId: ac.id });
@@ -961,8 +1052,15 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
           state.groundStats.lateReadyFlights++;
           state.groundStats.lateReadySec += state.now - dep.scheduled;
         }
-        dep.estimated = Math.max(dep.scheduled, state.now);
+        dep.estimated = dep.nightHold ? Math.max(dep.estimated, dep.scheduled, state.now) : Math.max(dep.scheduled, state.now);
         setState(state, ac, 'readyForPushback');
+        return;
+      }
+      // 夜間のスポット待機: 搭乗を始める前に、予測離陸が夜間なら止める（早い判定。city.nightOps のときだけ）
+      if (nightOpsOf(sim)) {
+        const dep = state.flights[ac.departureFlightId]!;
+        const lead = BOARDING_LEAD_MIN[type.size] * 60 + 300;
+        if (state.now >= dep.estimated - lead && !(dep.nightHold && state.now < dep.nightHold.releaseAt)) holdDepartureAtStand(sim, ac);
       }
       return;
     case 'readyForPushback':
@@ -993,7 +1091,13 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
       moveTaxi(sim, ac);
       const r = ac.route!;
       const limit = movementLimit(sim, ac);
-      const holdAt = r.cum[r.nodes.length - 1]! - holdShortOnRoute(sim.ctx, r, r.nodes.length - 1, -1);
+      let holdAt = r.cum[r.nodes.length - 1]! - holdShortOnRoute(sim.ctx, r, r.nodes.length - 1, -1);
+      if (sim.ctx.blocks) {
+        // 滑走路手前の区間の終わりが停止位置より手前なら、そこで止まる（区間の外へは出ない）
+        const refs = routeBlocks(sim.ctx, r).refs;
+        const lastRef = refs[refs.length - 1];
+        if (lastRef && lastRef.exitDist < holdAt) holdAt = lastRef.exitDist;
+      }
       if (ac.dist >= holdAt - 0.01 && limit <= holdAt + 0.01) {
         ac.speed = 0;
         ac.queuedSince = state.now;
@@ -1054,6 +1158,12 @@ function stepInbound(sim: Simulation, ac: Aircraft): void {
   const arr = state.flights[ac.arrivalFlightId]!;
   const dep = state.flights[ac.departureFlightId]!;
   const ready = state.now >= arr.estimated - APPROACH_SEC;
+  // 上空の夜間待機の上限（city.nightOps のときだけ）: 超えたらダイバート。既存の HOLD_DIVERT_SEC の判定とは別（夜間待機の時間は数えない）
+  const nightCap = nightOpsOf(sim);
+  if (nightCap && arr.nightHold?.kind === 'airborne' && ac.holdReason === 'noiseCurfew' && state.now - arr.nightHold.decidedAt >= nightCap.airborneHoldMaxMin * 60) {
+    divert(sim, ac);
+    return;
+  }
 
   if (ready && sim.company?.city && isCityNightMovement(state.now + APPROACH_SEC)) {
     const allowedAt = nextCityMovementTime(state.now + APPROACH_SEC);
@@ -1062,6 +1172,8 @@ function stepInbound(sim: Simulation, ac: Aircraft): void {
     ac.retryAt = Math.max(state.now + 1, allowedAt - APPROACH_SEC);
     setHold(state, ac, 'noiseCurfew');
     addDelayCause(arr, 'noiseRestriction');
+    // 上空の夜間待機の始まりを記録する（上限の判定は関数の先頭）
+    if (nightOpsOf(sim)) arr.nightHold ??= { kind: 'airborne', decidedAt: state.now, releaseAt: allowedAt };
     return;
   }
 
@@ -1075,6 +1187,7 @@ function stepInbound(sim: Simulation, ac: Aircraft): void {
   if (ac.standId && ac.runwayId && ready && state.now >= ac.retryAt) {
     const eta = state.now + APPROACH_SEC;
     let reason = approachBlocked(sim, ac, ac.runwayId, eta);
+    let blkReason: HoldReason | null = null;
     if (!reason) {
       // 着陸後に滑走路を離脱してスポットまで行ける経路を先に確保する
       const p = arrivalPath(sim, ac, ac.runwayId, ac.standId, true);
@@ -1084,8 +1197,11 @@ function stepInbound(sim: Simulation, ac: Aircraft): void {
         for (let i = 0; i < p.exit.index; i++) runwayEdges.push(edgeBetween(sim, p.rw.nodes[i]!, p.rw.nodes[i + 1]!));
         const route = makeRoute(sim.ctx, 'landing', nodes, [...runwayEdges, ...p.path.edges], p.exit.index);
         const parts = reservableParts(sim.ctx, route, p.exit.index);
-        if (isFree(state, ac.id, parts)) {
-          reserve(state, ac.id, parts);
+        // 区間ごとの走行: 全回廊の向き + 出口の小片・解放位置を越えて止まれる最初の区間までのチェーンを確保する（スポットまでの全区間の枠は要求しない）
+        const blk = sim.ctx.blocks ? acquireRoute(sim, ac, route) : null;
+        if (blk && !blk.ok) blkReason = blk.reason;
+        if (blk ? blk.ok : isFree(state, ac.id, parts)) {
+          if (!blk) reserve(state, ac.id, parts);
           route.released = p.exit.index;
           ac.route = route;
           ac.dist = 0;
@@ -1098,7 +1214,7 @@ function stepInbound(sim: Simulation, ac: Aircraft): void {
           return;
         }
       }
-      reason = arrivalPath(sim, ac, ac.runwayId, ac.standId, false) ? 'routeBusy' : 'noRoute';
+      reason = arrivalPath(sim, ac, ac.runwayId, ac.standId, false) ? (sim.ctx.blocks ? blkReason ?? 'opposingTraffic' : 'routeBusy') : 'noRoute';
     }
     ac.retryAt = state.now + RETRY_SEC;
     holdArrival(sim, ac, reason);
@@ -1193,6 +1309,43 @@ function releaseEverything(sim: Simulation, ac: Aircraft): void {
   delete ac.heldCrossings;
 }
 
+/**
+ * 夜間のスポット待機（フェーズ 2、R8・R9(a)。city.nightOps があるときだけ呼ぶ）: 予測離陸（プッシュバック開始 + 標準の所要 + 列 + 余裕）が夜間なら、
+ * スポットを離れず翌朝まで待つ。持つのはスポットだけ（誘導路・区間・滑走路・トーイングカーは持たない）。止めたら true。
+ */
+function holdDepartureAtStand(sim: Simulation, ac: Aircraft, path?: { nodes: string[]; edges: string[] }): boolean {
+  const { state } = sim;
+  const dep = state.flights[ac.departureFlightId]!;
+  const pred = predictTakeoffAt(sim, ac, Math.max(state.now, dep.estimated), path);
+  if (pred === null || !isCityNightMovement(pred)) return false;
+  const releaseAt = standReleaseAt(sim, ac);
+  dep.estimated = Math.max(dep.estimated, releaseAt);
+  dep.nightHold = { kind: 'stand', decidedAt: state.now, releaseAt };
+  setHold(state, ac, 'noiseCurfew');
+  addDelayCause(dep, 'noiseRestriction');
+  ac.retryAt = Math.max(ac.retryAt, releaseAt - PUSHBACK_DISPATCH_LEAD_SEC);
+  cancelPushbackTask(sim, ac.id);
+  return true;
+}
+
+/** 夜間にかかる到着を、出発地で待たせて朝に現れさせる（R10）。同じ朝の順番は SEPARATION_SEC[L][L] ずつずらす */
+function holdAtOrigin(sim: Simulation, ac: Aircraft): void {
+  const { state } = sim;
+  const arr = state.flights[ac.arrivalFlightId]!;
+  const dep = state.flights[ac.departureFlightId]!;
+  const morning = nextCityMovementTime(arr.estimated);
+  let last = -Infinity;
+  for (const f of Object.values(state.flights)) {
+    if (f.id === arr.id || f.nightHold?.kind !== 'origin' || f.nightHold.releaseAt < morning || f.nightHold.releaseAt > morning + 6 * 3600) continue;
+    last = Math.max(last, f.nightHold.releaseAt);
+  }
+  const at = last === -Infinity ? morning : Math.max(morning, last + SEPARATION_SEC.L.L);
+  arr.estimated = at;
+  dep.estimated = Math.max(dep.scheduled, at + typeOf(sim, ac).turnaroundSec);
+  arr.nightHold = { kind: 'origin', decidedAt: state.now, releaseAt: at };
+  addDelayCause(arr, 'noiseRestriction');
+}
+
 function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
   const { state } = sim;
   const dep = state.flights[ac.departureFlightId]!;
@@ -1213,11 +1366,17 @@ function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
     return;
   }
   const p = departurePath(sim, ac, true);
+  // 夜間のスポット待機（最後の判定）: 実際の経路でもう一度予測し、夜間なら止める（プッシュバックの直前）
+  if (nightOpsOf(sim) && holdDepartureAtStand(sim, ac, p?.path)) return;
+  let blkReason: HoldReason | null = null;
   if (p) {
     const route = makeRoute(sim.ctx, 'pushback', p.path.nodes, p.path.edges);
     const parts = reservableParts(sim.ctx, route, 0);
-    if (isFree(state, ac.id, parts)) {
-      reserve(state, ac.id, parts);
+    // 区間ごとの走行: 全回廊の向き + 最初のチェーン（スポット入口〜止まれる最初の区間）を確保できたらプッシュバックする
+    const blk = sim.ctx.blocks ? acquireRoute(sim, ac, route) : null;
+    if (blk && !blk.ok) blkReason = blk.reason;
+    if (blk ? blk.ok : isFree(state, ac.id, parts)) {
+      if (!blk) reserve(state, ac.id, parts);
       ac.route = route;
       ac.dist = 0;
       ac.runwayId = p.runwayId;
@@ -1229,7 +1388,10 @@ function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
       return;
     }
   }
-  const reason: HoldReason = p || departurePath(sim, ac, false) ? 'routeBusy' : 'noRoute';
+  const alt = p ? null : departurePath(sim, ac, false);
+  // 区間ごとの走行: 逆向きの回廊で通れないときは、対向待ちの公平性（DIR_FAIRNESS_SEC）のために待ちを記録する
+  if (sim.ctx.blocks && alt) noteOpposed(sim, ac, makeRoute(sim.ctx, 'pushback', alt.path.nodes, alt.path.edges));
+  const reason: HoldReason = p || alt ? (sim.ctx.blocks ? blkReason ?? 'opposingTraffic' : 'routeBusy') : 'noRoute';
   setHold(state, ac, reason);
   addDelayCause(dep, reason === 'noRoute' ? 'noRoute' : 'taxiCongestion');
   ac.retryAt = state.now + RETRY_SEC;
@@ -1359,6 +1521,8 @@ function movementLimit(sim: Simulation, ac: Aircraft): number {
   if (r.kind === 'pushback' && ac.state !== 'lineUp') limit = r.cum[last]! - holdShortOnRoute(sim.ctx, r, last, -1);
   const req = pendingCrossing(sim, ac);
   if (req) limit = Math.min(limit, req.distToHold + ac.dist);
+  // 区間ごとの走行: 確保した範囲の停止位置と、前の機体への追従の上限
+  if (sim.state.taxiBlocks) limit = Math.min(limit, Math.max(blockMovementLimit(sim, ac).limit, ac.dist));
   return limit;
 }
 
@@ -1386,12 +1550,14 @@ function moveTaxi(sim: Simulation, ac: Aircraft): void {
   ac.dist = Math.min(ac.dist + ac.speed * TICK_SEC, limit);
   if (limit - ac.dist < 0.01 && ac.speed < 0.5) ac.speed = 0;
   releasePassed(sim.state, ac, type.lengthM);
+  if (sim.state.taxiBlocks) releaseBlocksPassed(sim, ac);
   // 横断を終えたら滑走路を解放する
   releaseFinishedCrossings(sim, ac, type.lengthM);
   if (ac.state === 'taxiIn' || ac.state === 'taxiOut' || ac.state === 'vacating') {
     const req = pendingCrossing(sim, ac);
     if (req && req.distToHold < 1 && ac.speed === 0) setHold(sim.state, ac, 'crossing');
     else if (ac.holdReason === 'crossing') setHold(sim.state, ac, null);
+    else if (sim.state.taxiBlocks) blockHoldReason(sim, ac);
   }
   placeOnRoute(sim, ac);
 }

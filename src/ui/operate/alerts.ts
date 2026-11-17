@@ -7,7 +7,9 @@ import type { SimContext } from '../../core/sim/context';
 import type { Disruption, DisruptionKind, SimEvent, SimState } from '../../core/sim/types';
 import { BUS_SHORTAGE_ALERT_SEC } from '../../core/sim/busRules';
 import { airlineDef } from '../../core/economy/registry';
-import { GAME_UI, SCORE_LABEL, DISRUPTION_KIND_LABEL, OPS_UI, HOLD_REASON_LABEL, WEATHER_LABEL, displayName, issueText } from '../../i18n/ja';
+import { nightRiskFlights } from '../../core/sim/nightOps';
+import type { Simulation } from '../../core/sim/simulation';
+import { NIGHT_UI, formatClock, GAME_UI, SCORE_LABEL, DISRUPTION_KIND_LABEL, OPS_UI, HOLD_REASON_LABEL, WEATHER_LABEL, displayName, issueText } from '../../i18n/ja';
 import type { OverlayKey } from './opsUi';
 
 /**
@@ -229,6 +231,23 @@ export function deriveAlerts(sim: { state: SimState; ctx: SimContext }, company:
       actions: ['focus', 'delay15', ...(beforeLanding ? (['reassign'] as const) : [])],
       flightId,
     });
+  }
+
+  // 夜間の持ち越しの恐れ（city.nightOps があるときだけ。予測離陸が制限開始の warnLeadMin 分前を越える便。R11）
+  if (company?.city?.nightOps && 'company' in sim) {
+    for (const r of nightRiskFlights(sim as Simulation)) {
+      const ac = state.aircraft[r.aircraftId];
+      if (!ac) continue;
+      add({
+        key: `night:${r.flightId}`,
+        severity: r.marginSec < 0 ? 'critical' : 'warning',
+        t: state.now,
+        title: NIGHT_UI.riskAlert(ac.callsign, formatClock(r.predictedAt)),
+        target: { kind: 'aircraft', id: ac.id },
+        actions: ['focus', 'delay15'],
+        flightId: r.flightId,
+      });
+    }
   }
 
   // 保安検査の待ち（待ち人数 × 1 人あたりの処理時間 ÷ レーン数）

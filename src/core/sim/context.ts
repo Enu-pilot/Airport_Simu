@@ -15,6 +15,8 @@ import type { RunwayConfig, UnitKind } from './types';
 import { rotatedDims } from '../layout/footprint';
 import { hydrantConnectedStands } from '../layout/fuelHydrants';
 import { HOLD_SHORT_M } from './rules';
+import { buildTaxiBlocks, type TaxiBlockGraph } from './taxiBlocks';
+import { holdShortDistanceAt } from './routes';
 
 /**
  * シミュレーションが参照する、レイアウトから導出した不変の情報。
@@ -97,6 +99,8 @@ export interface SimContext {
   freeRunways: Record<string, FreeRunwayInfo>;
   /** 機種テーブル（現在のカタログ、または保存時の機種データのスナップショット） */
   types: TypeTable;
+  /** 誘導路の区間（layout.taxiMode === 'block' のときだけ。従来方式ではキー自体を作らない。配置から作る派生データで保存しない） */
+  blocks?: TaxiBlockGraph;
 }
 
 export function createContext(layout: AirportLayout, opts: { types?: TypeTable } = {}): SimContext {
@@ -212,7 +216,14 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
   const sorters = operational.filter((f) => f.kind === 'baggageSort').map((f) => ({ id: f.id, ...center(f), capacityPerMin: n(f, 'capacityPerMin') }));
   const hasFuelFarm = operational.some((f) => f.kind === 'fuelFarm');
   const hydrantStands = hydrantConnectedStands(layout);
-  return { layout, network, runways, stands, terminal, standGate, busGates, paxTerminal, bases, sorters, hasFuelFarm, hydrantStands, crossings, crossingsByRunway, crossingNodeRunways, freeRunways, types: opts.types ?? AIRCRAFT_TYPES };
+  const ctx: SimContext = { layout, network, runways, stands, terminal, standGate, busGates, paxTerminal, bases, sorters, hasFuelFarm, hydrantStands, crossings, crossingsByRunway, crossingNodeRunways, freeRunways, types: opts.types ?? AIRCRAFT_TYPES };
+  if (layout.taxiMode === 'block') {
+    ctx.blocks = buildTaxiBlocks(layout, network, layout.taxiBlockTiles ?? 10, {
+      holdShortM: (nodeId, otherId, edgeLengthM) => holdShortDistanceAt(ctx, nodeId, otherId, edgeLengthM),
+      runwayLikeNodes: Object.keys(crossingNodeRunways),
+    });
+  }
+  return ctx;
 }
 
 /** 運用方向に並べた滑走路上ノードと、進入端からの距離 */

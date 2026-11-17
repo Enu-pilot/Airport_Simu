@@ -2,7 +2,7 @@ import { CATALOG, CATALOG_VERSION, type AircraftModel } from '../aircraft/catalo
 import { AIRCRAFT_ASSETS, ASSET_VERSION } from '../assets/registry';
 import { importCompany, type CompanyState } from '../economy/company';
 import { checkGameFields } from '../economy/game';
-import { isCityConfig } from '../economy/city';
+import { isCityConfig, isCityNightOps } from '../economy/city';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
 import { SIM_MODEL_VERSION, modelsUsed, type Scenario } from '../scenario/scenario';
 import { buildTypeTable } from '../sim/aircraftTypes';
@@ -10,9 +10,9 @@ import { createContext } from '../sim/context';
 import { checkInvariants, repairCrossingState } from '../sim/invariants';
 import { hydrateClosureReasons } from '../sim/closureState';
 import type { Simulation } from '../sim/simulation';
-import type { SimState } from '../sim/types';
+import { TERMINAL_STATES, type SimState } from '../sim/types';
 import { checkWxState } from '../sim/weather';
-import { SAVE_FORMAT, checkRunwayFields, validateLayoutData } from './serialize';
+import { SAVE_FORMAT, checkRunwayFields, checkTaxiFields, validateLayoutData } from './serialize';
 import { migrateLayout } from './migrate';
 import { checkJournal, hasJournalData, type Journal } from '../analytics/journal';
 
@@ -35,7 +35,9 @@ export const PROJECT_FORMAT_VERSION = 1;
 export const PROJECT_FORMAT_VERSION_2 = 2;
 /** 階層交通・ターミナル間交通データを使うファイル */
 export const PROJECT_FORMAT_VERSION_3 = 3;
-export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_3;
+/** 区間ごとに進む地上走行（taxiMode 'block'）・夜間の運用（city.nightOps）・それらの運航状態（taxiBlocks・nightHold）を使うファイル（フェーズ 2） */
+export const PROJECT_FORMAT_VERSION_4 = 4;
+export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_4;
 
 const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !== null && k in (o as Record<string, unknown>);
 
@@ -76,6 +78,23 @@ export function layoutUsesFormat3(l: AirportLayout): boolean {
   return layoutUsesFormat3Traffic(l) || layoutUsesFormat3FacilityLevels(l);
 }
 
+/** 区間ごとに進む地上走行の方式（taxiMode）を使うレイアウトか。taxiBlockTiles・blockMaxAircraft だけでは従来方式の運航に影響しないので数えない */
+export function layoutUsesFormat4(l: AirportLayout): boolean {
+  return hasKey(l, 'taxiMode');
+}
+
+/** 夜間の運用設定（city.nightOps）を持つ会社か */
+export function companyUsesFormat4(c: CompanyState | null | undefined): boolean {
+  return !!c && isObj(c.city) && hasKey(c.city, 'nightOps');
+}
+
+/** 運航状態が版 4 の項目（taxiBlocks・便の nightHold）を持つか */
+export function simStateUsesFormat4(state: SimState | null | undefined): boolean {
+  if (!state) return false;
+  if (hasKey(state, 'taxiBlocks')) return true;
+  return Object.values(state.flights ?? {}).some((f) => hasKey(f, 'nightHold'));
+}
+
 function closureLedgerUsed(state: SimState): boolean {
   return !!state.closureReasons && (['taxiways', 'stands', 'gates'] as const).some((kind) => Object.keys(state.closureReasons![kind]).length > 0);
 }
@@ -89,6 +108,9 @@ function companyUsesFormat2(c: CompanyState | null | undefined): boolean {
  * 使わないときは 1 のまま（従来のファイル・ゴールデンの出力が変わらない）。
  */
 export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null; journal?: Journal }): number {
+  if (layoutUsesFormat4(p.layout) || companyUsesFormat4(p.company)) return PROJECT_FORMAT_VERSION_4;
+  if (p.scenarios.some((s) => layoutUsesFormat4(s.layout) || companyUsesFormat4(s.company))) return PROJECT_FORMAT_VERSION_4;
+  if (p.sim && (simStateUsesFormat4(p.sim.state) || companyUsesFormat4(p.sim.company))) return PROJECT_FORMAT_VERSION_4;
   if (layoutUsesFormat3(p.layout) || p.scenarios.some((s) => layoutUsesFormat3(s.layout))) return PROJECT_FORMAT_VERSION_3;
   if (layoutUsesFormat2(p.layout) || companyUsesFormat2(p.company)) return PROJECT_FORMAT_VERSION_2;
   if (hasJournalData(p.journal)) return PROJECT_FORMAT_VERSION_2;
@@ -236,6 +258,7 @@ export function checkLayout(l: unknown, where = 'レイアウト'): string[] {
     else if (Array.isArray(link.allowedZones) && link.allowedZones.some((zone) => zone !== from.zone || zone !== to.zone)) errors.push(`${where}: ターミナル連絡設備 ${link.id} の旅客区域が接続先エリアと一致しません`);
   }
   errors.push(...checkRunwayFields(layout, where));
+  errors.push(...checkTaxiFields(layout, where));
   errors.push(...checkBusProps(layout, where));
   return errors;
 }
@@ -274,6 +297,7 @@ function checkCompany(c: unknown, where: string): { errors: string[]; company: C
   if (!company) return { errors: [`${where}: 会社のデータが不正です（版・資金・契約）`], company: null };
   const errors: string[] = checkGameFields(c).map((e) => `${where}: ${e}`);
   if (c.city !== undefined && !isCityConfig(c.city)) errors.push(`${where}: 都市設定（city）の形式が不正です`);
+  else if (isObj(c.city) && c.city.nightOps !== undefined && !isCityNightOps(c.city.nightOps)) errors.push(`${where}: 夜間の運用設定（city.nightOps）が不正です（最終出発時刻 1200〜1305 分・上空待機 0〜120 分・警告の前倒し 0〜120 分・出発地待機）`);
   for (const [key, k] of Object.entries(company.contracts)) {
     if (!isObj(k) || k.id !== key) errors.push(`${where}: 契約 ${key} の ID が一致しません`);
     else if (typeof k.typeId !== 'string' || typeof k.airlineId !== 'string') errors.push(`${where}: 契約 ${key} の機種・航空会社が不正です`);
@@ -357,9 +381,69 @@ function checkSim(sim: unknown, layout: AirportLayout): string[] {
   }
   errors.push(...checkBusState(state, layout));
   errors.push(...checkWeatherState(state, sim.company));
+  errors.push(...checkTaxiBlocksState(state, layout));
+  errors.push(...checkNightHoldState(state, sim.company));
   for (const [standId, acId] of Object.entries(state.standAssignments)) {
     if (!layout.stands[standId]) errors.push(`運航状態: スポット割り当て ${standId} がレイアウトにありません`);
     if (!state.aircraft[acId as string]) errors.push(`運航状態: スポット ${standId} に割り当てた機体 ${String(acId)} がありません`);
+  }
+  return errors;
+}
+
+/**
+ * 区間ごとに進む地上走行の運航状態（state.taxiBlocks。フェーズ 2）の形と参照の検査。従来の運航は何も持たない。
+ * 機数・向きの整合（B1〜B6）は復元後の不変条件（invariants.ts）が見る。ここは形・ID・数の範囲だけ。
+ */
+function checkTaxiBlocksState(state: SimState, layout: AirportLayout): string[] {
+  const raw = (state as unknown as Record<string, unknown>).taxiBlocks;
+  if (raw === undefined) return [];
+  const bad = (m: string) => [`運航状態: 区間ごとの走行（taxiBlocks）の${m}`];
+  if (layout.taxiMode !== 'block') return bad('状態があるのに、レイアウトの地上走行の方式（taxiMode）は区間ごとではありません');
+  if (!isObj(raw) || !isObj(raw.occ) || !isObj(raw.locks) || !isObj(raw.stats)) return bad('形が不正です');
+  const errors: string[] = [];
+  const graph = createContext(layout).blocks;
+  if (!graph) return bad('区間を作れません（レイアウトに誘導路がありません）');
+  const acs = state.aircraft;
+  const live = (id: unknown): id is string => typeof id === 'string' && !!acs[id] && !TERMINAL_STATES.includes(acs[id]!.state);
+  for (const [bid, list] of Object.entries(raw.occ)) {
+    if (!graph.blocks[bid]) { errors.push(...bad(`占有に存在しない区間 ${bid} があります`)); continue; }
+    if (!Array.isArray(list) || list.length === 0 || new Set(list).size !== list.length) { errors.push(...bad(`区間 ${bid} の占有の形が不正です（空・重複）`)); continue; }
+    for (const id of list) if (!live(id)) errors.push(...bad(`区間 ${bid} の占有に、存在しない・終了した機体 ${String(id)} があります`));
+  }
+  for (const [cid, lock] of Object.entries(raw.locks)) {
+    if (!graph.corridors[cid]) { errors.push(...bad(`向きの確保に存在しない回廊 ${cid} があります`)); continue; }
+    if (!isObj(lock) || (lock.dir !== 1 && lock.dir !== -1) || !Array.isArray(lock.holders) || lock.holders.length === 0 || new Set(lock.holders).size !== lock.holders.length) {
+      errors.push(...bad(`回廊 ${cid} の向きの確保の形が不正です（向き・保持者）`));
+      continue;
+    }
+    for (const id of lock.holders) if (!live(id)) errors.push(...bad(`回廊 ${cid} の保持者に、存在しない・終了した機体 ${String(id)} があります`));
+  }
+  if (raw.oppWait !== undefined) {
+    if (!isObj(raw.oppWait)) errors.push(...bad('対向待ち（oppWait）の形が不正です'));
+    else for (const [cid, w] of Object.entries(raw.oppWait)) {
+      if (!graph.corridors[cid] || !isObj(w) || !live(w.acId) || typeof w.since !== 'number' || !Number.isFinite(w.since)) errors.push(...bad(`対向待ち ${cid} が不正です`));
+    }
+  }
+  if (raw.priority !== undefined && !live(raw.priority)) errors.push(...bad('優先中の機体（priority）が存在しない・終了しています'));
+  if (raw.priorityAt !== undefined && (raw.priority === undefined || typeof raw.priorityAt !== 'number' || !Number.isFinite(raw.priorityAt))) errors.push(...bad('優先の開始時刻（priorityAt）は優先中の機体（priority）があるときの有限な数値だけです'));
+  for (const k of ['resolutions', 'reroutes', 'overruns', 'unresolved', 'nightStranded'] as const) {
+    const v = raw.stats[k];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) errors.push(...bad(`統計 ${k} が 0 以上の整数ではありません`));
+  }
+  return errors;
+}
+
+/** 夜間制限で止めた便（flight.nightHold。フェーズ 2）の形。夜間の運用設定（city.nightOps）がない運航には現れない */
+function checkNightHoldState(state: SimState, company: unknown): string[] {
+  const errors: string[] = [];
+  const hasNight = isObj(company) && isObj(company.city) && hasKey(company.city, 'nightOps');
+  for (const f of Object.values(state.flights)) {
+    const h = (f as unknown as Record<string, unknown>).nightHold;
+    if (h === undefined) continue;
+    if (!hasNight) { errors.push(`運航状態: 便 ${f.id} が夜間の保留（nightHold）を持つのに、会社の夜間の運用設定（city.nightOps）がありません`); continue; }
+    if (!isObj(h) || !['stand', 'origin', 'airborne'].includes(h.kind as string) || typeof h.decidedAt !== 'number' || !Number.isFinite(h.decidedAt) || typeof h.releaseAt !== 'number' || !Number.isFinite(h.releaseAt) || h.releaseAt < h.decidedAt) {
+      errors.push(`運航状態: 便 ${f.id} の夜間の保留（nightHold）の種類・時刻が不正です`);
+    }
   }
   return errors;
 }
@@ -610,6 +694,12 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
   const simInputState = isObj(data.sim) && isObj(data.sim.state) ? data.sim.state as unknown as SimState : null;
   const containsV2Input = data.journal !== undefined || layoutUsesFormat2(layout) || companyUsesFormat2(company) || scenarios.some((s) => layoutUsesFormat2(s.layout) || companyUsesFormat2(s.company)) || !!simInputState && (hasKey(simInputState, 'bus') || hasKey(simInputState, 'wx') || inputHadAirlineStandHomes || (inputHadClosureReasons && closureLedgerUsed(simInputState)) || companyUsesFormat2(sim?.company));
   const containsV3Input = layoutUsesFormat3(layout) || scenarios.some((s) => layoutUsesFormat3(s.layout));
+  const containsV4Input = layoutUsesFormat4(layout) || companyUsesFormat4(company) || scenarios.some((s) => layoutUsesFormat4(s.layout) || companyUsesFormat4(s.company)) ||
+    (!!sim && (simStateUsesFormat4(simInputState) || companyUsesFormat4(sim.company)));
+  if (typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_4 && containsV4Input) {
+    errors.push(`保存形式の版（formatVersion）が ${String(data.formatVersion)} ですが、区間ごとの地上走行または夜間の運用設定（版 4 の項目）を含んでいます。ファイルが壊れているか、手で編集された可能性があります`);
+    return fail();
+  }
   const projectLayouts = [layout, ...scenarios.map((scenario) => scenario.layout)];
   const containsLegacyFacilityLevels = projectLayouts.some(layoutHasLegacyFacilityLevels);
   const containsV3Traffic = projectLayouts.some(layoutUsesFormat3Traffic);
@@ -646,5 +736,5 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
     sim,
     ...(journal ? { journal } : {}),
   };
-  return { ok: true, errors, warnings, migratedFrom: data.formatVersion !== PROJECT_FORMAT_VERSION && data.formatVersion !== PROJECT_FORMAT_VERSION_2 && data.formatVersion !== PROJECT_FORMAT_VERSION_3 ? `${PROJECT_FORMAT} v${String(data.formatVersion)}` : null, project };
+  return { ok: true, errors, warnings, migratedFrom: data.formatVersion !== PROJECT_FORMAT_VERSION && data.formatVersion !== PROJECT_FORMAT_VERSION_2 && data.formatVersion !== PROJECT_FORMAT_VERSION_3 && data.formatVersion !== PROJECT_FORMAT_VERSION_4 ? `${PROJECT_FORMAT} v${String(data.formatVersion)}` : null, project };
 }

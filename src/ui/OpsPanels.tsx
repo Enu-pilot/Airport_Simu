@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { compareIds } from '../core/model/ids';
+import { departureCutoffIssue } from '../core/economy/city';
+import { PLAN_TURN_BUFFER_SEC } from '../core/economy/planning';
 import { AIRCRAFT_TYPES, AIRCRAFT_TYPE_IDS, resolveType, type AircraftTypeId } from '../core/sim/aircraftTypes';
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { flightDelayMin, operableTypes } from '../core/sim/simulation';
@@ -61,6 +63,8 @@ export function OpsControls() {
   const active = Object.values(state.aircraft).filter((a) => !['scheduled', 'departed', 'diverted', 'cannotOperate'].includes(a.state));
   const airborne = active.filter((a) => ['inbound', 'holding', 'approach'].includes(a.state)).length;
   const types = operableTypes(ctx);
+  // 手動の到着便の折り返し出発が最終出発時刻（city.nightOps）を過ぎる見込みなら警告だけ出す（禁止しない。R7）
+  const cutoffWarning = departureCutoffIssue(o.sim.company?.city, state.now + resolveType(ctx.types, type).turnaroundSec + PLAN_TURN_BUFFER_SEC);
 
   return (
     <div className="toolbox ops" data-testid="ops-controls">
@@ -131,6 +135,7 @@ export function OpsControls() {
         <button onClick={() => ops.addArrival(type)} disabled={!types.includes(type)} data-testid="add-arrival">
           到着便を追加（すぐ空域に進入）
         </button>
+        {cutoffWarning && <div className="warning-text small" role="status" data-testid="manual-cutoff-warning">{cutoffWarning}</div>}
         {o.sim.company ? (
           <div className="muted small">定期便は契約から作られます（下の「運航計画」タブ）。手動で追加した便も料金・費用の対象です。</div>
         ) : (

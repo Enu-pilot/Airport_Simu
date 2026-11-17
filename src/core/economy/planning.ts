@@ -9,7 +9,7 @@ import { operableTypes, type SimContext } from '../sim/context';
 import { BALANCE } from './balance';
 import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
 import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
-import { cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedPassengers } from './city';
+import { CITY_NIGHT_CURFEW, cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedPassengers } from './city';
 import { resolveBusGateForStand } from '../terminal/busGateAssignment';
 
 /**
@@ -61,6 +61,8 @@ export interface DayPlan {
   flights: PlannedFlight[];
   /** 運用時間・時間帯に収まらず計画できなかった便（契約ID） */
   dropped: string[];
+  /** 最終出発時刻（日内の分。city.nightOps があるときだけ。dropped の理由の表示に使う） */
+  departureCutoffMin?: number;
   /** Carrier or airport route requirements prevent these contracts from being scheduled. */
   unsupportedRoutes?: { contractId: string; destinationId: string; reason: 'airline-unsupported' | 'international-processing-required' }[];
 }
@@ -159,13 +161,14 @@ export function planDayWithDemand(
   types: TypeTable = AIRCRAFT_TYPES,
   routeCapabilities: RouteCapabilities = routeCapabilitiesForAirport(),
 ): DayPlan {
-  const planningCompany = c.city ? { ...c, hours: cityOperatingHours(c.hours) } : c;
+  const planningCompany = c.city ? { ...c, hours: cityOperatingHours(c.hours, c.city) } : c;
+  const cutoff = c.city?.nightOps ? { departureCutoffMin: Math.min(c.hours.closeMin, CITY_NIGHT_CURFEW.fromMin, c.city.nightOps.departureCutoffMin) } : {};
   const base = planDay(planningCompany, day, access, types, routeCapabilities);
   if (!c.city) return base;
   const event = cityEventEffects(c.city, day);
   const expected = expectedPassengers(c, day, types, routeCapabilities);
   const factor = Math.min(1.1 * event.demandMultiplier, cityDemandCeiling(c.city, access) * event.demandMultiplier / Math.max(1, expected));
-  return planDay(planningCompany, day, access * factor, types, routeCapabilities);
+  return { ...planDay(planningCompany, day, access * factor, types, routeCapabilities), ...cutoff };
 }
 
 // ---------------------------------------------------------------- 計画の分析
@@ -295,7 +298,10 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
       route.destinationId,
     );
   }
-  for (const id of plan.dropped) add('OUTSIDE_HOURS', 'warning', id);
+  const cutoffDetail = plan.departureCutoffMin !== undefined
+    ? `最終出発時刻 ${String(Math.floor(plan.departureCutoffMin / 60)).padStart(2, '0')}:${String(plan.departureCutoffMin % 60).padStart(2, '0')}`
+    : undefined;
+  for (const id of plan.dropped) add('OUTSIDE_HOURS', 'warning', id, cutoffDetail);
 
   // スポットの仮割り当て（到着順、区分が合う最小のスポット・ゲート付き優先）
   const stands = Object.values(ctx.stands)

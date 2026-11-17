@@ -257,6 +257,21 @@ export function boardingAllowed(state: SimState, acId: string): boolean {
   return TASK_DEFS.board.deps.every((k) => taskDone(state, acId, k));
 }
 
+/**
+ * 夜間のスポット待機（フェーズ 2）で、すでに作られたプッシュバックの作業を取り消してトーイングカーと作業員を返す。
+ * 取り消した作業があれば true。朝にもう一度 createPushbackTask で作り直す。
+ */
+export function cancelPushbackTask(sim: Simulation, acId: string): boolean {
+  let any = false;
+  for (const t of tasksOf(sim.state, acId)) {
+    if (t.kind !== 'pushback' || t.state === 'done' || t.state === 'cancelled') continue;
+    releaseUnits(sim, t);
+    t.state = 'cancelled';
+    any = true;
+  }
+  return any;
+}
+
 /** 便がキャンセルされた機体の作業を止め、ユニットを戻す */
 export function cancelTasks(sim: Simulation, acId: string): void {
   for (const t of tasksOf(sim.state, acId)) {

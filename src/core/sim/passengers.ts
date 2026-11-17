@@ -224,8 +224,9 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
     p.gateId = ctx.standGate[ac.standId] ?? null;
     // バスゲートがある運航: ゲートのないスポットの便はバスゲートで搭乗し、ランプバスで運ぶ（sim/apronBus.ts）
     if (state.bus || explicitRemoteConfiguration) applyBusDeparture(sim, f, ac);
-    // 付け直すのは「新しいゲートが決まった」とき（null から新ゲートへの変化も含む）。null へは付け直さない（1-07 / P-1）
-    if (p.generated && p.gateId && previousGateId !== p.gateId) reconcileDepartureGate(sim, f, p.gateId);
+    // 付け直すのは「別のゲートへ変わった」ときだけ。最初の割当（null → ゲート）では付け直さない: 通常の運航の旅客の動きを
+    // 従来と同じに保つため。バスゲートの一時閉鎖は、生成後のゲート固定（apronBus）と stranded の復帰で扱う（1-07 / P-1）
+    if (p.generated && previousGateId && p.gateId && previousGateId !== p.gateId) reconcileDepartureGate(sim, f, p.gateId);
   }
   // 複数ターミナルでは、ゲート所属先が確定してから旅客を作る。
   // 単一ターミナル空港では従来どおり、便の生成時刻に旅客を作る。

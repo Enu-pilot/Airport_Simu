@@ -1,6 +1,6 @@
-# 40. 出発時刻の制限と最終便の遅れ抑制（仕様案・未実装）
+# 40. 出発時刻の制限と最終便の遅れ抑制（仕様案・フェーズ 2 で実装中）
 
-- 状態: **未実装**。本書は要求と判定基準を定める仕様案で、実装方式は指定しない。数値はすべてゲーム内の値で、実在の空港の運用時間・騒音規制を表さない。
+- 状態: 要求と判定基準を定める仕様案（実装方式は [design/impl_phase2_plan.md](design/impl_phase2_plan.md) §1.5・§3）。**実装の状況は末尾の「実装の記録（フェーズ 2）」**。数値はすべてゲーム内の値で、実在の空港の運用時間・騒音規制を表さない。
 - 関連: [docs/31](31_city_models.md)「騒音・夜間制限」（実装済みの離着陸制限）、[docs/11](11_operations_rules.md)（運航ルール）、[docs/36](36_daily_review_and_flight_analysis.md)（遅延の評価）、[docs/39](39_comprehensive_test_audit_and_handover.md) §11（現状の検証結果）。
 
 ## 1. 目的
@@ -93,3 +93,19 @@
 7. 離陸の遅れを、既存の遅延指標に置き換えるか、別の指標として並べるか（docs/36 の「実績の遅延」と「評価対象の遅延」との関係）。
 8. 都市設定のある既存データに新しい挙動を適用するか。
 9. 夜間滞泊（docs/39 §7 の提案 A2）との関係。翌朝まで駐機する便は夜間滞泊と同じ仕組みで扱える可能性がある。
+
+## 実装の記録（フェーズ 2）
+
+既定値（余裕時間 45 分 = 最終出発 21:15、範囲 15〜120 分、到着は出発地で待機、上空の夜間待機の上限 30 分、手動の便は警告のみ、止めた出発は翌朝まで駐機）は impl_phase2_plan §8 のとおり。数値はゲーム内の値。
+
+| 要件 | 状態 | 実装・テスト |
+|---|---|---|
+| R1・R2 最終出発時刻の設定（`city.nightOps.departureCutoffMin`） | **実装済み**（データ・検証・保存形式 4・画面の入力） | `city.ts`、`ManagementPanels`＋`NightOpsSettings.tsx`、`departureCutoff.test.ts`、`projectFormat4.test.ts`、`e2e/nightOps.spec.ts` |
+| R3〜R6 計画の出発が最終出発時刻以内、収まらない契約は `OUTSIDE_HOURS`（詳細に最終出発時刻） | **実装済み** | `cityOperatingHours(hours, city)`、`planDayWithDemand`、`departureCutoff.test.ts`（3 種類の都市 × 3 シード） |
+| R7 手動の便の警告 | **実装済み**（警告のみ） | `departureCutoffIssue`、運航画面「便の追加」 |
+| R8・R9 夜間のスポット待機・R10 到着は出発地待機・R13 朝の解放順 | コア（`src/core/sim/nightOps.ts`・`simulation.ts`）は実装者 A の作業。確認: `tests/unit/sim/nightStandHold.test.ts`・`nightInbound.test.ts` | CP2 で状態を確定して追記 |
+| R11 早めの警告 | 画面は**実装済み**（`alerts.ts` の `night:<便ID>`、`tests/unit/nightAlerts.test.ts`）。判定はコアの `nightRiskFlights` | 〃 |
+| R12 優先 | 設定（`prioritizeAtRisk`、既定 false）の入力・保存は**実装済み**。列の並びへの反映はコア（`atRiskForNight`） | 〃 |
+| R14・R15 日次締め・遅延の指標 | **実装済み**: 日報 `night`、離陸の遅れ（振り返りの便別に別行） | `takeoffDelay.ts`、`ops.ts` `settleDay`、`review.ts`、`DayReview.tsx`、`takeoffDelay.test.ts` |
+| R16 評価対象の遅延・補償への反映 | **未実装**（次のフェーズで決める） | — |
+| R17 能力ダッシュボードの夜の枠 | **実装済み** | `capacity.ts`、`taxiwayCapacity.test.ts` |

@@ -1,5 +1,5 @@
 import { runwayDimsProblem } from '../model/runwayReference';
-import { DEFAULT_PROPS, FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, PROP_SCHEMAS, TERMINAL_AREA_SPECS, TILE_M } from '../model/catalog';
+import { DEFAULT_PROPS, FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TAXI_BLOCK_TILES_DEFAULT, TAXI_BLOCK_TILES_MAX, TAXI_BLOCK_TILES_MIN, TERMINAL_AREA_SPECS, TILE_M } from '../model/catalog';
 import { baseTerrainAt, createSite, inSite, terrainAt } from '../model/site';
 import {
   BUILD_STATES,
@@ -387,7 +387,7 @@ export function snapRunwayToGrid(layout: AirportLayout, id: string): OpResult {
  */
 export function updateLayoutSettings(
   layout: AirportLayout,
-  s: { magneticVariationDeg?: number | null; ruleSet?: 'classic' | 'realistic' },
+  s: { magneticVariationDeg?: number | null; ruleSet?: 'classic' | 'realistic'; taxiMode?: 'full' | 'block'; taxiBlockTiles?: number },
 ): OpResult {
   const d = cloneLayout(layout);
   let changed = false;
@@ -405,6 +405,20 @@ export function updateLayoutSettings(
     if ((d.ruleSet ?? 'classic') !== s.ruleSet) changed = true;
     if (s.ruleSet === 'classic') delete d.ruleSet;
     else d.ruleSet = s.ruleSet;
+  }
+  // 地上走行の方式（フェーズ 2）。'full'（従来の全区間確保）はキーを書かない。区間の長さ 10 タイル（既定）もキーを書かない
+  if (s.taxiMode !== undefined) {
+    if (s.taxiMode !== 'full' && s.taxiMode !== 'block') return fail('INVALID_VALUE');
+    if ((d.taxiMode ?? 'full') !== s.taxiMode) changed = true;
+    if (s.taxiMode === 'full') delete d.taxiMode;
+    else d.taxiMode = s.taxiMode;
+  }
+  if (s.taxiBlockTiles !== undefined) {
+    const t = s.taxiBlockTiles;
+    if (!Number.isInteger(t) || t < TAXI_BLOCK_TILES_MIN || t > TAXI_BLOCK_TILES_MAX) return fail('INVALID_VALUE');
+    if ((d.taxiBlockTiles ?? TAXI_BLOCK_TILES_DEFAULT) !== t) changed = true;
+    if (t === TAXI_BLOCK_TILES_DEFAULT) delete d.taxiBlockTiles;
+    else d.taxiBlockTiles = t;
   }
   if (!changed) return fail('NO_CHANGE');
   return ok(finalize(d));
@@ -1018,7 +1032,16 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
       err = apply(netNodes(d, netOfNode(id)!)[id], { name: str, holdShort: bool });
       break;
     case 'taxiway':
-      err = apply(d.taxiways[id], { name: str, widthClass: size, oneWay: bool, buildState: isBuildState, codeF: bool });
+      // blockMaxAircraft（区間ごとの走行の進入可能機数の上限。null = 解除＝キーを消す）
+      if (d.taxiways[id] && patch.blockMaxAircraft === null) {
+        const { blockMaxAircraft: _b, ...rest } = patch;
+        void _b;
+        const had = d.taxiways[id].blockMaxAircraft !== undefined;
+        delete d.taxiways[id].blockMaxAircraft;
+        if (Object.keys(rest).length === 0) return had ? ok(finalize(d)) : fail('NO_CHANGE');
+        return updateEntity(d, id, rest);
+      }
+      err = apply(d.taxiways[id], { name: str, widthClass: size, oneWay: bool, buildState: isBuildState, codeF: bool, blockMaxAircraft: (v) => isInt(v, 1, TAXI_BLOCK_MAX_AIRCRAFT) });
       break;
     case 'road':
       err = apply(d.roads[id], {

@@ -1,0 +1,518 @@
+{
+ "simModelVersion": "skyport-sim-10.3",
+ "flightsPerDay": 120,
+ "runs": {
+  "stress-a": {
+   "seconds": 10800,
+   "now": 32400,
+   "stateSha256": "342bb4b106d623e0a0e49f084941cbace492e60cfe1694fd5cc8c34643666acc",
+   "stateLength": 2793193,
+   "stats": {
+    "arrivals": 14,
+    "departures": 6,
+    "diverted": 2,
+    "cancelled": 0,
+    "goArounds": 0,
+    "conflicts": 0,
+    "taxiInSecTotal": 3172,
+    "taxiOutSecTotal": 1407
+   },
+   "crossings": 2,
+   "crossingHoldTicks": 0,
+   "holdShortTicks": 116,
+   "aircraft": 120,
+   "kpis": {
+    "elapsedSec": 10800,
+    "arrivals": 6,
+    "departures": 6,
+    "cancelled": 2,
+    "failCauses": {
+     "hold:noStand": 2
+    },
+    "runways": [
+     {
+      "id": "rwy_1",
+      "util": 0.011111111111111112,
+      "ops": 1,
+      "avgWaitMin": 11.1
+     },
+     {
+      "id": "rwy_2",
+      "util": 0.11583333333333333,
+      "ops": 11,
+      "avgWaitMin": 0.3
+     }
+    ],
+    "stands": [
+     {
+      "id": "std_1",
+      "util": 0.6703703703703704,
+      "turns": 1
+     },
+     {
+      "id": "std_2",
+      "util": 0.7981481481481482,
+      "turns": 1
+     },
+     {
+      "id": "std_3",
+      "util": 0.6259259259259259,
+      "turns": 1
+     },
+     {
+      "id": "std_4",
+      "util": 0.7703703703703704,
+      "turns": 1
+     },
+     {
+      "id": "std_5",
+      "util": 0.4537962962962963,
+      "turns": 1
+     },
+     {
+      "id": "std_6",
+      "util": 0.31657407407407406,
+      "turns": 0
+     },
+     {
+      "id": "std_7",
+      "util": 0.11657407407407408,
+      "turns": 0
+     },
+     {
+      "id": "std_8",
+      "util": 0.10546296296296297,
+      "turns": 0
+     },
+     {
+      "id": "std_9",
+      "util": 0.055462962962962964,
+      "turns": 0
+     },
+     {
+      "id": "std_10",
+      "util": 0.5041666666666667,
+      "turns": 1
+     },
+     {
+      "id": "std_11",
+      "util": 0.7258333333333333,
+      "turns": 0
+     },
+     {
+      "id": "std_12",
+      "util": 0.6610185185185186,
+      "turns": 0
+     }
+    ],
+    "hotspots": [
+     {
+      "node": "tn_4",
+      "waitMin": 2.4
+     },
+     {
+      "node": "tn_31",
+      "waitMin": 2.1
+     },
+     {
+      "node": "tn_7",
+      "waitMin": 1.1
+     },
+     {
+      "node": "tn_26",
+      "waitMin": 1
+     },
+     {
+      "node": "tn_30",
+      "waitMin": 1
+     },
+     {
+      "node": "tn_32",
+      "waitMin": 1
+     },
+     {
+      "node": "tn_39",
+      "waitMin": 1
+     },
+     {
+      "node": "tn_40",
+      "waitMin": 1
+     }
+    ],
+    "hourlyPax": [
+     {
+      "hour": 6,
+      "dep": 0,
+      "arr": 417
+     },
+     {
+      "hour": 7,
+      "dep": 375,
+      "arr": 403
+     },
+     {
+      "hour": 8,
+      "dep": 378,
+      "arr": 0
+     }
+    ],
+    "facilities": [
+     {
+      "id": "gate:fac_14",
+      "kind": "gate",
+      "served": 192,
+      "avgWaitMin": 8.8,
+      "maxQueue": 119
+     },
+     {
+      "id": "gate:fac_13",
+      "kind": "gate",
+      "served": 239,
+      "avgWaitMin": 6.9,
+      "maxQueue": 180
+     },
+     {
+      "id": "gate:fac_7",
+      "kind": "gate",
+      "served": 127,
+      "avgWaitMin": 5.8,
+      "maxQueue": 106
+     },
+     {
+      "id": "gate:fac_6",
+      "kind": "gate",
+      "served": 220,
+      "avgWaitMin": 4.9,
+      "maxQueue": 124
+     },
+     {
+      "id": "gate:fac_12",
+      "kind": "gate",
+      "served": 121,
+      "avgWaitMin": 4.8,
+      "maxQueue": 103
+     },
+     {
+      "id": "gate:fac_4",
+      "kind": "gate",
+      "served": 140,
+      "avgWaitMin": 3.3,
+      "maxQueue": 126
+     },
+     {
+      "id": "ta_8",
+      "kind": "security",
+      "served": 2895,
+      "avgWaitMin": 2.7,
+      "maxQueue": 209
+     },
+     {
+      "id": "gate:fac_3",
+      "kind": "gate",
+      "served": 119,
+      "avgWaitMin": 2.7,
+      "maxQueue": 102
+     },
+     {
+      "id": "gate:fac_5",
+      "kind": "gate",
+      "served": 116,
+      "avgWaitMin": 2.4,
+      "maxQueue": 99
+     },
+     {
+      "id": "ta_10",
+      "kind": "checkIn",
+      "served": 2756,
+      "avgWaitMin": 0.4,
+      "maxQueue": 99
+     }
+    ],
+    "missedPax": 32,
+    "bagProcessMin": 54.6,
+    "bagsLeft": 0,
+    "unitUtil": {
+     "staff": 0.4908101851851852,
+     "tug": 0.21513888888888888,
+     "beltLoader": 0.5983950617283951,
+     "baggageTractor": 0.5983950617283951,
+     "fuelTruck": 0.6441666666666667,
+     "cateringTruck": 0.49944444444444447,
+     "cleaningVan": 0.5847222222222223,
+     "engineer": 0.4695061728395062
+    },
+    "blockedMin": {
+     "dependency": 790,
+     "waitingTime": 89,
+     "noVehicle": 128,
+     "noStaff": 142,
+     "waitingBags": 129,
+     "waitingPax": 70
+    },
+    "avgTaxiInMin": 5.1,
+    "avgTaxiOutMin": 6.2,
+    "avgGroundDistM": 3308,
+    "avgAirborneHoldMin": 11.5
+   }
+  },
+  "stress-b": {
+   "seconds": 10800,
+   "now": 32400,
+   "stateSha256": "a195d1bc4b2ef87cfb6229a59b1bd33c940729f46f54866aa23e1b312f7f5a2e",
+   "stateLength": 2446760,
+   "stats": {
+    "arrivals": 18,
+    "departures": 9,
+    "diverted": 0,
+    "cancelled": 0,
+    "goArounds": 0,
+    "conflicts": 0,
+    "taxiInSecTotal": 3930,
+    "taxiOutSecTotal": 2820
+   },
+   "crossings": 5,
+   "crossingHoldTicks": 67,
+   "holdShortTicks": 386,
+   "aircraft": 120,
+   "kpis": {
+    "elapsedSec": 10800,
+    "arrivals": 9,
+    "departures": 9,
+    "cancelled": 0,
+    "failCauses": {},
+    "runways": [
+     {
+      "id": "rwy_1",
+      "util": 0.028888888888888888,
+      "ops": 3,
+      "avgWaitMin": 3.5
+     },
+     {
+      "id": "rwy_2",
+      "util": 0.14944444444444444,
+      "ops": 15,
+      "avgWaitMin": 1.8
+     }
+    ],
+    "stands": [
+     {
+      "id": "std_1",
+      "util": 0.8653703703703703,
+      "turns": 2
+     },
+     {
+      "id": "std_2",
+      "util": 0.8325,
+      "turns": 1
+     },
+     {
+      "id": "std_3",
+      "util": 0.6759259259259259,
+      "turns": 1
+     },
+     {
+      "id": "std_4",
+      "util": 0.7092592592592593,
+      "turns": 1
+     },
+     {
+      "id": "std_5",
+      "util": 0.6592592592592592,
+      "turns": 1
+     },
+     {
+      "id": "std_6",
+      "util": 0.6314814814814815,
+      "turns": 1
+     },
+     {
+      "id": "std_7",
+      "util": 0.5259259259259259,
+      "turns": 1
+     },
+     {
+      "id": "std_8",
+      "util": 0.5777777777777777,
+      "turns": 1
+     },
+     {
+      "id": "std_9",
+      "util": 0.4751851851851852,
+      "turns": 0
+     },
+     {
+      "id": "std_10",
+      "util": 0.24435185185185185,
+      "turns": 0
+     },
+     {
+      "id": "std_11",
+      "util": 0.1999074074074074,
+      "turns": 0
+     },
+     {
+      "id": "std_12",
+      "util": 0.18324074074074073,
+      "turns": 0
+     }
+    ],
+    "hotspots": [
+     {
+      "node": "tn_7",
+      "waitMin": 8.1
+     },
+     {
+      "node": "tn_36",
+      "waitMin": 2.1
+     },
+     {
+      "node": "tn_26",
+      "waitMin": 2
+     },
+     {
+      "node": "tn_29",
+      "waitMin": 1.1
+     },
+     {
+      "node": "tn_18",
+      "waitMin": 1.1
+     },
+     {
+      "node": "tn_31",
+      "waitMin": 1
+     },
+     {
+      "node": "tn_32",
+      "waitMin": 1
+     },
+     {
+      "node": "tn_33",
+      "waitMin": 1
+     }
+    ],
+    "hourlyPax": [
+     {
+      "hour": 6,
+      "dep": 0,
+      "arr": 236
+     },
+     {
+      "hour": 7,
+      "dep": 239,
+      "arr": 881
+     },
+     {
+      "hour": 8,
+      "dep": 762,
+      "arr": 0
+     }
+    ],
+    "facilities": [
+     {
+      "id": "gate:fac_4",
+      "kind": "gate",
+      "served": 290,
+      "avgWaitMin": 3.3,
+      "maxQueue": 141
+     },
+     {
+      "id": "gate:fac_11",
+      "kind": "gate",
+      "served": 137,
+      "avgWaitMin": 3.2,
+      "maxQueue": 123
+     },
+     {
+      "id": "gate:fac_7",
+      "kind": "gate",
+      "served": 120,
+      "avgWaitMin": 2.9,
+      "maxQueue": 109
+     },
+     {
+      "id": "gate:fac_9",
+      "kind": "gate",
+      "served": 128,
+      "avgWaitMin": 2.8,
+      "maxQueue": 114
+     },
+     {
+      "id": "gate:fac_8",
+      "kind": "gate",
+      "served": 124,
+      "avgWaitMin": 2.7,
+      "maxQueue": 102
+     },
+     {
+      "id": "gate:fac_10",
+      "kind": "gate",
+      "served": 122,
+      "avgWaitMin": 2.7,
+      "maxQueue": 109
+     },
+     {
+      "id": "gate:fac_6",
+      "kind": "gate",
+      "served": 183,
+      "avgWaitMin": 2.6,
+      "maxQueue": 121
+     },
+     {
+      "id": "gate:fac_5",
+      "kind": "gate",
+      "served": 186,
+      "avgWaitMin": 2.5,
+      "maxQueue": 113
+     },
+     {
+      "id": "gate:fac_3",
+      "kind": "gate",
+      "served": 177,
+      "avgWaitMin": 2.4,
+      "maxQueue": 112
+     },
+     {
+      "id": "ta_10",
+      "kind": "checkIn",
+      "served": 2208,
+      "avgWaitMin": 0,
+      "maxQueue": 89
+     },
+     {
+      "id": "ta_8",
+      "kind": "security",
+      "served": 2318,
+      "avgWaitMin": 0,
+      "maxQueue": 22
+     }
+    ],
+    "missedPax": 5,
+    "bagProcessMin": 52.8,
+    "bagsLeft": 0,
+    "unitUtil": {
+     "staff": 0.5186620370370371,
+     "tug": 0.2850925925925926,
+     "beltLoader": 0.6165123456790124,
+     "baggageTractor": 0.6165123456790124,
+     "fuelTruck": 0.6443518518518518,
+     "cateringTruck": 0.5404166666666667,
+     "cleaningVan": 0.6224074074074074,
+     "engineer": 0.5660493827160494
+    },
+    "blockedMin": {
+     "dependency": 828,
+     "waitingBags": 189,
+     "waitingPax": 41,
+     "waitingTime": 22,
+     "noVehicle": 189,
+     "noStaff": 144,
+     "noEngineer": 19
+    },
+    "avgTaxiInMin": 4.5,
+    "avgTaxiOutMin": 7,
+    "avgGroundDistM": 3223.4,
+    "avgAirborneHoldMin": 0.3
+   }
+  }
+ }
+}
