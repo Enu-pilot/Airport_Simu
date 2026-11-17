@@ -7,6 +7,7 @@ import { createSampleAirport } from '../../../src/core/sample/sampleAirport';
 import { BAG_FINAL_STATES, reconcileDepartureBags } from '../../../src/core/sim/baggage';
 import { checkGroundInvariants, checkPaxInvariants } from '../../../src/core/sim/invariants';
 import { addTurnaround, createSimulation, stepSimulation } from '../../../src/core/sim/simulation';
+import { airportKpis } from '../../../src/core/analytics/kpi';
 import { runUntil } from '../sim/helpers';
 
 describe('1-09 欠航便の手荷物', () => {
@@ -52,6 +53,8 @@ describe('1-09 欠航便の手荷物', () => {
     expect(after.every((b) => BAG_FINAL_STATES.includes(b.state))).toBe(true);
     expect(after.some((b) => b.state === 'leftBehind')).toBe(true);
     expect(sim.state.groundStats.bagsLeftBehind).toBe(before); // 欠航は積み残しに数えない
+    // 指標（空港 KPI・便の記録 → 航空会社の評価）でも、欠航便の手荷物は積み残しに数えない（1-09 の既定）
+    expect(airportKpis(sim).bagsLeft).toBe(sim.state.groundStats.bagsLeftBehind);
     expect([...checkGroundInvariants(sim, true), ...checkPaxInvariants(sim, true)]).toEqual([]);
   });
 

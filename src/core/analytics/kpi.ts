@@ -196,7 +196,7 @@ export function airportKpis(sim: Simulation): AirportKpis {
   let bagsLeft = 0;
   for (const b of Object.values(state.bags)) {
     if (b.direction !== 'departure') continue;
-    if (b.state === 'leftBehind') bagsLeft++;
+    if (b.state === 'leftBehind' && state.paxGroups[b.paxGroupId]?.state !== 'cancelled') bagsLeft++;
     const start = b.history.find((h) => h.state === 'checkedIn')?.t;
     const end = b.history.find((h) => h.state === 'loaded')?.t;
     if (start !== undefined && end !== undefined) bagTimes.push((end - start) / 60);

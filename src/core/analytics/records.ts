@@ -176,7 +176,7 @@ function buildRecord(sim: Simulation, ac: Aircraft): FlightRecord {
     paxMissed: dep.pax.missed,
     paxArrived: arr.pax.deplaned,
     bagsLoaded: bags.filter((b) => b.state === 'loaded').length,
-    bagsLeft: bags.filter((b) => b.state === 'leftBehind').length,
+    bagsLeft: bags.filter((b) => b.state === 'leftBehind' && state.paxGroups[b.paxGroupId]?.state !== 'cancelled').length,
     taskSec,
     taskBlockedSec: tasks.reduce((s, t) => s + t.blockedTotal, 0),
     revenue: Math.round(live.revenue),
