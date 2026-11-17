@@ -177,6 +177,7 @@
 | 5-10 | テスト不足の解消: 検証コード 29 種、都市イベント、旧形式の実ファイル、複合障害、保存サイズの上限。カバレッジ計測の導入（未計測を達成扱いにしない） | docs/39 §3 |
 | 5-11 | 保存データの間引き（運航状態が 1 日約 2.2 MB 増える） | docs/39 §3.1 |
 | 5-12 | 貨物（旅客の未完成部分の後） | docs/39 §7 A6 |
+| 5-13 | 旅客動線の3段階接続判定: 経路全体を「通行可能／建設完了待ち／未接続」に分類する。運用中経路を優先し、建設中経路は完成後の接続予測にだけ使う。旅客移動・構造検証・建設完了後の再探索へ反映し、内部通路の建設状態表現と連絡設備の工事進捗連携を整える | PO 依頼（2026-11-18）、[実装計画](implementation/planned/passenger_connectivity_status_plan.md) |
 
 フェーズ 5 は項目ごとに独立しているので、フェーズ 2〜4 の合間に小さいものから入れてよい。各項目の完了の条件は着手時に定める。
 
@@ -200,7 +201,7 @@
 | 2.5 | 計画・未着手 | [planned/phase2_5_map_expansion_plan.md](implementation/planned/phase2_5_map_expansion_plan.md) | Phase 2 の後、Phase 3 の前に実施 |
 | 3 | 計画・未着手 | [planned/phase3_plan.md](implementation/planned/phase3_plan.md) | Phase 2.5 の受入完了後に着手 |
 | 4 | 計画・未着手 | [planned/phase4_plan.md](implementation/planned/phase4_plan.md) | 先行フェーズとの依存関係を確認して着手 |
-| 5 | 候補 | — | §3.5 の候補。着手時に要求・受入条件と詳細計画を作成 |
+| 5 | 候補 | [passenger_connectivity_status_plan.md](implementation/planned/passenger_connectivity_status_plan.md)（5-13） | §3.4 の候補を個別に実施。5-13 は計画作成済み・実装未着手。その他は着手時に要求・受入条件と詳細計画を作成 |
 
 計画書を `planned/` から `active/` に移すのは実装開始時、`completed/` に移すのは全受入条件と品質ゲートの完了後とする。部分完了・中断では `active/` に残す。
 
