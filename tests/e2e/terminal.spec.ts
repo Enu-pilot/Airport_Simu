@@ -38,6 +38,19 @@ test('ターミナル内部のエリアを階を選んで配置し、選択し�
   await expect(page.getByTestId('prop-fixtures')).toHaveValue('6');
 });
 
+test('エスカレーターを選択してもブラックアウトせず、能力を編集できる（React #301 回帰）', async ({ page }) => {
+  await page.getByTestId('level-0').click();
+  // サンプル空港のエスカレーター（86,52 / 4×2）の中央をクリックして選択
+  const p = await tilePos(page, 88, 53);
+  await page.mouse.click(p.x, p.y);
+  await expect(page.getByTestId('prop-title')).toContainText('エスカレーター');
+  // capacityPerHour は未設定（運航では既定能力を使う）ので空欄。落ちずに表示されること
+  await expect(page.getByTestId('prop-capacityPerHour')).toHaveValue('');
+  await page.getByTestId('prop-capacityPerHour').fill('3000');
+  await page.getByTestId('prop-capacityPerHour').press('Enter');
+  await expect(page.getByTestId('prop-capacityPerHour')).toHaveValue('3000');
+});
+
 test('運航中のターミナル表で旅客数・待ち時間を確認し、施設を閉鎖できる', async ({ page }) => {
   await page.getByTestId('page-operations').click();
   await page.getByTestId('speed-600').click();
