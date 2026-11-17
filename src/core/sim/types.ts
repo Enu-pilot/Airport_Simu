@@ -68,7 +68,10 @@ export type HoldReason =
   | 'boarding' // 搭乗手続きの完了待ち
   | 'groundCrew' // プッシュバックの車両・作業員待ち
   | 'weather' // 天候による欠航（天候 5 段階のモデルだけ。欠航の理由に使う）
-  | 'noiseCurfew'; // 都市の夜間騒音規制による運航待機
+  | 'noiseCurfew' // 都市の夜間騒音規制による運航待機
+  | 'blockFull' // 前の区間が満杯（区間ごとに進む地上走行）
+  | 'opposingTraffic' // 対向する機体の通過待ち（区間ごとに進む地上走行）
+  | 'runwayQueue'; // 滑走路手前の待機列（区間ごとに進む地上走行）
 
 export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling' | 'apronBus' | 'weather' | 'noiseRestriction';
 export type ExternalDelayCause = 'inboundDelay' | 'weather' | 'airTraffic';
@@ -170,6 +173,8 @@ export interface FlightPax {
 
 export interface Flight {
   id: string;
+  /** 夜間制限で止めた便（フェーズ 2。値があるときだけ書く） */
+  nightHold?: { kind: 'stand' | 'origin' | 'airborne'; decidedAt: number; releaseAt: number };
   number: string;
   direction: 'arrival' | 'departure';
   aircraftId: string;
@@ -518,6 +523,14 @@ export interface SimSettings {
 
 export interface SimState {
   version: 1;
+  /** 区間ごとに進む地上走行の状態（taxiMode 'block' のときだけ作る。フェーズ 2） */
+  taxiBlocks?: {
+    occ: Record<string, string[]>;
+    locks: Record<string, { dir: 1 | -1; holders: string[] }>;
+    oppWait?: Record<string, { acId: string; since: number }>;
+    priority?: string;
+    stats: { resolutions: number; reroutes: number; overruns: number; unresolved: number; nightStranded: number };
+  };
   seed: string;
   now: number;
   rng: RngState;

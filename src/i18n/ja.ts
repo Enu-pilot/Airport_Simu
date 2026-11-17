@@ -347,6 +347,9 @@ export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
   groundCrew: 'トーイングカー・作業員待ち',
   weather: '天候',
   noiseCurfew: '夜間騒音規制',
+  blockFull: '前の区間が満杯',
+  opposingTraffic: '対向機の通過待ち',
+  runwayQueue: '滑走路手前の待機列',
 };
 
 export const HOLD_REASON_EXPLANATION: Record<HoldReason, string> = {
@@ -364,6 +367,9 @@ export const HOLD_REASON_EXPLANATION: Record<HoldReason, string> = {
   groundCrew: '牽引作業員・トーイングカーなど必要な地上資源が空くのを待っています。',
   weather: '天候条件が運航可能な範囲へ戻るのを待っています。',
   noiseCurfew: '夜間騒音規制の運航可能時間になるのを待っています。',
+  blockFull: '進む先の誘導路の区間が他の機体で満杯のため、区間の手前で待っています。',
+  opposingTraffic: '同じ誘導路を逆向きに通る機体が抜けるのを待っています。',
+  runwayQueue: '滑走路の手前で離陸の順番を待っています。',
 };
 
 export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {

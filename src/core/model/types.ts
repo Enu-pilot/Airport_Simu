@@ -136,6 +136,8 @@ export interface TaxiwayEdge {
   buildState: BuildState;
   /** コード F（翼幅 65〜80 m）の機体が通行できる（L 級のみ意味を持つ。Phase 7） */
   codeF?: boolean;
+  /** 区間ごとに進む地上走行（taxiMode 'block'）で、この誘導路を含む区間に同時に入れる機数の上限（1〜10。計算値より小さくする方向だけ） */
+  blockMaxAircraft?: number;
 }
 
 /** public: 一般道路 / service: 構内サービス道路（業務用）/ rail: 鉄道（空港連絡線） */
@@ -314,6 +316,10 @@ export interface AirportLayout {
   magneticVariationDeg?: number;
   /** 判定ルール。欠落 = 'classic' */
   ruleSet?: 'classic' | 'realistic';
+  /** 地上走行の方式（フェーズ 2）。欠落 = 従来の全区間一括確保。'block' = 区間ごとに進む */
+  taxiMode?: 'block';
+  /** 区間の区切りの長さ（タイル、4〜40）。欠落 = 10 */
+  taxiBlockTiles?: number;
 }
 
 export type EntityType = 'runway' | 'taxiNode' | 'taxiway' | 'roadNode' | 'road' | 'stand' | 'facility' | 'terminalArea';

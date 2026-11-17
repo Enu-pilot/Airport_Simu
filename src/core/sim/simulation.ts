@@ -260,6 +260,9 @@ const HOLD_TO_DELAY: Partial<Record<HoldReason, DelayCause>> = {
   boarding: 'boarding',
   groundCrew: 'groundHandling',
   noiseCurfew: 'noiseRestriction',
+  blockFull: 'taxiCongestion',
+  opposingTraffic: 'taxiCongestion',
+  runwayQueue: 'runwayQueue',
 };
 
 const typeOf = (sim: Simulation, ac: Aircraft): AircraftType => resolveType(sim.ctx.types, ac.typeId);

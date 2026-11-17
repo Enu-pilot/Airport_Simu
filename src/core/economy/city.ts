@@ -29,6 +29,22 @@ export interface CityConfig {
   railQuality: 0 | 1 | 2 | 3 | 4 | 5;
   residents: number;
   events?: CityEvent[];
+  /** 出発時刻の制限と夜間の運用（フェーズ 2、docs/40）。欠落 = 従来どおり */
+  nightOps?: CityNightOps;
+}
+
+export interface CityNightOps {
+  version: 1;
+  /** 最終出発時刻（日内の分）。既定 1275（21:15）。範囲 1200〜1305 */
+  departureCutoffMin: number;
+  /** 夜間にかかる到着の扱い（R10）。フェーズ 2 は出発地で待機のみ */
+  inboundPolicy: 'originHold';
+  /** 上空の夜間待機の上限（分）。既定 30、範囲 0〜120 */
+  airborneHoldMaxMin: number;
+  /** 予測離陸が制限開始の何分前を越えたら警告するか。既定 20、範囲 0〜120 */
+  warnLeadMin: number;
+  /** 持ち越しの危険がある便を優先する。既定 false */
+  prioritizeAtRisk: boolean;
 }
 
 export const CITY_NIGHT_CURFEW = { fromMin: 22 * 60, toMin: 6 * 60 } as const;
