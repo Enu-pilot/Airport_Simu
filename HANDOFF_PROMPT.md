@@ -13,13 +13,11 @@
 7. 作業終了時（中断・引き継ぎを含む）は、実施内容・検証結果・残件を記録し、状態を `完了` または `中断` に更新する。記録更新後に終了する。
 
 ## 現在の作業
-- 状態: 完了
-- 開始/中断: 2026-11-18 開始、2026-11-18 完了（ブランチ `claude/audit-39-comprehensive`。push は GitHub の書き込み承認待ち）
-- 目的: フェーズ 4 の実装（格による解放、夜間滞泊・拠点・整備、国際線、乗継・ハブ、道路/線路の区間能力、保存形式 6、文書 4-14）。
-- 対象: `docs/design/impl_phase4_plan.md`、`docs/42` §3.3、新規 `docs/44`、`src/core/economy/unlocks.ts`・`hub.ts`、`src/core/sim/overnight.ts`、`src/core/terminal/hub.ts`、`src/core/access/segments.ts`
-- 結果: 4-01〜4-09・4-11〜4-14 を実装（詳細は docs/42 §3.3 の状態、仕様は docs/44）。保存形式は版 6（フェーズ 3 の市場が版 5 を使ったため）。未検証: 4-03・4-10 の区間走行での再計測、2 ターミナルの波。
-- 検証: 型検査・lint・ビルド合格。新規テスト 8 ファイル全件合格、E2E `phase3-traffic.spec.ts` 3 件合格。
-- 全体テスト（2026-11-18）: 1080 件合格・8 件失敗。失敗の内訳はすべて既知のもの: golden.ops の G-1（変更前からある基準値のずれ。再採取は SIM_MODEL_VERSION の更新が要るため未実施）、nightInbound 6 件と simulation.test 1 件はテスト内の制限時間（200 秒 / 30 秒）超過で、単独では nightInbound 全件合格・simulation.test は 30 秒制限に対し約 34 秒（純粋なシミュレーションのテストで、本フェーズの変更対象外）。検証中に `generateOffers` の乱数消費順の入れ替わりで `legacyFingerprint` が 2 件不一致になり、従来の順序に戻して 7 件全件合格に戻した（docs/42 §3.2）。
+- 状態: 進行中
+- 開始/中断: 2026-11-18 開始（ブランチ `claude/sweet-pasteur-4denw0`）
+- 目的: 旅客移動における接続状態3段階判定（未接続／建設完了待ち／通行可能）の実装計画・要求を Docs に追加する。
+- 対象: `docs/implementation/planned/passenger_connectivity_status_plan.md`、`docs/42_implementation_roadmap.md`、`docs/implementation/README.md`、本ファイル。
+- 実施範囲: Docs のみ。コード・テスト・既存仕様の変更は行わない。
 
 ## 次の作業
 - フェーズ 5（docs/42 §3.4）から項目を選んで実装する。
