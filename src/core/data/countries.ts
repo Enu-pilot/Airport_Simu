@@ -1,0 +1,46 @@
+import type { CountryDef, RegionDef } from './types';
+
+/** 地域と国（registry.ts から移動。順序は旧 registry と同一に保つこと） */
+export const REGION_DATA: RegionDef[] = [
+  { id: 'east-asia', name: '東アジア' },
+  { id: 'southeast-asia', name: '東南アジア' },
+  { id: 'north-continent', name: '北方大陸' },
+  { id: 'central-continent', name: '中央大陸' },
+  { id: 'south-continent', name: '南方大陸' },
+  { id: 'north', name: '北部' },
+  { id: 'east', name: '東部' },
+  { id: 'south', name: '南部' },
+  { id: 'west', name: '西部' },
+  { id: 'central', name: '中央部' },
+  { id: 'pacific', name: '太平洋' },
+  { id: 'europe', name: 'ヨーロッパ' },
+  { id: 'middle-east', name: '中東' },
+  { id: 'south-asia', name: '南アジア' },
+  { id: 'north-america', name: '北アメリカ' },
+];
+
+export const COUNTRY_DATA: CountryDef[] = [
+  { id: 'JP', name: '日本', regionId: 'east-asia' },
+  { id: 'KR', name: '韓国', regionId: 'east-asia' },
+  { id: 'TW', name: '台湾', regionId: 'east-asia' },
+  { id: 'HK', name: '香港', regionId: 'east-asia' },
+  { id: 'SG', name: 'シンガポール', regionId: 'southeast-asia' },
+  { id: 'TH', name: 'タイ', regionId: 'southeast-asia' },
+  { id: 'ND', name: 'ノルデンブルク', regionId: 'north-continent' },
+  { id: 'BH', name: 'ベルンハイム', regionId: 'central-continent' },
+  { id: 'LM', name: 'ルミナス', regionId: 'south-continent' },
+  { id: 'CN', name: '中国', regionId: 'east-asia' },
+  { id: 'PH', name: 'フィリピン', regionId: 'southeast-asia' },
+  { id: 'VN', name: 'ベトナム', regionId: 'southeast-asia' },
+  { id: 'MY', name: 'マレーシア', regionId: 'southeast-asia' },
+  { id: 'US', name: 'アメリカ', regionId: 'pacific' },
+  { id: 'AU', name: 'オーストラリア', regionId: 'pacific' },
+  { id: 'ID', name: 'インドネシア', regionId: 'southeast-asia' },
+  { id: 'IN', name: 'インド', regionId: 'south-asia' },
+  { id: 'GB', name: 'イギリス', regionId: 'europe' },
+  { id: 'FR', name: 'フランス', regionId: 'europe' },
+  { id: 'DE', name: 'ドイツ', regionId: 'europe' },
+  { id: 'AE', name: 'アラブ首長国連邦', regionId: 'middle-east' },
+  { id: 'TR', name: 'トルコ', regionId: 'middle-east' },
+  { id: 'CA', name: 'カナダ', regionId: 'north-america' },
+];

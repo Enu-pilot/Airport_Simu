@@ -56,6 +56,11 @@ export interface GateAccess {
   deplane: string | null;
   /** 2 つ以上のターミナルに接し、所属を決められない（T-1） */
   ambiguousTerminalIds?: string[];
+  /** フェーズ 4: ゲートの国内/国際の別（props.routeType。欠落 = domestic のときは項目自体を持たない） */
+  routeType?: 'domestic' | 'international' | 'swing';
+  /** 国際・兼用ゲートの搭乗口（departureIntl）と降機口（arrivalIntl） */
+  boardingIntl?: string | null;
+  deplaneIntl?: string | null;
 }
 
 /** 独立ゲート（ターミナルに隣接せず、連絡通路でつながるゲート）の接続 */
@@ -202,6 +207,19 @@ export function buildTerminalModel(layout: AirportLayout): TerminalModel {
         touching
           .filter((a) => a.zone === 'arrival' && !isLift(a.kind))
           .sort((p, q) => Number(q.kind === 'arrivalCorridor') - Number(p.kind === 'arrivalCorridor') || compareIds(p.id, q.id))[0]?.id ?? null;
+      // フェーズ 4 §4.3: 国際・兼用ゲートは国際区域の搭乗口・降機口も持つ
+      const rt = g.props.routeType;
+      if (rt === 'international' || rt === 'swing') {
+        access.routeType = rt;
+        access.boardingIntl =
+          touching
+            .filter((a) => a.zone === 'departureIntl' && a.kind !== 'security' && !isLift(a.kind))
+            .sort((p, q) => rank(p) - rank(q) || compareIds(p.id, q.id))[0]?.id ?? null;
+        access.deplaneIntl =
+          touching
+            .filter((a) => a.zone === 'arrivalIntl' && !isLift(a.kind))
+            .sort((p, q) => Number(q.kind === 'arrivalCorridor') - Number(p.kind === 'arrivalCorridor') || compareIds(p.id, q.id))[0]?.id ?? null;
+      }
     }
     gates[g.id] = access;
   }
@@ -241,15 +259,15 @@ function connectIndependentGate(
   };
   const depAnchor = nearest('departure');
   const arrAnchor = nearest('arrival');
-  const make = (suffix: 'dep' | 'arr', anchor: AreaNode | null): string | null => {
+  const make = (suffix: string, anchor: AreaNode | null, zone: PaxZone = suffix === 'dep' ? 'departure' : 'arrival'): string | null => {
     if (!anchor) return null;
     const id = `${gateId}:${suffix}`;
     const node: AreaNode = {
       id,
       terminalId,
       level: anchor.level,
-      kind: suffix === 'dep' ? 'waiting' : 'arrivalCorridor',
-      zone: suffix === 'dep' ? 'departure' : 'arrival',
+      kind: suffix.startsWith('dep') ? 'waiting' : 'arrivalCorridor',
+      zone,
       x: g.origin.x,
       y: g.origin.y,
       w: 1,
@@ -276,7 +294,26 @@ function connectIndependentGate(
     arrAnchor: arrAnchor?.id ?? null,
     lengthM: anchor ? Math.hypot(anchor.center.x - center.x, anchor.center.y - center.y) * TILE_M * CONNECTOR_DETOUR : 0,
   });
-  return { terminalId, boarding, deplane };
+  const access: GateAccess = { terminalId, boarding, deplane };
+  // フェーズ 4 §4.3: 独立ゲートでも国際・兼用なら国際区域のアンカーを持つ
+  const rt = g.props.routeType;
+  if (rt === 'international' || rt === 'swing') {
+    access.routeType = rt;
+    access.boardingIntl = make('depi', nearest('departureIntl'), 'departureIntl');
+    access.deplaneIntl = make('arri', nearest('arrivalIntl'), 'arrivalIntl');
+  }
+  return access;
+}
+
+/**
+ * フェーズ 4 §4.5: 国際旅客処理の準備ができているか。
+ * 出国審査・入国審査・税関が各 1 つ以上あり、国際/兼用ゲートに国際の搭乗口と降機口が両方あること。
+ */
+export function intlProcessingReady(model: TerminalModel): boolean {
+  const kinds = new Set<string>();
+  for (const a of Object.values(model.areas)) kinds.add(a.kind);
+  if (!kinds.has('emigration') || !kinds.has('immigration') || !kinds.has('customs')) return false;
+  return Object.values(model.gates).some((g) => (g.routeType === 'international' || g.routeType === 'swing') && g.boardingIntl && g.deplaneIntl);
 }
 
 const isLift = (k: TerminalAreaKind): boolean => k === 'stairs' || k === 'escalator' || k === 'elevator';
@@ -333,7 +370,13 @@ function overlapCenter(a: AreaNode, b: AreaNode): Vec2 | null {
 export function canMove(from: AreaNode, to: AreaNode): boolean {
   if (from.zone === to.zone) return true;
   if (from.zone === 'landside' && to.zone === 'departure') return to.kind === 'security';
-  if (from.zone === 'arrival' && to.zone === 'landside') return from.kind === 'baggageClaim' || to.kind === 'exit';
+  if (from.zone === 'arrival' && to.zone === 'landside') return from.kind === 'baggageClaim' || to.kind === 'exit' || to.kind === 'customs';
+  // フェーズ 4 §4.2: 国際の区域の境界は審査のエリアを通るときだけ越えられる（既存の枝は変えない）
+  if (from.zone === 'departure' && to.zone === 'departureIntl') return to.kind === 'emigration';
+  if (from.zone === 'arrivalIntl' && to.zone === 'arrival') return to.kind === 'immigration';
+  // 乗継保安検査: 到着 → 出発（区域の種類が一致する組み合わせだけ）
+  if (from.zone === 'arrival' && to.zone === 'departure') return to.kind === 'transferSecurity';
+  if (from.zone === 'arrivalIntl' && to.zone === 'departureIntl') return to.kind === 'transferSecurity';
   return false;
 }
 

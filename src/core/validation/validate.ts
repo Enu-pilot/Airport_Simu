@@ -1,4 +1,5 @@
 import { FACILITY_SPECS, GATE_CONNECTOR_MAX_TILES, GATE_MAX_STAND_DISTANCE, type FootprintLayer } from '../model/catalog';
+import type { CompanyState } from '../economy/company';
 import { compareIds, sortedValues } from '../model/ids';
 import { inSite, isBuildable, isSiteEdge } from '../model/site';
 import { isFreeRunway, sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
@@ -33,6 +34,7 @@ import { ACCESS_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touche
 import { connectorFits, facilityLevel, roadEdgeLevelValid, DEFAULT_LEVEL_HEIGHT_M } from '../model/levels';
 import { findPedestrianRoute } from '../access/verticalWalk';
 import { busGateStatus } from '../terminal/busGateAssignment';
+import { featureOn } from '../economy/unlocks';
 
 /**
  * 配置エラー・接続エラーの検出と、各エンティティの運用可否の判定。
@@ -67,6 +69,7 @@ export type IssueCode =
   | 'DUPLICATE_EDGE'
   // スポット・ゲート
   | 'STAND_NOT_CONNECTED'
+  | 'OVERNIGHT_STAND_REMOVED'
   | 'STAND_NO_RUNWAY_ROUTE'
   | 'STAND_ROUTE_SIZE_LIMITED'
   | 'STAND_ONE_WAY_TRAP'
@@ -111,6 +114,12 @@ export type IssueCode =
   | 'TERMINAL_NO_SECURITY'
   | 'TERMINAL_NO_BAGGAGE_CLAIM'
   | 'SECURITY_NOT_CONNECTED'
+  | 'INTL_EMIGRATION_UNLINKED'
+  | 'INTL_IMMIGRATION_UNLINKED'
+  | 'INTL_CUSTOMS_UNLINKED'
+  | 'INTL_GATE_ZONE'
+  | 'SWING_GATE_ZONE'
+  | 'INTL_LOCKED'
   | 'GATE_NO_BOARDING_ACCESS'
   | 'GATE_NO_ARRIVAL_ACCESS'
   | 'GATE_UNREACHABLE'
@@ -154,6 +163,7 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   STAND_ROUTE_SIZE_LIMITED: 'warning',
   STAND_ONE_WAY_TRAP: 'warning',
   STAND_REMOTE: 'info',
+  OVERNIGHT_STAND_REMOVED: 'warning',
   STAND_MULTIPLE_GATES: 'warning',
   GATE_NOT_AT_TERMINAL: 'error',
   GATE_TERMINAL_AMBIGUOUS: 'error',
@@ -191,6 +201,12 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   TERMINAL_NO_SECURITY: 'warning',
   TERMINAL_NO_BAGGAGE_CLAIM: 'warning',
   SECURITY_NOT_CONNECTED: 'warning',
+  INTL_EMIGRATION_UNLINKED: 'warning',
+  INTL_IMMIGRATION_UNLINKED: 'warning',
+  INTL_CUSTOMS_UNLINKED: 'warning',
+  INTL_GATE_ZONE: 'warning',
+  SWING_GATE_ZONE: 'warning',
+  INTL_LOCKED: 'warning',
   GATE_NO_BOARDING_ACCESS: 'warning',
   GATE_NO_ARRIVAL_ACCESS: 'warning',
   GATE_UNREACHABLE: 'warning',
@@ -760,6 +776,57 @@ function checkAirside(layout: AirportLayout, net: AirsideNetwork, sink: IssueSin
  * スポットから（または スポットへ）、その機体区分が使える滑走路まで到達できるか。
  * size = null の場合は機体区分を無視する。
  */
+/**
+ * フェーズ 4 §3.3: 夜間滞泊の記録（company.carryOver）にある機体のスポットが、
+ * 撤去・閉鎖・未完成になっている場合の警告。レイアウトだけでは決まらないので analyzeLayout とは別に返す。
+ */
+export function overnightStandIssues(layout: AirportLayout, company: CompanyState | null | undefined): Issue[] {
+  const records = company?.carryOver?.aircraft ?? [];
+  if (records.length === 0) return [];
+  const byStand = new Map<string, number>();
+  for (const r of records) byStand.set(r.standId, (byStand.get(r.standId) ?? 0) + 1);
+  const issues: Issue[] = [];
+  for (const [standId, count] of byStand) {
+    const stand = layout.stands[standId];
+    if (stand && stand.buildState === 'operational') continue;
+    issues.push({
+      key: `OVERNIGHT_STAND_REMOVED:${standId}`,
+      code: 'OVERNIGHT_STAND_REMOVED',
+      severity: ISSUE_SEVERITY.OVERNIGHT_STAND_REMOVED,
+      targets: [standId],
+      related: [],
+      params: { count },
+      ...(stand ? { at: stand.origin } : {}),
+    });
+  }
+  return issues;
+}
+
+/**
+ * フェーズ 4 §4.2: 国際のエリアや国際・兼用ゲートがあるのに、国際機能が解放・有効化されていない場合の警告。
+ * 会社側の状態が要るので analyzeLayout とは別に返す（overnightStandIssues と同じ扱い）。
+ */
+export function intlLockedIssues(layout: AirportLayout, company: CompanyState | null | undefined): Issue[] {
+  if (!company || featureOn(company, 'international')) return [];
+  const targets: string[] = [
+    ...Object.values(layout.terminalAreas)
+      .filter((a) => a.kind === 'emigration' || a.kind === 'immigration' || a.kind === 'customs' || a.kind === 'transferSecurity')
+      .map((a) => a.id),
+    ...Object.values(layout.facilities)
+      .filter((f) => f.kind === 'gate' && (f.props.routeType === 'international' || f.props.routeType === 'swing'))
+      .map((f) => f.id),
+  ];
+  if (targets.length === 0) return [];
+  return [{
+    key: 'INTL_LOCKED',
+    code: 'INTL_LOCKED',
+    severity: ISSUE_SEVERITY.INTL_LOCKED,
+    targets,
+    related: [],
+    params: {},
+  }];
+}
+
 export function standReachesRunway(
   layout: AirportLayout,
   net: AirsideNetwork,
@@ -1006,6 +1073,30 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     const near = (model.links[a.id] ?? []).map((l) => model.areas[l.to]!);
     if (!near.some((n) => n.zone === 'landside') || !near.some((n) => n.zone === 'departure' && n.kind !== 'security')) {
       sink.add('SECURITY_NOT_CONNECTED', [a.id], {}, { x: a.x, y: a.y });
+    }
+  }
+
+  // 国際の境界エリアは両側の区域に接していること（フェーズ 4 §4.2）
+  for (const a of Object.values(model.areas)) {
+    const nearZones = new Set((model.links[a.id] ?? []).map((l) => model.areas[l.to]!.zone));
+    if (a.kind === 'emigration' && (!nearZones.has('departure') || !nearZones.has('departureIntl'))) {
+      sink.add('INTL_EMIGRATION_UNLINKED', [a.id], {}, { x: a.x, y: a.y });
+    }
+    if (a.kind === 'immigration' && (!nearZones.has('arrivalIntl') || !nearZones.has('arrival'))) {
+      sink.add('INTL_IMMIGRATION_UNLINKED', [a.id], {}, { x: a.x, y: a.y });
+    }
+    if (a.kind === 'customs' && (!nearZones.has('arrival') || !nearZones.has('landside'))) {
+      sink.add('INTL_CUSTOMS_UNLINKED', [a.id], {}, { x: a.x, y: a.y });
+    }
+  }
+
+  // 国際・兼用ゲートは国際側の搭乗口・降機口の両方に接していること（フェーズ 4 §4.2）
+  for (const g of sortedValues(layout.facilities).filter((f) => f.kind === 'gate')) {
+    const rt = g.props.routeType;
+    if (rt !== 'international' && rt !== 'swing') continue;
+    const access = model.gates[g.id];
+    if (!access?.boardingIntl || !access?.deplaneIntl) {
+      sink.add(rt === 'international' ? 'INTL_GATE_ZONE' : 'SWING_GATE_ZONE', [g.id], {}, g.origin);
     }
   }
 

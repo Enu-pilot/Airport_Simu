@@ -1,9 +1,9 @@
 import { Rng } from '../rng';
 import type { AirlineScore, ScoreKey } from './airlineScore';
-import { SCORE_KEYS } from './airlineScore';
+import { SCORE_KEYS_V2, scoreKeysFor } from './airlineScore';
 import type { CompanyState } from './company';
 import { contractsOf } from './company';
-import { AIRLINES, type AirlineType } from './registry';
+import { AIRLINES, airlinesFor, type AirlineType } from './registry';
 import { COMPLAINTS_BLOCK_INCREASE, REQUEST_BOOST_DAYS } from './evalRules';
 
 /**
@@ -62,20 +62,28 @@ export const DONE_LIMIT = 10;
 
 /** 航空会社の種類ごとの重み（各行の合計は 1。ゲーム値） */
 export const EVAL_WEIGHTS: Record<AirlineType, Record<ScoreKey, number>> = {
-  regional: { otp: 0.3, turnaround: 0.1, stand: 0.15, fees: 0.15, slots: 0.1, aircraft: 0.1, pax: 0.1 },
-  lcc: { otp: 0.3, turnaround: 0.15, stand: 0.1, fees: 0.25, slots: 0.1, aircraft: 0.05, pax: 0.05 },
-  fullService: { otp: 0.3, turnaround: 0.05, stand: 0.15, fees: 0.1, slots: 0.1, aircraft: 0.15, pax: 0.15 },
+  regional: { otp: 0.3, turnaround: 0.1, stand: 0.15, fees: 0.15, slots: 0.1, aircraft: 0.1, pax: 0.1, demand: 0 },
+  lcc: { otp: 0.3, turnaround: 0.15, stand: 0.1, fees: 0.25, slots: 0.1, aircraft: 0.05, pax: 0.05, demand: 0 },
+  fullService: { otp: 0.3, turnaround: 0.05, stand: 0.15, fees: 0.1, slots: 0.1, aircraft: 0.15, pax: 0.15, demand: 0 },
 };
+
+/** market 有効時の重み（フェーズ 3 §4.1）: 旧の重み × 0.8 + 需要 0.20 */
+export const EVAL_WEIGHTS_V2: Record<AirlineType, Record<ScoreKey, number>> = {
+  regional: { otp: 0.24, turnaround: 0.08, stand: 0.12, fees: 0.12, slots: 0.08, aircraft: 0.08, pax: 0.08, demand: 0.2 },
+  lcc: { otp: 0.24, turnaround: 0.12, stand: 0.08, fees: 0.2, slots: 0.08, aircraft: 0.04, pax: 0.04, demand: 0.2 },
+  fullService: { otp: 0.24, turnaround: 0.04, stand: 0.12, fees: 0.08, slots: 0.08, aircraft: 0.12, pax: 0.12, demand: 0.2 },
+};
+
+export const evalWeightsFor = (c: { market?: unknown }): Record<AirlineType, Record<ScoreKey, number>> => (c.market ? EVAL_WEIGHTS_V2 : EVAL_WEIGHTS);
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 export const emptyEntry = (): AirlineEvalEntry => ({ ema: {}, low: {}, complaints: [], requests: [], boostUntil: 0, done: [], otpBadDays: 0 });
 
 /** 満足度の変化 = Σ 重み × (移動平均 − 60) ÷ 10 を [−8, +4] に丸めた値 */
-export function evalDelta(type: AirlineType, ema: Partial<Record<ScoreKey, number>>): number {
-  const w = EVAL_WEIGHTS[type];
+export function evalDelta(type: AirlineType, ema: Partial<Record<ScoreKey, number>>, weights: Record<ScoreKey, number> = EVAL_WEIGHTS[type]): number {
   let d = 0;
-  for (const k of SCORE_KEYS) d += w[k] * (((ema[k] ?? NEUTRAL) - NEUTRAL) / 10);
+  for (const k of SCORE_KEYS_V2) d += (weights[k] ?? 0) * (((ema[k] ?? NEUTRAL) - NEUTRAL) / 10);
   return clamp(d, DELTA_MIN, DELTA_MAX);
 }
 
@@ -136,7 +144,7 @@ export function stepAirlineEval(c: CompanyState, input: EvalStepInput): EvalStep
   const deltas: Record<string, number> = {};
   const bonus: Record<string, number> = {};
   const events: string[] = [];
-  for (const a of AIRLINES) {
+  for (const a of airlinesFor(c)) {
     const s = input.scores.find((x) => x.airlineId === a.id);
     if (!s) continue;
     const hasContract = contractsOf(c, 'active').some((k) => k.airlineId === a.id);
@@ -147,9 +155,9 @@ export function stepAirlineEval(c: CompanyState, input: EvalStepInput): EvalStep
       if (comp.score === null) continue;
       e.ema[comp.key] = Math.round(((1 - EMA_ALPHA) * (e.ema[comp.key] ?? NEUTRAL) + EMA_ALPHA * comp.score) * 100) / 100;
     }
-    deltas[a.id] = Math.round(evalDelta(a.type, e.ema) * 1000) / 1000;
+    deltas[a.id] = Math.round(evalDelta(a.type, e.ema, evalWeightsFor(c)[a.type]) * 1000) / 1000;
     // 不満（ヒステリシス）
-    for (const k of SCORE_KEYS) {
+    for (const k of scoreKeysFor(c)) {
       const v = e.ema[k];
       if (v === undefined) continue;
       if (v < COMPLAINT_ON) {
@@ -202,7 +210,7 @@ export const blocksIncrease = (c: Pick<CompanyState, 'airlineEval'>, airlineId: 
 // ---------------------------------------------------------------- 検証
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const KEYS: readonly string[] = SCORE_KEYS;
+const KEYS: readonly string[] = SCORE_KEYS_V2;
 const KINDS: readonly string[] = ['standFor', 'slot', 'contactGate', 'otp'];
 const num = (v: unknown, lo: number, hi: number): boolean => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
 

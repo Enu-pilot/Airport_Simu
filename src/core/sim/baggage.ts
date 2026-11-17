@@ -43,18 +43,19 @@ export function moveBag(state: SimState, bag: Bag, to: BagState, location: strin
   bag.history.push({ t: state.now, state: to, location });
 }
 
-function addBag(state: SimState, g: PaxGroup, flightId: string, s: BagState, location: string): Bag {
+function addBag(state: SimState, g: PaxGroup, flightId: string, s: BagState, location: string, opts: { direction?: Bag['direction']; transferToFlightId?: string } = {}): Bag {
   const id = nextId(state, 'bg');
   const bag: Bag = {
     id,
     flightId,
     paxGroupId: g.id,
-    direction: g.direction,
+    direction: opts.direction ?? g.direction,
     state: s,
     location,
     since: state.now,
     loadedOn: null,
     history: [{ t: state.now, state: s, location }],
+    ...(opts.transferToFlightId ? { transferToFlightId: opts.transferToFlightId } : {}),
   };
   state.bags[id] = bag;
   state.activeBags.push(id);
@@ -72,6 +73,34 @@ export function checkInBags(sim: Simulation, g: PaxGroup, counterArea: string): 
 /** 到着グループの手荷物（到着機の貨物室にある） */
 export function arrivalBags(sim: Simulation, g: PaxGroup, aircraftId: string): void {
   for (let i = 0; i < g.bags; i++) addBag(sim.state, g, g.flightId, 'onAircraft', `aircraft:${aircraftId}`);
+}
+
+/** 乗継グループの手荷物（フェーズ 4 §5.5）: 到着便の手荷物として作り、出発便への付け替え先を持たせる */
+export function transferArrivalBags(sim: Simulation, g: PaxGroup, aircraftId: string, arrFlightId: string, depFlightId: string): void {
+  for (let i = 0; i < g.bags; i++) {
+    addBag(sim.state, g, arrFlightId, 'onAircraft', `aircraft:${aircraftId}`, { direction: 'arrival', transferToFlightId: depFlightId });
+  }
+}
+
+/**
+ * 乗継手荷物の付け替え（フェーズ 4 §5.5）: 搬送の完了時に受取所へ送らず、出発便の預け手荷物にする。
+ * 付け替えは 1 回だけ（付け替え先が残っているものだけが対象）。便ごとの索引も付け替える。
+ */
+export function retagTransferBag(state: SimState, bag: Bag): void {
+  if (!bag.transferToFlightId || bag.transferFromFlightId) return;
+  const from = bag.flightId;
+  const to = bag.transferToFlightId;
+  const list = state.flightBags[from];
+  if (list) {
+    const i = list.indexOf(bag.id);
+    if (i >= 0) list.splice(i, 1);
+  }
+  (state.flightBags[to] ??= []).push(bag.id);
+  bag.flightId = to;
+  bag.transferFromFlightId = from;
+  delete bag.transferToFlightId;
+  bag.direction = 'departure';
+  moveBag(state, bag, 'checkedIn', `transfer:${from}`);
 }
 
 export function bagsOf(state: SimState, flightId: string, states?: readonly BagState[]): Bag[] {

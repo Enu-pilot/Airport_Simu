@@ -387,7 +387,7 @@ export function snapRunwayToGrid(layout: AirportLayout, id: string): OpResult {
  */
 export function updateLayoutSettings(
   layout: AirportLayout,
-  s: { magneticVariationDeg?: number | null; ruleSet?: 'classic' | 'realistic'; taxiMode?: 'full' | 'block'; taxiBlockTiles?: number },
+  s: { magneticVariationDeg?: number | null; ruleSet?: 'classic' | 'realistic'; taxiMode?: 'full' | 'block'; taxiBlockTiles?: number; accessCapacityModel?: 'segment' | null },
 ): OpResult {
   const d = cloneLayout(layout);
   let changed = false;
@@ -412,6 +412,13 @@ export function updateLayoutSettings(
     if ((d.taxiMode ?? 'full') !== s.taxiMode) changed = true;
     if (s.taxiMode === 'full') delete d.taxiMode;
     else d.taxiMode = s.taxiMode;
+  }
+  // アクセスの区間能力モデル（フェーズ 4）。集約モデル（既定）はキーを書かない
+  if (s.accessCapacityModel !== undefined) {
+    if (s.accessCapacityModel !== 'segment' && s.accessCapacityModel !== null) return fail('INVALID_VALUE');
+    if ((d.accessCapacityModel ?? null) !== s.accessCapacityModel) changed = true;
+    if (s.accessCapacityModel === null) delete d.accessCapacityModel;
+    else d.accessCapacityModel = s.accessCapacityModel;
   }
   if (s.taxiBlockTiles !== undefined) {
     const t = s.taxiBlockTiles;
@@ -1052,6 +1059,9 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
         connectorKind: (v) => v === 'stairs' || v === 'escalator' || v === 'elevator' || v === 'ramp' || v === 'railRamp' || v === 'pipeRiser',
         capacityPerHour: (v) => Number.isFinite(v) && Number(v) > 0,
         travelSec: (v) => Number.isFinite(v) && Number(v) > 0,
+        // フェーズ 4: 区間能力の既定値に使う車線数・線路数
+        lanes: (v) => Number.isInteger(v) && Number(v) >= 1 && Number(v) <= 8,
+        tracks: (v) => v === 1 || v === 2,
       });
       break;
     case 'stand': {

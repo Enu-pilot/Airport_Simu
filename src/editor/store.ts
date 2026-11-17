@@ -9,7 +9,7 @@ import type { OpResult } from '../core/layout/operations';
 import { createEmptyLayout } from '../core/layout/operations';
 import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { createSampleAirport } from '../core/sample/sampleAirport';
-import { analyzeLayout, type LayoutAnalysis } from '../core/validation/validate';
+import { analyzeLayout, intlLockedIssues, overnightStandIssues, type LayoutAnalysis } from '../core/validation/validate';
 import { exportLayout, importLayout } from '../core/io/serialize';
 import { OP_FAILURE_LABEL } from '../i18n/ja';
 import type { Simulation } from '../core/sim/simulation';
@@ -333,7 +333,13 @@ export function useLayout(): AirportLayout {
 }
 
 export function useAnalysis(): LayoutAnalysis {
-  return getAnalysis(useLayout());
+  const layout = useLayout();
+  const company = useEditor((s) => s.company);
+  const base = getAnalysis(layout);
+  // フェーズ 4: 滞泊の記録と国際の解放状態は会社側の状態なので、レイアウト解析へここで重ねる
+  const extra = [...overnightStandIssues(layout, company), ...intlLockedIssues(layout, company)];
+  if (extra.length === 0) return base;
+  return { ...base, issues: [...base.issues, ...extra] };
 }
 
 // ---------------------------------------------------------------- 保存
@@ -543,6 +549,28 @@ export function setCompanyCity(city: CityConfig | null): void {
   else delete company.city;
   set({ company });
   showToast(city ? '都市と空港需要の設定を更新しました' : '都市モデルを停止し、従来の需要に戻しました');
+}
+
+/** フェーズ 4 の機能の有効化を付け外しする（建設モード。解放の判定は unlocks.ts） */
+export function setCompanyFeatures(features: { overnight?: true; based?: true; international?: true; hub?: true } | null): void {
+  const s = get();
+  if (s.mode === 'operate') return;
+  const company = structuredClone(s.company);
+  if (features && Object.keys(features).length > 0) company.features = features;
+  else delete company.features;
+  set({ company });
+  showToast(features ? '新しい運航の仕組みの設定を更新しました' : '新しい運航の仕組みをすべて停止しました');
+}
+
+/** 路線需要モデル（フェーズ 3 の market）を付け外しする（建設モード。city が必要） */
+export function setCompanyMarket(enabled: boolean): void {
+  const s = get();
+  if (s.mode === 'operate') return;
+  const company = structuredClone(s.company);
+  if (enabled && company.city) company.market = { version: 1, routes: {} };
+  else delete company.market;
+  set({ company });
+  showToast(enabled && company.city ? '路線需要モデルを有効にしました' : '路線需要モデルを停止しました');
 }
 
 export function addCityEvent(event: Omit<CityEvent, 'id'>): void {

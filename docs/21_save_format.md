@@ -2,9 +2,9 @@
 
 実装: `src/core/io/project.ts`（形式・検証・復元）、`src/editor/project.ts`（保存先・操作）、`src/ui/ProjectPanel.tsx`（画面）。
 
-## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜4）
+## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜6）
 
-**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・階層施設／建物内設備・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜4 を読み、5 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`、`PROJECT_FORMAT_VERSION_4 = 4`（フェーズ 2）。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
+**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・階層施設／建物内設備・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜6 を読み、7 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`、`PROJECT_FORMAT_VERSION_4 = 4`（フェーズ 2）。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
 
 `Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。`FlightRecord` の形式は変更しない。便別レビューの締め時点の原因・実時刻・機体状態・作業・施設名、航空会社評価要素・EMA/満足度前後・不満/要望は `DayReview` に集約し、日ごとの IndexedDB 履歴の `review` に保存する。会社状態やプロジェクトJSONには追加しないため、プロジェクト保存形式・シミュレーションモデルの版は上げない。古い保存済みレビューにない項目は推測せず欠落として表示する。
 
@@ -63,6 +63,25 @@
 - 理由: 旧アプリ（最大 3 まで読める）が上の項目を無視して従来方式で運航を続けると、区間の途中状態が不変条件に反して読まれるため。4 にすれば旧アプリは「新しい版」として拒否する。版 1〜3 を名乗るファイルに版 4 の項目がある場合も拒否する。
 - `SCHEMA_VERSION`（レイアウト）・`state.version`・`SIM_MODEL_VERSION` は上げない（任意項目の追加だけ・新方式は opt-in で既存レイアウトの結果は変わらない。`tests/unit/sim/legacyFingerprint.test.ts` とゴールデンで確認）。旧データの移行は不要（欠落 = 従来方式）。判断の経緯は [design/impl_phase2_plan.md](design/impl_phase2_plan.md) §1.6。
 - 区間の構造（`ctx.blocks`）・経路 → 区間の対応は配置と経路から作り直す派生データで、保存しない。
+
+### 版 5（フェーズ 3。実装済み）
+
+会社の `market`（路線需要モデル: `{ version: 1, routes }`）を含むときだけ `formatVersion 5` で書く。含まないプロジェクトは従来の版のまま（`tests/unit/projectFormat4.test.ts` の境界を版 5 に合わせて更新済み）。検証: `market` には `city` が必要。契約の航空会社・都市の ID がカタログにない場合はエラー（廃止・別名の案内を含む）。`importCompany` は不正な `market` を落として取り込む。機能の仕様は docs/43。
+
+### 版 6（フェーズ 4。実装済み）
+
+次のどれかを含むときだけ `formatVersion 6`（`versions.format` も 6）で書く。**どれも含まないプロジェクトは従来の版（1〜5）のまま書き、バイト列は変わらない**（`tests/unit/projectFormat6.test.ts`、ゴールデン）。仕様は docs/44。
+
+| 項目 | 場所 | 検証（読み込みエラーの条件） |
+|---|---|---|
+| `features`（overnight / based / international / hub） | `company` | 値が `true` 以外 |
+| `carryOver` / `basedFleet` / `hub` / `maintenanceCredit` / `basedIssueDays` | `company` | `features` がないのに存在する（取り込み時は落とす）。`carryOver` の出発秒（0〜86400）・駐機秒の範囲。`hub.banks` の分（0〜1440、開始 ≤ 終了） |
+| 契約の `kind` / `basedAircraft` / `transferShare` / `bankId` | `company.contracts` | `kind` が列挙外、`basedAircraft` が 1〜6 以外、`transferShare` が 0〜0.5 以外 |
+| `accessCapacityModel: 'segment'`、国際のエリア種類（emigration / immigration / customs / transferSecurity）、ゲートの `routeType`、駅の `platforms`、道路の `lanes` / `tracks` | `layout` | ゲートの `routeType` が列挙外 |
+| `swingGates` / `hubStats`、便の `overnight` / `carryOver` / `routeType` / `techHoldUntil` / `transferPlan` / `plannedTransferIn` | `sim.state` | （状態の形は `checkSim` の既存検査に従う） |
+
+- 版 6 未満を名乗るファイルに版 6 の項目がある場合は拒否する（フェーズ 4 の項目を含む旨のメッセージ）。
+- `SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない（任意項目の追加だけ・新機能は opt-in）。
 
 ## 機種データの固定（カタログ更新との互換性）
 

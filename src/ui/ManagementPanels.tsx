@@ -3,7 +3,9 @@ import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
 import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type DailyKpi, type DailyReport } from '../core/economy/company';
 import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
-import { AIRLINES, airlineDef, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
+import { airlineDef, airlinesFor, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
+import { previewLoadFactor } from '../core/economy/traffic';
+import { routeDemandSummary } from '../core/economy/demand';
 import { BALANCE } from '../core/economy/balance';
 import { forecastForDay } from '../core/sim/weather';
 import { analyzeAccess, type AccessMode } from '../core/access/model';
@@ -15,6 +17,7 @@ import {
   ACCESS_MODE_LABEL,
   GAME_UI,
   AIRLINE_TYPE_LABEL,
+  CONTRACT_KIND_LABEL,
   CONTRACT_STATUS_LABEL,
   COST_LABEL,
   KPI_LABEL,
@@ -48,7 +51,8 @@ export function PlanPanel() {
   const operable = operableTypes(ctx);
   const routeCapabilities = routeCapabilitiesForAirport(layout.countryId);
   // 実際の運航と同じアクセス係数（前日の混雑を反映）で計画する
-  const plan = planDayWithDemand(c, c.day, analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor, ctx.types, routeCapabilities);
+  const accessFactor = analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor;
+  const plan = planDayWithDemand(c, c.day, accessFactor, ctx.types, routeCapabilities);
   const analysis = analyzeDayPlan(plan, ctx);
   const issueKeys = new Map<string, string[]>();
   for (const i of analysis.issues) for (const k of i.keys) issueKeys.set(k, [...(issueKeys.get(k) ?? []), PLAN_ISSUE_LABEL[i.code]]);
@@ -83,6 +87,8 @@ export function PlanPanel() {
                 <th>就航先</th>
                 <th>機種</th>
                 <th>便数/日</th>
+                {c.market && <th>座席/日</th>}
+                {c.market && <th>見込み搭乗率</th>}
                 <th>時間帯</th>
                 <th>割引</th>
                 <th>期間</th>
@@ -92,7 +98,15 @@ export function PlanPanel() {
             <tbody>
               {active.map((k) => (
                 <tr key={k.id} data-testid={`contract-${k.id}`}>
-                  <td>{airlineDef(k.airlineId).name}</td>
+                  <td>
+                    {airlineDef(k.airlineId).name}
+                    {k.kind && (
+                      <span data-testid={`contract-kind-${k.id}`}>
+                        （{CONTRACT_KIND_LABEL[k.kind]}
+                        {k.kind === 'based' && k.basedAircraft ? `・所属機 ${k.basedAircraft} 機` : ''}）
+                      </span>
+                    )}
+                  </td>
                   <td>
                     {destinationDef(k.destinationId).name}（{classifyRoute(routeCapabilities.originCountryId, destinationDef(k.destinationId)) === 'domestic' ? '国内線' : '国際線'}）
                     {routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities) === 'international-processing-required' && <span className="ng-text"> 国際旅客処理未実装</span>}
@@ -114,6 +128,15 @@ export function PlanPanel() {
                     {operable.includes(k.typeId) ? '' : ' 運航不可'}
                   </td>
                   <td>{k.perDay}</td>
+                  {c.market && <td data-testid={`contract-seats-${k.id}`}>{k.perDay * seatsFor(c, k.airlineId, k.typeId, ctx.types) * 2}</td>}
+                  {c.market && (
+                    <td data-testid={`contract-lf-${k.id}`}>
+                      {(() => {
+                        const p = previewLoadFactor(c, k, c.day, accessFactor, ctx.types, routeCapabilities);
+                        return p ? `${Math.round(p.lf * 100)}%` : '—';
+                      })()}
+                    </td>
+                  )}
                   <td>{WINDOW_LABEL[k.window]}</td>
                   <td>{Math.round(k.feeDiscount * 100)}%</td>
                   <td>
@@ -141,7 +164,15 @@ export function PlanPanel() {
                 const ok = operable.includes(k.typeId) && routeStatus === 'available';
                 return (
                   <tr key={k.id} data-testid={`offer-${k.id}`}>
-                    <td>{airlineDef(k.airlineId).name}</td>
+                    <td>
+                      {airlineDef(k.airlineId).name}
+                      {k.kind && (
+                        <span data-testid={`offer-kind-${k.id}`}>
+                          （{CONTRACT_KIND_LABEL[k.kind]}
+                          {k.kind === 'based' && k.basedAircraft ? `・所属機 ${k.basedAircraft} 機` : ''}）
+                        </span>
+                      )}
+                    </td>
                     <td>
                       {destinationDef(k.destinationId).name}（{classifyRoute(routeCapabilities.originCountryId, destinationDef(k.destinationId)) === 'domestic' ? '国内線' : '国際線'}）
                       {routeStatus === 'international-processing-required' && <span className="ng-text"> 国際旅客処理未実装</span>}
@@ -152,6 +183,16 @@ export function PlanPanel() {
                       {ok ? '' : '（未対応）'}
                     </td>
                     <td>{k.perDay}便/日</td>
+                    {c.market &&
+                      (() => {
+                        const p = previewLoadFactor(c, k, c.day, accessFactor, ctx.types, routeCapabilities);
+                        return (
+                          <>
+                            <td data-testid={`offer-lf-${k.id}`}>見込み搭乗率 {p ? `${Math.round(p.lf * 100)}%` : '—'}</td>
+                            <td data-testid={`offer-demand-${k.id}`}>路線需要 {p ? `${Math.round(p.demand)}人/日` : '—'}</td>
+                          </>
+                        );
+                      })()}
                     <td>{WINDOW_LABEL[k.window]}</td>
                     <td>割引 {Math.round(k.feeDiscount * 100)}%</td>
                     <td>{k.offerExpiresDay + 1}日目まで</td>
@@ -177,10 +218,36 @@ export function PlanPanel() {
             </>
           )}
 
+          {c.market && (
+            <>
+              <h4>路線の需要と供給（今日）</h4>
+              <table className="board" data-testid="traffic-routes">
+                <thead>
+                  <tr>
+                    <th>就航先</th>
+                    <th>需要（人/日）</th>
+                    <th>供給座席</th>
+                    <th>基準搭乗率</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...(routeDemandSummary(c, c.day, accessFactor, ctx.types, routeCapabilities)?.values() ?? [])].map((info) => (
+                    <tr key={info.destinationId} data-testid={`traffic-route-${info.destinationId}`}>
+                      <td>{destinationDef(info.destinationId).name}</td>
+                      <td>{Math.round(info.demand)}</td>
+                      <td>{info.seats}</td>
+                      <td>{Math.round(info.baseLf * 100)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
           <h4>航空会社</h4>
           <table className="board">
             <tbody>
-              {AIRLINES.map((a) => (
+              {airlinesFor(c).map((a) => (
                 <tr key={a.id}>
                   <td>
                     {a.code} {a.name}

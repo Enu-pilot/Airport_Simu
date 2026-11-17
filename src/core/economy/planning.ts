@@ -8,8 +8,11 @@ import { checkStand } from '../aircraft/compat';
 import { operableTypes, type SimContext } from '../sim/context';
 import { BALANCE } from './balance';
 import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
-import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
+import { airlineDef, classifyRoute, destinationDef, HOME_COUNTRY_ID, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
 import { CITY_NIGHT_CURFEW, cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedPassengers } from './city';
+import { featureOn } from './unlocks';
+import { routeLoadFactors } from './demand';
+import type { TransferKind } from './phase4Types';
 import { resolveBusGateForStand } from '../terminal/busGateAssignment';
 
 /**
@@ -54,11 +57,23 @@ export interface PlannedFlight {
   /** 座席数（航空会社の座席構成） */
   seats: number;
   inboundDelaySec: number;
+  /** 夜間滞泊の便（フェーズ 4）: 到着便はその晩泊まり、出発便は前泊の朝発 */
+  overnight?: true;
+  /** 国際線の便（フェーズ 4） */
+  routeType?: 'international';
+  /** 乗継の計画（到着便）: 出発便の key への人数 */
+  connections?: { depKey: string; pax: number; kind: TransferKind }[];
+  /** 乗継で入ってくる人数（出発便） */
+  transferIn?: number;
+  /** 乗継の波（バンク）の ID */
+  bankId?: string;
 }
 
 export interface DayPlan {
   day: number;
   flights: PlannedFlight[];
+  /** 前日の夜間滞泊の便（当日の朝に出発する。分析で朝までスポットを占有する分。フェーズ 4 §3.2） */
+  prevOvernight?: PlannedFlight[];
   /** 運用時間・時間帯に収まらず計画できなかった便（契約ID） */
   dropped: string[];
   /** 最終出発時刻（日内の分。city.nightOps があるときだけ。dropped の理由の表示に使う） */
@@ -92,6 +107,64 @@ export function loadFactor(c: CompanyState, k: Pick<Contract, 'airlineId' | 'des
   return Math.min(1, Math.max(0.15, base * destinationDef(k.destinationId).passengerDemand * fee * rating * access * noise));
 }
 
+const DAY_SEC_P = 86400;
+
+/**
+ * 夜間滞泊の 1 機分（フェーズ 4 §3.2）: 夕方に到着し、翌朝に出発する。
+ * 到着は [閉場 − 240 分, 閉場 − 30 分]、出発は翌日の [m, m + 90 分]（m = max(開場 + 30 分, 夜間制限の終わり)）。
+ * 乱数は通常の便と同じ種（`${seed}:${契約}:${日}:${i}`）から、位置・旅客数・遅れの順に使う。
+ */
+export function overnightFlightFor(
+  c: CompanyState,
+  k: Contract,
+  day: number,
+  i: number,
+  count: number,
+  access = 1,
+  types: TypeTable = AIRCRAFT_TYPES,
+  paxModel?: (k: Contract, u: number) => number,
+): PlannedFlight {
+  const rng = new Rng(`${c.seed}:${k.id}:${day}:${i}`);
+  const seats = seatsFor(c, k.airlineId, k.typeId, types);
+  const code = airlineDef(k.airlineId).code;
+  const from = c.hours.closeMin - 240;
+  const to = c.hours.closeMin - 30;
+  const pos = (i + 0.5 + (rng.next() - 0.5) * 0.6) / count;
+  const arrMin = Math.min(to, Math.max(from, Math.round((from + (to - from) * pos) / 5) * 5));
+  const m = Math.max(c.hours.openMin + 30, c.city?.nightOps ? CITY_NIGHT_CURFEW.toMin : 0);
+  const posD = (i + 0.5 + (rng.next() - 0.5) * 0.6) / count;
+  const depMin = Math.min(m + 90, Math.max(m, Math.round((m + 90 * posD) / 5) * 5));
+  const arrPax = Math.round(seats * (paxModel ? paxModel(k, rng.next()) : loadFactor(c, k, rng.next(), access)));
+  const depPax = Math.round(seats * (paxModel ? paxModel(k, rng.next()) : loadFactor(c, k, rng.next(), access)));
+  const D = BALANCE.demand;
+  const inboundDelaySec = rng.next() < D.inboundDelayProb ? rng.int(3, D.inboundDelayMaxMin) * 60 : 0;
+  const n = k.numberBase + i * 2;
+  return {
+    key: `${k.id}:${day}:${i}`,
+    contractId: k.id,
+    airlineId: k.airlineId,
+    destinationId: k.destinationId,
+    typeId: k.typeId,
+    arrNumber: `${code}${n}`,
+    depNumber: `${code}${n + 1}`,
+    arrivalAt: arrMin * 60,
+    departureAt: DAY_SEC_P + depMin * 60,
+    arrPax,
+    depPax,
+    seats,
+    inboundDelaySec,
+    overnight: true,
+    ...(classifyRoute(HOME_COUNTRY_ID, destinationDef(k.destinationId)) === 'international' ? { routeType: 'international' as const } : {}),
+  };
+}
+
+/** その晩に泊まる機数（overnight 契約は perDay、based 契約は常駐機数） */
+export function overnightCountFor(k: Contract): number {
+  if (k.kind === 'overnight') return k.perDay;
+  if (k.kind === 'based') return k.basedAircraft ?? 1;
+  return 0;
+}
+
 /**
  * access = アクセス係数（運航では analyzeAccess の値を渡す。プレビューも同じ値を渡せば実際の運航と一致する）
  * types = 機種テーブル（保存時のスナップショットで再現するときはそれを渡す）
@@ -103,6 +176,8 @@ export function planDay(
   access = 1,
   types: TypeTable = AIRCRAFT_TYPES,
   routeCapabilities: RouteCapabilities = routeCapabilitiesForAirport(),
+  /** 搭乗率の差し替え（フェーズ 3 §3.3。market 有効時の路線需要モデル）。u は従来と同じ位置の乱数 */
+  paxModel?: (k: Contract, u: number) => number,
 ): DayPlan {
   const flights: PlannedFlight[] = [];
   const dropped: string[] = [];
@@ -116,19 +191,32 @@ export function planDay(
     const range = arrivalRange(k.window, k.typeId, c.hours, types);
     const seats = seatsFor(c, k.airlineId, k.typeId, types);
     const code = airlineDef(k.airlineId).code;
+    // 夜間滞泊（フェーズ 4 §3.2）: overnight 契約は滞泊だけ、based 契約は日中の折り返しに加えて常駐機が滞泊する
+    if (k.kind === 'overnight' || k.kind === 'based') {
+      const count = overnightCountFor(k);
+      const offset = k.kind === 'based' ? k.perDay : 0;
+      for (let j = 0; j < count; j++) flights.push(overnightFlightFor(c, k, day, offset + j, count, access, types, paxModel));
+      if (k.kind === 'overnight') continue;
+    }
+    // 波（バンク、フェーズ 4 §5.6）: bankId のある契約は到着・出発を波の時間帯に寄せる（乱数の値は従来と同じ）
+    const bank = k.bankId && featureOn(c, 'hub') ? c.hub?.banks.find((b) => b.id === k.bankId) : undefined;
     for (let i = 0; i < k.perDay; i++) {
-      if (!range) {
+      if (!range && !bank) {
         dropped.push(k.id);
         continue;
       }
       const rng = new Rng(`${c.seed}:${k.id}:${day}:${i}`);
-      const [from, to] = range;
+      const [from, to] = bank ? [bank.arriveFromMin, bank.arriveToMin] : range!;
       const pos = (i + 0.5 + (rng.next() - 0.5) * 0.6) / k.perDay;
       const arrMin = Math.round((from + (to - from) * pos) / 5) * 5;
       const arrivalAt = Math.min(to, Math.max(from, arrMin)) * 60;
-      const departureAt = arrivalAt + resolveType(types, k.typeId).turnaroundSec + PLAN_TURN_BUFFER_SEC;
-      const arrPax = Math.round(seats * loadFactor(c, k, rng.next(), access));
-      const depPax = Math.round(seats * loadFactor(c, k, rng.next(), access));
+      let departureAt = arrivalAt + resolveType(types, k.typeId).turnaroundSec + PLAN_TURN_BUFFER_SEC;
+      if (bank) {
+        const depMin = Math.round((bank.departFromMin + (bank.departToMin - bank.departFromMin) * pos) / 5) * 5;
+        departureAt = Math.max(departureAt, depMin * 60);
+      }
+      const arrPax = Math.round(seats * (paxModel ? paxModel(k, rng.next()) : loadFactor(c, k, rng.next(), access)));
+      const depPax = Math.round(seats * (paxModel ? paxModel(k, rng.next()) : loadFactor(c, k, rng.next(), access)));
       const D = BALANCE.demand;
       const inboundDelaySec = rng.next() < D.inboundDelayProb ? rng.int(3, D.inboundDelayMaxMin) * 60 : 0;
       const n = k.numberBase + i * 2;
@@ -146,11 +234,26 @@ export function planDay(
         depPax,
         seats,
         inboundDelaySec,
+        ...(bank ? { bankId: bank.id } : {}),
+        ...(classifyRoute(routeCapabilities.originCountryId, destinationDef(k.destinationId)) === 'international' ? { routeType: 'international' as const } : {}),
       });
     }
   }
   flights.sort((a, b) => a.arrivalAt - b.arrivalAt || compareIds(a.key, b.key));
-  return { day, flights, dropped, unsupportedRoutes };
+  // 前日の滞泊（分析で当日の朝までスポットを占有する分。契約から決定的に求める）
+  let prevOvernight: PlannedFlight[] | undefined;
+  if (day > 0) {
+    const prev: PlannedFlight[] = [];
+    for (const k of activeContractsOn(c, day - 1)) {
+      if (k.kind !== 'overnight' && k.kind !== 'based') continue;
+      if (routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities) !== 'available') continue;
+      const count = overnightCountFor(k);
+      const offset = k.kind === 'based' ? k.perDay : 0;
+      for (let j = 0; j < count; j++) prev.push(overnightFlightFor(c, k, day - 1, offset + j, count, access, types, paxModel));
+    }
+    if (prev.length > 0) prevOvernight = prev;
+  }
+  return { day, flights, dropped, unsupportedRoutes, ...(prevOvernight ? { prevOvernight } : {}) };
 }
 
 /** 都市設定があるときだけ、アクセス性に都市需要上限を反映する計画。設定なしは従来の計画を返す。 */
@@ -163,6 +266,30 @@ export function planDayWithDemand(
 ): DayPlan {
   const planningCompany = c.city ? { ...c, hours: cityOperatingHours(c.hours, c.city) } : c;
   const cutoff = c.city?.nightOps ? { departureCutoffMin: Math.min(c.hours.closeMin, CITY_NIGHT_CURFEW.fromMin, c.city.nightOps.departureCutoffMin) } : {};
+  // 路線需要モデル（フェーズ 3 §3.3）: market 有効時は契約ごとの搭乗率で計画し、都市の需要上限は最終保護で効かせる
+  if (c.market && c.city) {
+    const lfs = routeLoadFactors(c, day, access, types, routeCapabilities);
+    if (lfs) {
+      const noise = BALANCE.market.noise;
+      const plan = planDay(planningCompany, day, access, types, routeCapabilities, (k, u) => {
+        const lk = lfs.get(k.id);
+        if (lk === undefined) return loadFactor(c, k, u, access);
+        return Math.min(1, Math.max(0.05, lk * (1 + noise * (2 * u - 1))));
+      });
+      const event = cityEventEffects(c.city, day);
+      const ceiling = cityDemandCeiling(c.city, access) * event.demandMultiplier;
+      const total = plan.flights.reduce((s, f) => s + f.arrPax + f.depPax, 0);
+      if (total > ceiling && total > 0) {
+        const scale = ceiling / total;
+        for (const f of plan.flights) {
+          // 切り捨てで丸め直し、合計が上限を超えないことを保証する
+          f.arrPax = Math.floor(f.arrPax * scale);
+          f.depPax = Math.floor(f.depPax * scale);
+        }
+      }
+      return { ...plan, ...cutoff };
+    }
+  }
   const base = planDay(planningCompany, day, access, types, routeCapabilities);
   if (!c.city) return base;
   const event = cityEventEffects(c.city, day);
@@ -188,7 +315,11 @@ export type PlanIssueCode =
   | 'GROUND_OVERLOAD' // 同時に折り返す機数が地上支援の能力を超える
   | 'AIRLINE_ROUTE_UNSUPPORTED' // 航空会社がこの路線種別を運航しない
   | 'INTERNATIONAL_PROCESSING_REQUIRED' // 国際旅客処理設備が未実装・不足
-  | 'OUTSIDE_HOURS'; // 運用時間・契約の時間帯に収まらない
+  | 'OUTSIDE_HOURS' // 運用時間・契約の時間帯に収まらない
+  | 'OVERNIGHT_CAPACITY_EXCEEDED' // 滞泊できる機数を超える
+  | 'BASED_CONDITIONS_UNMET' // 拠点契約の条件を満たさない
+  | 'INTL_GATE_MISSING' // 国際のゲートがない
+  | 'MCT_UNAVAILABLE'; // 乗継の経路がなく MCT が出せない
 
 export interface PlanIssue {
   code: PlanIssueCode;
@@ -308,6 +439,40 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     .filter((s) => s.operational && s.entry)
     .sort((a, b) => SIZE_RANK[a.size] - SIZE_RANK[b.size] || Number(b.contact) - Number(a.contact) || compareIds(a.id, b.id));
   const freeAt = new Map<string, number>();
+  // ゲートの国内/国際の振り分け（フェーズ 4 §4.3・§4.5）。routeType のないゲートは国内扱い。
+  // swing ゲートは種別が変わるとき 600 秒の切り替え間隔が要る（計画の分析でも同じ規則で判定する）
+  const gateSwing = new Map<string, { type: 'domestic' | 'international'; until: number }>();
+  const gateRtOf = (gateId: string): 'domestic' | 'international' | 'swing' => ctx.terminal.gates[gateId]?.routeType ?? 'domestic';
+  const busRts = new Set(ctx.busGates.map((id) => gateRtOf(id)));
+  const standRouteOk = (standId: string, intl: boolean, arrivalAt: number, checkSwing = true): boolean => {
+    const gid = ctx.standGate[standId];
+    if (gid) {
+      const rt = gateRtOf(gid);
+      if (intl ? rt === 'domestic' : rt === 'international') return false;
+      if (checkSwing && rt === 'swing') {
+        const cur = gateSwing.get(gid);
+        const t = intl ? 'international' : 'domestic';
+        if (cur && cur.type !== t && arrivalAt < cur.until + BALANCE.phase4.swingChangeSec) return false;
+      }
+      return true;
+    }
+    // リモートスポットはバスゲートの種別で決まる。バスゲート自体がない空港では国際便は置けない
+    if (ctx.busGates.length === 0) return !intl;
+    return intl ? busRts.has('international') || busRts.has('swing') : busRts.has('domestic') || busRts.has('swing');
+  };
+  const noteSwingUse = (standId: string, type: 'domestic' | 'international', until: number) => {
+    const gid = ctx.standGate[standId];
+    if (gid && gateRtOf(gid) === 'swing') gateSwing.set(gid, { type, until });
+  };
+  // 前日の滞泊は当日の朝までスポットを占有する（出発の早い順に仮割り当て）
+  for (const f of [...(plan.prevOvernight ?? [])].sort((a, b) => a.departureAt - b.departureAt)) {
+    const type = resolveType(ctx.types, f.typeId);
+    const s = stands.find((x) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= 0 && standRouteOk(x.id, f.routeType === 'international', 0, false));
+    if (s) {
+      freeAt.set(s.id, f.departureAt - DAY_SEC_P + STAND_GAP_SEC);
+      noteSwingUse(s.id, f.routeType === 'international' ? 'international' : 'domestic', f.departureAt - DAY_SEC_P);
+    }
+  }
   const blockersByType = new Map<string, string[]>();
   const assignments: PlanAnalysis['assignments'] = {};
   for (const f of plan.flights) {
@@ -322,13 +487,17 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     let blockers = blockersByType.get(f.typeId);
     if (!blockers) blockersByType.set(f.typeId, (blockers = groundBlockers(ctx, type)));
     if (blockers.length > 0) add('GROUND_SUPPORT_MISSING', 'error', f.key, blockers.join('・'));
-    const s = stands.find((x) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt);
+    const intl = f.routeType === 'international';
+    const s = stands.find((x) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt && standRouteOk(x.id, intl, f.arrivalAt));
     if (!s) {
       assignments[f.key] = { standId: null, gateId: null, terminalId: null };
-      add('STAND_CONFLICT', 'error', f.key);
+      // 国際便で、空き時間に関係なく置けるスポット自体がない場合はゲート不足として区別する（フェーズ 4 §4.5）
+      const anyRouteOk = intl && stands.some((x) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && standRouteOk(x.id, true, f.arrivalAt, false));
+      add(intl && !anyRouteOk ? 'INTL_GATE_MISSING' : 'STAND_CONFLICT', 'error', f.key);
       continue;
     }
     freeAt.set(s.id, f.departureAt + STAND_GAP_SEC);
+    noteSwingUse(s.id, intl ? 'international' : 'domestic', f.departureAt);
     const gateId = ctx.standGate[s.id] ?? null;
     // A contact gate owns the passenger terminal. Remote stands use the shared
     // preview/live selector, so their bus gate and terminal are fixed together.
@@ -410,8 +579,9 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     { t: f.arrivalAt + f.inboundDelaySec, d: 1, key: f.key },
     { t: f.departureAt, d: -1, key: f.key },
   ]);
+  for (const f of plan.prevOvernight ?? []) points.push({ t: f.departureAt - DAY_SEC_P, d: -1, key: f.key });
   points.sort((a, b) => a.t - b.t || a.d - b.d);
-  let cur = 0;
+  let cur = (plan.prevOvernight ?? []).length;
   let peak = 0;
   const overloaded: string[] = [];
   for (const p of points) {
@@ -420,6 +590,27 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     if (p.d > 0 && cur > capacity.turnarounds) overloaded.push(p.key);
   }
   for (const k of overloaded) add('GROUND_OVERLOAD', capacity.turnarounds === 0 ? 'error' : 'warning', k);
+  // フェーズ 4 §3.4: 今夜の滞泊の必要数が、運用中で誘導路につながったスポットの能力を超えたらエラー。
+  // capacity.ts の overnightFeasible と同じ貪欲判定（planning → capacity の循環 import を避けるためここに置く）
+  const ovnFlights = plan.flights.filter((f) => f.overnight);
+  if (ovnFlights.length > 0) {
+    const req = new Map<string, number>();
+    for (const f of ovnFlights) req.set(resolveType(ctx.types, f.typeId).size, (req.get(resolveType(ctx.types, f.typeId).size) ?? 0) + 1);
+    const standsAsc = Object.values(ctx.stands).filter((s) => s.operational && s.entry).sort((a, b) => SIZE_RANK[a.size] - SIZE_RANK[b.size]);
+    const used = new Set<string>();
+    let feasible = true;
+    for (const size of ['L', 'M', 'S'] as const) {
+      let need = req.get(size) ?? 0;
+      for (const st of standsAsc) {
+        if (need <= 0) break;
+        if (used.has(st.id) || SIZE_RANK[st.size] < SIZE_RANK[size]) continue;
+        used.add(st.id);
+        need--;
+      }
+      if (need > 0) { feasible = false; break; }
+    }
+    if (!feasible) for (const f of ovnFlights) add('OVERNIGHT_CAPACITY_EXCEEDED', 'error', f.key);
+  }
   return { assignments, issues, hourly: { movements, depPax }, capacity, terminalCapacity, hourlyByTerminal, peakTurnarounds: peak };
 }
 

@@ -101,7 +101,7 @@ export const BALANCE = {
   /** 地上支援の作業ごとの運営費 */
   taskCost: { unload: 300, load: 300, fuel: 600, clean: 400, cater: 300, inspect: 600, pushback: 200, defect: 3_000, busTrip: 150 } as Record<string, number>,
   /** 補償・対応費 */
-  compensation: { missedPax: 400, leftBag: 300, delayedFlight60: 5_000 },
+  compensation: { missedPax: 400, leftBag: 300, delayedFlight60: 5_000, missedConnection: 600 },
 
   // ------------------------------------------------------------ 需要・航空会社
   demand: {
@@ -112,6 +112,27 @@ export const BALANCE = {
     noise: 0.08,
     inboundDelayProb: 0.2,
     inboundDelayMaxMin: 30,
+  },
+  /** フェーズ 4 のゲーム値（夜間滞泊・拠点・整備・兼用ゲート） */
+  phase4: {
+    /** 整備の周期（運航回数） */
+    checkCycles: 12,
+    /** 兼用ゲートの切替に必要な間隔（秒） */
+    swingChangeSec: 600,
+  },
+  /** 路線需要モデル（フェーズ 3 §3。market 有効時のみ使う） */
+  market: {
+    /** D_r = K × (P_o/1e6)^alpha × (P_d/1e6)^beta × I × g(d) × φ × A × F × R */
+    K: 600,
+    alpha: 0.6,
+    beta: 0.4,
+    /** 契約の搭乗率のクランプ */
+    lfMin: 0.1,
+    lfMax: 0.98,
+    /** 便ごとの揺らぎ（旧 loadFactor の noise と同じ） */
+    noise: 0.08,
+    /** 国際路線の需要係数 */
+    internationalFactor: 0.6,
   },
   offers: { baseProb: 0.12, ratingProb: 0.3, maxOpen: 6, expireDays: 3, contractDays: 30 },
   contracts: { renewGoodSat: 70, renewOkSat: 45, withdrawSat: 25, withdrawDays: 3, increaseMinSat: 60, decreasePenaltySat: 10 },

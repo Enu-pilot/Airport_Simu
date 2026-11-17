@@ -537,6 +537,19 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         </Field>
         <Info label="階層">{`${from?.level ?? 0} → ${to?.level ?? 0}`}</Info>
         {e.connectorKind && <Info label="階層接続">{e.connectorKind}</Info>}
+        {(e.roadClass === 'public' || e.roadClass === 'service') && (
+          <Field label="車線数（区間能力の既定値）">
+            <NumberInput value={e.lanes ?? 1} min={1} max={8} onCommit={(v) => update(layout, id, { lanes: v })} testid="prop-lanes" />
+          </Field>
+        )}
+        {e.roadClass === 'rail' && (
+          <Field label="線路（区間能力の既定値）">
+            <select value={e.tracks ?? 1} onChange={(ev) => update(layout, id, { tracks: Number(ev.target.value) })} data-testid="prop-tracks">
+              <option value={1}>単線（4 本/時）</option>
+              <option value={2}>複線（12 本/時）</option>
+            </select>
+          </Field>
+        )}
         <Info label="明示能力">{e.capacityPerHour ? `${e.capacityPerHour.toLocaleString()} /時` : '未算出'}</Info>
         {e.travelSec && <Info label="移動時間">{`${e.travelSec} 秒`}</Info>}
       </>

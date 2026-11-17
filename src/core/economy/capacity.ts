@@ -13,7 +13,9 @@ import { resolveType } from '../sim/aircraftTypes';
 import { cityOperatingHours } from './city';
 import type { CompanyState, Contract, TimeWindow } from './company';
 import { addContract } from './company';
-import { routeCapabilitiesForAirport } from './registry';
+import { internationalProcessingFor, routeCapabilitiesForAirport } from './registry';
+import { analyzeHub, TRANSFER_KINDS } from '../terminal/hub';
+import { planConnections } from './hub';
 import {
   analyzeDayPlan,
   CHECKIN_SHARE,
@@ -59,6 +61,13 @@ export interface AirportCapacitySnapshot {
   facilities: CapacityFacilityRow[];
   peakHour: { hour: number; movements: number; departingPax: number };
   terminalRows: { terminalId: string; checkInPerHour: number; securityPerHour: number; throughputPerHour: number; peakPaxPerHour: number; bottleneck: 'checkIn' | 'security' | null }[];
+  /** ハブ（フェーズ 4 §5.6）: 種類ごとの MCT（分）と波の能力。算出できない値は null のまま */
+  hub: {
+    mctMin: Record<'DD' | 'DI' | 'ID' | 'II', { max: number | null; median: number | null }>;
+    bankAircraft: number | null;
+    bankPax: number | null;
+    transferPaxPerDay: number;
+  };
 }
 
 const peak = (values: readonly number[]): number => Math.max(0, ...values);
@@ -106,8 +115,26 @@ export interface LiveClosures {
   closedStandIds: readonly string[];
 }
 
-export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, closedBusGateIds: readonly string[] = [], plan = planDayWithDemand(company, company.day, 1, ctx.types, routeCapabilitiesForAirport(ctx.layout.countryId)), currentPaxByTerminal?: Readonly<Record<string, number>>, live?: LiveClosures): AirportCapacitySnapshot {
+export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, closedBusGateIds: readonly string[] = [], plan = planDayWithDemand(company, company.day, 1, ctx.types, routeCapabilitiesForAirport(ctx.layout.countryId, { international: internationalProcessingFor(company, ctx.terminal) })), currentPaxByTerminal?: Readonly<Record<string, number>>, live?: LiveClosures): AirportCapacitySnapshot {
   const analysis = analyzeDayPlan(plan, ctx, closedBusGateIds);
+  // ハブ（フェーズ 4 §5.6）: 乗継の計画を同じ MCT で付け、波の能力を算出する
+  const hubAnalysis = analyzeHub(ctx.layout, ctx.terminal);
+  planConnections(plan, company, hubAnalysis);
+  const hub = (() => {
+    const mctMin = Object.fromEntries(TRANSFER_KINDS.map((kind) => [kind, {
+      max: hubAnalysis.byKind[kind].max !== null ? hubAnalysis.byKind[kind].max! / 60 : null,
+      median: hubAnalysis.byKind[kind].median !== null ? hubAnalysis.byKind[kind].median! / 60 : null,
+    }])) as AirportCapacitySnapshot['hub']['mctMin'];
+    const banks = company.hub?.banks ?? [];
+    const gateCount = Object.values(ctx.terminal.gates).filter((g) => g.terminalId).length;
+    const bankAircraft = banks.length > 0 ? Math.min(analysis.capacity.totalStands, gateCount) : null;
+    const tsAreas = Object.values(ctx.layout.terminalAreas).filter((a) => a.kind === 'transferSecurity');
+    const tsPerHour = tsAreas.reduce((sum, a) => sum + (Math.max(0, Number(a.props.counters ?? a.props.booths ?? a.props.lanes ?? a.props.fixtures ?? a.props.capacity ?? 0)) * 3600) / serviceSecPerPax(a.kind, a.props), 0);
+    const longestBankHours = banks.length > 0 ? Math.max(...banks.map((b) => Math.max(0, (b.departToMin - b.arriveFromMin) / 60))) : 0;
+    const bankPax = banks.length > 0 && tsAreas.length > 0 ? Math.floor(tsPerHour * longestBankHours) : null;
+    const transferPaxPerDay = plan.flights.reduce((sum, f) => sum + (f.connections ?? []).reduce((s, cn) => s + cn.pax, 0), 0);
+    return { mctMin, bankAircraft, bankPax, transferPaxPerDay };
+  })();
   // 夜間の運用設定（最終出発時刻）があるときだけ、運用時間の終わりを最終出発時刻で切る（R17）。ないときは従来の値
   const capHours = company.city?.nightOps ? cityOperatingHours(company.hours, company.city) : company.hours;
   const operatingHours = Math.max(0, (capHours.closeMin - capHours.openMin) / 60);
@@ -118,6 +145,7 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
   const liveNote = live ? '。運航中の閉鎖を反映' : '';
   const operationalRunways = Object.values(ctx.runways).filter((r) => r.operational && !closedRunways.has(r.id)).length;
   const runwayHourly = operationalRunways * RUNWAY_HOURLY_CAPACITY;
+  const overnightCount = plan.flights.filter((f) => f.overnight).length;
   const terminalIds = Object.keys(ctx.terminal.byTerminal).sort(compareIds);
   const terminalRows = terminalIds.map((terminalId) => {
     const t = analysis.terminalCapacity[terminalId] ?? { checkInPerHour: 0, securityPerHour: 0 };
@@ -175,6 +203,8 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
   const summary = [
     metric('滑走路', 'movements/h', runwayHourly, peakMovements, `稼働滑走路 ${operationalRunways} 本 × 計画基準 ${RUNWAY_HOURLY_CAPACITY} 回/時。日計は運用時間 ${operatingHours.toFixed(1)} 時間を使用${liveNote}`),
     metric('スポット同時駐機', 'aircraft', availableStands, peakStandUse, `運用中・誘導路接続済み ${availableStands} 箇所（直結 ${contactStands} / リモート ${remoteStands}）。需要は計画割当の同時駐機ピーク${liveNote}`),
+    // フェーズ 4 §3.4: 朝の 1 時間に出せる始発の数（能力は滑走路の時間能力を流用。滞泊の計画がない日は未算出）
+    metric('朝の始発（1 時間）', 'movements/h', overnightCount > 0 ? runwayHourly : null, overnightCount > 0 ? overnightCount : null, overnightCount > 0 ? `滞泊の出発 ${overnightCount} 便が朝の波を作る。能力は滑走路の時間能力 ${runwayHourly} 回/時を流用（地上走行の競合は含めない）` : '滞泊の契約がないため未算出'),
     metric('ターミナル全体', 'pax/h', terminalRows.length ? totalTerminalThroughput : null, peakTerminalDemand, 'ターミナルごとのチェックイン能力÷利用率と保安検査能力の小さい方を合算。経路未割当の旅客は含めない'),
     metric('ターミナル最大収容人数', 'pax', terminalOccupancyCapacity, currentOccupancy, '既存 TerminalModel の各エリア容量（面積基準）を合算。現在人数は運航中の未完了旅客グループから算出'),
     metric('チェックイン', 'pax/h', totalCheckin, peakDepartingPax * CHECKIN_SHARE, `配置カウンター数 × 3600 ÷ 各施設の処理秒数。計画旅客の ${Math.round(CHECKIN_SHARE * 100)}% が利用`),
@@ -263,7 +293,7 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
   }
   const peakHour = analysis.hourly.movements.reduce((best, movements, hour) => movements > best.movements ? { hour, movements, departingPax: analysis.hourly.depPax[hour] ?? 0 } : best, { hour: 0, movements: 0, departingPax: 0 });
   const bottlenecks = summary.filter((m) => m.status === 'shortage' || m.status === 'warning').sort((a, b) => (b.utilization ?? 0) - (a.utilization ?? 0));
-  return { plan, analysis, operatingHours, summary, overall, bottlenecks, facilities, peakHour, terminalRows };
+  return { plan, analysis, operatingHours, summary, overall, bottlenecks, facilities, peakHour, terminalRows, hub };
 }
 
 const unitLabelFor = (unit: CapacityMetric['unit']): string => ({ 'movements/h': '回/時', 'movements/day': '回/日', aircraft: '機', pax: '人', 'pax/h': '人/時', 'pax/day': '人/日', 'aircraft/day': '機/日', units: '台・人', 'pax/trip': '人/便', 'vehicles/h': '台/時', 'trains/h': '本/時', 'fuel/h': '単位/時' })[unit];
@@ -274,6 +304,9 @@ export interface CapacityPreviewInput {
   typeId: string;
   perDay: number;
   window: TimeWindow;
+  /** フェーズ 4: 滞泊・拠点の契約は滞泊の能力も合わせて判定する */
+  kind?: Contract['kind'];
+  basedAircraft?: number;
 }
 export interface CapacityPreview {
   result: 'acceptable' | 'conditional' | 'unacceptable';
@@ -292,7 +325,7 @@ function newlyIntroducedIssues(before: PlanAnalysis, after: PlanAnalysis): PlanA
 
 /** Add a temporary contract to a deep copy; no company, layout, save slot, or running simulation is mutated. */
 export function previewContractCapacity(company: CompanyState, ctx: SimContext, input: CapacityPreviewInput, closedBusGateIds: readonly string[] = [], access = 1): CapacityPreview {
-  const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId);
+  const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId, { international: internationalProcessingFor(company, ctx.terminal) });
   const beforePlan = planDayWithDemand(company, company.day, access, ctx.types, routeCapabilities);
   const before = analyzeAirportCapacity(company, ctx, closedBusGateIds, beforePlan);
   const copy = structuredClone(company);
@@ -307,6 +340,8 @@ export function previewContractCapacity(company: CompanyState, ctx: SimContext, 
     endDay: company.day,
     status: 'active',
     offerExpiresDay: company.day,
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.basedAircraft !== undefined ? { basedAircraft: input.basedAircraft } : {}),
   };
   addContract(copy, contract);
   const afterPlan = planDayWithDemand(copy, copy.day, access, ctx.types, routeCapabilities);
@@ -327,7 +362,7 @@ export function previewFrequencyCapacity(
   closedBusGateIds: readonly string[] = [],
   access = 1,
 ): CapacityPreview {
-  const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId);
+  const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId, { international: internationalProcessingFor(company, ctx.terminal) });
   const beforePlan = planDayWithDemand(company, company.day, access, ctx.types, routeCapabilities);
   const before = analyzeAirportCapacity(company, ctx, closedBusGateIds, beforePlan);
   const copy = structuredClone(company);
@@ -351,4 +386,51 @@ export function previewFrequencyCapacity(
 
 export function airportCapacityLabel(layout: AirportLayout, id: string): string {
   return layout.facilities[id]?.name ?? layout.runways[id]?.name ?? layout.stands[id]?.name ?? layout.taxiways[id]?.name ?? id;
+}
+
+// ---------------------------------------------------------------- 夜間滞泊の能力（フェーズ 4 §3.4）
+
+export type SizeClass3 = 'S' | 'M' | 'L';
+const SIZE_RANK3: Record<SizeClass3, number> = { S: 1, M: 2, L: 3 };
+
+/**
+ * 滞泊できる機数（大きさ別）: 運用中で誘導路につながったスポット（リモートを含む）に、
+ * 大きい順（L → M → S）に貪欲に割り当てたときの大きさ別の最大機数。
+ */
+export function overnightCapacity(ctx: SimContext, closures: readonly string[] = []): Record<SizeClass3, number> {
+  const stands = Object.values(ctx.stands).filter((s) => s.operational && s.entry && !closures.includes(s.id));
+  const fits = (size: SizeClass3) => stands.filter((st) => SIZE_RANK3[st.size] >= SIZE_RANK3[size]).length;
+  return { L: fits('L'), M: fits('M'), S: fits('S') };
+}
+
+/** 必要機数（大きさ別）が滞泊の能力に収まるか（大きい順の貪欲な割り当てで判定） */
+export function overnightFeasible(ctx: SimContext, required: Partial<Record<SizeClass3, number>>, closures: readonly string[] = []): boolean {
+  const stands = Object.values(ctx.stands)
+    .filter((s) => s.operational && s.entry && !closures.includes(s.id))
+    .sort((a, b) => SIZE_RANK3[a.size] - SIZE_RANK3[b.size] || compareIds(a.id, b.id));
+  const used = new Set<string>();
+  for (const size of ['L', 'M', 'S'] as const) {
+    let need = required[size] ?? 0;
+    for (const st of stands) {
+      if (need <= 0) break;
+      if (used.has(st.id) || SIZE_RANK3[st.size] < SIZE_RANK3[size]) continue;
+      used.add(st.id);
+      need--;
+    }
+    if (need > 0) return false;
+  }
+  return true;
+}
+
+/** 会社の有効な overnight・based 契約の 1 晩の必要機数（大きさ別） */
+export function overnightRequired(company: CompanyState, ctx: SimContext, day: number): Partial<Record<SizeClass3, number>> {
+  const out: Partial<Record<SizeClass3, number>> = {};
+  for (const k of Object.values(company.contracts)) {
+    if (k.status !== 'active' || day < k.startDay || day > k.endDay) continue;
+    const n = k.kind === 'overnight' ? k.perDay : k.kind === 'based' ? (k.basedAircraft ?? 1) : 0;
+    if (n <= 0) continue;
+    const size = resolveType(ctx.types, k.typeId).size as SizeClass3;
+    out[size] = (out[size] ?? 0) + n;
+  }
+  return out;
 }

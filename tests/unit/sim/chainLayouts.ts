@@ -45,5 +45,8 @@ export function freeShallowCrossingAirport(): AirportLayout {
   step(addTaxiwayPath(l, [{ x: 50, y: 23 }, { x: 50, y: 50 }]));
   step(addTaxiwayPath(l, [{ x: 10, y: 30 }, { x: 10, y: 48 }, { x: 17, y: 48 }]));
   step(addTaxiwayPath(l, [{ x: 100, y: 30 }, { x: 100, y: 50 }]));
+  // 南側の行（y=50）で東の離脱路と x=50 の列をつなぐ。narrow180 は着陸滑走 1300 m のため x=50 の離脱路（1000 m 地点）を使えず、
+  // 東端の離脱路からこの行を経由してエプロンへ戻るしかない（この行が無いと経路が無く、到着機が全てダイバートした）
+  step(addTaxiwayPath(l, [{ x: 50, y: 50 }, { x: 100, y: 50 }]));
   return apron(l, 38);
 }

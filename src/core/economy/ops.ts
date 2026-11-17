@@ -1,4 +1,5 @@
 import { nightDayReport } from './takeoffDelay';
+import { morningWave, settlePhase4 } from '../sim/overnight';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../sim/aircraftTypes';
 import { attributeRevenue } from '../analytics/records';
 import { operableTypes, type SimContext } from '../sim/context';
@@ -43,7 +44,9 @@ import { isPeak, RUNWAY_HOURLY_CAPACITY, analyzeDayPlan, planDayWithDemand } fro
 import { airlineScorecard } from './airlineScore';
 import { stepAirlineEval } from './airlineEval';
 import { evaluateGoals } from './goals';
-import { airlineDef, routeCapabilitiesForAirport } from './registry';
+import { airlineDef, internationalProcessingFor, routeCapabilitiesForAirport } from './registry';
+import { routeDemandSummary } from './demand';
+import { stepMarket } from './market';
 import { aircraftNoisePoints, applyCityNoiseImpact, cityDemandCeiling, cityDemandFactor, cityEventEffects, expectedPassengers, growCity, isCityNightMovement } from './city';
 
 /**
@@ -272,6 +275,12 @@ export function onPaxMissed(sim: Simulation, _f: Flight, count: number): void {
   post(sim.company, 'compensation', -count * BALANCE.compensation.missedPax);
 }
 
+/** 乗継の失敗は通常の乗り遅れより高い補償（フェーズ 4 §5.4） */
+export function onTransferMissed(sim: Simulation, count: number): void {
+  if (!enabled(sim)) return;
+  post(sim.company, 'compensation', -count * BALANCE.compensation.missedConnection);
+}
+
 export function onBagLeftBehind(sim: Simulation): void {
   if (!enabled(sim)) return;
   sim.state.economy!.leftBags++;
@@ -330,6 +339,7 @@ function legsInPeriod(sim: Simulation, from: number, to: number): Leg[] {
   const { state } = sim;
   const legs: Leg[] = [];
   const inP = (t: number | null) => t !== null && t >= from && t < to;
+  // 合成の到着便（フェーズ 4 の置き直し）は集計に数えない
   const evaluationFor = (f: Flight) => {
     const ac = state.aircraft[f.aircraftId];
     const arr = ac ? state.flights[ac.arrivalFlightId] : undefined;
@@ -352,6 +362,7 @@ function legsInPeriod(sim: Simulation, from: number, to: number): Leg[] {
       : { evaluated: pair.departureSec, actual: pair.actualDepartureSec };
   };
   for (const f of Object.values(state.flights)) {
+    if (f.carryOver) continue; // 合成の到着便は数えない（フェーズ 4 §3.3）
     if (f.status === 'diverted' || f.status === 'cancelled') {
       const ac = state.aircraft[f.aircraftId];
       if (ac && (ac.state === 'diverted' || ac.state === 'cannotOperate') && inP(ac.stateSince)) legs.push({ f, at: ac.stateSince, lost: true, delaySec: 0, actualDelaySec: 0 });
@@ -472,11 +483,20 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
   return { kpi, byAirline };
 }
 
-/** 航空会社満足度 = 有効な契約がある航空会社の満足度の平均 */
-function airlineSatisfaction(c: CompanyState): number | null {
-  const ids = [...new Set(contractsOf(c, 'active').map((k) => k.airlineId))];
+/** 航空会社満足度 = 有効な契約がある航空会社の満足度の平均（フェーズ 4 §3.5: 拠点の会社は features.based のとき加重 2 倍） */
+export function airlineSatisfaction(c: CompanyState): number | null {
+  const active = contractsOf(c, 'active');
+  const ids = [...new Set(active.map((k) => k.airlineId))];
   if (ids.length === 0) return null;
-  return round1(ids.reduce((s, id) => s + c.airlines[id]!.satisfaction, 0) / ids.length);
+  const basedIds = c.features?.based ? new Set(active.filter((k) => k.kind === 'based').map((k) => k.airlineId)) : new Set<string>();
+  let sum = 0;
+  let weight = 0;
+  for (const id of ids) {
+    const w = basedIds.has(id) ? 2 : 1;
+    sum += c.airlines[id]!.satisfaction * w;
+    weight += w;
+  }
+  return round1(sum / weight);
 }
 
 /**
@@ -512,6 +532,9 @@ function cityNoiseMetrics(state: SimState, ctx: SimContext, from: number, to: nu
  * 日次締め。partial = true は運航の途中停止（その日を途中で締める）。
  * 収支を日報に移し、航空会社の満足度・契約・評価・新しい提案を更新して、会社の日を進める。
  */
+/** 乗継統計の前回締め時点の累計（保存対象にしないため WeakMap で保持する） */
+const hubStatsPrev = new WeakMap<object, { spawned: number; connected: number; missed: number; noShow: number }>();
+
 export function settleDay(sim: Simulation, partial: boolean): DailyReport | null {
   if (!enabled(sim)) return null;
   const { state, ctx } = sim;
@@ -520,7 +543,7 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   const cityStart = c.city ? { ...c.city } : null;
   const cityAccess = state.access?.factor ?? 1;
   const cityCeiling = cityStart ? cityDemandCeiling(cityStart, cityAccess) : 0;
-  const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId);
+  const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId, { international: internationalProcessingFor(c, ctx.terminal) });
   const cityExpected = cityStart ? expectedPassengers(c, c.day, ctx.types, routeCapabilities) : 0;
   const cityNoise = cityStart ? cityNoiseMetrics(state, ctx, e.periodStart, state.now) : null;
   const cityEvents = cityStart ? cityEventEffects(cityStart, c.day) : null;
@@ -545,7 +568,13 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
     for (const t of r.events) log(state, t);
     evalIn = { deltas: r.deltas, bonus: r.bonus };
   }
-  for (const ev of updateContracts(c, byAirline, evalIn)) log(state, ev);
+  if (c.market) {
+    // 路線市場の日次更新（フェーズ 3 §4.2）: 搭乗率の実績 → 減便・撤退・増便の要望。契約の更新より前に進める
+    const summary = routeDemandSummary(c, c.day, state.access?.factor ?? 1, ctx.types, routeCapabilities);
+    const routeLf = new Map<string, number>([...(summary ?? new Map())].map(([id, info]) => [id, info.baseLf] as [string, number]));
+    for (const ev of stepMarket(c, recs, routeLf)) log(state, ev);
+  }
+  for (const ev of updateContracts(c, byAirline, evalIn, operableTypes(ctx))) log(state, ev);
   kpi.airlineSatisfaction = airlineSatisfaction(c);
   c.rating = nextRating(c.rating, kpi);
   kpi.rating = c.rating;
@@ -644,6 +673,19 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
       report.city.residentsEnd = c.city.residents;
       report.city.residentDelta = residentDelta;
     }
+  }
+  // フェーズ 4 の締め（整備・不具合・持ち越しの記録・拠点の条件）。c.day++ の前に行う
+  const p4 = settlePhase4(sim, e.periodStart);
+  for (const ev of p4.events) log(state, ev);
+  if (p4.maintenance) report.maintenance = p4.maintenance;
+  const wave = morningWave(sim, e.periodStart, state.now);
+  if (wave) report.morningWave = wave;
+  // 乗継の当日分（フェーズ 4 §5.6）。累計ではなく当日の増分を記録する
+  if (c.features?.hub && state.hubStats) {
+    const h = state.hubStats;
+    const prev = hubStatsPrev.get(state) ?? { spawned: 0, connected: 0, missed: 0, noShow: 0 };
+    report.hub = { spawned: h.spawned - prev.spawned, connected: h.connected - prev.connected, missed: h.missed - prev.missed, noShow: h.noShow - prev.noShow };
+    hubStatsPrev.set(state, { spawned: h.spawned, connected: h.connected, missed: h.missed, noShow: h.noShow });
   }
   log(state, `${c.day + 1}日目を締めました: 営業利益 ${report.operatingProfit.toLocaleString('ja-JP')} cr`);
   c.day++;

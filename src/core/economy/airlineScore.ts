@@ -6,7 +6,7 @@ import { contractsOf, type CompanyState } from './company';
 import { evaluateDelayPair } from './delayEvaluation';
 import { otpAddOf } from './game';
 import type { DayPlan, PlanAnalysis } from './planning';
-import { AIRLINES, type AirlineDef } from './registry';
+import { airlinesFor, type AirlineDef } from './registry';
 
 /**
  * 航空会社の評価カード（読み取り専用の導出）。既存のデータ（実績の記録・運航計画の分析・料金・機材）だけから、
@@ -14,10 +14,13 @@ import { AIRLINES, type AirlineDef } from './registry';
  * （総合の満足度は company.airlines[id].satisfaction をそのまま表示する）。値はゲーム用の簡易な指標。
  * 文言は UI 側（i18n/ja.ts）が、ここで返す構造化された事実から作る。
  */
-export type ScoreKey = 'otp' | 'turnaround' | 'stand' | 'fees' | 'slots' | 'aircraft' | 'pax';
+export type ScoreKey = 'otp' | 'turnaround' | 'stand' | 'fees' | 'slots' | 'aircraft' | 'pax' | 'demand';
 export type ScoreLevel = 'good' | 'warn' | 'bad' | 'n/a';
 
 export const SCORE_KEYS: readonly ScoreKey[] = ['otp', 'turnaround', 'stand', 'fees', 'slots', 'aircraft', 'pax'];
+/** market 有効時の要素（フェーズ 3 §4.1。旧の保存データの検証でも受理する） */
+export const SCORE_KEYS_V2: readonly ScoreKey[] = [...SCORE_KEYS, 'demand'];
+export const scoreKeysFor = (c: { market?: unknown }): readonly ScoreKey[] => (c.market ? SCORE_KEYS_V2 : SCORE_KEYS);
 
 export interface ScoreFacts {
   /** 主な数値（定時率 0〜1、折り返しの超過分、スポット不足の便数、料金倍率、枠から外れた便数、非対応機種の数、乗り遅れ率） */
@@ -204,11 +207,27 @@ function paxComponent(recs: readonly FlightRecord[]): ScoreComponent {
   return { key: 'pax', level, score: Math.round(clamp(100 - bad * 800)), facts: { value: missed, target: left, n: recs.length, ...(affected.length ? { flightNumbers: [...new Set(affected)] } : {}) } };
 }
 
-/** 全航空会社の評価カード（AIRLINES の順） */
+/** 需要の要素（フェーズ 3 §4.1）: その日の自社の搭乗率と基準搭乗率の差。market 有効時だけ出す */
+function demandComponent(a: AirlineDef, recs: readonly FlightRecord[]): ScoreComponent {
+  let pax = 0;
+  let seats = 0;
+  for (const r of recs) {
+    if (r.result === 'cancelled') continue;
+    pax += r.paxBooked + r.paxArrived;
+    seats += r.seats * 2;
+  }
+  if (seats === 0) return na('demand');
+  const lf = pax / seats;
+  const score = Math.round(clamp(60 + (lf - a.baseLoadFactor) * 200));
+  const level: ScoreLevel = lf >= a.baseLoadFactor ? 'good' : lf >= a.baseLoadFactor - 0.1 ? 'warn' : 'bad';
+  return { key: 'demand', level, score, facts: { value: lf, target: a.baseLoadFactor, n: recs.length } };
+}
+
+/** 全航空会社の評価カード（会社の対象会社の順） */
 export function airlineScorecard(input: ScorecardInput): AirlineScore[] {
   const { company, ctx, records, plan, analysis } = input;
   const operable = new Set<string>(operableTypes(ctx));
-  return AIRLINES.map((a) => {
+  return airlinesFor(company).map((a) => {
     const recs = records.filter((r) => r.airlineId === a.id);
     const planKeys = new Set(plan.flights.filter((f) => f.airlineId === a.id).map((f) => f.key));
     const components: ScoreComponent[] = [
@@ -219,6 +238,7 @@ export function airlineScorecard(input: ScorecardInput): AirlineScore[] {
       slotsComponent(company, a.id, plan, analysis, planKeys),
       aircraftComponent(a, company, operable),
       paxComponent(recs),
+      ...(company.market ? [demandComponent(a, recs)] : []),
     ];
     const lacking = components
       .filter((c) => c.level === 'bad' || c.level === 'warn')
