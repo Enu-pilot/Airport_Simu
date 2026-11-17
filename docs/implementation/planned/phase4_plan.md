@@ -4,7 +4,7 @@
 > 実装開始前に先行フェーズの完了・依存関係・PO 承認を再確認し、本書を `active/` へ移してください。
 
 
-- 根拠: docs/42 §1（K-5〜K-8）・§3.3（4-01〜4-14）・§3.5・§4・§5、docs/41 §2・§5・§6、docs/39 §7.2〜7.3・§12.3・§12.6・§12.7、docs/12・13・15・21・27・30・34・35。
+- 根拠: docs/42 §1（K-5〜K-8）・§3.4（4-01〜4-14）・§3.6・§4・§5、docs/41 §2・§5・§6、docs/39 §7.2〜7.3・§12.3・§12.6・§12.7、docs/12・13・15・21・27・30・34・35。
 - 状態: **計画**（2026-11-16 作成）。本書の機能はすべて未実装。数値はゲーム内の値で、実在の空港の能力・基準を表さない。
 - 共通の約束:
   - **すべて opt-in**。会社の `features`（§1）・レイアウトの `accessCapacityModel`（§6）・契約の新しい種類がないデータは、計画・運航・保存の結果が今と同じ（ゴールデン一致で確認）。
@@ -307,7 +307,7 @@ export function featureOn(c, f): boolean;            // isUnlocked && c.features
 
 トラック: **S**（運航・経営・アクセス）、**P**（旅客・ターミナル・レイアウト・検証・保存・画面）。§9 の持ち主に従う。
 
-| ID | 主なファイル・関数 | テスト（新規ファイル） | 完了の判定（docs/42 §3.3） |
+| ID | 主なファイル・関数 | テスト（新規ファイル） | 完了の判定（docs/42 §3.4） |
 |---|---|---|---|
 | 4-01 | S: `economy/unlocks.ts`、`generateOffers`・`acceptOffer`。P: `Toolbox`・`PropertiesPanel`・`editor/tools.ts`、設定画面 | `tests/unit/unlocks.test.ts`: 格 0〜3 の解放一覧、サンドボックス・目標なしは全解放、格を満たしても `features` OFF なら提案に新しい種類が出ない、既存の会社の提案の列が変わらない（回帰）。`tests/e2e/unlocks.spec.ts`: 解放前は選べず理由が出る | 単体と E2E の合格。既存の会社の提案・計画が同一 |
 | 4-02 | S: `sim/overnight.ts`（`recordCarryOver`・`materializeCarryOver`）、`createSimulation`、`settleDay`、`planDay`、`ground.ts` `createTurnaroundTasks`、`ops.ts` の集計の除外 | `tests/unit/sim/overnight.test.ts`: 0:00 に契約の機数が在泊、翌朝の最初の出発、駐機料が前日分を含む、スポット撤去・閉鎖・不適合・満杯の代わりの扱い、全滅で欠航と補償。`tests/unit/sim/overnightSave.test.ts`: 続けて運航・停止 → 再開・建設モードの保存 → 読み込み → 再開・1 日スキップで、翌朝の便の便名・機種・スポット・時刻が一致。運航状態の保存 → 復元で二重に置かない。境界: 23:59 着・00:01 の停止・最終日・初日 | 左記がすべて合格 |
