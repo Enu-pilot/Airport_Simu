@@ -1,6 +1,8 @@
 import { CATALOG, CATALOG_VERSION, type AircraftModel } from '../aircraft/catalog';
 import { AIRCRAFT_ASSETS, ASSET_VERSION } from '../assets/registry';
 import { importCompany, type CompanyState } from '../economy/company';
+import { findAirline, findDestination, resolveAirlineId, resolveDestinationId } from '../data/index';
+import { checkMarket } from '../economy/market';
 import { checkGameFields } from '../economy/game';
 import { isCityConfig, isCityNightOps } from '../economy/city';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
@@ -37,7 +39,11 @@ export const PROJECT_FORMAT_VERSION_2 = 2;
 export const PROJECT_FORMAT_VERSION_3 = 3;
 /** 区間ごとに進む地上走行（taxiMode 'block'）・夜間の運用（city.nightOps）・それらの運航状態（taxiBlocks・nightHold）を使うファイル（フェーズ 2） */
 export const PROJECT_FORMAT_VERSION_4 = 4;
-export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_4;
+/** 路線市場（company.market）を使うファイル（フェーズ 3） */
+export const PROJECT_FORMAT_VERSION_5 = 5;
+/** フェーズ 4 の項目（features・carryOver・国際のエリアなど）を使うファイルの版。当初計画の 5 はフェーズ 3 の市場設定が使ったため 6 に繰り下げた */
+export const PROJECT_FORMAT_VERSION_6 = 6;
+export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_6;
 
 const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !== null && k in (o as Record<string, unknown>);
 
@@ -107,7 +113,39 @@ function companyUsesFormat2(c: CompanyState | null | undefined): boolean {
  * このプロジェクトを書くときの保存形式の版。新しい項目を使うときだけ必要な版に上げる（旧アプリが読み違えないため）、
  * 使わないときは 1 のまま（従来のファイル・ゴールデンの出力が変わらない）。
  */
+/** 会社が保存形式 5 の項目（company.market）を使っているか */
+export function companyUsesFormat5(c: CompanyState | null | undefined): boolean {
+  return !!c && hasKey(c, 'market');
+}
+
+const PHASE4_AREA_KINDS = new Set(['emigration', 'immigration', 'customs', 'transferSecurity']);
+
+/** レイアウトが保存形式 6 の項目（国際・乗継のエリア、ゲートの routeType、区間能力など）を使っているか */
+export function layoutUsesFormat6(l: AirportLayout): boolean {
+  if (hasKey(l, 'accessCapacityModel')) return true;
+  if (Object.values(l.terminalAreas ?? {}).some((a) => PHASE4_AREA_KINDS.has(a.kind))) return true;
+  if (Object.values(l.facilities ?? {}).some((f) => f.kind === 'gate' && hasKey(f.props ?? {}, 'routeType'))) return true;
+  if (Object.values(l.facilities ?? {}).some((f) => f.kind === 'railStation' && hasKey(f.props ?? {}, 'platforms'))) return true;
+  return Object.values(l.roads ?? {}).some((r) => hasKey(r, 'lanes') || hasKey(r, 'tracks'));
+}
+
+/** 会社が保存形式 6 の項目（features・carryOver・basedFleet・hub・契約の新しい項目）を使っているか */
+export function companyUsesFormat6(c: CompanyState | null | undefined): boolean {
+  if (!c) return false;
+  if (hasKey(c, 'features') || hasKey(c, 'carryOver') || hasKey(c, 'basedFleet') || hasKey(c, 'hub') || hasKey(c, 'maintenanceCredit') || hasKey(c, 'basedIssueDays')) return true;
+  return Object.values(c.contracts ?? {}).some((k) => hasKey(k, 'kind') || hasKey(k, 'basedAircraft') || hasKey(k, 'transferShare') || hasKey(k, 'bankId'));
+}
+
+/** 運航状態が保存形式 6 の項目（swingGates・hubStats・便のフェーズ 4 項目）を持つか */
+export function simUsesFormat6(state: SimState | null | undefined): boolean {
+  if (!state) return false;
+  if (hasKey(state, 'swingGates') || hasKey(state, 'hubStats')) return true;
+  return Object.values(state.flights ?? {}).some((f) => hasKey(f, 'overnight') || hasKey(f, 'carryOver') || hasKey(f, 'routeType') || hasKey(f, 'techHoldUntil') || hasKey(f, 'transferPlan'));
+}
+
 export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null; journal?: Journal }): number {
+  if (layoutUsesFormat6(p.layout) || companyUsesFormat6(p.company) || p.scenarios.some((sc) => layoutUsesFormat6(sc.layout) || companyUsesFormat6(sc.company)) || (p.sim && (simUsesFormat6(p.sim.state) || companyUsesFormat6(p.sim.company)))) return PROJECT_FORMAT_VERSION_6;
+  if (companyUsesFormat5(p.company) || p.scenarios.some((s) => companyUsesFormat5(s.company)) || (p.sim && companyUsesFormat5(p.sim.company))) return PROJECT_FORMAT_VERSION_5;
   if (layoutUsesFormat4(p.layout) || companyUsesFormat4(p.company)) return PROJECT_FORMAT_VERSION_4;
   if (p.scenarios.some((s) => layoutUsesFormat4(s.layout) || companyUsesFormat4(s.company))) return PROJECT_FORMAT_VERSION_4;
   if (p.sim && (simStateUsesFormat4(p.sim.state) || companyUsesFormat4(p.sim.company))) return PROJECT_FORMAT_VERSION_4;
@@ -274,6 +312,8 @@ function checkBusProps(layout: AirportLayout, where: string): string[] {
       if (bm !== undefined && bm !== 'contact' && bm !== 'bus') errors.push(`${where}: ゲート ${f.id} の搭乗方式（boardingMode）が不正です`);
       const ct = props.connectedTo;
       if (ct !== undefined && ct !== null && (typeof ct !== 'string' || layout.facilities[ct]?.kind !== 'terminal')) errors.push(`${where}: ゲート ${f.id} の接続先（connectedTo）がターミナルではありません`);
+      const rt = props.routeType;
+      if (rt !== undefined && rt !== 'domestic' && rt !== 'international' && rt !== 'swing') errors.push(`${where}: ゲート ${f.id} の国内/国際の別（routeType）が不正です`);
     }
     if (f.kind === 'gseBase') {
       const n = props.apronBuses;
@@ -298,11 +338,61 @@ function checkCompany(c: unknown, where: string): { errors: string[]; company: C
   const errors: string[] = checkGameFields(c).map((e) => `${where}: ${e}`);
   if (c.city !== undefined && !isCityConfig(c.city)) errors.push(`${where}: 都市設定（city）の形式が不正です`);
   else if (isObj(c.city) && c.city.nightOps !== undefined && !isCityNightOps(c.city.nightOps)) errors.push(`${where}: 夜間の運用設定（city.nightOps）が不正です（最終出発時刻 1200〜1305 分・上空待機 0〜120 分・警告の前倒し 0〜120 分・出発地待機）`);
+  if (c.market !== undefined) {
+    for (const e of checkMarket(c.market)) errors.push(`${where}: ${e}`);
+    if (c.city === undefined) errors.push(`${where}: 市場設定（market）には都市設定（city）が必要です`);
+  }
+  errors.push(...checkPhase4Company(c, company, where));
   for (const [key, k] of Object.entries(company.contracts)) {
     if (!isObj(k) || k.id !== key) errors.push(`${where}: 契約 ${key} の ID が一致しません`);
     else if (typeof k.typeId !== 'string' || typeof k.airlineId !== 'string') errors.push(`${where}: 契約 ${key} の機種・航空会社が不正です`);
+    else {
+      // 登録データにない ID は読み込みエラー（フェーズ 3 §2.2。削除ではなく retired / ID_ALIASES で対応する）
+      if (!findAirline(resolveAirlineId(k.airlineId))) errors.push(`${where}: 契約 ${key} の航空会社 "${k.airlineId}" が登録データにありません（retired にするか ID_ALIASES に対応を追加してください）`);
+      if (typeof k.destinationId === 'string' && !findDestination(resolveDestinationId(k.destinationId))) errors.push(`${where}: 契約 ${key} の就航先 "${k.destinationId}" が登録データにありません（retired にするか ID_ALIASES に対応を追加してください）`);
+    }
   }
   return { errors, company };
+}
+
+/** フェーズ 4 の会社の項目の検証（§1: 型・範囲。features がない会社の carryOver などはエラー） */
+function checkPhase4Company(raw: Record<string, unknown>, company: CompanyState, where: string): string[] {
+  const errors: string[] = [];
+  const features = isObj(raw.features) ? raw.features : undefined;
+  if (raw.features !== undefined && !features) errors.push(`${where}: 機能の設定（features）が不正です`);
+  for (const key of ['overnight', 'based', 'international', 'hub'] as const) {
+    if (features && features[key] !== undefined && features[key] !== true) errors.push(`${where}: 機能の設定（features.${key}）が不正です`);
+  }
+  for (const key of ['carryOver', 'basedFleet', 'hub'] as const) {
+    if (raw[key] !== undefined && !features) errors.push(`${where}: ${key} には機能の設定（features）が必要です`);
+  }
+  if (raw.carryOver !== undefined) {
+    const co = raw.carryOver;
+    if (!isObj(co) || typeof co.forDay !== 'number' || !Array.isArray(co.aircraft)) errors.push(`${where}: 持ち越し（carryOver）の形式が不正です`);
+    else for (const a of co.aircraft) {
+      if (!isObj(a) || typeof a.depSecOfDay !== 'number' || a.depSecOfDay < 0 || a.depSecOfDay >= 86400 || typeof a.parkedBeforeSec !== 'number' || a.parkedBeforeSec < 0) {
+        errors.push(`${where}: 持ち越し（carryOver）の機体の時刻が範囲外です`);
+        break;
+      }
+    }
+  }
+  if (raw.hub !== undefined) {
+    const hub = raw.hub;
+    if (!isObj(hub) || !Array.isArray(hub.banks) || typeof hub.maxConnectMin !== 'number') errors.push(`${where}: 乗継の設定（hub）の形式が不正です`);
+    else for (const b of hub.banks) {
+      if (!isObj(b) || ![b.arriveFromMin, b.arriveToMin, b.departFromMin, b.departToMin].every((v) => typeof v === 'number' && v >= 0 && v <= 1440) || (b.arriveFromMin as number) > (b.arriveToMin as number) || (b.departFromMin as number) > (b.departToMin as number)) {
+        errors.push(`${where}: 乗継の波（hub.banks）の時間帯が不正です`);
+        break;
+      }
+    }
+  }
+  for (const [key, k] of Object.entries(company.contracts)) {
+    if (!isObj(k)) continue;
+    if (k.kind !== undefined && !['turnaround', 'overnight', 'based'].includes(k.kind as string)) errors.push(`${where}: 契約 ${key} の種類（kind）が不正です`);
+    if (k.transferShare !== undefined && (typeof k.transferShare !== 'number' || k.transferShare < 0 || k.transferShare > 0.5)) errors.push(`${where}: 契約 ${key} の乗継の割合（transferShare）が範囲外です（0〜0.5）`);
+    if (k.basedAircraft !== undefined && (typeof k.basedAircraft !== 'number' || !Number.isInteger(k.basedAircraft) || k.basedAircraft < 1 || k.basedAircraft > 6)) errors.push(`${where}: 契約 ${key} の常駐機数（basedAircraft）が範囲外です（1〜6）`);
+  }
+  return errors;
 }
 
 function checkModels(models: unknown): string[] {
@@ -696,6 +786,17 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
   const containsV3Input = layoutUsesFormat3(layout) || scenarios.some((s) => layoutUsesFormat3(s.layout));
   const containsV4Input = layoutUsesFormat4(layout) || companyUsesFormat4(company) || scenarios.some((s) => layoutUsesFormat4(s.layout) || companyUsesFormat4(s.company)) ||
     (!!sim && (simStateUsesFormat4(simInputState) || companyUsesFormat4(sim.company)));
+  const containsV5Input = companyUsesFormat5(company) || scenarios.some((s) => companyUsesFormat5(s.company)) || (!!sim && companyUsesFormat5(sim.company));
+  const containsV6Input = layoutUsesFormat6(layout) || companyUsesFormat6(company) || scenarios.some((s) => layoutUsesFormat6(s.layout) || companyUsesFormat6(s.company)) ||
+    (!!simInputState && simUsesFormat6(simInputState)) || (!!sim && companyUsesFormat6(sim.company));
+  if (typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_6 && containsV6Input) {
+    errors.push(`保存形式の版（formatVersion）が ${String(data.formatVersion)} ですが、フェーズ 4 の項目（機能の設定・持ち越し・国際のエリアなど）を含んでいます。ファイルが壊れているか、手で編集された可能性があります`);
+    return fail();
+  }
+  if (typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_5 && containsV5Input) {
+    errors.push(`保存形式の版（formatVersion）が ${String(data.formatVersion)} ですが、市場設定（版 5 の項目）を含んでいます。ファイルが壊れているか、手で編集された可能性があります`);
+    return fail();
+  }
   if (typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_4 && containsV4Input) {
     errors.push(`保存形式の版（formatVersion）が ${String(data.formatVersion)} ですが、区間ごとの地上走行または夜間の運用設定（版 4 の項目）を含んでいます。ファイルが壊れているか、手で編集された可能性があります`);
     return fail();

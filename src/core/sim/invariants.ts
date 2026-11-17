@@ -5,6 +5,7 @@ import { resolveType } from './aircraftTypes';
 import { checkStand } from '../aircraft/compat';
 import { edgeIndexAt } from './routes';
 import { checkBlockInvariants } from './blockControl';
+import { checkPhase4Invariants } from './invariants4';
 import { MIN_GROUND_SEPARATION_M, TICK_SEC } from './rules';
 import { APRON_BUS_CAPACITY } from './busRules';
 import type { Simulation } from './simulation';
@@ -310,6 +311,8 @@ export function checkGroundInvariants(sim: Simulation, full: boolean): string[] 
       if (n !== 0 && n !== g.bags) out.push(`B3 ${g.id} の手荷物 ${n} 個 ≠ ${g.bags} 個`);
     }
   }
+  // フェーズ 4 の不変条件（新機能の項目があるときだけ中身を検査する）
+  out.push(...checkPhase4Invariants(sim, false));
   return out;
 }
 
@@ -341,7 +344,7 @@ export function checkPaxInvariants(sim: Simulation, full: boolean): string[] {
   }
   for (const [key, fac] of Object.entries(state.facilities)) {
     const area = ctx.layout.terminalAreas[key];
-    const cap = key.startsWith('gate:') ? 1 : Number(area?.props.counters ?? area?.props.lanes ?? area?.props.fixtures ?? area?.props.capacity ?? 0);
+    const cap = key.startsWith('gate:') ? 1 : Number(area?.props.counters ?? area?.props.booths ?? area?.props.lanes ?? area?.props.fixtures ?? area?.props.capacity ?? 0);
     if (fac.inService.length > cap) out.push(`P3 ${key} の処理中 ${fac.inService.length} > 窓口数 ${cap}`);
     for (const id of fac.queue) if (state.paxGroups[id]?.facility !== key) out.push(`P3 ${id} が ${key} の待ち行列にいるが所属が不一致`);
     for (const id of fac.inService) if (state.paxGroups[id]?.state !== 'inService') out.push(`P3 ${id} が ${key} で処理中だが状態が不一致`);
@@ -381,7 +384,7 @@ export function checkPaxInvariants(sim: Simulation, full: boolean): string[] {
     if (g.terminalId && gateTerminal && gateTerminal !== g.terminalId && gateTerminal !== g.targetTerminalId) {
       out.push(`P6 ${g.id} のターミナル ${g.terminalId} と便ゲート ${gateId} のターミナル ${gateTerminal} が不一致`);
     }
-    if (g.direction === 'departure' && a && a.zone === 'departure' && a.kind !== 'security' && !g.securityCleared) {
+    if (g.direction === 'departure' && a && a.zone === 'departure' && a.kind !== 'security' && a.kind !== 'transferSecurity' && !g.securityCleared) {
       out.push(`P4 ${g.id} が保安検査を通らずに出発区域 ${a.id} にいる`);
     }
     if ((g.state === 'queuing' || g.state === 'boardingQueue') && !state.facilities[g.facility ?? '']?.queue.includes(g.id)) {

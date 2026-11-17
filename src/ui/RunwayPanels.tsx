@@ -14,7 +14,7 @@ import { resolveRunwayDims } from '../core/layout/runwayAreas';
 import { convertRunwayToFree, snapRunwayToGrid, updateEntity, updateLayoutSettings } from '../core/layout/operations';
 import { runwayAxis, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
 import { actions, applyOp, useEditor, useLayout, type ToolOptions } from '../editor/store';
-import { MAG_VAR_LABEL, RUNWAY_DISCLAIMER, RUNWAY_UI, TAXI_UI, displayName } from '../i18n/ja';
+import { ACCESS_UI, MAG_VAR_LABEL, RUNWAY_DISCLAIMER, RUNWAY_UI, TAXI_UI, displayName } from '../i18n/ja';
 import { blockGraphOf } from '../core/layout/blockGraph';
 import { DecimalInput, Field, Info, Section, TextInput } from './fields';
 
@@ -391,6 +391,18 @@ export function AirportSettings() {
         </select>
       </Field>
       <div className="muted small" data-testid="setting-taxiExplain">{TAXI_UI.modeExplain}</div>
+      <Field label={ACCESS_UI.model}>
+        <select
+          value={layout.accessCapacityModel ?? 'aggregate'}
+          disabled={disabled}
+          onChange={(e) => applyOp(updateLayoutSettings(layout, { accessCapacityModel: e.target.value === 'segment' ? 'segment' : null }))}
+          data-testid="setting-accessModel"
+        >
+          <option value="aggregate">{ACCESS_UI.modelAggregate}</option>
+          <option value="segment">{ACCESS_UI.modelSegment}</option>
+        </select>
+      </Field>
+      <div className="muted small" data-testid="setting-accessExplain">{ACCESS_UI.modelExplain}</div>
       <Field label={TAXI_UI.tiles}>
         {disabled ? (
           <span>{layout.taxiBlockTiles ?? TAXI_BLOCK_TILES_DEFAULT}</span>

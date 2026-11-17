@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { analyzeAccess } from '../core/access/model';
 import { analyzeAirportCapacity, previewContractCapacity, type CapacityMetric, type CapacityPreview, type CapacityStatus } from '../core/economy/capacity';
-import { AIRLINES, DESTINATIONS, airlineDef, destinationDef, routeCapabilitiesForAirport } from '../core/economy/registry';
+import { airlineDef, airlinesFor, destinationDef, destinationsFor, routeCapabilitiesForAirport } from '../core/economy/registry';
+import { previewLoadFactor } from '../core/economy/traffic';
 import { OVERALL_CAPACITY_NOTE, OVERALL_CAPACITY_TITLE, OVERALL_LIMIT_LABEL, PLAN_ISSUE_LABEL } from '../i18n/ja';
 import { createContext } from '../core/sim/context';
 import { planDayWithDemand } from '../core/economy/planning';
@@ -49,8 +50,8 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
     : undefined;
   const snapshot = analyzeAirportCapacity(company, ctx, closedGates, plan, currentPaxByTerminal, live);
   const [filter, setFilter] = useState('すべて');
-  const [airlineId, setAirlineId] = useState(AIRLINES[0]?.id ?? '');
-  const [destinationId, setDestinationId] = useState(DESTINATIONS[0]?.id ?? '');
+  const [airlineId, setAirlineId] = useState(airlinesFor(company)[0]?.id ?? '');
+  const [destinationId, setDestinationId] = useState(destinationsFor(company)[0]?.id ?? '');
   const fleet = company.fleets?.[airlineId] ?? airlineDef(airlineId).fleet;
   const [typeId, setTypeId] = useState(fleet[0]?.typeId ?? '');
   const [perDay, setPerDay] = useState(1);
@@ -90,6 +91,28 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
       </article>
       <div className="capacity-grid">{snapshot.summary.map((item) => <MetricCard key={item.name} item={item} />)}</div>
     </section>
+    {(snapshot.hub.transferPaxPerDay > 0 || Object.values(snapshot.hub.mctMin).some((m) => m.max !== null)) && (
+      <section data-testid="capacity-hub">
+        <h4>乗継・ハブ</h4>
+        <table className="board">
+          <thead><tr><th>乗継の種類</th><th>最短乗継時間（最大）</th><th>最短乗継時間（中央値）</th></tr></thead>
+          <tbody>
+            {([['DD', '国内→国内'], ['DI', '国内→国際'], ['ID', '国際→国内'], ['II', '国際→国際']] as const).map(([kind, label]) => (
+              <tr key={kind} data-testid={`capacity-hub-mct-${kind}`}>
+                <td>{label}</td>
+                <td>{snapshot.hub.mctMin[kind].max !== null ? `${Math.round(snapshot.hub.mctMin[kind].max!)} 分` : '接続不可'}</td>
+                <td>{snapshot.hub.mctMin[kind].median !== null ? `${Math.round(snapshot.hub.mctMin[kind].median!)} 分` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="capacity-peak">
+          1 日の乗継旅客（計画）: <span data-testid="capacity-hub-transfer-pax">{snapshot.hub.transferPaxPerDay} 人</span>
+          {snapshot.hub.bankAircraft !== null && <> · バンク時の最大機数: {snapshot.hub.bankAircraft} 機</>}
+          {snapshot.hub.bankPax !== null && <> · バンク時の乗継処理能力: {snapshot.hub.bankPax} 人/時</>}
+        </div>
+      </section>
+    )}
     <section className="capacity-detail">
       <div className="capacity-heading"><h4>施設別の能力・状態</h4><label>種類 <select value={filter} onChange={(e) => setFilter(e.target.value)}>{categories.map((c) => <option key={c}>{c}</option>)}</select></label></div>
       <div className="capacity-table-scroll"><table className="board" data-testid="capacity-facilities">
@@ -109,8 +132,8 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
       <h4>契約・増便の仮想チェック</h4>
       <p className="muted">現在の空港・契約・セーブには反映しません。既存の計画生成と割当・能力警告で追加便を評価します。</p>
       <div className="capacity-form">
-        <label>航空会社 <select value={airlineId} onChange={(e) => { const next = e.target.value; setAirlineId(next); setTypeId((company.fleets?.[next] ?? airlineDef(next).fleet)[0]?.typeId ?? ''); setPreview(null); }}>{AIRLINES.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
-        <label>就航先 <select value={destinationId} onChange={(e) => setDestinationId(e.target.value)}>{DESTINATIONS.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+        <label>航空会社 <select value={airlineId} onChange={(e) => { const next = e.target.value; setAirlineId(next); setTypeId((company.fleets?.[next] ?? airlineDef(next).fleet)[0]?.typeId ?? ''); setPreview(null); }}>{airlinesFor(company).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+        <label>就航先 <select value={destinationId} onChange={(e) => setDestinationId(e.target.value)}>{destinationsFor(company).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>機種 <select value={typeId} onChange={(e) => setTypeId(e.target.value)}>{fleet.map((f) => <option key={f.typeId} value={f.typeId}>{f.typeId}</option>)}</select></label>
         <label>往復便数/日 <input type="number" min={1} max={20} value={perDay} onChange={(e) => setPerDay(Number(e.target.value))} /></label>
         <label>時間帯 <select value={window} onChange={(e) => setWindow(e.target.value as typeof window)}><option value="any">終日</option><option value="morning">朝</option><option value="daytime">昼</option><option value="evening">夕方</option></select></label>
@@ -122,6 +145,15 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
         <p>{preview.reason}</p>
         {preview.newIssues.length > 0 ? <ul>{preview.newIssues.map((i) => <li key={`${i.code}:${i.detail}`}>{PLAN_ISSUE_LABEL[i.code]} · {i.keys.length} 便{i.detail ? ` · ${i.detail}` : ''}</li>)}</ul> : <p className="muted">追加便による新しい計画警告はありません。</p>}
         <small className="muted">計画便数 {preview.before.plan.flights.length} → {preview.after.plan.flights.length} 往復。能力 {fmt(preview.after.summary[0]?.capacity ?? null)} 回/時のように値を比較します。タクシーウェイ、バス時間能力、日次実運用上限は未算出です。</small>
+        {company.market &&
+          (() => {
+            const p = previewLoadFactor(company, { airlineId, destinationId, typeId, perDay }, company.day, access.factor, ctx.types, routeCapabilitiesForAirport(layout.countryId));
+            return p ? (
+              <p data-testid="capacity-preview-lf">
+                見込み搭乗率 {Math.round(p.lf * 100)}%（路線需要 {Math.round(p.demand)}人/日 ÷ 供給 {p.seats}席）
+              </p>
+            ) : null;
+          })()}
       </div>}
     </section>
   </div>;

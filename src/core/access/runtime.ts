@@ -3,7 +3,7 @@ import { BALANCE } from '../economy/balance';
 import { post, type CompanyState } from '../economy/company';
 import type { Simulation } from '../sim/simulation';
 import type { PaxGroup, SimState } from '../sim/types';
-import { ACCESS_MODES, analyzeAccess, type AccessAnalysis, type AccessMode, type TransitMode } from './model';
+import { ACCESS_MODES, analyzeAccess, type AccessAnalysis, type AccessMode, type AccessSegments, type SegmentPath, type TransitMode } from './model';
 
 /**
  * 運航中の空港アクセス（docs/15_access_rules.md §4）。
@@ -37,6 +37,10 @@ export interface AccessRuntime {
   queues: Record<TransitMode, string[]>;
   taxiAcc: number;
   stats: AccessStats;
+  /** 区間能力モデル（フェーズ 4 §6）の解析。ない場合は集約モデル */
+  segments?: AccessSegments;
+  /** 区間モデルのときの鉄道の受け入れ上限（人/時）= min(本数 × 定員, 連絡通路の能力)（4-12） */
+  railCapPerHour?: number;
 }
 
 export interface AccessStats {
@@ -104,6 +108,8 @@ export function createAccessRuntime(sim: Simulation, c: CompanyState): AccessRun
     queues: { taxi: [], bus: [], rail: [] },
     taxiAcc: 0,
     stats: emptyAccessStats(),
+    ...(a.segments ? { segments: a.segments } : {}),
+    ...(a.segments && a.railWalkCapacityPerHour !== null ? { railCapPerHour: Math.min(a.trainsPerHour * M.trainSeats, a.railWalkCapacityPerHour) } : {}),
   };
 }
 
@@ -114,6 +120,8 @@ export function refreshAccess(sim: Simulation, c: CompanyState): number {
   if (acc) {
     for (const m of ACCESS_MODES) acc.shares[m] = a.modes[m].share;
     acc.factor = a.factor;
+    acc.segments = a.segments;
+    acc.railCapPerHour = a.segments && a.railWalkCapacityPerHour !== null ? Math.min(a.trainsPerHour * M.trainSeats, a.railWalkCapacityPerHour) : undefined;
   }
   return a.factor;
 }
@@ -146,6 +154,41 @@ export function congestionDelayMin(baseMin: number, volume: number, capacity: nu
 const TRANSIT_LOOKAHEAD_H = 24;
 
 const add = (acc: AccessRuntime, key: string, v: number) => (acc.hourly[key] = (acc.hourly[key] ?? 0) + v);
+
+/**
+ * 区間モデル: その時間帯の volume / capacity が最小の出入口の経路を選ぶ（決定的、乱数なし）。
+ * 選んだ経路の各辺に台数を足し、BPR 型の遅れ（分）を返す。到着側は台数だけ足す（countOnly）。
+ */
+function segmentTraverse(acc: AccessRuntime, paths: Record<string, SegmentPath>, vehicles: number, hour: number, externalMin: number, countOnly: boolean): number {
+  const segs = acc.segments!;
+  let best: SegmentPath | null = null;
+  let bestRatio = Infinity;
+  for (const key of Object.keys(paths).sort()) {
+    const p = paths[key]!;
+    let r = 0;
+    for (const e of p.edges) {
+      const info = segs.edges[e];
+      if (!info || info.capacity <= 0) continue;
+      r = Math.max(r, (acc.hourly[`seg:${e}:${hour}`] ?? 0) / info.capacity);
+    }
+    if (r < bestRatio) {
+      bestRatio = r;
+      best = p;
+    }
+  }
+  if (!best) return 0;
+  let total = 0;
+  for (const e of best.edges) {
+    const info = segs.edges[e];
+    if (!info || info.capacity <= 0) continue;
+    const v = add(acc, `seg:${e}:${hour}`, vehicles);
+    if (!countOnly) {
+      const t0 = info.t0Min + (e === best.edges[0] ? externalMin : 0);
+      total += Math.min(M.congestionMaxMin, t0 * 0.15 * (v / info.capacity) ** 4);
+    }
+  }
+  return Math.min(M.congestionMaxMin, total);
+}
 
 function release(acc: AccessRuntime, now: number): void {
   let i = 0;
@@ -193,7 +236,7 @@ export function accessDeparture(sim: Simulation, g: PaxGroup): number {
   }
   if (mode === 'bus' || mode === 'rail') {
     // 1時間あたりの定員を超えたら次の便（時間帯）へ。24 時間先まで探して空きがなければ、定員を超えて受け入れず別の手段に切り替える（1-16 / E-1）
-    const cap = mode === 'bus' ? acc.busesPerHour * M.busSeats : acc.trainsPerHour * M.trainSeats;
+    const cap = mode === 'bus' ? acc.busesPerHour * M.busSeats : (acc.railCapPerHour ?? acc.trainsPerHour * M.trainSeats);
     let h = hour;
     const lastHour = hour + TRANSIT_LOOKAHEAD_H - 1;
     if (cap > 0 && g.count <= cap) while (h <= lastHour && (acc.hourly[`${mode}:${h}`] ?? 0) + g.count > cap) h++;
@@ -212,17 +255,26 @@ export function accessDeparture(sim: Simulation, g: PaxGroup): number {
   if (mode === 'car' || mode === 'dropoff' || mode === 'taxi') {
     // 道路: 自家用車 1台、送迎・タクシー 2台（往復）。バスは毎時の便数 × 2 を常に含む
     const vehicles = mode === 'car' ? 1 : 2;
-    const v = add(acc, `road:${hour}`, vehicles) + acc.busesPerHour * 2;
-    const d = congestionDelayMin(M.externalMin[mode], v, acc.roadCapacity);
-    acc.stats.roadDelaySum += d;
-    acc.stats.roadDelayN++;
-    delayMin += d;
-    if (mode !== 'car') {
-      const cv = add(acc, `curb:${hour}`, 1);
-      const cd = congestionDelayMin(10, cv, acc.curbCapacity);
-      acc.stats.curbDelaySum += cd;
-      acc.stats.curbDelayN++;
-      delayMin += cd;
+    if (acc.segments) {
+      // 区間モデル（フェーズ 4 §6.3）: 出入口の経路ごとに台数を数え、辺ごとの BPR 遅れを合計する
+      const paths = mode === 'car' ? acc.segments.parkingPaths : acc.segments.paths;
+      const d = segmentTraverse(acc, paths, vehicles, hour, M.externalMin[mode], false);
+      acc.stats.roadDelaySum += d;
+      acc.stats.roadDelayN++;
+      delayMin += d;
+    } else {
+      const v = add(acc, `road:${hour}`, vehicles) + acc.busesPerHour * 2;
+      const d = congestionDelayMin(M.externalMin[mode], v, acc.roadCapacity);
+      acc.stats.roadDelaySum += d;
+      acc.stats.roadDelayN++;
+      delayMin += d;
+      if (mode !== 'car') {
+        const cv = add(acc, `curb:${hour}`, 1);
+        const cd = congestionDelayMin(10, cv, acc.curbCapacity);
+        acc.stats.curbDelaySum += cd;
+        acc.stats.curbDelayN++;
+        delayMin += cd;
+      }
     }
   }
   fee(sim.company, mode, g.count);
@@ -246,12 +298,16 @@ export function accessArrival(sim: Simulation, g: PaxGroup): boolean {
   acc.stats.pax[mode] += g.count;
   g.walkSec += Math.round((acc.walkMin[mode] ?? 0) * 60);
   const hour = Math.floor(state.now / 3600);
-  if (mode === 'dropoff' || mode === 'car') {
+  if (acc.segments && (mode === 'dropoff' || mode === 'car' || mode === 'taxi')) {
+    // 区間モデル: 到着側も同じ経路に台数だけ足す（遅れは発生しない）
+    const paths = mode === 'car' ? acc.segments.parkingPaths : acc.segments.paths;
+    segmentTraverse(acc, paths, mode === 'car' ? 1 : 2, hour, 0, true);
+  } else if (mode === 'dropoff' || mode === 'car') {
     add(acc, `road:${hour}`, mode === 'car' ? 1 : 2);
     if (mode === 'dropoff') add(acc, `curb:${hour}`, 1);
   }
   if (mode === 'taxi' || mode === 'bus' || mode === 'rail') {
-    if (mode === 'taxi') add(acc, `road:${hour}`, 2);
+    if (mode === 'taxi' && !acc.segments) add(acc, `road:${hour}`, 2);
     acc.queues[mode].push(g.id);
     g.state = 'waitingTransport';
     return true;

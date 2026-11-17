@@ -47,7 +47,8 @@ export function findPaxRoute(model: TerminalModel, q: PaxRouteQuery): PaxRoute |
       if (q.closed?.has(next.id)) continue;
       if (q.stepFree && (node.kind === 'stairs' || next.kind === 'stairs')) continue;
       if (q.uncleared) {
-        if (next.zone === 'departure' && !(next.kind === 'security' && q.goals.has(next.id))) continue;
+        // フェーズ 4 §4.4: 保安検査を済ませていないグループは security・transferSecurity 以外から出発区域へ入れない
+        if ((next.zone === 'departure' || next.zone === 'departureIntl') && !((next.kind === 'security' || next.kind === 'transferSecurity') && q.goals.has(next.id))) continue;
         if (!(node.kind === 'security' && next.zone === 'landside') && !canMove(node, next)) continue;
       } else if (!canMove(node, next)) continue;
       const nc = c + link.lengthM / WALK_SPEED_MPS + link.travelSec;

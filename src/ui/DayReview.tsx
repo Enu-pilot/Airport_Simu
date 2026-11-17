@@ -4,7 +4,7 @@ import { airlineDef } from '../core/economy/registry';
 import type { DayReview, ReviewFlight, ReviewMetric } from '../core/analytics/review';
 import type { ScoreComponent, ScoreKey } from '../core/economy/airlineScore';
 import { COST_CATEGORIES, REVENUE_CATEGORIES } from '../core/economy/company';
-import { GAME_UI, AIRCRAFT_STATE_LABEL, COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL, SCORE_LEVEL_LABEL, TASK_LABEL } from '../i18n/ja';
+import { GAME_UI, AIRCRAFT_STATE_LABEL, COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL, SCORE_LEVEL_LABEL, TASK_LABEL, formatClock } from '../i18n/ja';
 import type { DelayCause, HoldReason } from '../core/sim/types';
 import { DAY_SEC } from '../core/sim/rules';
 import { dayFlowActions } from '../editor/dayFlowActions';
@@ -130,6 +130,24 @@ export function ReviewBody({ review }: { review: DayReview }) {
         <Row label="評価対象の平均遅延" value={`${num(k.avgDelayMin)} 分`} />
         {k.actualAvgDelayMin !== undefined && <Row label="実績の平均遅延" value={`${k.actualAvgDelayMin.toFixed(1)} 分`} />}
         <Row label={DAY_LOOP.flights} value={`${k.flights}`} />
+        {r.morningWave && (
+          <div data-testid="review-morning-wave">
+            <Row
+              label="朝の始発の波"
+              value={`${r.morningWave.departures} 便（${formatClock(r.morningWave.firstTakeoff ?? 0)}〜${formatClock(r.morningWave.lastTakeoff ?? 0)}${r.morningWave.intervalsSec.length ? `、間隔 ${r.morningWave.intervalsSec.map((s) => `${Math.round(s / 60)}分`).join('・')}` : ''}）`}
+            />
+          </div>
+        )}
+        {r.maintenance && (
+          <div data-testid="review-maintenance">
+            <Row label="所属機の整備" value={`整備 ${r.maintenance.checked} 機・周期超過 ${r.maintenance.overdue} 機・不具合 ${r.maintenance.faults} 件（欠航 ${r.maintenance.techCancelled} 件）`} />
+          </div>
+        )}
+        {r.hub && (
+          <div data-testid="review-hub">
+            <Row label="乗継" value={`発生 ${r.hub.spawned} 人・接続成功 ${r.hub.connected} 人・乗り遅れ ${r.hub.missed} 人・現れず ${r.hub.noShow} 人`} />
+          </div>
+        )}
         <div className="card-sub" data-testid="review-causes">
           <b>{DAY_LOOP.causes}</b>
           {review.delayCauses.length === 0 ? (
@@ -271,6 +289,14 @@ export function ReviewBody({ review }: { review: DayReview }) {
                 }
               />
               {a.worst.length > 0 && <div className="card-sub warn-text">{DAY_LOOP.lacking}: {a.worst.map((w) => SCORE_LABEL[w]).join('・')}</div>}
+              {(() => {
+                const demand = a.components?.find((x) => x.key === 'demand' && x.score !== null);
+                return demand ? (
+                  <div className="card-sub" data-testid={`review-traffic-${a.id}`}>
+                    {SCORE_LABEL.demand}: {pct(demand.facts.value ?? null)}（基準 {pct(demand.facts.target ?? null)}）
+                  </div>
+                ) : null;
+              })()}
               {a.newComplaints?.map((k) => (
                 <div key={k} className="card-sub ng-text" data-testid={`review-complaint-${a.id}`}>{GAME_UI.newComplaint(airlineDef(a.id).name, SCORE_LABEL[k])}</div>
               ))}

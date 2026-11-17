@@ -7,6 +7,8 @@ import { useLayout } from '../editor/store';
 import { RunwayToolOptions } from './RunwayPanels';
 import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL } from '../i18n/ja';
 import { floorExistsInParent } from '../core/layout/levelRules';
+import { featureForAreaKind, lockLabel } from '../core/economy/unlocks';
+import type { TerminalAreaKind } from '../core/model/types';
 
 interface ToolDef {
   id: ToolId;
@@ -40,7 +42,7 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
   },
   {
     title: 'ターミナル内部（ドラッグで範囲）',
-    tools: (['entrance', 'checkIn', 'security', 'departureLobby', 'waiting', 'restroom', 'arrivalCorridor', 'baggageClaim', 'exit', 'hall', 'stairs', 'escalator', 'elevator', 'shop', 'restaurant'] as const).map((k) => ({
+    tools: (['entrance', 'checkIn', 'security', 'departureLobby', 'waiting', 'restroom', 'arrivalCorridor', 'baggageClaim', 'exit', 'hall', 'stairs', 'escalator', 'elevator', 'shop', 'restaurant', 'emigration', 'immigration', 'customs', 'transferSecurity'] as const).map((k) => ({
       id: `area:${k}` as ToolId,
       label: AREA_KIND_LABEL[k],
       hint: 'ターミナルの中でドラッグして範囲を指定（表示中の階に配置）',
@@ -75,6 +77,7 @@ export function toolHint(tool: ToolId): string {
 
 export function Toolbox() {
   const tool = useEditor((s) => s.tool);
+  const company = useEditor((s) => s.company);
   const options = useEditor((s) => s.options);
   const kind = facilityKindOf(tool);
   const level = useEditor((s) => s.interiorLevel);
@@ -89,17 +92,25 @@ export function Toolbox() {
         <div key={g.title} className="tool-group">
           <div className="tool-group-title">{g.title}</div>
           <div className="tool-buttons">
-            {g.tools.map((t) => (
-              <button
-                key={t.id}
-                className={tool === t.id ? 'tool active' : 'tool'}
-                title={t.hint}
-                data-testid={`tool-${t.id}`}
-                onClick={() => actions.setTool(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
+            {g.tools.map((t) => {
+              // フェーズ 4 のエリアは、格で解放されるまで選べない（理由を表示）
+              const areaKind = t.id.startsWith('area:') ? (t.id.slice(5) as TerminalAreaKind) : null;
+              const feature = areaKind ? featureForAreaKind(areaKind) : null;
+              const lock = feature && company ? lockLabel(company, feature) : null;
+              return (
+                <button
+                  key={t.id}
+                  className={tool === t.id ? 'tool active' : 'tool'}
+                  title={lock ?? t.hint}
+                  data-testid={`tool-${t.id}`}
+                  disabled={!!lock}
+                  onClick={() => actions.setTool(t.id)}
+                >
+                  {t.label}
+                  {lock ? `（${lock}）` : ''}
+                </button>
+              );
+            })}
           </div>
         </div>
       ))}

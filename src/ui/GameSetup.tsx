@@ -1,7 +1,11 @@
 import { useState, useSyncExternalStore } from 'react';
 import { CLIMATES, DIFFICULTIES, defaultGame, type GameSettings } from '../core/economy/game';
 import { CITY_TYPES, defaultCity, defaultCityNightOps, type CityType } from '../core/economy/city';
-import { editorStore, newGame, setCompanyCity, setGameSettings } from '../editor/store';
+import { editorStore, newGame, setCompanyCity, setCompanyFeatures, setCompanyMarket, setGameSettings } from '../editor/store';
+import { isUnlocked, lockLabel } from '../core/economy/unlocks';
+import type { CompanyState } from '../core/economy/company';
+
+type FeatureKey = keyof NonNullable<CompanyState['features']>;
 import { GAME_UI, MODE_LABEL } from '../i18n/ja';
 
 /** ゲーム設定ダイアログの表示状態（表示だけの状態。保存しない） */
@@ -44,17 +48,24 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
   const [mode, setMode] = useState<'career' | 'sandbox'>('career');
   const [cityEnabled, setCityEnabled] = useState(kind === 'new' || !!currentCompany.city);
   const [cityType, setCityType] = useState<CityType>(currentCompany.city?.type ?? 'regional');
+  const [marketEnabled, setMarketEnabled] = useState(!!currentCompany.market);
+  const [features, setFeatures] = useState<{ overnight?: true; based?: true; international?: true; hub?: true }>(currentCompany.features ?? {});
+  const toggleFeature = (f: FeatureKey, on: boolean) => setFeatures((x) => ({ ...x, [f]: on ? true : undefined }));
   const patch = (p: Partial<GameSettings>) => setG((x) => ({ ...x, ...p }));
   const submit = () => {
     if (kind === 'new') {
       if (!window.confirm(GAME_UI.setupConfirm)) return;
       // 新規ゲームで都市を選んだときだけ、夜間の運用（最終出発時刻 21:15）を既定で有効にする。defaultCity 自体は変えない
       newGame(mode, legacy ? null : g, cityEnabled ? { ...defaultCity(cityType), nightOps: defaultCityNightOps() } : null);
+      if (marketEnabled && cityEnabled) setCompanyMarket(true);
+      setCompanyFeatures(features);
     } else {
       if (!window.confirm(GAME_UI.setupApplyConfirm)) return;
       setGameSettings(legacy ? null : g);
       // 既存の夜間の運用設定は引き継ぐ（なければ足さない）
       setCompanyCity(cityEnabled ? { ...defaultCity(cityType), ...(currentCompany.city?.nightOps ? { nightOps: currentCompany.city.nightOps } : {}) } : null);
+      setCompanyMarket(marketEnabled && cityEnabled);
+      setCompanyFeatures(features);
     }
     gameSetupUi.close();
   };
@@ -100,6 +111,28 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
           <select value={cityType} disabled={!cityEnabled} onChange={(e) => setCityType(e.target.value as CityType)} data-testid="setup-city-type">
             {CITY_TYPES.map((type) => <option key={type} value={type}>{GAME_UI.cityType[type]}</option>)}
           </select>
+          <label>
+            <input type="checkbox" checked={marketEnabled} disabled={!cityEnabled} onChange={(e) => setMarketEnabled(e.target.checked)} data-testid="setup-market-enabled" />
+            {GAME_UI.setupMarket}
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>{GAME_UI.setupFeatures}</legend>
+          {([
+            ['overnight', GAME_UI.setupFeatureOvernight],
+            ['based', GAME_UI.setupFeatureBased],
+            ['international', GAME_UI.setupFeatureInternational],
+            ['hub', GAME_UI.setupFeatureHub],
+          ] as [FeatureKey, string][]).map(([f, label]) => {
+            const locked = !isUnlocked(currentCompany, f);
+            return (
+              <label key={f}>
+                <input type="checkbox" checked={!!features[f]} disabled={locked} onChange={(e) => toggleFeature(f, e.target.checked)} data-testid={`setup-feature-${f}`} />
+                {label}
+                {locked && <span className="muted small">（{lockLabel(currentCompany, f)}）</span>}
+              </label>
+            );
+          })}
         </fieldset>
         <fieldset disabled={legacy}>
           <legend>{GAME_UI.setupRules}</legend>

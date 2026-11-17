@@ -31,7 +31,7 @@ import {
   type OperatingHours,
 } from '../core/economy/company';
 import { createContext, operableTypes } from '../core/sim/context';
-import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
+import { airlineDef, destinationDef, internationalProcessingFor, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { CONTRACT_ACTION_LABEL, FLEET_RESULT_LABEL, RESPONSE_LABEL } from '../i18n/ja';
 import {
   addDisruption,
@@ -469,7 +469,7 @@ export const companyActions = {
     const k = c.contracts[id];
     if (!k) return;
     const ctx = s.ops?.sim.ctx ?? createContext(s.history.present);
-    const route = routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilitiesForAirport(ctx.layout.countryId));
+    const route = routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilitiesForAirport(ctx.layout.countryId, { international: internationalProcessingFor(c, ctx.terminal) }));
     const closedGates = s.ops?.sim.state.closures.gates ?? [];
     const access = s.ops?.sim.state.access?.factor
       ?? analyzeAccess(ctx.layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }).factor;
@@ -479,6 +479,8 @@ export const companyActions = {
       typeId: k.typeId,
       perDay: k.perDay,
       window: k.window,
+      ...(k.kind ? { kind: k.kind } : {}),
+      ...(k.basedAircraft !== undefined ? { basedAircraft: k.basedAircraft } : {}),
     }, closedGates, access).result;
     if (mutateCompany((x) => acceptOffer(x, id, operableTypes(ctx).includes(k.typeId), route, capacity))) {
       showToast(s.ops ? '契約しました（翌日の運航計画から運航します）' : '契約しました');

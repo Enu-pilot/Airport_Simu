@@ -73,7 +73,7 @@ export type HoldReason =
   | 'opposingTraffic' // 対向する機体の通過待ち（区間ごとに進む地上走行）
   | 'runwayQueue'; // 滑走路手前の待機列（区間ごとに進む地上走行）
 
-export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling' | 'apronBus' | 'weather' | 'noiseRestriction';
+export type DelayCause = 'inboundLate' | 'noStand' | 'runwayQueue' | 'taxiCongestion' | 'turnaround' | 'noRoute' | 'boarding' | 'groundHandling' | 'apronBus' | 'weather' | 'noiseRestriction' | 'technical';
 export type ExternalDelayCause = 'inboundDelay' | 'weather' | 'airTraffic';
 
 export interface Route {
@@ -169,10 +169,32 @@ export interface FlightPax {
   bus?: { gateId: string | null; gateClosedAt: number | null; /** バスで運んだ旅客数と、その待ち時間の合計（人・秒。運行の作成からバスの出発まで） */ paxCarried: number; waitPaxSec: number };
   /** 明示したリモートスポットのバス接続設定が無効・未設定の場合の診断 */
   busFailure?: 'disabled' | 'unconfigured' | 'invalidGate';
+  /** 到着便: 乗継として降機した人数（フェーズ 4） */
+  transferOut?: number;
+  /** 出発便: 乗継グループとして生成した人数（フェーズ 4） */
+  transferIn?: number;
+  /** 出発便: 到着便の欠航・未降機で来なかった乗継人数（フェーズ 4） */
+  transferNoShow?: number;
+  /** 乗継グループ専用の乱数の状態（フェーズ 4） */
+  transferRng?: RngState;
 }
 
 export interface Flight {
   id: string;
+  /** 夜間滞泊の便（フェーズ 4）: 出発便は翌日発・到着便は夜間滞泊 */
+  overnight?: true;
+  /** 持ち越しの記録から置き直した合成の到着便（フェーズ 4）。集計から除外する */
+  carryOver?: true;
+  /** 国際線の便（フェーズ 4） */
+  routeType?: 'international';
+  /** 拠点契約の所属機 ID */
+  basedAircraftId?: string;
+  /** 整備の不具合でプッシュバックを保留する時刻 */
+  techHoldUntil?: number;
+  /** 乗継の計画（到着便）: 出発便 ID への人数 */
+  transferPlan?: { depFlightId: string; pax: number; kind: 'DD' | 'DI' | 'ID' | 'II' }[];
+  /** 乗継で入ってくる予定人数（出発便） */
+  plannedTransferIn?: number;
   /** 夜間制限で止めた便（フェーズ 2。値があるときだけ書く） */
   nightHold?: { kind: 'stand' | 'origin' | 'airborne'; decidedAt: number; releaseAt: number };
   number: string;
@@ -297,6 +319,10 @@ export interface Bag {
   id: string;
   /** 所属する便（出発手荷物は出発便、到着手荷物は到着便） */
   flightId: string;
+  /** 乗継手荷物: 付け替え先の出発便（フェーズ 4） */
+  transferToFlightId?: string;
+  /** 乗継手荷物: 付け替え元の到着便（フェーズ 4） */
+  transferFromFlightId?: string;
   paxGroupId: string;
   direction: 'departure' | 'arrival';
   state: BagState;
@@ -357,7 +383,7 @@ export type PaxState =
 
 export const PAX_FINAL_STATES: readonly PaxState[] = ['boarded', 'exited', 'missed', 'cancelled'];
 
-export type PaxStep = 'checkIn' | 'security' | 'shop' | 'restroom' | 'gate' | 'claim' | 'exit';
+export type PaxStep = 'checkIn' | 'security' | 'shop' | 'restroom' | 'gate' | 'claim' | 'exit' | 'emigration' | 'immigration' | 'customs' | 'transferSecurity';
 export type MissReason = 'late' | 'unreachable' | 'facilityClosed' | 'noGate' | 'noBus' | 'cancelled';
 
 export interface PaxGroup {
@@ -367,6 +393,10 @@ export interface PaxGroup {
   terminalId: string | null;
   /** Spot/gate change destination while the passenger is walking between terminals. */
   targetTerminalId?: string | null;
+  /** 乗継グループ（フェーズ 4）: 乗継元の到着便と種類 */
+  transfer?: { fromFlightId: string; kind: 'DD' | 'DI' | 'ID' | 'II' };
+  /** 国際の審査の通過印（フェーズ 4） */
+  ciq?: { emigration?: true; immigration?: true; customs?: true };
   count: number;
   bags: number;
   state: PaxState;
@@ -533,6 +563,10 @@ export interface SimState {
     priorityAt?: number;
     stats: { resolutions: number; reroutes: number; overruns: number; unresolved: number; nightStranded: number };
   };
+  /** 兼用ゲートの現在の種類と切替の保留（フェーズ 4） */
+  swingGates?: Record<string, { routeType: 'domestic' | 'international'; busyUntil: number }>;
+  /** 乗継の集計（フェーズ 4） */
+  hubStats?: { spawned: number; connected: number; missed: number; noShow: number; byLink: Record<string, number> };
   seed: string;
   now: number;
   rng: RngState;

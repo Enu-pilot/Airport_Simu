@@ -27,6 +27,10 @@ const STAGE_LABEL: Record<PaxStep, string> = {
   gate: '搭乗口',
   claim: '手荷物受取',
   exit: '出口',
+  emigration: '出国審査',
+  immigration: '入国審査',
+  customs: '税関',
+  transferSecurity: '乗継保安検査',
 };
 
 /**

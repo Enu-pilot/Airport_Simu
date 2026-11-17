@@ -159,6 +159,10 @@ export interface RoadEdge {
   capacityPerHour?: number;
   /** 上下移動設備の所要時間。未設定時は距離/歩速から計算。 */
   travelSec?: number;
+  /** 車線数（一般・サービス道路。フェーズ 4 の区間能力の既定値に使う） */
+  lanes?: number;
+  /** 線路数（鉄道。1 = 単線、2 = 複線。フェーズ 4） */
+  tracks?: 1 | 2;
 }
 
 export interface Stand {
@@ -239,13 +243,17 @@ export type TerminalAreaKind =
   | 'escalator'
   | 'elevator'
   | 'shop'
-  | 'restaurant';
+  | 'restaurant'
+  | 'emigration'
+  | 'immigration'
+  | 'customs'
+  | 'transferSecurity';
 
 /**
  * 旅客の区域。landside = 保安検査前（一般区域）、departure = 保安検査後の出発区域、arrival = 到着区域。
  * 区域をまたぐ移動は保安検査（landside → departure）と手荷物受取所・出口（arrival → landside）でのみ可能。
  */
-export type PaxZone = 'landside' | 'departure' | 'arrival';
+export type PaxZone = 'landside' | 'departure' | 'arrival' | 'departureIntl' | 'arrivalIntl';
 
 /** ターミナル内部のエリア（ターミナルの敷地内、階ごとの矩形） */
 export interface TerminalArea {
@@ -320,6 +328,8 @@ export interface AirportLayout {
   taxiMode?: 'block';
   /** 区間の区切りの長さ（タイル、4〜40）。欠落 = 10 */
   taxiBlockTiles?: number;
+  /** アクセスの区間能力モデル（フェーズ 4）。欠落 = 集約モデル、'segment' = 区間ごと */
+  accessCapacityModel?: 'segment';
 }
 
 export type EntityType = 'runway' | 'taxiNode' | 'taxiway' | 'roadNode' | 'road' | 'stand' | 'facility' | 'terminalArea';

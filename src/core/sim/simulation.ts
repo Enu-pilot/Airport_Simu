@@ -71,11 +71,15 @@ import { createAnalytics, stepAnalytics } from '../analytics/records';
 import type { CompanyState } from '../economy/company';
 import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
 import { analyzeDayPlan, planDayWithDemand } from '../economy/planning';
-import { routeCapabilitiesForAirport } from '../economy/registry';
+import { internationalProcessingFor, routeCapabilitiesForAirport } from '../economy/registry';
 import { stepBaggage } from './baggage';
 import { atRiskForNight, lineUpToAirborneSec, nightOpsOf, predictTakeoffAt, standReleaseAt } from './nightOps';
 import { acquireNext, acquireRoute, blockMovementLimit, createTaxiBlockState, detectTaxiStall, noteOpposed, opposedMove, pendingChainDistance, releaseBlocksPassed, routeBlocks } from './blockControl';
 import { createApronBusRuntime, stepApronBuses } from './apronBus';
+import { materializeCarryOver } from './overnight';
+import { BALANCE } from '../economy/balance';
+import { planConnections } from '../economy/hub';
+import { analyzeHub } from '../terminal/hub';
 import { isCityNightMovement, nextCityMovementTime } from '../economy/city';
 import { addExternalDelay } from '../economy/delayEvaluation';
 import {
@@ -202,6 +206,8 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
   if (ctx.blocks) state.taxiBlocks = createTaxiBlockState();
   // バスゲートがある運航だけランプバスの運行の状態を持つ（従来の運航にはキー自体を作らない）
   if (ctx.busGates.length > 0) state.bus = createApronBusRuntime();
+  // フェーズ 4: 持ち越しの記録があれば、スケジュール生成の前に機体を置き直す
+  materializeCarryOver(sim);
   if (state.settings.autoSchedule) generateDaySchedule(sim, Math.floor(state.now / DAY_SEC));
   return sim;
 }
@@ -215,18 +221,18 @@ function withRng<T>(state: SimState, fn: (rng: Rng) => T): T {
   return v;
 }
 
-function nextId(state: SimState, prefix: string): string {
+export function nextId(state: SimState, prefix: string): string {
   const n = (state.counters[prefix] ?? 0) + 1;
   state.counters[prefix] = n;
   return `${prefix}_${n}`;
 }
 
-function logEvent(state: SimState, e: SimState['events'][number]): void {
+export function logEvent(state: SimState, e: SimState['events'][number]): void {
   state.events.push(e);
   if (state.events.length > EVENT_LOG_LIMIT) state.events.splice(0, state.events.length - EVENT_LOG_LIMIT);
 }
 
-function setState(state: SimState, ac: Aircraft, next: AircraftState, note?: string): void {
+export function setState(state: SimState, ac: Aircraft, next: AircraftState, note?: string): void {
   if (ac.state === next) return;
   ac.state = next;
   ac.stateSince = state.now;
@@ -248,7 +254,7 @@ function setHold(state: SimState, ac: Aircraft, reason: HoldReason | null): void
   }
 }
 
-function addDelayCause(f: Flight, c: DelayCause): void {
+export function addDelayCause(f: Flight, c: DelayCause): void {
   if (!f.delayCauses.includes(c)) f.delayCauses.push(c);
 }
 
@@ -289,7 +295,7 @@ export function addTurnaround(
     inboundDelaySec?: number;
     airline?: string;
     numbers?: [string, string];
-    plan?: { contractId: string; destinationId: string; arrPax: number; depPax: number; standId: string | null; seats?: number };
+    plan?: { contractId: string; destinationId: string; arrPax: number; depPax: number; standId: string | null; seats?: number; overnight?: true; basedAircraftId?: string; routeType?: 'international' };
   } = {},
 ): Aircraft {
   const { state } = sim;
@@ -325,6 +331,9 @@ export function addTurnaround(
     plannedPax: plan ? (direction === 'arrival' ? plan.arrPax : plan.depPax) : null,
     plannedStandId: plan?.standId ?? null,
     ...(plan?.seats !== undefined ? { seats: plan.seats } : {}),
+    ...(plan?.overnight ? { overnight: true as const } : {}),
+    ...(plan?.basedAircraftId ? { basedAircraftId: plan.basedAircraftId } : {}),
+    ...(plan?.routeType ? { routeType: plan.routeType } : {}),
   });
   const arrEst = arrivalAt + (opts.inboundDelaySec ?? 0);
   state.flights[arrId] = flight(arrId, 'arrival', arrNumber, arrivalAt, arrEst);
@@ -413,18 +422,51 @@ export function generateDaySchedule(sim: Simulation, day: number): void {
 function generateContractSchedule(sim: Simulation, day: number): void {
   const { state, ctx } = sim;
   // 需要にはアクセス係数（前日の混雑を反映）が掛かる。運航計画タブのプレビューも同じ値を使う
-  const plan = planDayWithDemand(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!), ctx.types, routeCapabilitiesForAirport(ctx.layout.countryId));
+  const plan = planDayWithDemand(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!), ctx.types, routeCapabilitiesForAirport(ctx.layout.countryId, { international: internationalProcessingFor(sim.company, ctx.terminal) }));
+  // 乗継の計画（フェーズ 4 §5.3）: ハブ解析の MCT を使って到着便→出発便の人数を決める
+  planConnections(plan, sim.company!, analyzeHub(ctx.layout, ctx.terminal));
   const analysis = analyzeDayPlan(plan, ctx, state.closures.gates);
   const earliest = state.now + 20 * 60;
+  // 拠点契約の滞泊便には所属機を ID 順に割り当てる（フェーズ 4 §3.5）
+  const basedCounters = new Map<string, number>();
+  const basedIdsOf = (contractId: string) => Object.values(sim.company!.basedFleet ?? {}).filter((b) => b.contractId === contractId).sort((a, b) => compareIds(a.id, b.id));
+  // 乗継の計画を実便へ移すための key → 便 ID の対応（フェーズ 4 §5.3）
+  const arrIdByKey = new Map<string, string>();
+  const depIdByKey = new Map<string, string>();
   for (const p of plan.flights) {
     const arrivalAt = Math.max(day * DAY_SEC + p.arrivalAt, Math.ceil(earliest / 60) * 60);
-    addTurnaround(sim, p.typeId, arrivalAt, {
+    let basedAircraftId: string | undefined;
+    if (p.overnight) {
+      const ids = basedIdsOf(p.contractId);
+      if (ids.length > 0) {
+        const idx = basedCounters.get(p.contractId) ?? 0;
+        basedAircraftId = ids[idx % ids.length]!.id;
+        basedCounters.set(p.contractId, idx + 1);
+      }
+    }
+    const ac = addTurnaround(sim, p.typeId, arrivalAt, {
       departureAt: Math.max(day * DAY_SEC + p.departureAt, arrivalAt + resolveType(ctx.types, p.typeId).turnaroundSec),
       inboundDelaySec: p.inboundDelaySec,
       airline: p.airlineId,
       numbers: [p.arrNumber, p.depNumber],
-      plan: { contractId: p.contractId, destinationId: p.destinationId, arrPax: p.arrPax, depPax: p.depPax, standId: analysis.assignments[p.key]?.standId ?? null, seats: p.seats },
+      plan: { contractId: p.contractId, destinationId: p.destinationId, arrPax: p.arrPax, depPax: p.depPax, standId: analysis.assignments[p.key]?.standId ?? null, seats: p.seats, ...(p.overnight ? { overnight: true as const } : {}), ...(basedAircraftId ? { basedAircraftId } : {}), ...(p.routeType ? { routeType: p.routeType } : {}) },
     });
+    arrIdByKey.set(p.key, ac.arrivalFlightId);
+    depIdByKey.set(p.key, ac.departureFlightId);
+  }
+  // 乗継の計画を実便へ移す（到着便の transferPlan・出発便の plannedTransferIn）
+  for (const p of plan.flights) {
+    if (p.connections?.length) {
+      const arr = state.flights[arrIdByKey.get(p.key)!]!;
+      arr.transferPlan = p.connections.flatMap((cn) => {
+        const depFlightId = depIdByKey.get(cn.depKey);
+        return depFlightId ? [{ depFlightId, pax: cn.pax, kind: cn.kind }] : [];
+      });
+    }
+    if (p.transferIn) {
+      const dep = state.flights[depIdByKey.get(p.key)!]!;
+      dep.plannedTransferIn = p.transferIn;
+    }
   }
   logEvent(state, { t: state.now, kind: 'scheduleGenerated', note: `day ${day}: ${plan.flights.length}（契約）` });
 }
@@ -584,6 +626,30 @@ function gateClosed(sim: Simulation, standId: string): boolean {
  * 到着機にスポットと滑走路を割り当てる。空きスポット（1スポットに1機）のうち、
  * 区分が合い、使用可能な滑走路との間を往復できるものを、サイズの無駄が少ない順・ゲート付き優先で選ぶ。
  */
+/**
+ * ゲートの国内/国際の適合（フェーズ 4 §4.3・§4.5）。routeType のないゲートは国内扱い。
+ * swing ゲートは、現在の種別と違う便を受けるとき切り替え間隔（600 秒）が空いていること。
+ * リモートスポットはバスゲートの種別で決まり、バスゲートがない空港では国際便は置けない。
+ */
+function gateRouteCompatible(sim: Simulation, standId: string, flightRt: 'domestic' | 'international'): boolean {
+  const { state, ctx } = sim;
+  const gid = ctx.standGate[standId];
+  if (!gid) {
+    if (ctx.busGates.length === 0) return flightRt === 'domestic';
+    return ctx.busGates.some((id) => {
+      const rt = ctx.terminal.gates[id]?.routeType ?? 'domestic';
+      return flightRt === 'international' ? rt !== 'domestic' : rt !== 'international';
+    });
+  }
+  const rt = ctx.terminal.gates[gid]?.routeType ?? 'domestic';
+  if (flightRt === 'international' ? rt === 'domestic' : rt === 'international') return false;
+  if (rt === 'swing') {
+    const cur = state.swingGates?.[gid];
+    if (cur && cur.routeType !== flightRt && state.now < cur.busyUntil + BALANCE.phase4.swingChangeSec) return false;
+  }
+  return true;
+}
+
 function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
   const { state, ctx } = sim;
   const type = typeOf(sim, ac);
@@ -611,13 +677,15 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
       return homeNode ? Math.hypot(node.pos.x - homeNode.pos.x, node.pos.y - homeNode.pos.y) : Infinity;
     }));
   };
+  const flightRt = arrival.routeType === 'international' ? 'international' : 'domestic';
   const candidates = Object.values(ctx.stands)
     .filter(
       (s) =>
         s.entry &&
         !state.standAssignments[s.id] &&
         !state.closures.stands.includes(s.id) &&
-        checkStand(type, ctx.layout.stands[s.id]!).status === 'ok',
+        checkStand(type, ctx.layout.stands[s.id]!).status === 'ok' &&
+        gateRouteCompatible(sim, s.id, flightRt),
     )
     .sort(
       (a, b) =>
@@ -653,6 +721,12 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     if (!dep) continue;
     state.standAssignments[s.id] = ac.id;
     ac.standId = s.id;
+    // swing ゲートの現在の種別と占有終了を記録する（次の切り替え判定に使う）
+    const swingGateId = ctx.standGate[s.id];
+    if (swingGateId && ctx.terminal.gates[swingGateId]?.routeType === 'swing') {
+      const depF = state.flights[ac.departureFlightId];
+      (state.swingGates ??= {})[swingGateId] = { routeType: flightRt, busyUntil: depF?.estimated ?? depF?.scheduled ?? state.now };
+    }
     if (ac.requestedStandId === s.id) delete ac.requestedStandId; // 指定したスポットへ割り当てられた
     ac.runwayId = best.runwayId;
     const arr = state.flights[ac.arrivalFlightId]!;
@@ -853,13 +927,14 @@ function departureBlocked(sim: Simulation, rid: string, type: AircraftType, airc
     if (isCityNightMovement(state.now + lineUpToAirborneSec(sim, aircraft))) return 'noiseCurfew';
   }
   if (!runwayUsable(sim, rid, type, 'dep')) return 'runwayBusy';
-  if (rs.occupant) return 'runwayBusy';
+  if (rs.occupant && rs.occupant.aircraftId !== aircraft.id) return 'runwayBusy';
   if (rs.booking && rs.booking.eta - state.now < DEPARTURE_WINDOW_SEC) return 'runwayBusy';
   // 交差する滑走路（従属運用: 2 本の離着陸を 1 本とみなす。自由形が関与する交差だけ）
   const partners = partnersOf(sim, rid);
   for (const p of partners) {
     const ps = state.runways[p]!;
-    if (ps.occupant) return 'intersection';
+    // 自分自身の横断占有は妨げにならない（出発滑走路へ向けて横断中の機体が、自分の横断を理由に永遠に整列できない）
+    if (ps.occupant && ps.occupant.aircraftId !== aircraft.id) return 'intersection';
     if (ps.booking && ps.booking.eta - state.now < DEPARTURE_WINDOW_SEC) return 'intersection';
   }
   const wx = weatherEffects(state).separation;
@@ -1091,14 +1166,19 @@ function stepAircraft(sim: Simulation, ac: Aircraft): void {
       moveTaxi(sim, ac);
       const r = ac.route!;
       const limit = movementLimit(sim, ac);
-      let holdAt = r.cum[r.nodes.length - 1]! - holdShortOnRoute(sim.ctx, r, r.nodes.length - 1, -1);
+      const runwayHoldAt = r.cum[r.nodes.length - 1]! - holdShortOnRoute(sim.ctx, r, r.nodes.length - 1, -1);
+      let holdAt = runwayHoldAt;
       if (sim.ctx.blocks) {
         // 滑走路手前の区間の終わりが停止位置より手前なら、そこで止まる（区間の外へは出ない）
         const refs = routeBlocks(sim.ctx, r).refs;
         const lastRef = refs[refs.length - 1];
         if (lastRef && lastRef.exitDist < holdAt) holdAt = lastRef.exitDist;
       }
-      if (ac.dist >= holdAt - 0.01 && limit <= holdAt + 0.01) {
+      // 横断許可を得て区間の終わりを越え、滑走路の停止位置まで進んだ場合も列に加わる。
+      // 区間の終わりだけを見ると、停止位置で止まった機体がいつまでも holdShort へ移らず、
+      // 横断中の滑走路を占有したまま後続の着陸を永遠に妨げる（freeShallow のデッドロック）
+      const stoppedAt = (p: number) => ac.dist >= p - 0.01 && limit <= p + 0.01;
+      if (stoppedAt(holdAt) || stoppedAt(runwayHoldAt)) {
         ac.speed = 0;
         ac.queuedSince = state.now;
         setState(state, ac, 'holdShort');
@@ -1349,6 +1429,12 @@ function holdAtOrigin(sim: Simulation, ac: Aircraft): void {
 function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
   const { state } = sim;
   const dep = state.flights[ac.departureFlightId]!;
+  // 整備の不具合による保留（フェーズ 4 §3.6）: 時刻まではプッシュバックしない
+  if (dep.techHoldUntil !== undefined && state.now < dep.techHoldUntil) {
+    setHold(state, ac, 'groundCrew');
+    addDelayCause(dep, 'technical');
+    return;
+  }
   // 出発の10分前にトーイングカーと作業員を手配する
   if (state.now >= dep.estimated - PUSHBACK_DISPATCH_LEAD_SEC) createPushbackTask(sim, ac);
   if (state.now < dep.estimated || state.now < ac.retryAt) return;
@@ -1584,7 +1670,7 @@ function placeOnRoute(sim: Simulation, ac: Aircraft, reverse = false): void {
   }
 }
 
-function placeAtStand(sim: Simulation, ac: Aircraft): void {
+export function placeAtStand(sim: Simulation, ac: Aircraft): void {
   const s = sim.ctx.stands[ac.standId!]!;
   const p = sim.ctx.network.nodes[s.node]!.pos;
   ac.x = p.x;

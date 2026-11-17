@@ -14,6 +14,7 @@ import {
   isDown,
   moveBag,
   reconcileDepartureBags,
+  retagTransferBag,
   setEquipmentBroken,
 } from './baggage';
 import type { Simulation } from './simulation';
@@ -158,14 +159,15 @@ export function setUnitBroken(sim: Simulation, unitId: string, broken: boolean, 
 
 // ---------------------------------------------------------------- 作業の生成
 
-/** ブロックイン時に折り返し作業を生成する */
-export function createTurnaroundTasks(sim: Simulation, ac: Aircraft): void {
+/** ブロックイン時に折り返し作業を生成する。skip の作業は作らない（置き直しの合成機体など） */
+export function createTurnaroundTasks(sim: Simulation, ac: Aircraft, opts: { skip?: readonly string[] } = {}): void {
   const { state } = sim;
   if ((state.aircraftTasks[ac.id] ?? []).length > 0) return;
   const type = resolveType(sim.ctx.types, ac.typeId);
   const defect = withRng(state, (rng) => rng.next() < DEFECT_PROB);
   const totals = unitTotals(sim);
   for (const kind of TURNAROUND_TASKS) {
+    if (opts.skip?.includes(kind)) continue;
     const task = newTask(state, ac, kind);
     // 機種ごとの作業時間・必要なユニット。空港に必要数より少なければ、ある台数で時間をかけて行う（docs/16 §4）
     task.needs = taskNeeds(type, kind);
@@ -499,7 +501,11 @@ function stepUnload(sim: Simulation, t: GroundTask, ac: Aircraft): void {
   if (t.phase === 'transport') {
     if (state.now >= t.phaseUntil!) {
       const claim = arr.pax.claimAreaId ?? 'none';
-      for (const b of bagsOf(state, arr.id, ['onCart'])) moveBag(state, b, 'atClaim', `claim:${claim}`);
+      for (const b of bagsOf(state, arr.id, ['onCart'])) {
+        // 乗継手荷物は受取所へ送らず、出発便の預け手荷物に付け替える（フェーズ 4 §5.5）
+        if (b.transferToFlightId) retagTransferBag(state, b);
+        else moveBag(state, b, 'atClaim', `claim:${claim}`);
+      }
       finishTask(sim, t);
     }
     return;

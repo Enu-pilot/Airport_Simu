@@ -17,6 +17,9 @@ import {
 } from './landside';
 import { facilityLevel } from '../model/levels';
 import { findPedestrianRoute, type WalkRoute } from './verticalWalk';
+import { analyzeSegments, type AccessSegments } from './segments';
+
+export type { AccessSegments, SegmentPath } from './segments';
 
 /**
  * 旅客の空港アクセス手段の選択（docs/15_access_rules.md §3）。ゲーム用の簡易なロジットモデル。
@@ -104,6 +107,8 @@ export interface AccessAnalysis {
   staff: number;
   staffSpacesNeeded: number;
   staffSpaces: number;
+  /** 区間能力モデル（layout.accessCapacityModel === 'segment'）のときだけ付く解析（フェーズ 4 §6.2） */
+  segments?: AccessSegments;
 }
 
 export const DEFAULT_ACCESS_FEES: AccessFees = { carPark: 1, taxi: 1, bus: 1, rail: 1 };
@@ -214,7 +219,12 @@ export function analyzeAccess(
   const parkingSpaces = parking.facilities.reduce((s, f) => s + num(f.props.spaces), 0);
   const taxiBerths = taxi.facilities.reduce((s, f) => s + num(f.props.berths), 0);
   const busesPerHour = bus.facilities.reduce((s, f) => s + Math.min(num(f.props.busesPerHour), num(f.props.busBays) * M.busesPerBay), 0);
-  const trainsPerHour = rail.facilities.reduce((s, f) => s + num(f.props.trainsPerHour), 0);
+  const declaredTrainsPerHour = rail.facilities.reduce((s, f) => s + num(f.props.trainsPerHour), 0);
+  // フェーズ 4 §6.2: 区間能力モデルのときだけ区間解析を行い、鉄道の実効本数を使う（集約の値は比較用に残す）
+  const segments = layout.accessCapacityModel === 'segment'
+    ? analyzeSegments(layout, net, { railStationIds: rail.facilities.map((f) => f.id), railDeclaredTrainsPerHour: declaredTrainsPerHour })
+    : undefined;
+  const trainsPerHour = segments ? segments.railTrainsPerHour : declaredTrainsPerHour;
   const needsWalkCapacity = railFacilities.some((f) => !legacyRailStations.has(f.id));
   const railPaxCapacity = needsWalkCapacity ? (railWalkCapacityPerHour === null ? null : Math.min(trainsPerHour * M.trainSeats, railWalkCapacityPerHour)) : trainsPerHour * M.trainSeats;
   const weightedRail = rail.facilities.reduce((acc, f) => {
@@ -321,6 +331,7 @@ export function analyzeAccess(
     staff,
     staffSpacesNeeded: Math.ceil(staff * M.staffParkingPerStaff),
     staffSpaces,
+    ...(segments ? { segments } : {}),
   };
 }
 

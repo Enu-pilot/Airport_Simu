@@ -75,6 +75,10 @@ export const PROP_LABEL: Record<string, string> = {
   jetBridge: 'ボーディングブリッジ',
   boardingMode: '搭乗方式',
   connectedTo: '接続先ターミナル',
+  routeType: '国内/国際の別',
+  platforms: 'ホーム数',
+  lanes: '車線数',
+  tracks: '線路数',
   apronBuses: 'ランプバス',
   maxSize: '収容可能な最大機体',
   level: '階層（地上0・地下負数・高架正数）',
@@ -108,6 +112,9 @@ export const BOARDING_MODE_LABEL = {
 } as const;
 
 export const RAIL_SERVICE_LABEL = { local: '各停', rapid: '快速', express: '特急' } as const;
+
+/** ゲートの国内/国際の別（フェーズ 4） */
+export const GATE_ROUTE_TYPE_LABEL = { domestic: '国内', international: '国際', swing: '兼用（国内・国際）' } as const;
 
 export const SEVERITY_LABEL: Record<Severity, string> = { error: 'エラー', warning: '警告', info: '情報' };
 
@@ -229,6 +236,7 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   STAND_ONE_WAY_TRAP: (n, p) =>
     `${n[0]} は一方通行のため${p.direction === 'arrival' ? '到着機が入れません' : '出発機が滑走路へ出られません'}`,
   STAND_REMOTE: (n, p) => (p.bus ? `${n[0]} はリモートスポットです（バスゲートのランプバスで搭乗）` : `${n[0]} にはゲートがありません（リモートスポット）`),
+  OVERNIGHT_STAND_REMOVED: (n, p) => `${n[0]} には夜間滞泊の機体が ${p.count} 機います。撤去・閉鎖したままだと、運航の再開時に置き直せず欠航になります`,
   STAND_MULTIPLE_GATES: (n) => `${n[0]} に複数のゲートが紐付いています`,
   GATE_NOT_AT_TERMINAL: (n) => `${n[0]} がターミナルに接していません`,
   GATE_TERMINAL_AMBIGUOUS: (n) => `${n[0]} が複数のターミナル（${n.slice(1).join('・')}）に接しています。「接続先ターミナル」を指定してください`,
@@ -282,6 +290,12 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   TERMINAL_NO_SECURITY: (n) => `${n[0]} に保安検査場がありません`,
   TERMINAL_NO_BAGGAGE_CLAIM: (n) => `${n[0]} に手荷物受取所がありません`,
   SECURITY_NOT_CONNECTED: (n) => `${n[0]} が一般区域と出発区域の両方に接していません`,
+  INTL_EMIGRATION_UNLINKED: (n) => `${n[0]}（出国審査）が出発区域と国際出発区域の両方に接していません`,
+  INTL_IMMIGRATION_UNLINKED: (n) => `${n[0]}（入国審査）が国際到着区域と到着区域の両方に接していません`,
+  INTL_CUSTOMS_UNLINKED: (n) => `${n[0]}（税関）が到着区域と一般区域の両方に接していません`,
+  INTL_GATE_ZONE: (n) => `${n[0]}（国際ゲート）が国際出発区域・国際到着区域の両方に接していません`,
+  SWING_GATE_ZONE: (n) => `${n[0]}（兼用ゲート）が国内・国際の両方の区域に接していません`,
+  INTL_LOCKED: () => `国際線のエリアやゲートがありますが、国際機能が解放・有効化されていません`,
   GATE_NO_BOARDING_ACCESS: (n) => `${n[0]} に接する出発区域のエリア（出発ロビー等）がありません`,
   GATE_NO_ARRIVAL_ACCESS: (n) => `${n[0]} に接する到着通路がありません`,
   GATE_UNREACHABLE: (n) => `出発旅客が入口から保安検査を経て ${n[0]} に到達できません`,
@@ -384,6 +398,7 @@ export const DELAY_CAUSE_LABEL: Record<DelayCause, string> = {
   apronBus: 'ランプバス待ち',
   weather: '天候',
   noiseRestriction: '夜間騒音規制',
+  technical: '機材の不具合',
 };
 
 export const FLIGHT_STATUS_LABEL: Record<FlightStatus, string> = {
@@ -487,12 +502,25 @@ export const AREA_KIND_LABEL: Record<TerminalAreaKind, string> = {
   elevator: 'エレベーター',
   shop: '店舗',
   restaurant: '飲食店',
+  emigration: '出国審査',
+  immigration: '入国審査',
+  customs: '税関',
+  transferSecurity: '乗継保安検査',
 };
 
 export const ZONE_LABEL: Record<PaxZone, string> = {
   landside: '一般区域（保安検査前）',
   departure: '出発区域（保安検査後）',
   arrival: '到着区域',
+  departureIntl: '国際出発区域',
+  arrivalIntl: '国際到着区域',
+};
+
+/** 契約の種類（フェーズ 4） */
+export const CONTRACT_KIND_LABEL: Record<string, string> = {
+  turnaround: '折り返し',
+  overnight: '夜間滞泊',
+  based: '拠点',
 };
 
 export const AREA_PROP_LABEL: Record<string, string> = {
@@ -502,6 +530,7 @@ export const AREA_PROP_LABEL: Record<string, string> = {
   seats: '座席数',
   fixtures: '個室・設備数',
   belts: 'ベルト数',
+  booths: '窓口数',
   travelSec: '上下移動の所要時間（秒）',
   capacity: '同時に利用できるグループ数',
   levels: '階数',
@@ -679,6 +708,7 @@ export const CONTRACT_ACTION_LABEL: Record<Exclude<ContractActionResult, { ok: t
   CAPACITY_INSUFFICIENT: '追加便を受け入れる空港処理能力が不足しています（能力画面で不足箇所を確認してください）',
   AIRLINE_REFUSED: '航空会社の満足度が低いため、増便に応じてもらえません',
   MIN_FREQUENCY: 'これ以上減便できません（1日1便が最小）',
+  LOCKED: 'この種類の契約はまだ解放されていないか、有効化されていません',
 };
 
 export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
@@ -696,6 +726,10 @@ export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
   AIRLINE_ROUTE_UNSUPPORTED: '航空会社がこの路線種別を運航していない',
   INTERNATIONAL_PROCESSING_REQUIRED: '国際旅客処理（出入国審査・税関）が未対応',
   OUTSIDE_HOURS: '運用時間・契約の時間帯に収まらない（計画できない便）',
+  OVERNIGHT_CAPACITY_EXCEEDED: '滞泊できる機数を超える',
+  BASED_CONDITIONS_UNMET: '拠点契約の条件（滞泊の能力・整備・人員）を満たさない',
+  INTL_GATE_MISSING: '国際のゲートがない',
+  MCT_UNAVAILABLE: '乗継の経路がなく、最小乗継時間が出せない',
 };
 
 /** KPI の名前と計算式（画面のツールチップに表示） */
@@ -1097,6 +1131,7 @@ export const SCORE_LABEL: Record<ScoreKey, string> = {
   slots: '枠（時間帯）',
   aircraft: '機材の対応',
   pax: '旅客体験',
+  demand: '需要（搭乗率）',
 };
 
 export const SCORE_LEVEL_LABEL: Record<ScoreLevel, string> = { good: '良好', warn: '注意', bad: '不足', 'n/a': '—' };
@@ -1132,6 +1167,8 @@ export function scoreText(c: ScoreComponent): string {
       return '契約の機材はすべて運航できる';
     case 'pax':
       return `乗り遅れ ${pctText(f.value ?? 0)}・手荷物の積み残し ${pctText(f.target ?? 0)}`;
+    case 'demand':
+      return `搭乗率 ${pctText(f.value ?? 0)}（基準 ${pctText(f.target ?? 0)}）`;
   }
 }
 
@@ -1263,6 +1300,15 @@ export const TAXI_UI = {
   legend: '区間の区切り（点線）と「機数 / 進入可能機数（M）」',
 } as const;
 
+/** アクセスの区間能力モデル（フェーズ 4、docs/44） */
+export const ACCESS_UI = {
+  model: 'アクセスの能力モデル',
+  modelAggregate: '集約（出入口数 × 900 台/時・既定）',
+  modelSegment: '区間（最も細い区間で決める）',
+  modelExplain:
+    '「区間」にすると、出入口から車寄せ・駐車場までの経路で最も細い区間の能力が上限になり、混雑の遅れも区間ごとに計算します。道路の車線数・線路の単線/複線・駅のホーム数が効きます。ゲーム内の値です。',
+} as const;
+
 /** 夜間の運用・出発時刻の制限（フェーズ 2、docs/40） */
 export const NIGHT_UI = {
   title: '夜間の運用（出発時刻の制限）',
@@ -1295,6 +1341,12 @@ export const GAME_UI = {
   setupRules: '使うルール',
   setupCity: '都市・空港需要（ゲーム値）',
   setupCityEnabled: '都市規模を旅客需要・アクセス所要時間・人口成長に反映する',
+  setupMarket: '路線需要モデル（都市と就航先の規模から路線ごとの需要・搭乗率を決め、就航先と航空会社が増える）',
+  setupFeatures: '新しい運航の仕組み（フェーズ 4）',
+  setupFeatureOvernight: '夜間滞泊（夕方に着いて翌朝出る便と、拠点の土台）',
+  setupFeatureBased: '拠点航空会社（常駐機と整備）',
+  setupFeatureInternational: '国際線（出入国審査・税関・国際ゲート）',
+  setupFeatureHub: '乗継と波（乗継旅客・バンク）',
   cityType: { regional: '地方都市（人口 30 万）', core: '中核都市（人口 120 万）', metropolitan: '大都市（人口 600 万）' } as Record<string, string>,
   setupWeather: '天候 5 段階・予報（オフ = 従来の 4 種の天候の障害）',
   setupEval: '航空会社の評価要素・不満・要望',

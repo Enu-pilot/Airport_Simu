@@ -2,10 +2,14 @@ import { Rng, type RngState } from '../rng';
 import { compareIds } from '../model/ids';
 import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
-import { AIRLINES, DESTINATIONS, HOME_COUNTRY_ID, airlineDef, routeAvailability, type FleetEntry } from './registry';
+import { AIRLINES, HOME_COUNTRY_ID, airlineDef, airlinesFor, destinationDef, destinationsFor, resolveAirlineId, resolveDestinationId, routeAvailability, type DestinationDef, type FleetEntry } from './registry';
+import { routeDemand } from './demand';
 import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
 import { checkGameSettings, otpAddOf, type GameSettings } from './game';
 import { checkAirlineEval, type AirlineEvalState } from './airlineEval';
+import { checkMarket, type MarketSettings } from './market';
+import type { BasedAircraft, CarryOverAircraft, HubSettings } from './phase4Types';
+import { featureForContractKind, featureOn } from './unlocks';
 import { aircraftIsLow, complaintCount, COMPLAINTS_BLOCK_INCREASE, increaseMinSatRelief, offerBoost, tierBonus } from './evalRules';
 import { checkGoals, type GoalState } from './goals';
 import { isCityConfig, type CityConfig, type CityEvent, type CityType } from './city';
@@ -58,8 +62,18 @@ export const COST_CATEGORIES: readonly CostCategory[] = [
 
 export type TimeWindow = 'morning' | 'daytime' | 'evening' | 'any';
 
+export type ContractKind = 'turnaround' | 'overnight' | 'based';
+
 export interface Contract {
   id: string;
+  /** 契約の種類（フェーズ 4）。欠落 = turnaround */
+  kind?: ContractKind;
+  /** 拠点契約: 常駐機数 */
+  basedAircraft?: number;
+  /** 乗継の割合 0〜0.5（フェーズ 4）。欠落 = 0 */
+  transferShare?: number;
+  /** 乗継の波（バンク）の ID */
+  bankId?: string;
   airlineId: string;
   destinationId: string;
   typeId: AircraftTypeId;
@@ -153,6 +167,12 @@ export interface DailyReport {
   grants?: number;
   /** 夜間の運用（city.nightOps）があるときだけ（フェーズ 2、R15）。持ち越し便はその便の予定日に数える */
   night?: { lastDepartureDelayMin: number | null; standHeld: number; originHeld: number; carriedOver: number; diverted: number; cancelled: number };
+  /** 朝の始発の波（フェーズ 4 §3.4。滞泊の出発があった日だけ） */
+  morningWave?: { departures: number; firstTakeoff: number | null; lastTakeoff: number | null; intervalsSec: number[] };
+  /** 整備の記録（フェーズ 4 §3.6。拠点が有効な日だけ） */
+  maintenance?: { checked: number; overdue: number; faults: number; techCancelled: number };
+  /** 乗継の記録（フェーズ 4 §5.6。ハブが有効な日だけ） */
+  hub?: { spawned: number; connected: number; missed: number; noShow: number };
   city?: { type: CityType; populationStart: number; populationEnd: number; demandCeiling: number; expectedPax: number; actualPax: number; cityFactor: number; roadQuality: number; railQuality: number; residentsStart?: number; residentsEnd?: number; residentDelta?: number; noiseMovements?: number; nightMovements?: number; noisePoints?: number; events?: CityEvent[]; eventDemandMultiplier?: number; eventTrafficMultiplier?: number };
 }
 
@@ -208,6 +228,20 @@ export interface CompanyState {
   /** game.goals のときの目標・空港の格 */
   goals?: GoalState;
   city?: CityConfig;
+  /** 路線需要モデル（フェーズ 3）。city がある会社だけ有効 */
+  market?: MarketSettings;
+  /** フェーズ 4 の機能の有効化（解放は unlocks.ts の判定が別にある） */
+  features?: { overnight?: true; based?: true; international?: true; hub?: true };
+  /** 日付をまたぐ機体の記録（フェーズ 4 §3.3） */
+  carryOver?: { forDay: number; aircraft: CarryOverAircraft[] };
+  /** 拠点契約の所属機 */
+  basedFleet?: Record<string, BasedAircraft>;
+  /** 整備の枠の端数の繰り越し（施設 ID → 端数） */
+  maintenanceCredit?: Record<string, number>;
+  /** 拠点の条件を満たさない連続日数（契約 ID → 日数） */
+  basedIssueDays?: Record<string, number>;
+  /** 乗継・波の設定（フェーズ 4） */
+  hub?: HubSettings;
 }
 
 /** 工事: 新設・改修（移設・拡張）は建設中、一時閉鎖は運用を止めるだけ。残り日数は運航した日で進む */
@@ -224,6 +258,7 @@ export const REPORT_LIMIT = 120;
 export function createCompany(mode: CompanyState['mode'] = 'career', seed = 'company'): CompanyState {
   const airlines: Record<string, AirlineRelation> = {};
   for (const a of AIRLINES) {
+    if (!a.legacy) continue;
     if ((a.minimumAirportRating ?? 0) <= 50) airlines[a.id] = { satisfaction: 60, lowDays: 0 };
   }
   return {
@@ -252,8 +287,15 @@ export function createCompany(mode: CompanyState['mode'] = 'career', seed = 'com
 
 export function defaultFleets(): Record<string, FleetEntry[]> {
   return Object.fromEntries(
-    AIRLINES.filter((a) => (a.minimumAirportRating ?? 0) <= 50).map((a) => [a.id, a.fleet.map((e) => ({ ...e }))]),
+    AIRLINES.filter((a) => a.legacy && (a.minimumAirportRating ?? 0) <= 50).map((a) => [a.id, a.fleet.map((e) => ({ ...e }))]),
   );
+}
+
+/** 提案・更新の1日あたり便数の上限。market 有効時は相手空港の混雑で減る（フェーズ 3 §3.4） */
+export function maxPerDayFor(c: CompanyState, dest?: DestinationDef): number {
+  const base = (c.rating >= 70 ? 4 : c.rating >= 50 ? 3 : 2) + tierBonus(c);
+  if (!c.market || !dest) return base;
+  return Math.max(1, Math.round(base * (1 - 0.5 * dest.congestion)));
 }
 
 /** 便の座席数: 航空会社の座席構成にあればその値、なければ機種の既定値 */
@@ -345,7 +387,7 @@ export function addContract(c: CompanyState, k: Omit<Contract, 'id' | 'numberBas
 
 // ---------------------------------------------------------------- プレイヤーの操作
 
-export type ContractActionResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'NOT_OFFERED' | 'NOT_ACTIVE' | 'UNSUPPORTED' | 'AIRLINE_ROUTE_UNSUPPORTED' | 'INTERNATIONAL_PROCESSING_REQUIRED' | 'CAPACITY_INSUFFICIENT' | 'AIRLINE_REFUSED' | 'MIN_FREQUENCY' };
+export type ContractActionResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'NOT_OFFERED' | 'NOT_ACTIVE' | 'UNSUPPORTED' | 'AIRLINE_ROUTE_UNSUPPORTED' | 'INTERNATIONAL_PROCESSING_REQUIRED' | 'CAPACITY_INSUFFICIENT' | 'AIRLINE_REFUSED' | 'MIN_FREQUENCY' | 'LOCKED' };
 
 /** 提案を受け入れる（翌運航日から有効）。supported = 空港で運航可能な機種か */
 export function acceptOffer(
@@ -358,6 +400,9 @@ export function acceptOffer(
   const k = c.contracts[id];
   if (!k) return { ok: false, reason: 'NOT_FOUND' };
   if (k.status !== 'offered') return { ok: false, reason: 'NOT_OFFERED' };
+  // フェーズ 4: 解放・有効化されていない種類の契約は受け入れない
+  const kindFeature = featureForContractKind(k.kind);
+  if (kindFeature && !featureOn(c, kindFeature)) return { ok: false, reason: 'LOCKED' };
   if (!supported) return { ok: false, reason: 'UNSUPPORTED' };
   if (routeStatus === 'airline-unsupported') return { ok: false, reason: 'AIRLINE_ROUTE_UNSUPPORTED' };
   if (routeStatus === 'international-processing-required') return { ok: false, reason: 'INTERNATIONAL_PROCESSING_REQUIRED' };
@@ -368,7 +413,17 @@ export function acceptOffer(
 
   k.status = 'active';
   k.startDay = c.day;
-  k.endDay = c.day + BALANCE.offers.contractDays - 1;
+  // 拠点契約の期間は通常の 3 倍（フェーズ 4 §3.5）
+  k.endDay = c.day + BALANCE.offers.contractDays * (k.kind === 'based' ? 3 : 1) - 1;
+  // 拠点契約: 所属機を登録する
+  if (k.kind === 'based') {
+    c.basedFleet ??= {};
+    const n = k.basedAircraft ?? 1;
+    for (let i = 0; i < n; i++) {
+      const id = `ba_${Object.keys(c.basedFleet).length + 1}`;
+      c.basedFleet[id] = { id, airlineId: k.airlineId, contractId: k.id, typeId: k.typeId, cycles: 0, lastCheckDay: null };
+    }
+  }
   return { ok: true };
 }
 
@@ -438,35 +493,78 @@ export function generateOffers(
   const out: Contract[] = [];
   const open = () => contractsOf(c, 'offered').length;
   withRng(c, (rng) => {
-    for (const a of AIRLINES) {
+    for (const a of airlinesFor(c)) {
       if (open() >= BALANCE.offers.maxOpen) break;
       if (c.rating < (a.minimumAirportRating ?? 0)) continue;
+      // 格による解放（フェーズ 4 §2.3）: 目標がある会社では unlock.minTier を格と比べる（legacy 項目は minTier を持たないので従来の提案は変わらない）
+      if (c.game?.goals && c.goals && a.unlock.minTier !== undefined && c.goals.tier < a.unlock.minTier) continue;
       const rel = (c.airlines[a.id] ??= { satisfaction: 60, lowDays: 0 });
       c.fleets[a.id] ??= a.fleet.map((entry) => ({ ...entry }));
       const p = (BALANCE.offers.baseProb + BALANCE.offers.ratingProb * (c.rating / 100) * (rel.satisfaction / 60)) * offerBoost(c, a.id);
       if (rng.next() >= p) continue;
       const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && (k.status === 'active' || k.status === 'offered')).map((k) => k.destinationId));
-      const dests = DESTINATIONS.filter((d) => {
+      const dests = destinationsFor(c).filter((d) => {
         if (served.has(d.id) || c.rating < (d.minimumAirportRating ?? 0)) return false;
+        if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
         return routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
       });
       if (dests.length === 0) continue;
-      const dest = dests[rng.int(0, dests.length - 1)]!;
+      // market 有効時（フェーズ 3 §4.3）: 行き先は未充足需要 w = max(0.05, D_r − S_r) の重みで選ぶ（乱数は 1 回だけ使う）
+      let dest: DestinationDef;
+      let unmet = 0;
+      if (c.market && c.city) {
+        const weights = dests.map((d) => {
+          const demand = routeDemand(c, d, 1) ?? 0;
+          const supplied = contractsOf(c)
+            .filter((k) => k.destinationId === d.id && (k.status === 'active' || k.status === 'offered'))
+            .reduce((s, k) => s + k.perDay * seatsFor(c, k.airlineId, k.typeId) * 2, 0);
+          return Math.max(0.05, demand - supplied);
+        });
+        const totalW = weights.reduce((s, w) => s + w, 0);
+        let x = rng.next() * totalW;
+        let idx = 0;
+        while (idx < dests.length - 1 && x >= weights[idx]!) {
+          x -= weights[idx]!;
+          idx++;
+        }
+        dest = dests[idx]!;
+        unmet = weights[idx]!;
+      } else {
+        dest = dests[rng.int(0, dests.length - 1)]!;
+      }
       // 運航できる機種を優先しつつ、評価が高いと大型機の提案も来る
       const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId);
       if (own.length === 0) continue;
       const fleet = own.filter((t) => operable.includes(t) || (resolveType(AIRCRAFT_TYPES, t).size === 'L' && c.rating >= 60 && !aircraftIsLow(c, a.id)) || rng.next() < 0.25);
-      const typeId = (fleet.length > 0 ? fleet : own)[rng.int(0, (fleet.length > 0 ? fleet : own).length - 1)]!;
-      const maxPerDay = (c.rating >= 70 ? 4 : c.rating >= 50 ? 3 : 2) + tierBonus(c);
+      const candidates = fleet.length > 0 ? fleet : own;
+      let typeId = candidates[rng.int(0, candidates.length - 1)]!;
+      const maxPerDay = maxPerDayFor(c, dest);
       const windows: TimeWindow[] = ['morning', 'daytime', 'evening', 'any'];
+      // 乱数の消費順は従来と同一に保つ（discount の rng.next() → perDay の rng.int() → window の rng.int()）
       const discount =
         a.type === 'lcc' ? 0.2 + rng.next() * 0.2 : a.type === 'regional' ? 0.1 + rng.next() * 0.15 : rng.next() * 0.15;
+      let perDay = rng.int(1, maxPerDay);
+      if (c.market && c.city) {
+        // 機種と便数は、未充足需要に最も近い座席供給（座席 × 便数 × 2）の組を選ぶ（追加の乱数は使わない）
+        let best = Number.POSITIVE_INFINITY;
+        for (const t of candidates) {
+          const seats = seatsFor(c, a.id, t);
+          for (let pd = 1; pd <= maxPerDay; pd++) {
+            const diff = Math.abs(seats * pd * 2 - unmet);
+            if (diff < best) {
+              best = diff;
+              typeId = t;
+              perDay = pd;
+            }
+          }
+        }
+      }
       out.push(
         addContract(c, {
           airlineId: a.id,
           destinationId: dest.id,
           typeId,
-          perDay: rng.int(1, maxPerDay),
+          perDay,
           window: windows[rng.int(0, windows.length - 1)]!,
           feeDiscount: Math.round(discount * 100) / 100,
           startDay: c.day,
@@ -477,6 +575,65 @@ export function generateOffers(
       );
     }
   });
+  out.push(...generatePhase4Offers(c, operable, originCountryId, internationalPassengerProcessing));
+  return out;
+}
+
+/**
+ * フェーズ 4 の新しい種類の提案（夜間滞泊・拠点）。専用の種で作り、従来の提案の乱数を消費しない。
+ * 解放・有効化されている機能だけが対象。候補は airlinesFor / destinationsFor で作る。
+ */
+export function generatePhase4Offers(
+  c: CompanyState,
+  operable: readonly AircraftTypeId[],
+  originCountryId = HOME_COUNTRY_ID,
+  internationalPassengerProcessing = false,
+): Contract[] {
+  const out: Contract[] = [];
+  const wantOvernight = featureOn(c, 'overnight');
+  const wantBased = featureOn(c, 'based');
+  if (!wantOvernight && !wantBased) return out;
+  const rng = new Rng(`${c.seed}:offers4:${c.day}`);
+  // 新しい種類の提案は従来の枠（maxOpen）とは別に最大 2 件まで（従来の提案を押し出さない）
+  const open = () => contractsOf(c, 'offered').filter((k) => k.kind !== undefined).length + out.length;
+  for (const a of airlinesFor(c)) {
+    if (open() >= 2) break;
+    if (c.rating < (a.minimumAirportRating ?? 0)) continue;
+    if (c.game?.goals && c.goals && a.unlock.minTier !== undefined && c.goals.tier < a.unlock.minTier) continue;
+    const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && (k.status === 'active' || k.status === 'offered')).map((k) => `${k.destinationId}:${k.kind ?? 'turnaround'}`));
+    const dests = destinationsFor(c).filter((d) => {
+      if (c.rating < (d.minimumAirportRating ?? 0)) return false;
+      if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
+      return routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
+    });
+    const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId).filter((t) => operable.includes(t));
+    if (own.length === 0) continue;
+    if (wantOvernight && rng.next() < 0.35) {
+      const candidates = dests.filter((d) => !served.has(`${d.id}:overnight`) && d.scope === 'domestic');
+      if (candidates.length > 0) {
+        const dest = candidates[rng.int(0, candidates.length - 1)]!;
+        out.push(addContract(c, {
+          airlineId: a.id, destinationId: dest.id, typeId: own[rng.int(0, own.length - 1)]!,
+          perDay: rng.int(1, 3), window: 'evening', feeDiscount: 0.1,
+          startDay: c.day, endDay: c.day + BALANCE.offers.contractDays - 1, status: 'offered',
+          offerExpiresDay: c.day + BALANCE.offers.expireDays, kind: 'overnight',
+        }));
+        continue;
+      }
+    }
+    if (wantBased && a.canBase && rng.next() < 0.3) {
+      const candidates = dests.filter((d) => !served.has(`${d.id}:based`) && d.scope === 'domestic');
+      if (candidates.length > 0) {
+        const dest = candidates[rng.int(0, candidates.length - 1)]!;
+        out.push(addContract(c, {
+          airlineId: a.id, destinationId: dest.id, typeId: own[rng.int(0, own.length - 1)]!,
+          perDay: rng.int(1, 3), window: 'any', feeDiscount: 0.25,
+          startDay: c.day, endDay: c.day + BALANCE.offers.contractDays * 3 - 1, status: 'offered',
+          offerExpiresDay: c.day + BALANCE.offers.expireDays, kind: 'based', basedAircraft: rng.int(2, 4),
+        }));
+      }
+    }
+  }
   return out;
 }
 
@@ -506,10 +663,10 @@ function cancelPenalty(r: AirlineDayResult): number {
  * 満足度の変化 = 定時率が要求以上なら +2、未満なら −(要求 − 定時率)×40
  *              − (料金倍率 − 1) × 料金への敏感さ × 12 − 乗り遅れ率 × 100 − 積み残し率 × 50 − 欠航 × 5
  */
-export function updateContracts(c: CompanyState, results: Record<string, AirlineDayResult>, ev?: { deltas: Record<string, number>; bonus: Record<string, number> }): string[] {
+export function updateContracts(c: CompanyState, results: Record<string, AirlineDayResult>, ev?: { deltas: Record<string, number>; bonus: Record<string, number> }, operable?: readonly AircraftTypeId[]): string[] {
   const events: string[] = [];
   const feeRatio = (c.fees.landing + c.fees.terminal + c.fees.parking) / 3;
-  for (const a of AIRLINES) {
+  for (const a of airlinesFor(c)) {
     const r = results[a.id];
     const hasContract = contractsOf(c, 'active').some((k) => k.airlineId === a.id);
     if (!hasContract && !r && !c.airlines[a.id]) continue;
@@ -540,10 +697,31 @@ export function updateContracts(c: CompanyState, results: Record<string, Airline
       k.status = 'withdrawn';
       events.push(`${airlineDef(k.airlineId).name} が撤退しました（満足度の低下）`);
     } else if (c.day >= k.endDay) {
-      if (rel.satisfaction >= BALANCE.contracts.renewGoodSat && complaintCount(c, k.airlineId) < COMPLAINTS_BLOCK_INCREASE) {
+      // market 有効時（フェーズ 3 §4.2）: 増便は需要の要望（signal）があるときだけ。増便が上限なら代わりに大型化する
+      const marketState = c.market?.routes[k.id];
+      const growOk = !c.market || marketState?.signal === 'grow';
+      if (rel.satisfaction >= BALANCE.contracts.renewGoodSat && complaintCount(c, k.airlineId) < COMPLAINTS_BLOCK_INCREASE && growOk) {
         k.endDay = c.day + BALANCE.offers.contractDays;
-        k.perDay += 1;
-        events.push(`${airlineDef(k.airlineId).name} が契約を増便して更新しました`);
+        let acted = false;
+        if (c.market && k.perDay >= maxPerDayFor(c, destinationDef(k.destinationId))) {
+          const curSeats = seatsFor(c, k.airlineId, k.typeId);
+          const bigger = (c.fleets[k.airlineId] ?? airlineDef(k.airlineId).fleet)
+            .filter((e) => e.typeId !== k.typeId && seatsFor(c, k.airlineId, e.typeId) > curSeats && (!operable || operable.includes(e.typeId)))
+            .sort((x, y) => seatsFor(c, k.airlineId, x.typeId) - seatsFor(c, k.airlineId, y.typeId))[0];
+          if (bigger && changeContractAircraft(c, k.id, bigger.typeId).ok) {
+            events.push(`${airlineDef(k.airlineId).name} が契約を大型化して更新しました`);
+            acted = true;
+          }
+        }
+        if (!acted) {
+          if (c.market && k.perDay >= maxPerDayFor(c, destinationDef(k.destinationId))) {
+            events.push(`${airlineDef(k.airlineId).name} が契約を更新しました`);
+          } else {
+            k.perDay += 1;
+            events.push(`${airlineDef(k.airlineId).name} が契約を増便して更新しました`);
+          }
+        }
+        if (marketState) delete marketState.signal;
       } else if (rel.satisfaction >= BALANCE.contracts.renewOkSat) {
         k.endDay = c.day + BALANCE.offers.contractDays;
         events.push(`${airlineDef(k.airlineId).name} が契約を更新しました`);
@@ -591,6 +769,21 @@ export function importCompany(json: string): CompanyState | null {
   try {
     const c = JSON.parse(json) as CompanyState;
     if (c?.version !== 1 || typeof c.cash !== 'number' || typeof c.contracts !== 'object') return null;
+    // ID の別名対応（フェーズ 3 §2.1。ID_ALIASES が空なら何もしない＝現行データは不変）
+    const remap = <T,>(rec: Record<string, T> | undefined, resolve: (id: string) => string): Record<string, T> | undefined => {
+      if (!rec) return rec;
+      const out: Record<string, T> = {};
+      for (const [k, v] of Object.entries(rec)) out[resolve(k)] = v;
+      return out;
+    };
+    c.airlines = remap(c.airlines, resolveAirlineId) ?? {};
+    const fleets = remap(c.fleets, resolveAirlineId);
+    if (fleets) c.fleets = fleets;
+    if (c.airlineEval) c.airlineEval = remap(c.airlineEval, resolveAirlineId);
+    for (const k of Object.values(c.contracts)) {
+      if (typeof k.airlineId === 'string') k.airlineId = resolveAirlineId(k.airlineId);
+      if (typeof k.destinationId === 'string') k.destinationId = resolveDestinationId(k.destinationId);
+    }
     // Phase 5 の保存データ: アクセス関連の項目を補う
     c.fees = Object.assign({ carPark: 1, taxi: 1, bus: 1, rail: 1 }, c.fees);
     c.accessFeedback ??= { ...NO_FEEDBACK, waitMin: {} };
@@ -601,6 +794,15 @@ export function importCompany(json: string): CompanyState | null {
     if (c.airlineEval !== undefined && checkAirlineEval(c.airlineEval).length > 0) delete c.airlineEval;
     if (c.goals !== undefined && checkGoals(c.goals).length > 0) delete c.goals;
     if (c.city !== undefined && !isCityConfig(c.city)) delete c.city;
+    // market の形が不正なら捨てる。city がない会社の market も捨てる（フェーズ 3 §2.2 の寛容読み込み）
+    if (c.market !== undefined && checkMarket(c.market).length > 0) delete c.market;
+    if (c.market && !c.city) delete c.market;
+    // features がない会社のフェーズ 4 の状態は捨てる（フェーズ 4 §1 の寛容読み込み）
+    if (!c.features) {
+      delete c.carryOver;
+      delete c.basedFleet;
+      delete c.hub;
+    }
     // 対応するゲーム設定のフラグがない評価・目標のデータは捨てる（フラグとデータの食い違いを持ち込まない）
     if (!c.game?.airlineEval) delete c.airlineEval;
     if (!c.game?.goals) delete c.goals;

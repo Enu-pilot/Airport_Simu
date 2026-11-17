@@ -113,6 +113,8 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
     { key: 'boardingMode', type: 'enum', options: ['contact', 'bus'] },
     /** 明示の接続先ターミナル（欠落 = 隣接で決まる）。隣接しないゲートは連絡通路でつながる独立ゲート */
     { key: 'connectedTo', type: 'facilityRef', of: 'terminal' },
+    /** 国内/国際の別（フェーズ 4。欠落 = 'domestic'）。'swing' は兼用 */
+    { key: 'routeType', type: 'enum', options: ['domestic', 'international', 'swing'] },
   ],
   hangar: [{ key: 'maxSize', type: 'enum', options: ['S', 'M', 'L'] }],
   tower: [{ key: 'level', type: 'int', min: 1, max: 3 }],
@@ -145,6 +147,8 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
     { key: 'level', type: 'int', min: -5, max: 10 },
     { key: 'trainsPerHour', type: 'int', min: 1, max: 20 },
     { key: 'railService', type: 'enum', options: ['local', 'rapid', 'express'] },
+    /** ホーム数（フェーズ 4。欠落 = 2） */
+    { key: 'platforms', type: 'int', min: 1, max: 12 },
   ],
   staffParking: [{ key: 'spaces', type: 'int', min: 0, max: 5000 }],
   hotel: [{ key: 'rooms', type: 'int', min: 10, max: 2000 }],
@@ -265,6 +269,27 @@ export const TERMINAL_AREA_SPECS: Record<TerminalAreaKind, TerminalAreaSpec> = {
   restaurant: {
     defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: true,
     props: [{ key: 'capacity', type: 'int', min: 1, max: 100 }], defaults: { capacity: 10 },
+  },
+  // フェーズ 4: 国際・乗継のエリア
+  emigration: {
+    defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'departureIntl', zoneEditable: false,
+    props: [{ key: 'lanes', type: 'int', min: 0, max: 30 }, { key: 'serviceSecPerPax', type: 'int', min: 3, max: 300 }],
+    defaults: { lanes: 4, serviceSecPerPax: 30 },
+  },
+  immigration: {
+    defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'arrival', zoneEditable: false,
+    props: [{ key: 'booths', type: 'int', min: 0, max: 30 }, { key: 'serviceSecPerPax', type: 'int', min: 3, max: 300 }],
+    defaults: { booths: 6, serviceSecPerPax: 45 },
+  },
+  customs: {
+    defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'landside', zoneEditable: false,
+    props: [{ key: 'lanes', type: 'int', min: 0, max: 30 }, { key: 'serviceSecPerPax', type: 'int', min: 3, max: 300 }],
+    defaults: { lanes: 4, serviceSecPerPax: 20 },
+  },
+  transferSecurity: {
+    defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: true,
+    props: [{ key: 'lanes', type: 'int', min: 0, max: 30 }, { key: 'serviceSecPerPax', type: 'int', min: 3, max: 300 }],
+    defaults: { lanes: 2, serviceSecPerPax: 15 },
   },
 };
 

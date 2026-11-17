@@ -229,3 +229,31 @@ describe('建設途中と運用可能の区別', () => {
     expect(a.counts.error).toBe(0);
   });
 });
+
+describe('overnightStandIssues: 滞泊スポットの撤去・閉鎖の警告（フェーズ 4 §3.3）', () => {
+  it('在泊の記録があるスポットを閉鎖すると警告し、運用中なら警告しない', async () => {
+    const { overnightStandIssues } = await import('../../src/core/validation/validate');
+    const { createSandboxCompany } = await import('../../src/core/economy/company');
+    const layout = createSampleAirport();
+    const standId = Object.values(layout.stands).find((s) => s.size === 'M')!.id;
+    const c = createSandboxCompany('ovn-val');
+    c.features = { overnight: true };
+    c.carryOver = {
+      forDay: 1,
+      aircraft: [{
+        sourceAircraftId: 'ac_1', typeId: 'B737-800', airlineId: 'SK', contractId: null, destinationId: 'KTA',
+        callsign: 'SK101', depNumber: 102, standId, parkedBeforeSec: 3600, depSecOfDay: 23400, depDelaySec: 0, depPax: 100,
+      }],
+    };
+    expect(overnightStandIssues(layout, c)).toEqual([]);
+    layout.stands[standId]!.buildState = 'planned';
+    const issues = overnightStandIssues(layout, c);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('OVERNIGHT_STAND_REMOVED');
+    expect(issues[0]!.severity).toBe('warning');
+    expect(issues[0]!.params.count).toBe(1);
+    // 記録がなければ警告しない
+    delete c.carryOver;
+    expect(overnightStandIssues(layout, c)).toEqual([]);
+  });
+});

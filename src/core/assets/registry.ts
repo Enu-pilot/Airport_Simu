@@ -1,4 +1,5 @@
 import type { AircraftModel } from '../aircraft/catalog';
+import { findAirline } from '../data/index';
 
 /**
  * 3D 表示のアセット登録簿（Phase 9）。
@@ -128,5 +129,9 @@ export const LIVERIES: Record<string, Livery> = {
 export const DEFAULT_LIVERY: Livery = { id: 'liv-plain', airlineId: null, body: 0xe5e7eb, tail: 0x6b7280, stripe: 0x9ca3af, engine: 0x9ca3af };
 
 export function liveryOf(airlineId: string | null | undefined): Livery {
-  return (airlineId && LIVERIES[airlineId]) || DEFAULT_LIVERY;
+  if (airlineId && LIVERIES[airlineId]) return LIVERIES[airlineId];
+  // ② 登録データ（src/core/data）の livery（フェーズ 3 §1.5）。③ どちらもなければ既定塗装
+  const def = airlineId ? findAirline(airlineId) : undefined;
+  if (def?.livery) return { id: `liv-${def.id.toLowerCase()}`, airlineId: def.id, ...def.livery };
+  return DEFAULT_LIVERY;
 }

@@ -1,17 +1,17 @@
-import { Rng } from '../rng';
+import { Rng, seedFromString } from '../rng';
 import { compareIds } from '../model/ids';
 import { terminalLinkCapacityPerHour, WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
 import { findPaxRoute, linkBetween } from '../terminal/route';
 import { serviceSecPerPax } from '../terminal/capacity';
 import { resolveType } from './aircraftTypes';
 import { demandFactorAt } from './disruptions';
-import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt, reconcileDepartureBags } from './baggage';
+import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt, reconcileDepartureBags, transferArrivalBags } from './baggage';
 import { boardingAllowed } from './ground';
 import { applyBusArrival, applyBusDeparture, pickBusGate, stepBusBoarding } from './apronBus';
 import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './busRules';
 import { gateMode } from '../model/gates';
 import { BALANCE } from '../economy/balance';
-import { onPaxDeplaned, onPaxMissed, onShopDone } from '../economy/ops';
+import { onPaxDeplaned, onPaxMissed, onShopDone, onTransferMissed } from '../economy/ops';
 import { accessArrival, accessDeparture } from '../access/runtime';
 import type { Simulation } from './simulation';
 import {
@@ -40,6 +40,8 @@ import {
 export const PAX_GENERATE_LEAD_SEC = 3 * 3600;
 /** 空港到着時刻の分布（出発予定の何分前か）: 三角分布 [最早, 最頻, 最遅] */
 export const PAX_ARRIVAL_MIN = { earliest: 150, mode: 90, latest: 45 };
+/** フェーズ 4 §4.4: 国際の出発旅客は早く来て長く滞在する */
+export const PAX_ARRIVAL_MIN_INTL = { earliest: 240, mode: 150, latest: 75 };
 export const LOAD_FACTOR = { min: 0.65, max: 0.9 };
 export const MAX_GROUP_SIZE = 5;
 const STEP_FREE_GROUP_RATE = 0.05;
@@ -118,7 +120,7 @@ export function serversOf(sim: Simulation, key: string): number {
   if (key.startsWith('gate:')) return sim.state.closures.gates.includes(key.slice('gate:'.length)) ? 0 : 1;
   const a = sim.ctx.layout.terminalAreas[key];
   if (!a || isClosed(sim.state, key)) return 0;
-  return Math.max(0, Number(a.props.counters ?? a.props.lanes ?? a.props.fixtures ?? a.props.capacity ?? 0));
+  return Math.max(0, Number(a.props.counters ?? a.props.booths ?? a.props.lanes ?? a.props.fixtures ?? a.props.capacity ?? 0));
 }
 
 function perPaxSec(sim: Simulation, key: string): number {
@@ -145,12 +147,16 @@ const STEP_KIND: Partial<Record<PaxStep, AreaNode['kind']>> = {
   restroom: 'restroom',
   claim: 'baggageClaim',
   exit: 'exit',
+  emigration: 'emigration',
+  immigration: 'immigration',
+  customs: 'customs',
+  transferSecurity: 'transferSecurity',
 };
 
 function boardingLeadSec(sim: Simulation, f: Flight): number {
   const ac = sim.state.aircraft[f.aircraftId]!;
-  // バス扱いの便は、バスの移動・乗降の分だけ早く搭乗を始める
-  return BOARDING_LEAD_MIN[resolveType(sim.ctx.types, ac.typeId).size] * 60 + (f.pax.bus ? BUS_EXTRA_LEAD_MIN * 60 : 0);
+  // バス扱いの便は、バスの移動・乗降の分だけ早く搭乗を始める。国際は搭乗開始が 15 分早い（フェーズ 4 §4.4）
+  return BOARDING_LEAD_MIN[resolveType(sim.ctx.types, ac.typeId).size] * 60 + (f.pax.bus ? BUS_EXTRA_LEAD_MIN * 60 : 0) + (f.routeType === 'international' ? 15 * 60 : 0);
 }
 
 function hasBridge(sim: Simulation, gateId: string | null): boolean {
@@ -275,10 +281,16 @@ export { groupsOf as groupsOfFlight };
  * 条件に合う未完了のグループを乗り遅れ（または欠航）にして、乗り遅れ人数を返す。補償は onPaxMissed。
  * forced が null のときの理由は従来どおり（ゲートなし・到達不能・施設閉鎖・間に合わず）
  */
+/** ハブの集計（フェーズ 4 §5.4）。記録があるときだけ作る */
+export function hubStatsOf(state: SimState): NonNullable<SimState['hubStats']> {
+  return (state.hubStats ??= { spawned: 0, connected: 0, missed: 0, noShow: 0, byLink: {} });
+}
+
 export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null, pred: (g: PaxGroup) => boolean = () => true): number {
   const { state } = sim;
   const p = f.pax;
   let missed = 0;
+  let transferMissed = 0;
   for (const g of groupsOf(state, f.id)) {
     if (PAX_FINAL_STATES.includes(g.state) || !pred(g)) continue;
     const reason: MissReason =
@@ -294,9 +306,15 @@ export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null
       p.missed += g.count;
       state.paxStats.missed += g.count;
       missed += g.count;
+      if (g.transfer) transferMissed += g.count;
     }
   }
-  if (missed > 0) onPaxMissed(sim, f, missed);
+  // 乗継の失敗は補償が別（600/人）。乗り遅れ率には p.missed として含まれる
+  if (missed - transferMissed > 0) onPaxMissed(sim, f, missed - transferMissed);
+  if (transferMissed > 0) {
+    onTransferMissed(sim, transferMissed);
+    hubStatsOf(state).missed += transferMissed;
+  }
   return missed;
 }
 
@@ -304,6 +322,14 @@ export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null
 function closeBoarding(sim: Simulation, f: Flight, forced: MissReason | null): void {
   const { state } = sim;
   const p = f.pax;
+  // 乗継のノーショー（フェーズ 4 §5.4）: 到着便の欠航などで、計画された乗継客が現れなかった分
+  if (f.plannedTransferIn !== undefined) {
+    const noShow = Math.max(0, f.plannedTransferIn - (p.transferIn ?? 0) - (p.transferNoShow ?? 0));
+    if (noShow > 0) {
+      p.transferNoShow = (p.transferNoShow ?? 0) + noShow;
+      hubStatsOf(state).noShow += noShow;
+    }
+  }
   const missed = missGroups(sim, f, forced);
   // 欠航便の預け手荷物は、地上作業が走らないので締め処理で終端状態（leftBehind / offloaded）にする（1-09 / B-1）
   if (forced === 'cancelled') reconcileDepartureBags(sim, f.id, true);
@@ -339,11 +365,13 @@ function generateDeparturePax(sim: Simulation, f: Flight): void {
   withRng(state, (rng) => {
     let remaining = f.plannedPax ?? Math.round(seats * (LOAD_FACTOR.min + rng.next() * (LOAD_FACTOR.max - LOAD_FACTOR.min)));
     if (surge !== 1) remaining = Math.min(seats, Math.round(remaining * surge));
-    p.booked = remaining;
+    // 既に降機して生成済みの乗継グループは、この代入で消えないよう足して戻す（生成後に来た分は生成時に加算済み）
+    p.booked = remaining + (p.transferIn ?? 0);
     while (remaining > 0) {
       const count = Math.min(remaining, rng.int(1, MAX_GROUP_SIZE));
       remaining -= count;
-      const minutesBefore = triangular(rng.next(), PAX_ARRIVAL_MIN.latest, PAX_ARRIVAL_MIN.mode, PAX_ARRIVAL_MIN.earliest);
+      const table = f.routeType === 'international' ? PAX_ARRIVAL_MIN_INTL : PAX_ARRIVAL_MIN;
+      const minutesBefore = triangular(rng.next(), table.latest, table.mode, table.earliest);
       addGroup(sim, rng, f, count, Math.round(f.scheduled - minutesBefore * 60), terminal);
     }
   });
@@ -416,8 +444,11 @@ function addGroup(
   for (let i = 0; i < count; i++) if (rng.next() < BAG_PROB) bags++;
   if (bagsFixed !== undefined) bags = bagsFixed;
   const steps: PaxStep[] = [];
-  if (bags > 0 || rng.next() < COUNTER_WITHOUT_BAGS_PROB) steps.push('checkIn');
+  // フェーズ 4 §4.4: 国際は手荷物なしでも 90% がチェックインに寄る（乱数の消費は国内と同じ 1 回）
+  const intl = f.routeType === 'international';
+  if (bags > 0 || rng.next() < (intl ? 0.9 : COUNTER_WITHOUT_BAGS_PROB)) steps.push('checkIn');
   steps.push('security');
+  if (intl) steps.push('emigration');
   // 店舗・飲食店があるターミナルでは、一部の旅客が出発区域で立ち寄る（時間に余裕があるときだけ）
   if (shopAreas(sim, terminalId).length > 0 && rng.next() < BALANCE.retail.shopVisitProb) steps.push('shop');
   if (rng.next() < RESTROOM_PROB) steps.push('restroom');
@@ -459,6 +490,124 @@ function triangular(u: number, a: number, c: number, b: number): number {
   return u < fc ? a + Math.sqrt(u * (b - a) * (c - a)) : b - Math.sqrt((1 - u) * (b - a) * (b - c));
 }
 
+// ---------------------------------------------------------------- 乗継（フェーズ 4 §5.4）
+
+type TransferKind = NonNullable<PaxGroup['transfer']>['kind'];
+
+const TRANSFER_STEPS: Record<TransferKind, PaxStep[]> = {
+  DD: ['transferSecurity', 'gate'],
+  DI: ['transferSecurity', 'emigration', 'gate'],
+  ID: ['immigration', 'transferSecurity', 'gate'],
+  II: ['transferSecurity', 'gate'],
+};
+
+/** 乗継専用の乱数（便ごとに保持し、状態を書き戻す） */
+function withTransferRng<T>(state: SimState, p: FlightPax, flightId: string, fn: (rng: Rng) => T): T {
+  const rng = new Rng(p.transferRng ?? seedFromString(`${state.seed}:xfer:${flightId}`));
+  const v = fn(rng);
+  p.transferRng = rng.state();
+  return v;
+}
+
+/** まだ降機していない乗継の計画（先頭のもの）。進み具合は生成済みの乗継グループから数える */
+function nextTransferEntry(state: SimState, f: Flight): { depFlightId: string; kind: TransferKind; remaining: number } | null {
+  for (const entry of f.transferPlan ?? []) {
+    const done = groupsOf(state, entry.depFlightId)
+      .filter((g) => g.transfer?.fromFlightId === f.id)
+      .reduce((s, g) => s + g.count, 0);
+    if (done < entry.pax) return { depFlightId: entry.depFlightId, kind: entry.kind, remaining: entry.pax - done };
+  }
+  return null;
+}
+
+/** 乗継グループを作る: 出発便のグループとして登録し、到着便の索引にも入れる（人数保存のため） */
+function addTransferGroup(
+  sim: Simulation,
+  f: Flight,
+  entry: { depFlightId: string; kind: TransferKind },
+  size: number,
+  bags: number,
+  gateId: string | null,
+  trng: Rng,
+): void {
+  const { state, ctx } = sim;
+  const dep = state.flights[entry.depFlightId];
+  const access = gateId ? ctx.terminal.gates[gateId] : undefined;
+  const arrIntl = f.routeType === 'international';
+  const deplaneArea = arrIntl ? (access?.deplaneIntl ?? null) : (access?.deplane ?? null);
+  const terminalId = access?.terminalId ?? null;
+  const steps: PaxStep[] = [...TRANSFER_STEPS[entry.kind]];
+  // 任意の立ち寄りは専用の乱数で決める（地元の出発と同じ確率・順序）
+  if (shopAreas(sim, terminalId).length > 0 && trng.next() < BALANCE.retail.shopVisitProb) steps.splice(steps.length - 1, 0, 'shop');
+  if (trng.next() < RESTROOM_PROB) steps.splice(steps.length - 1, 0, 'restroom');
+  const depGateTerminal = dep?.pax.gateId ? ctx.terminal.gates[dep.pax.gateId]?.terminalId ?? null : null;
+  const id = nextId(state, 'pg');
+  const g: PaxGroup = {
+    id,
+    flightId: entry.depFlightId,
+    direction: 'departure',
+    terminalId,
+    ...(depGateTerminal && depGateTerminal !== terminalId ? { targetTerminalId: depGateTerminal } : {}),
+    transfer: { fromFlightId: f.id, kind: entry.kind },
+    count: size,
+    bags,
+    state: 'walking',
+    steps,
+    stepIndex: 0,
+    area: deplaneArea,
+    route: [],
+    legProgress: 0,
+    legLength: 0,
+    facility: null,
+    serviceUntil: null,
+    appearAt: state.now,
+    finishedAt: null,
+    securityCleared: false,
+    accessDone: true,
+    ...(needsStepFreeRoute(state.seed, id) ? { stepFree: true } : {}),
+    boardedGate: null,
+    waitSec: 0,
+    walkSec: 0,
+    reason: null,
+    retryAt: 0,
+  };
+  registerGroup(state, g);
+  (state.flightPax[f.id] ??= []).push(g.id);
+  // 手荷物は到着便の手荷物として作る（搬送の完了時に出発便へ付け替える）
+  transferArrivalBags(sim, g, f.aircraftId, f.id, entry.depFlightId);
+  if (dep) {
+    dep.pax.transferIn = (dep.pax.transferIn ?? 0) + size;
+    // 出発旅客の生成が済んでいれば予約数にも足す。まだなら生成時に transferIn から足される（二重に数えない）
+    if (dep.pax.generated) dep.pax.booked += size;
+  }
+  f.pax.transferOut = (f.pax.transferOut ?? 0) + size;
+  hubStatsOf(state).spawned += size;
+  if (dep && (dep.pax.boarding === 'closed' || dep.status === 'completed' || dep.status === 'cancelled')) {
+    // 出発便の締切後に生まれた乗継は、その場で乗り遅れにする（人数保存を保つため）
+    const cancelled = dep.status === 'cancelled';
+    g.state = cancelled ? 'cancelled' : 'missed';
+    g.reason = cancelled ? 'cancelled' : 'late';
+    g.finishedAt = state.now;
+    g.area = null;
+    if (!cancelled) {
+      dep.pax.missed += size;
+      state.paxStats.missed += size;
+      onTransferMissed(sim, size);
+      hubStatsOf(state).missed += size;
+    }
+    return;
+  }
+  if (f.pax.bus && gateId && deplaneArea) {
+    g.state = 'waitingBus';
+    g.area = null;
+  } else if (!g.area) {
+    g.state = 'stranded';
+    g.reason = 'unreachable';
+  } else {
+    planStep(sim, g);
+  }
+}
+
 // ---------------------------------------------------------------- 到着便
 
 function stepArrivalFlight(sim: Simulation, f: Flight): void {
@@ -490,11 +639,12 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
         : 0;
       p.deplaneRemaining = p.booked;
       // 手荷物受取所: 降機口から近い受取所。ベルトが空くまで手荷物は出ない
-      if (access?.deplane) {
+      const deplaneArea = f.routeType === 'international' ? (access?.deplaneIntl ?? null) : (access?.deplane ?? null);
+      if (access && deplaneArea) {
         const claims = new Map(
           (ctx.terminal.byTerminal[access.terminalId!] ?? []).filter((id) => ctx.terminal.areas[id]!.kind === 'baggageClaim').map((id) => [id, 0] as const),
         );
-        const r = findPaxRoute(ctx.terminal, { from: access.deplane, goals: claims });
+        const r = findPaxRoute(ctx.terminal, { from: deplaneArea, goals: claims });
         // 手荷物は荷下ろし作業で受取所へ運ばれ、ベルトに空きがあれば流れる（baggage.ts）
         if (r) p.claimAreaId = r.areas[r.areas.length - 1]!;
       }
@@ -505,6 +655,25 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
   p.deplaneAcc += rate / 60;
   withRng(state, (rng) => {
     while (p.deplaneRemaining > 0) {
+      // 乗継分は先に降機する（フェーズ 4 §5.4）。大きさ・手荷物は専用の乱数で決める
+      const xferEntry = nextTransferEntry(state, f);
+      if (xferEntry) {
+        const advanced = withTransferRng(state, p, f.id, (trng) => {
+          const size = Math.min(p.deplaneRemaining, xferEntry.remaining, 1 + Math.floor(trng.next() * MAX_GROUP_SIZE));
+          if (p.deplaneAcc < size) return false;
+          p.deplaneAcc -= size;
+          p.deplaneRemaining -= size;
+          p.deplaned += size;
+          state.paxStats.deplaned += size;
+          onPaxDeplaned(sim, f, size);
+          let bags = 0;
+          for (let i = 0; i < size; i++) if (trng.next() < BAG_PROB) bags++;
+          addTransferGroup(sim, f, xferEntry, size, bags, gateId, trng);
+          return true;
+        });
+        if (!advanced) break;
+        continue;
+      }
       const size = Math.min(p.deplaneRemaining, 1 + Math.floor(rng.next() * MAX_GROUP_SIZE));
       if (p.deplaneAcc < size) break;
       p.deplaneAcc -= size;
@@ -515,7 +684,12 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
       const access = gateId ? ctx.terminal.gates[gateId] : undefined;
       let bags = 0;
       for (let i = 0; i < size; i++) if (rng.next() < BAG_PROB) bags++;
-      const steps: PaxStep[] = bags > 0 && p.claimAreaId ? ['claim', 'exit'] : ['exit'];
+      // フェーズ 4 §4.4: 国際の到着は 入国審査 →（手荷物があれば）受取 → 税関 → 出口
+      const intl = f.routeType === 'international';
+      const deplaneArea = intl ? (access?.deplaneIntl ?? null) : (access?.deplane ?? null);
+      const steps: PaxStep[] = intl
+        ? ['immigration', ...(bags > 0 && p.claimAreaId ? ['claim' as const] : []), 'customs', 'exit']
+        : bags > 0 && p.claimAreaId ? ['claim', 'exit'] : ['exit'];
       const id = nextId(state, 'pg');
       const g: PaxGroup = {
         id,
@@ -529,7 +703,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
         state: 'walking',
         steps,
         stepIndex: 0,
-        area: access?.deplane ?? null,
+        area: deplaneArea,
         route: [],
         legProgress: 0,
         legLength: 0,
@@ -547,7 +721,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
       };
       registerGroup(state, g);
       arrivalBags(sim, g, ac.id);
-      if (p.bus && gateId && access?.deplane) {
+      if (p.bus && gateId && deplaneArea) {
         // スポットでランプバスを待つ（降機口へはバスが運ぶ）
         g.state = 'waitingBus';
         g.area = null;
@@ -702,7 +876,11 @@ function planStep(sim: Simulation, g: PaxGroup): void {
     return;
   }
   const kind = STEP_KIND[step]!;
-  const ids = (model.byTerminal[g.terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === kind);
+  let ids = (model.byTerminal[g.terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === kind);
+  // 乗継グループは到着ターミナルに工程の設備がないとき、出発側のターミナルの設備も候補にする（連絡設備で移動する）
+  if (g.transfer && ids.length === 0) {
+    ids = Object.values(model.byTerminal).flat().filter((id) => model.areas[id]!.kind === kind);
+  }
   // 受取所は便ごとに決まっている
   const candidates = step === 'claim' ? ids.filter((id) => id === state.flights[g.flightId]!.pax.claimAreaId) : ids;
   const usable = candidates.filter((id) => !closed.has(id) && (step === 'exit' || step === 'claim' || serversOf(sim, id) > 0));
@@ -728,7 +906,8 @@ function planGate(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
   const model = ctx.terminal;
   const f = state.flights[g.flightId]!;
   const gateId = f.pax.gateId;
-  const boarding = gateId ? model.gates[gateId]?.boarding : null;
+  // フェーズ 4 §4.3: 国際の便は国際区域の搭乗口を使う
+  const boarding = gateId ? (f.routeType === 'international' ? (model.gates[gateId]?.boardingIntl ?? null) : (model.gates[gateId]?.boarding ?? null)) : null;
   if (gateId && !boarding) {
     // ゲートに接する出発区域のエリアがない: 到達不能
     setWaiting(state, g, 'stranded');
@@ -749,11 +928,12 @@ function planGate(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
     setWaiting(state, g, structural ? 'stranded' : 'waitingFacility');
     return;
   }
-  // ゲート未定: 出発区域の待合スペースで待つ
+  // ゲート未定: 出発区域の待合スペースで待つ（国際は出国審査の後の区域）
   const cur = model.areas[g.area!]!;
   if (cur.kind !== 'waiting') {
+    const waitZone = f.routeType === 'international' ? 'departureIntl' : 'departure';
     const waits = new Map(
-      (model.byTerminal[g.terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === 'waiting' && model.areas[id]!.zone === 'departure' && !closed.has(id)).map((id) => [id, 0] as const),
+      (model.byTerminal[g.terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === 'waiting' && model.areas[id]!.zone === waitZone && !closed.has(id)).map((id) => [id, 0] as const),
     );
     const route = waits.size > 0 ? findPaxRoute(model, { from: g.area!, goals: waits, closed, stepFree: g.stepFree }) : null;
     if (route && route.areas.length > 1) {
@@ -911,6 +1091,11 @@ function walk(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): voi
   g.walkSec++;
   if (g.legProgress >= g.legLength) {
     const completedTransfer = (link.transferLinkId ?? (link.verticalTransportId ? `vertical:${link.verticalTransportId}` : undefined)) === g.terminalLinkId;
+    // 乗継グループが連絡設備を通ったら利用実績に数える（フェーズ 4 §5.6）
+    if (g.transfer && link.transferLinkId) {
+      const hs = hubStatsOf(state);
+      hs.byLink[link.transferLinkId] = (hs.byLink[link.transferLinkId] ?? 0) + g.count;
+    }
     g.area = next;
     const nextTerminal = ctx.terminal.areas[next]?.terminalId;
     if (nextTerminal && nextTerminal !== g.terminalId) {
@@ -944,6 +1129,10 @@ function arrive(sim: Simulation, g: PaxGroup): void {
     case 'security':
     case 'shop':
     case 'restroom':
+    case 'emigration':
+    case 'immigration':
+    case 'customs':
+    case 'transferSecurity':
       joinQueue(state, g, g.area!, 'queuing');
       return;
     case 'gate':
@@ -1024,6 +1213,7 @@ function stepFacility(sim: Simulation, key: string): void {
       g.boardedGate = key.slice('gate:'.length);
       g.finishedAt = state.now;
       g.area = null;
+      if (g.transfer) hubStatsOf(state).connected += g.count;
       f.pax.boarded += g.count;
       state.paxStats.boarded += g.count;
       finish(state, g);
@@ -1031,6 +1221,12 @@ function stepFacility(sim: Simulation, key: string): void {
     }
     const area = sim.ctx.terminal.areas[key];
     if (area?.kind === 'security') g.securityCleared = true;
+    // 乗継保安検査を出たら保安検査済みとして扱う（フェーズ 4 §5.4）
+    if (area?.kind === 'transferSecurity') g.securityCleared = true;
+    // フェーズ 4 §4.4: 審査・税関を通ったら印を付ける（不変条件 C1・C2 の根拠）
+    if (area?.kind === 'emigration') (g.ciq ??= {}).emigration = true;
+    if (area?.kind === 'immigration') (g.ciq ??= {}).immigration = true;
+    if (area?.kind === 'customs') (g.ciq ??= {}).customs = true;
     if (area?.kind === 'checkIn') checkInBags(sim, g, key);
     if (area?.kind === 'shop' || area?.kind === 'restaurant') onShopDone(sim, g, area.kind);
     g.stepIndex++;
@@ -1095,6 +1291,7 @@ export function finishBusBoarded(sim: Simulation, g: PaxGroup): void {
   g.finishedAt = state.now;
   g.area = null;
   delete g.busTrip;
+  if (g.transfer) hubStatsOf(state).connected += g.count;
   f.pax.boarded += g.count;
   state.paxStats.boarded += g.count;
   finish(state, g);

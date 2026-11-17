@@ -1062,8 +1062,12 @@ const AREA_COLOR: Record<TerminalAreaKind, number> = {
   elevator: 0x8a6a2a,
   shop: 0x9a5a2a,
   restaurant: 0xa0603a,
+  emigration: 0x2a7a5a,
+  immigration: 0x2a5a7a,
+  customs: 0x7a2a4a,
+  transferSecurity: 0x5a2a7a,
 };
-const ZONE_COLOR: Record<PaxZone, number> = { landside: 0x9be7a8, departure: 0xe0a0ff, arrival: 0x8fd3ff };
+const ZONE_COLOR: Record<PaxZone, number> = { landside: 0x9be7a8, departure: 0xe0a0ff, arrival: 0x8fd3ff, departureIntl: 0xffa0c0, arrivalIntl: 0xa0e7ff };
 const AREA_SHORT = AREA_KIND_LABEL;
 
 /** 作業車両の色 */
