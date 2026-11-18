@@ -23,7 +23,7 @@
 - 未 push 分の push（要承認）: 敷地サイズ選択一式・検証コード 29 種・PR#25 検証修正（App.tsx の SUMMARY 判定＋toolbox.spec セレクタ、E2E 4/4 合格）・5-14 一式（busTerminal ほか）。PR #26 のマージ競合で取り残された分を含む。
 - Phase 4 の未検証: 朝の波・バンクの区間走行再計測、2 ターミナル波（docs/44 §8）。
 - OD 計画書の planned/ から completed/ への移動は GitHub 側の整理と合わせて行う。
-- 管制官モードは独立ゲームモードとして計画のみ作成（docs/implementation/planned/air_traffic_control_mode_plan.md、docs/42 §3.9）。実装未着手。POの開始指示後にATC-01から監査。
+- 管制官モードは独立ゲームモードとして計画のみ作成（docs/implementation/planned/air_traffic_control_mode_plan.md、docs/42 §3.9）。PO決定: 初期版はGROUND/TOWERの両方を必須実装。スポット割当・着陸/離陸RWY・必要な横断要求はシナリオから自動生成し、プレイヤーが承認/許可する（自動許可・自動移動はしない）。実装未着手。POの開始指示後にATC-01から監査。
 
 ## 作業記録（直近）
 - 2026-11-18: 貨物 CARGO-07 を実施（保存検証に kind/features の cargo を接続。未対応だと貨物セーブが読み込み拒否される不具合を未然に修正、テスト 2 件）。貨物の残りは sim 便生成＋貨物タスク＋貨物専用機、日報表示、道路競合、5-20 連携。
