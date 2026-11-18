@@ -184,7 +184,7 @@ function CompatAnalysis() {
     const ids = [...new Set(contractsOf(company, 'active').map((k) => k.typeId))];
     return ids.map((id) => ({ id, c: checkAirport(resolveType(AIRCRAFT_TYPES, id), layout, n ?? (o ? o.sim.ctx.network : (undefined as never))) }));
   }, [layout, company, net, o]);
-  const failed = o ? o.sim.state.analytics.records.filter((r) => r.result !== 'completed' && r.causes.some((c) => ['hold:noStand', 'hold:noRunway', 'hold:noRoute', 'noStand', 'noRoute'].includes(c))) : [];
+  const failed = o ? o.sim.state.analytics.records.filter((r) => r.result !== 'completed' && r.causes.some((c) => ['hold:noStand', 'hold:standTooSmall', 'hold:gateRouteMismatch', 'hold:noDepartureRoute', 'hold:noRunway', 'hold:noRoute', 'noStand', 'standTooSmall', 'gateRouteMismatch', 'noDepartureRoute', 'noRoute'].includes(c))) : [];
   if (!o) return null;
   return (
     <div data-testid="compat-analysis">
