@@ -1,5 +1,5 @@
 import { airlineDef } from '../../../core/economy/registry';
-import { OPS_UI, SCORE_LABEL, scoreText } from '../../../i18n/ja';
+import { OPS_UI, SCORE_LABEL, complaintDetailText, scoreText } from '../../../i18n/ja';
 import { Card } from '../Card';
 import { useOps } from '../../OpsPanels';
 import { GAME_UI } from '../../../i18n/ja';
@@ -27,11 +27,15 @@ export function AirlineCard() {
           <div className={s.lacking.length ? 'card-sub warn-text' : 'card-sub'} data-testid={`card-airline-lacking-${s.airlineId}`}>
             {s.lacking.length ? s.lacking.map((c) => `${SCORE_LABEL[c.key]}: ${scoreText(c)}`).join(' / ') : OPS_UI.lackingNone}
           </div>
-          {evalState?.[s.airlineId]?.complaints.map((x) => (
-            <div key={x.key} className="card-sub ng-text" data-testid={`airline-complaint-${s.airlineId}`}>
-              {GAME_UI.complaintTitle}: {GAME_UI.complaintOf(SCORE_LABEL[x.key])}
-            </div>
-          ))}
+          {evalState?.[s.airlineId]?.complaints.map((x) => {
+            const comp = s.components.find((c) => c.key === x.key);
+            return (
+              <div key={x.key} className="card-sub ng-text" data-testid={`airline-complaint-${s.airlineId}`}>
+                {GAME_UI.complaintTitle}: {GAME_UI.complaintOf(SCORE_LABEL[x.key])}
+                {comp ? <div className="muted small">{complaintDetailText(comp)}</div> : null}
+              </div>
+            );
+          })}
           {evalState?.[s.airlineId]?.requests.map((x) => (
             <div key={x.id} className="card-sub warn-text" data-testid={`airline-request-${s.airlineId}`}>
               {GAME_UI.requestTitle}: {GAME_UI.requestText(x.kind, x.arg)}（{GAME_UI.requestDue(x.dueDay)}）

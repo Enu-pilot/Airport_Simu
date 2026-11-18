@@ -1,4 +1,5 @@
 import { AIRCRAFT_TYPES } from '../sim/aircraftTypes';
+import { CATALOG as AIRCRAFT_CATALOG } from '../aircraft/catalog';
 import type { AirlineInput, CountryDef, DestinationInput, RegionDef } from './types';
 
 /**
@@ -127,6 +128,14 @@ export function validateCatalog(raw: CatalogRaw): CatalogIssue[] {
         push('航空会社', a.id, `fleet[${j}].seats`, `座席 ${String(f.seats)} が機種 ${f.typeId} の最大旅客数 ${t.maxPax ?? '—'} を超えています`, `1〜${t.maxPax ?? '—'}`);
       }
     });
+    if (a.cargoFleet !== undefined) {
+      if (!Array.isArray(a.cargoFleet)) push('航空会社', a.id, 'cargoFleet', '貨物専用機の指定が配列ではありません', '機種 ID の配列');
+      else a.cargoFleet.forEach((t, j) => {
+        if (!AIRCRAFT_TYPES[t]) push('航空会社', a.id, `cargoFleet[${j}]`, `機種 "${String(t)}" が機種表にありません`, '存在する機種 ID');
+        else if (AIRCRAFT_CATALOG[t]?.cargoM3.value == null) push('航空会社', a.id, `cargoFleet[${j}]`, `機種 "${String(t)}" の貨物室容積が未設定です`, '容積が判明している機種');
+        else if (a.fleet.some((f) => f.typeId === t)) push('航空会社', a.id, `cargoFleet[${j}]`, `機種 "${String(t)}" が旅客フリートにも入っています`, '貨物専用機は旅客フリートと分ける');
+      });
+    }
     if (a.baseLoadFactor !== undefined) range('航空会社', a.id, 'baseLoadFactor', a.baseLoadFactor, 0.3, 0.95);
     if (a.fareLevel !== undefined) range('航空会社', a.id, 'fareLevel', a.fareLevel, 0.5, 2.0);
     if (a.priceSensitivity !== undefined) range('航空会社', a.id, 'priceSensitivity', a.priceSensitivity, 0, 1);

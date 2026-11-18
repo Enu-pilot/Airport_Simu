@@ -6,7 +6,7 @@ import { contractsOf, type CompanyState } from './company';
 import { evaluateDelayPair } from './delayEvaluation';
 import { otpAddOf } from './game';
 import type { DayPlan, PlanAnalysis } from './planning';
-import { airlinesFor, type AirlineDef } from './registry';
+import { airlinesFor, findDestination, type AirlineDef } from './registry';
 
 /**
  * 航空会社の評価カード（読み取り専用の導出）。既存のデータ（実績の記録・運航計画の分析・料金・機材）だけから、
@@ -37,6 +37,24 @@ export interface ScoreFacts {
   busShare?: number;
   /** 評価要素の根拠として記録できた便名。便に帰属しない要素では欠落する。 */
   flightNumbers?: string[];
+  /** 定時性要素: 定時を外れた区間の数（表示のみ。実績の区間がないときはキーなし） */
+  lateCount?: number;
+  /** 旅客体験要素: 乗り遅れ率（value と同じ値。意味を明示するための表示のみの別名） */
+  missedRate?: number;
+  /** 旅客体験要素: 手荷物の積み残し率（target と同じ値。意味を明示するための表示のみの別名） */
+  leftRate?: number;
+  /** 旅客体験要素: 乗り遅れの絶対数（人。表示のみ） */
+  missedCount?: number;
+  /** 旅客体験要素: 予約旅客の絶対数（人。表示のみ） */
+  bookedCount?: number;
+  /** 旅客体験要素: 積み残した手荷物の絶対数（個。表示のみ） */
+  leftCount?: number;
+  /** 旅客体験要素: 手荷物の総数（個。表示のみ） */
+  bagsCount?: number;
+  /** 需要要素: 契約（路線）別で最も搭乗率が低い行先の名前（表示のみ） */
+  worstRoute?: string;
+  /** 需要要素: その路線の搭乗率 0〜1（表示のみ） */
+  worstRouteLf?: number;
 }
 
 export interface ScoreComponent {
@@ -120,11 +138,14 @@ function otpComponent(a: AirlineDef, recs: readonly FlightRecord[], company: Com
     return (r.landedAt !== null && pair.arrivalSec > ON_TIME_SEC) || (r.blockOut !== null && pair.departureSec > ON_TIME_SEC);
   });
   const flightNumbers = late.flatMap((r) => [r.arrNumber, r.depNumber]);
-  return { key: 'otp', level, score: Math.round(clamp((otp / minOtp) * 100)), facts: { value: otp, target: minOtp, n: legs.length, ...(main ? { names: [main] } : {}), ...(flightNumbers.length ? { flightNumbers: [...new Set(flightNumbers)] } : {}), ...(fallback ? { fallback } : {}) } };
+  // 表示用: 定時を外れた区間の数（実績の区間があるときだけ。空港全体の値で代用したときは付けない）
+  const lateCount = legs.filter((d) => d !== null && d > ON_TIME_SEC).length;
+  return { key: 'otp', level, score: Math.round(clamp((otp / minOtp) * 100)), facts: { value: otp, target: minOtp, n: legs.length, ...(legs.length > 0 ? { lateCount } : {}), ...(main ? { names: [main] } : {}), ...(flightNumbers.length ? { flightNumbers: [...new Set(flightNumbers)] } : {}), ...(fallback ? { fallback } : {}) } };
 }
 
 function turnaroundComponent(recs: readonly FlightRecord[], types: TypeTable): ScoreComponent {
-  const rows = recs.filter((r) => r.blockIn !== null && r.readyAt !== null);
+  // 夜間滞泊は折り返しではない（夜をまたいだ駐機）ので、折り返し時間の集計から除く
+  const rows = recs.filter((r) => !r.overnightStay && r.blockIn !== null && r.readyAt !== null);
   if (rows.length === 0) return na('turnaround');
   const actual = rows.reduce((s, r) => s + (r.readyAt! - r.blockIn!), 0) / rows.length;
   const std = rows.reduce((s, r) => s + resolveType(types, r.typeId).turnaroundSec, 0) / rows.length;
@@ -169,7 +190,8 @@ function feesComponent(a: AirlineDef, company: CompanyState): ScoreComponent {
 }
 
 function slotsComponent(company: CompanyState, airlineId: string, plan: DayPlan, analysis: PlanAnalysis, planKeys: Set<string>): ScoreComponent {
-  const contracts = new Set(contractsOf(company, 'active').filter((k) => k.airlineId === airlineId).map((k) => k.id));
+  // 貨物契約は旅客評価とは別軸（5-12）: 落選・枠外れの判定は旅客契約だけで見る
+  const contracts = new Set(contractsOf(company, 'active').filter((k) => k.airlineId === airlineId && k.kind !== 'cargo').map((k) => k.id));
   if (contracts.size === 0) return na('slots');
   const dropped = plan.dropped.filter((id) => contracts.has(id)).length;
   const over = new Set<string>();
@@ -199,16 +221,19 @@ function paxComponent(recs: readonly FlightRecord[]): ScoreComponent {
   const booked = recs.reduce((s, r) => s + r.paxBooked, 0);
   const bags = recs.reduce((s, r) => s + r.bagsLoaded + r.bagsLeft, 0);
   if (recs.length === 0 || (booked === 0 && bags === 0)) return na('pax');
-  const missed = booked > 0 ? recs.reduce((s, r) => s + r.paxMissed, 0) / booked : 0;
-  const left = bags > 0 ? recs.reduce((s, r) => s + r.bagsLeft, 0) / bags : 0;
+  const missedCount = recs.reduce((s, r) => s + r.paxMissed, 0);
+  const leftCount = recs.reduce((s, r) => s + r.bagsLeft, 0);
+  const missed = booked > 0 ? missedCount / booked : 0;
+  const left = bags > 0 ? leftCount / bags : 0;
   const bad = missed + left;
   const level: ScoreLevel = bad <= 0.01 ? 'good' : bad <= 0.05 ? 'warn' : 'bad';
   const affected = recs.filter((r) => r.paxMissed > 0 || r.bagsLeft > 0).flatMap((r) => [r.arrNumber, r.depNumber]);
-  return { key: 'pax', level, score: Math.round(clamp(100 - bad * 800)), facts: { value: missed, target: left, n: recs.length, ...(affected.length ? { flightNumbers: [...new Set(affected)] } : {}) } };
+  // 率は value=乗り遅れ率 / target=積み残し率（従来どおり）。表示用に率の意味と絶対数も分けて持たせる
+  return { key: 'pax', level, score: Math.round(clamp(100 - bad * 800)), facts: { value: missed, target: left, missedRate: missed, leftRate: left, missedCount, bookedCount: booked, leftCount, bagsCount: bags, n: recs.length, ...(affected.length ? { flightNumbers: [...new Set(affected)] } : {}) } };
 }
 
 /** 需要の要素（フェーズ 3 §4.1）: その日の自社の搭乗率と基準搭乗率の差。market 有効時だけ出す */
-function demandComponent(a: AirlineDef, recs: readonly FlightRecord[]): ScoreComponent {
+function demandComponent(a: AirlineDef, recs: readonly FlightRecord[], company: CompanyState): ScoreComponent {
   let pax = 0;
   let seats = 0;
   for (const r of recs) {
@@ -220,7 +245,24 @@ function demandComponent(a: AirlineDef, recs: readonly FlightRecord[]): ScoreCom
   const lf = pax / seats;
   const score = Math.round(clamp(60 + (lf - a.baseLoadFactor) * 200));
   const level: ScoreLevel = lf >= a.baseLoadFactor ? 'good' : lf >= a.baseLoadFactor - 0.1 ? 'warn' : 'bad';
-  return { key: 'demand', level, score, facts: { value: lf, target: a.baseLoadFactor, n: recs.length } };
+  // 表示用: 契約（路線）別の搭乗率で最も低い行先（全体と同じ集計規則。点数には使わない）
+  const byContract = new Map<string, { pax: number; seats: number }>();
+  for (const r of recs) {
+    if (r.result === 'cancelled' || !r.contractId) continue;
+    const e = byContract.get(r.contractId) ?? { pax: 0, seats: 0 };
+    e.pax += r.paxBooked + r.paxArrived;
+    e.seats += r.seats * 2;
+    byContract.set(r.contractId, e);
+  }
+  let worst: { name: string; lf: number } | undefined;
+  for (const [contractId, e] of byContract) {
+    if (e.seats === 0) continue;
+    const contract = company.contracts[contractId];
+    const name = contract ? (findDestination(contract.destinationId)?.name ?? contract.destinationId) : contractId;
+    const routeLf = e.pax / e.seats;
+    if (!worst || routeLf < worst.lf) worst = { name, lf: routeLf };
+  }
+  return { key: 'demand', level, score, facts: { value: lf, target: a.baseLoadFactor, n: recs.length, ...(worst ? { worstRoute: worst.name, worstRouteLf: worst.lf } : {}) } };
 }
 
 /** 全航空会社の評価カード（会社の対象会社の順） */
@@ -228,7 +270,8 @@ export function airlineScorecard(input: ScorecardInput): AirlineScore[] {
   const { company, ctx, records, plan, analysis } = input;
   const operable = new Set<string>(operableTypes(ctx));
   return airlinesFor(company).map((a) => {
-    const recs = records.filter((r) => r.airlineId === a.id);
+    // 貨物便は旅客評価とは別軸（5-12）: 記録を使う要素（定時性・折り返し・スポット・旅客・需要）から貨物レコードを除く
+    const recs = records.filter((r) => r.airlineId === a.id && !r.cargo);
     const planKeys = new Set(plan.flights.filter((f) => f.airlineId === a.id).map((f) => f.key));
     const components: ScoreComponent[] = [
       otpComponent(a, recs, company, ctx.types),
@@ -238,7 +281,7 @@ export function airlineScorecard(input: ScorecardInput): AirlineScore[] {
       slotsComponent(company, a.id, plan, analysis, planKeys),
       aircraftComponent(a, company, operable),
       paxComponent(recs),
-      ...(company.market ? [demandComponent(a, recs)] : []),
+      ...(company.market ? [demandComponent(a, recs, company)] : []),
     ];
     const lacking = components
       .filter((c) => c.level === 'bad' || c.level === 'warn')

@@ -5,7 +5,7 @@ import { airlineDef } from '../core/economy/registry';
 import type { DayReview, ReviewFlight, ReviewMetric } from '../core/analytics/review';
 import type { ScoreComponent, ScoreKey } from '../core/economy/airlineScore';
 import { COST_CATEGORIES, REVENUE_CATEGORIES } from '../core/economy/company';
-import { GAME_UI, AIRCRAFT_STATE_LABEL, AREA_KIND_LABEL, COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL, SCORE_LEVEL_LABEL, TASK_LABEL, UNIT_KIND_LABEL, formatClock } from '../i18n/ja';
+import { GAME_UI, AIRCRAFT_STATE_LABEL, AREA_KIND_LABEL, COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, MISS_BOTTLENECK_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL, SCORE_LEVEL_LABEL, TASK_LABEL, UNIT_KIND_LABEL, complaintDetailText, displayName, formatClock } from '../i18n/ja';
 import type { DelayCause, HoldReason } from '../core/sim/types';
 import { DAY_SEC } from '../core/sim/rules';
 import { dayFlowActions } from '../editor/dayFlowActions';
@@ -149,6 +149,11 @@ export function ReviewBody({ review }: { review: DayReview }) {
             <Row label="乗継" value={`発生 ${r.hub.spawned} 人・接続成功 ${r.hub.connected} 人・乗り遅れ ${r.hub.missed} 人・現れず ${r.hub.noShow} 人`} />
           </div>
         )}
+        {r.cargo && (
+          <div data-testid="review-cargo">
+            <Row label="貨物" value={`取扱 ${r.cargo.carriedM3} m³（積み残し ${r.cargo.leftoverM3} m³）・収入 ${formatCr(r.cargo.revenue)}・荷役費 ${formatCr(r.cargo.handlingCost)}・トラック ${r.cargo.truckTrips} 台`} />
+          </div>
+        )}
         {r.linkUsage && r.linkUsage.length > 0 && (
           <div data-testid="review-link-usage">
             <b>連絡設備・上下移動の利用実績</b>
@@ -206,6 +211,26 @@ export function ReviewBody({ review }: { review: DayReview }) {
       <Section id="review-pax" title={DAY_LOOP.paxTitle}>
         <Row label={DAY_LOOP.pax} value={`${(k.paxDeparted + k.paxArrived).toLocaleString('ja-JP')} 人`} />
         <Row label={DAY_LOOP.missed} value={`${k.missedPax} 人`} tone={k.missedPax > 0 ? 'warn' : undefined} />
+        {review.missedBreakdown && review.missedBreakdown.summary.length > 0 && (
+          <div data-testid="review-missed-breakdown">
+            <Row
+              label="乗り遅れの内訳"
+              value={review.missedBreakdown.summary
+                .map((s) => `${MISS_BOTTLENECK_LABEL[s.category]} ${s.count} 人${s.topSpotId ? `（${displayName(layout, s.topSpotId)}）` : ''}`)
+                .join('・')}
+            />
+            <Row
+              label="主なボトルネック"
+              value={`${MISS_BOTTLENECK_LABEL[review.missedBreakdown.summary[0]!.category]} ${review.missedBreakdown.summary[0]!.count} 人${review.missedBreakdown.summary[0]!.topSpotId ? `（${displayName(layout, review.missedBreakdown.summary[0]!.topSpotId!)}）` : ''}`}
+              tone="warn"
+            />
+            {review.missedBreakdown.advice.map((a) => (
+              <div key={a.category} className="small">
+                改善案（{MISS_BOTTLENECK_LABEL[a.category]}）: {a.recommendation}
+              </div>
+            ))}
+          </div>
+        )}
         <Row label={DAY_LOOP.bags} value={`${k.leftBags} 個`} tone={k.leftBags > 0 ? 'warn' : undefined} />
         <Row label={DAY_LOOP.paxSat} value={num(k.paxSatisfaction)} />
         {k.paxSatisfactionDetail && (
@@ -326,13 +351,19 @@ export function ReviewBody({ review }: { review: DayReview }) {
                 const demand = a.components?.find((x) => x.key === 'demand' && x.score !== null);
                 return demand ? (
                   <div className="card-sub" data-testid={`review-traffic-${a.id}`}>
-                    {SCORE_LABEL.demand}: {pct(demand.facts.value ?? null)}（基準 {pct(demand.facts.target ?? null)}）
+                    {SCORE_LABEL.demand}: {pct(demand.facts.value ?? null)}（基準 {pct(demand.facts.target ?? null)}）{demand.facts.worstRoute && demand.facts.worstRouteLf !== undefined ? `・最も低いのは ${demand.facts.worstRoute}線 ${pct(demand.facts.worstRouteLf)}` : ''}
                   </div>
                 ) : null;
               })()}
-              {a.newComplaints?.map((k) => (
-                <div key={k} className="card-sub ng-text" data-testid={`review-complaint-${a.id}`}>{GAME_UI.newComplaint(airlineDef(a.id).name, SCORE_LABEL[k])}</div>
-              ))}
+              {a.newComplaints?.map((k) => {
+                const comp = a.components?.find((x) => x.key === k);
+                return (
+                  <div key={k} className="card-sub ng-text" data-testid={`review-complaint-${a.id}`}>
+                    {GAME_UI.newComplaint(airlineDef(a.id).name, SCORE_LABEL[k])}
+                    {comp ? <span className="muted"> — {complaintDetailText(comp)}</span> : null}
+                  </div>
+                );
+              })}
               {a.fulfilled && a.fulfilled.length > 0 && <div className="card-sub ok-text" data-testid={`review-fulfilled-${a.id}`}>{GAME_UI.fulfilled}: {a.fulfilled.length}</div>}
               {a.emaBefore && a.emaAfter && (
                 <div className="card-sub muted small">
@@ -495,7 +526,7 @@ function scoreReason(key: string, facts: ScoreComponent['facts']): string {
     case 'fees': return `料金倍率 ${value.toFixed(2)}、割引後 ${target.toFixed(2)}`;
     case 'slots': return `当日計画で時間枠の問題 ${value}便、契約時間外 ${n}件`;
     case 'aircraft': return `運航条件に合わない契約機材 ${value}種、保有機材 ${target}種`;
-    case 'pax': return `乗り遅れ率 ${pct(value)}、手荷物積み残し率 ${pct(target)}`;
+    case 'pax': return `乗り遅れ率 ${pct(facts.missedRate ?? value)}${facts.missedCount !== undefined && facts.bookedCount !== undefined ? `（${facts.missedCount}/${facts.bookedCount}人）` : ''}、手荷物積み残し率 ${pct(facts.leftRate ?? target)}${facts.leftCount !== undefined && facts.bagsCount !== undefined ? `（${facts.leftCount}/${facts.bagsCount}個）` : ''}`;
     default: return '保存された評価事実を確認してください';
   }
 }

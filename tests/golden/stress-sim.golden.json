@@ -5,8 +5,8 @@
   "stress-a": {
    "seconds": 10800,
    "now": 32400,
-   "stateSha256": "342bb4b106d623e0a0e49f084941cbace492e60cfe1694fd5cc8c34643666acc",
-   "stateLength": 2793193,
+   "stateSha256": "07393fa8344d2f70848c03354ebc463c74747e5dab1de899d182f44b825dd682",
+   "stateLength": 2793289,
    "stats": {
     "arrivals": 14,
     "departures": 6,
@@ -27,7 +27,7 @@
     "departures": 6,
     "cancelled": 2,
     "failCauses": {
-     "hold:noStand": 2
+     "hold:standTooSmall": 2
     },
     "runways": [
      {

@@ -192,6 +192,8 @@ export interface Flight {
   carryOver?: true;
   /** 国際線の便（フェーズ 4） */
   routeType?: 'international';
+  /** 貨物便（5-12）: 旅客を生成せず貨物タスクで折り返す。volumeM3 は片道分の搭載量。到着・出発の両便に付く */
+  cargo?: { volumeM3: number };
   /** 拠点契約の所属機 ID */
   basedAircraftId?: string;
   /** 整備の不具合でプッシュバックを保留する時刻 */
@@ -235,6 +237,17 @@ export interface Flight {
   priority?: boolean;
   /** 座席数（航空会社の座席構成。なければ機種の既定値） */
   seats?: number;
+}
+
+/**
+ * 到着便・出発便の組が「夜間滞泊」（折り返しではなく、夜をまたいでスポットに駐機する滞在）かどうか。
+ * 判定は明示的な信号だけに基づく（滞在時間の長さでは判定しない）:
+ * - 計画された滞泊: 便に overnight が付いている（計画から作る便は到着・出発とも。持ち越しの置き直しの出発便にも付く）
+ * - 夜間制限で朝までスポット待機した出発便: nightHold の kind が 'stand'（recordCarryOver も同じ組を滞泊として扱う）
+ * - 持ち越しの置き直し: 到着便が carryOver（合成便）
+ */
+export function isOvernightStay(arr: Flight, dep: Flight): boolean {
+  return arr.overnight === true || dep.overnight === true || arr.carryOver === true || dep.nightHold?.kind === 'stand';
 }
 
 // ---------------------------------------------------------------- 地上支援

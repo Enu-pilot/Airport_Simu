@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Field, Info, NumberInput, Section, TextInput } from './fields';
 import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
 import { FACILITY_SPECS, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
@@ -40,6 +40,16 @@ import { actions, applyOp, closeTemporarily, editorStore, entityExists, showToas
 import { ops } from '../editor/simRunner';
 import { closureReasonsFor } from '../core/sim/closureState';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
+import { areaProcessingPerHour, areaServerCount, isProcessingArea, serviceSecPerPax } from '../core/terminal/capacity';
+import { GATE_LOUNGE_CAPACITY, PAX_PER_TILE, defaultVerticalCapacityPerHour } from '../core/terminal/model';
+import { createContext } from '../core/sim/context';
+import { turnaroundCapacityDetail } from '../core/economy/planning';
+import { analyzeAirportCapacity } from '../core/economy/capacity';
+import { peakProcessDemand } from '../core/economy/peakDemand';
+import { cargoHandlingCapacityM3PerHour } from '../core/economy/cargo';
+import { BALANCE } from '../core/economy/balance';
+import type { UnitKind } from '../core/sim/types';
+import type { TerminalAreaKind } from '../core/model/types';
 import { focusEntity } from '../editor/input';
 import {
   BOARDING_MODE_LABEL,
@@ -65,6 +75,7 @@ import {
   PLACEMENT_PROBLEM_LABEL,
   INTERIOR_CHILDREN_LABEL,
   TAXI_UI,
+  UNIT_KIND_LABEL,
 } from '../i18n/ja';
 
 export function PropertiesPanel() {
@@ -697,6 +708,8 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
     const levels = Number(terminal?.props.levels ?? 1);
     const node = analysis.terminal.areas[id];
     const links = (analysis.terminal.links[id] ?? []).map((l) => l.to);
+    const areaTiles = a.w * a.h;
+    const isLift = a.kind === 'stairs' || a.kind === 'escalator' || a.kind === 'elevator';
     return (
       <>
         <NameField layout={layout} id={id} value={a.name} />
@@ -736,7 +749,29 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             </Field>
           ) : null,
         )}
-        {node && <Info label="混雑の目安">{`${node.capacity} 人`}</Info>}
+        {isProcessingArea(a.kind) && (
+          <Info label="処理能力" title="窓口数 × 3600 ÷ 1人あたり処理秒数（docs/12 の処理時間。エリアの serviceSecPerPax 設定があればそれを優先）">
+            {areaServerCount(a.props) > 0
+              ? `約 ${areaProcessingPerHour(a.kind, a.props)} 人/時（窓口 ${areaServerCount(a.props)} × 1人 ${serviceSecPerPax(a.kind, a.props)} 秒）`
+              : '0 人/時（窓口がありません）'}
+          </Info>
+        )}
+        {isLift && (
+          <Info label="昇降能力" title="この設備を通る階間移動の上限（人/時）。capacityPerHour の設定があればそれ、なければ種別ごとの既定値（階段 1800 / エスカレーター 2400 / エレベーター 600）">
+            {`${Number(a.props.capacityPerHour ?? defaultVerticalCapacityPerHour(a.kind))} 人/時`}
+          </Info>
+        )}
+        {a.kind === 'baggageClaim' && (
+          <Info label="受取ベルト" title="同時にベルトへ載せられる便数の上限（1便につき1ベルト）">
+            {`${Math.max(0, Number(a.props.belts ?? 0))} 本（同時に ${Math.max(0, Number(a.props.belts ?? 0))} 便まで）`}
+          </Info>
+        )}
+        {(isProcessingArea(a.kind) || a.kind === 'baggageClaim') && <AreaPeakDemandInfo layout={layout} terminalId={a.terminalId} kind={a.kind} />}
+        <Info label="収容人数" title={`面積基準の収容上限（1タイルあたり ${PAX_PER_TILE} 人、下限 10 人）`}>
+          {areaTiles * PAX_PER_TILE >= 10
+            ? `${node?.capacity ?? Math.max(10, areaTiles * PAX_PER_TILE)} 人（1タイルあたり ${PAX_PER_TILE} 人 × ${areaTiles} タイル）`
+            : `${node?.capacity ?? 10} 人（下限）`}
+        </Info>
         <Info label={`接続（${links.length}）`}>
           {links.length === 0 ? <span className="ng-text">どこにも接していません</span> : links.map((l) => <EntityLink key={l} layout={layout} id={l} />)}
         </Info>
@@ -880,6 +915,38 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             {`リモートスポット ${remoteStandCount(layout)} か所`}
           </Info>
         )}
+        {f.kind === 'gate' && (
+          <Info label="待合容量" title="ゲート待合の収容上限（ゲートあたり固定）">
+            {`${GATE_LOUNGE_CAPACITY} 人`}
+          </Info>
+        )}
+        {(f.kind === 'gseBase' || f.kind === 'maintenance') && <GroundCapacityInfo layout={layout} />}
+        {f.kind === 'baggageSort' && (
+          <Info label="処理上限" title="仕分け機1施設あたりの処理上限。合計は運用中の全仕分け施設の合算（空港全体の仕分け能力）">
+            {`${Math.max(0, Number(f.props.capacityPerMin ?? 0))} 個/分（全施設の合計 ${sorterTotalPerMin(layout)} 個/分）`}
+          </Info>
+        )}
+        {f.kind === 'cargoTerminal' && (
+          <Info label="処理上限" title="貨物上屋1施設あたりの処理上限。合計は運用中の全貨物上屋の合算（空港全体の荷役能力）">
+            {`${Math.max(0, Number(f.props.throughputM3PerHour ?? 0))} m³/時（全施設の合計 ${cargoHandlingCapacityM3PerHour(layout)} m³/時）`}
+          </Info>
+        )}
+        {(f.kind === 'busStop' || f.kind === 'busTerminal') && (() => {
+          const bays = Math.max(0, Number((f.kind === 'busTerminal' ? f.props.berths : f.props.busBays) ?? 0));
+          const declared = Math.max(0, Number(f.props.busesPerHour ?? 0));
+          const bayCap = bays * BALANCE.accessModel.busesPerBay;
+          const eff = Math.min(declared, bayCap);
+          return (
+            <Info label="発着上限" title="バスの発着上限。設定便数と乗降場の上限（乗降場1か所あたり6便/時）の小さい方。旅客数は1便50人換算">
+              {`${eff} 便/時（${declared <= bayCap ? `設定 ${declared} 便/時` : `乗降場 ${bays} か所 × ${BALANCE.accessModel.busesPerBay} 便/時`}が上限）・旅客 約 ${eff * BALANCE.accessModel.busSeats} 人/時`}
+            </Info>
+          );
+        })()}
+        {f.kind === 'railStation' && Number(f.props.trainsPerHour ?? 0) > 0 && (
+          <Info label="運行上限" title="設定された運行頻度がそのまま上限。旅客数は1便200人換算">
+            {`${Number(f.props.trainsPerHour)} 本/時（旅客 約 ${Number(f.props.trainsPerHour) * BALANCE.accessModel.trainSeats} 人/時）`}
+          </Info>
+        )}
       </>
     );
   }
@@ -893,6 +960,88 @@ function remoteStandCount(layout: AirportLayout): number {
     if (g.kind === 'gate' && gateMode(g) !== 'bus' && typeof g.props.standId === 'string') contact.add(g.props.standId);
   }
   return Object.values(layout.stands).filter((s) => !contact.has(s.id)).length;
+}
+
+/** 運用中の仕分け施設の処理能力の合計（個/分）。運航側の sorters の選び方（運用中・建物内配置を除く）と同じ */
+function sorterTotalPerMin(layout: AirportLayout): number {
+  return Object.values(layout.facilities)
+    .filter((f) => f.kind === 'baggageSort' && f.buildState === 'operational' && !f.parentFacilityId)
+    .reduce((s, f) => s + Math.max(0, Number(f.props.capacityPerMin ?? 0)), 0);
+}
+
+/**
+ * 運行計画から算出したピーク需要（人/時）を、処理系エリア・手荷物受取の詳細に並べる。
+ * 定義は core/economy/peakDemand.ts（出発は出発90分前に出現・到着は到着時刻に出現する前提の60分窓最大）。
+ * 会社（計画）が無い文脈では何も出さない。
+ */
+function AreaPeakDemandInfo({ layout, terminalId, kind }: { layout: AirportLayout; terminalId: string; kind: TerminalAreaKind }) {
+  const company = useEditor((s) => s.company);
+  const demand = useMemo(() => {
+    if (!company) return null;
+    const ctx = createContext(layout);
+    const snap = analyzeAirportCapacity(company, ctx);
+    const terminalIds = Object.keys(ctx.terminal.byTerminal);
+    return {
+      peak: peakProcessDemand(snap.plan, {
+        terminalId,
+        terminalIdOf: (f) => snap.analysis.assignments[f.key]?.terminalId ?? null,
+        soleTerminalId: terminalIds.length === 1 ? terminalIds[0] : undefined,
+      }),
+      hasFlights: snap.plan.flights.length > 0,
+    };
+  }, [company, layout, terminalId]);
+  if (!demand) return null;
+  const value = kind === 'checkIn'
+    ? demand.peak.checkInPaxPerHour
+    : kind === 'security' || kind === 'emigration' || kind === 'transferSecurity'
+      ? demand.peak.departurePaxPerHour
+      : demand.peak.arrivalPaxPerHour;
+  return (
+    <Info label="ピーク需要（運行計画）" title="その日の運行計画から算出。出発側は出発90分前に手続きへ現れる前提、到着側は到着時刻に現れる前提で、任意の60分の最大（人/時）。チェックインは出発旅客の65%が利用する前提（計画分析と同じ）">
+      {demand.hasFlights ? `約 ${value} 人/時` : '0 人/時（計画便なし）'}
+    </Info>
+  );
+}
+
+const GROUND_UNIT_SUFFIX: Partial<Record<UnitKind, string>> = { staff: '人', engineer: '人' };
+
+/**
+ * 地上支援の同時処理能力とボトルネックを、GSE 基地・整備施設の詳細に並べる。
+ * 資源は空港全体で共有されるため、能力は全基地・全整備施設の合計に対する値（計画側の
+ * turnaroundCapacity と同じ前提）。会社があれば計画上の最大同時折り返し（需要側）も併記する。
+ */
+function GroundCapacityInfo({ layout }: { layout: AirportLayout }) {
+  const company = useEditor((s) => s.company);
+  const data = useMemo(() => {
+    const ctx = createContext(layout);
+    return {
+      detail: turnaroundCapacityDetail(ctx),
+      peakTurns: company ? analyzeAirportCapacity(company, ctx).analysis.peakTurnarounds : null,
+    };
+  }, [company, layout]);
+  const { detail, peakTurns } = data;
+  const gateLabel = (k: 'fuelFarm' | 'engineer' | 'tug'): string => (k === 'fuelFarm' ? '燃料施設' : UNIT_KIND_LABEL[k]);
+  return (
+    <>
+      <Info label="同時処理能力" title="空港全体の地上支援（運用中の全GSE基地・整備施設の合計）で、資源待ちなく同時に処理できる折り返し機数。計画側の turnaroundCapacity と同じ前提">
+        {`${detail.capacity} 機（空港全体）`}
+      </Info>
+      {detail.gates.length > 0 ? (
+        <Info label="不足（運航が止まる）" title="この不足がある間は、他の資源を増やしても同時処理能力は 0 のまま">
+          {detail.gates.map((g) => `${gateLabel(g.kind)}なし`).join('・')}
+        </Info>
+      ) : detail.limiting.length > 0 ? (
+        <Info label="次に増やすべき" title="同時処理を +1 機するために不足している資源。複数ある場合は全部そろうと +1 機になる">
+          {`${detail.limiting.map((l) => `${UNIT_KIND_LABEL[l.kind]} あと ${l.add} ${GROUND_UNIT_SUFFIX[l.kind] ?? '台'}`).join('・')}（${detail.limiting.length > 1 ? '全部そろうと' : ''}同時処理 +1 機）`}
+        </Info>
+      ) : null}
+      {peakTurns !== null && (
+        <Info label="計画上の最大同時折り返し" title="その日の運行計画で、同時に折り返しが重なる最大機数。同時処理能力と比べると不足が分かる">
+          {`${peakTurns} 機`}
+        </Info>
+      )}
+    </>
+  );
 }
 
 // ---------------------------------------------------------------- 部品

@@ -239,6 +239,88 @@ export function evaluateGoals(c: CompanyState, x: Omit<GoalCtx, 'c'>): GoalResul
   return { completed, tierUp, cash };
 }
 
+/** 次の格の要件ごとの到達度（表示用。判定は meetsTier と同じ定義で値を読むだけ） */
+export interface TierProgressItem {
+  key: 'movements' | 'pax' | 'rating' | 'heavy' | 'intlOps' | 'transferOps';
+  /** 数値要件（発着・旅客・評価のみ。それ以外は null） */
+  required: number | null;
+  /** 現在値（発着・旅客は直近の日報、評価は現在の会社評価。それ以外は null） */
+  current: number | null;
+  /** 達成しているか。判定材料が渡されていない場合は null（不明） */
+  met: boolean | null;
+  /** 数値要件の不足分（達成済みは 0） */
+  shortfall: number | null;
+}
+
+export interface NextTierProgress {
+  /** 現在の格 */
+  tier: Tier;
+  /** 次の格（最高格では null） */
+  next: 1 | 2 | 3 | 4 | 5 | 6 | 7 | null;
+  /** 次の格の要件（next が null のときは null） */
+  req: TierReq | null;
+  /** 要件ごとの到達度（数値 3 軸は常時、大型機・国際線・乗継は要件にあるときだけ） */
+  items: TierProgressItem[];
+  /** 連続達成の進捗（next が null のときは null） */
+  streak: { current: number; required: number } | null;
+  /** 現在値の根拠にした日報の日（日報がまだない場合は null。その場合の発着・旅客は 0） */
+  reportDay: number | null;
+}
+
+/**
+ * 次の格までの到達度（5-20 T6。表示専用で、判定・昇格には使わない）。
+ * 現在値は meetsTier と同じ定義: 発着・旅客は直近の日報、評価は現在の会社評価、
+ * 大型機は空港で L 区分が運航できるか、国際線・乗継は直近の締め日の記録に実績があるか。
+ * 大型機と記録は会社の外の情報なので facts で渡す（渡されなければ met は null = 不明）。
+ * goals を持たない会社（サンドボックス等）は対象外として null を返す。
+ */
+export function nextTierProgress(
+  c: CompanyState,
+  facts?: { largeOperable?: boolean; records?: readonly FlightRecord[] },
+): NextTierProgress | null {
+  const g = c.goals;
+  if (!g) return null;
+  if (g.tier >= 7) return { tier: g.tier, next: null, req: null, items: [], streak: null, reportDay: c.reports[c.reports.length - 1]?.day ?? null };
+  const next = (g.tier + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  const req = TIER_REQ[next];
+  const report = c.reports[c.reports.length - 1];
+  const numeric = (key: 'movements' | 'pax' | 'rating', required: number, current: number): TierProgressItem => ({
+    key,
+    required,
+    current,
+    met: current >= required,
+    shortfall: Math.max(0, required - current),
+  });
+  const items: TierProgressItem[] = [
+    numeric('movements', req.movements, report?.kpi.movements ?? 0),
+    numeric('pax', req.pax, report ? report.kpi.paxDeparted + report.kpi.paxArrived : 0),
+    numeric('rating', req.rating, c.rating),
+  ];
+  if (req.heavy) {
+    items.push({ key: 'heavy', required: null, current: null, met: facts?.largeOperable ?? null, shortfall: null });
+  }
+  if (req.intlOps) {
+    items.push({
+      key: 'intlOps', required: null, current: null, shortfall: null,
+      met: facts?.records ? facts.records.some((r) => r.result === 'completed' && r.international) : null,
+    });
+  }
+  if (req.transferOps) {
+    items.push({
+      key: 'transferOps', required: null, current: null, shortfall: null,
+      met: facts?.records ? facts.records.some((r) => (r.transferPax ?? 0) > 0) : null,
+    });
+  }
+  return {
+    tier: g.tier,
+    next,
+    req,
+    items,
+    streak: { current: g.streaks.tier ?? 0, required: req.streakDays },
+    reportDay: report?.day ?? null,
+  };
+}
+
 /** 次に目指す目標（未達成を、格の低い順・登録順に最大 n 個）。固定をすべて達成したら連鎖の現在分 */
 export function nextGoals(g: GoalState | undefined, n = 3): GoalDef[] {
   const rest = GOALS.filter((d) => g?.done[d.id] === undefined)

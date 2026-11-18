@@ -30,7 +30,7 @@ describe('overnightCapacity: 滞泊の能力（4B-3 / §3.4）', () => {
   it('必要数は有効な overnight・based 契約だけから数える', () => {
     const c = createSandboxCompany('ovn-cap');
     addContract(c, {
-      airlineId: 'SK', destinationId: 'KTA', typeId: 'B737-800', perDay: 2, window: 'evening',
+      airlineId: 'HB', destinationId: 'KTA', typeId: 'B737-800', perDay: 2, window: 'evening',
       feeDiscount: 0.1, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0, kind: 'overnight',
     });
     addContract(c, {
@@ -46,10 +46,10 @@ describe('overnightCapacity: 滞泊の能力（4B-3 / §3.4）', () => {
 
   it('previewContractCapacity は滞泊の能力を超える overnight 契約を受け入れ不可にする', () => {
     const c = createSandboxCompany('ovn-cap2');
-    const over = previewContractCapacity(c, ctx, { airlineId: 'SK', destinationId: 'KTA', typeId: 'B737-800', perDay: 10, window: 'evening', kind: 'overnight' });
+    const over = previewContractCapacity(c, ctx, { airlineId: 'HB', destinationId: 'KTA', typeId: 'B737-800', perDay: 10, window: 'evening', kind: 'overnight' });
     expect(over.result).toBe('unacceptable');
     expect(over.newIssues.some((i) => i.code === 'OVERNIGHT_CAPACITY_EXCEEDED')).toBe(true);
-    const within = previewContractCapacity(c, ctx, { airlineId: 'SK', destinationId: 'KTA', typeId: 'B737-800', perDay: 2, window: 'evening', kind: 'overnight' });
+    const within = previewContractCapacity(c, ctx, { airlineId: 'HB', destinationId: 'KTA', typeId: 'B737-800', perDay: 2, window: 'evening', kind: 'overnight' });
     expect(within.newIssues.some((i) => i.code === 'OVERNIGHT_CAPACITY_EXCEEDED')).toBe(false);
   });
 });

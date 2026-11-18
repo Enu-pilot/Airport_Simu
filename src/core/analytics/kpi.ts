@@ -102,7 +102,7 @@ export function metricsOf(key: string, rs: FlightRecord[], types: TypeTable): Gr
     seats,
     paxBoarded: pax,
     loadFactor: seats ? pax / seats : null,
-    avgTurnMin: r1(avg(done.filter((r) => r.readyAt !== null && r.blockIn !== null).map((r) => (r.readyAt! - r.blockIn!) / 60))),
+    avgTurnMin: r1(avg(done.filter((r) => !r.overnightStay && !r.cargo && r.readyAt !== null && r.blockIn !== null).map((r) => (r.readyAt! - r.blockIn!) / 60))),
     avgStandMin: r1(avg(dep.filter((r) => r.blockIn !== null).map((r) => (r.blockOut! - r.blockIn!) / 60))),
     avgDepDelayMin: r1(avg(delayPairs.map((p) => p.departureSec / 60))),
     avgActualDepDelayMin: r1(avg(delayPairs.map((p) => p.actualDepartureSec / 60))),

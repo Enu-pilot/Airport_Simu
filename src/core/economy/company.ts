@@ -16,13 +16,14 @@ import { checkGoals, LEGACY_TIER_MAP, type GoalState } from './goals';
 import { isCityConfig, type CityConfig, type CityEvent, type CityType } from './city';
 import type { AirlineRequest, RequestKind } from './airlineEval';
 import type { ScoreComponent, ScoreKey } from './airlineScore';
+import type { MissBreakdownEntry } from '../sim/missBreakdown';
 
 /**
  * 空港会社（経営）の状態。建設モードと運航モードをまたいで保持し、レイアウトと一緒に保存する。
  * docs/14_management_rules.md
  */
 
-export type RevenueCategory = 'contract' | 'landing' | 'parking' | 'terminal' | 'groundHandling' | 'retail' | 'dining' | 'carPark' | 'transit' | 'hotel';
+export type RevenueCategory = 'contract' | 'landing' | 'parking' | 'terminal' | 'groundHandling' | 'retail' | 'dining' | 'carPark' | 'transit' | 'hotel' | 'cargo';
 export type CostCategory =
   | 'salary'
   | 'counterStaff'
@@ -33,7 +34,8 @@ export type CostCategory =
   | 'staffCommute'
   | 'groundOps'
   | 'compensation'
-  | 'disruption';
+  | 'disruption'
+  | 'cargoHandling';
 export type LedgerCategory = RevenueCategory | CostCategory | 'construction';
 
 export const REVENUE_CATEGORIES: readonly RevenueCategory[] = [
@@ -47,6 +49,7 @@ export const REVENUE_CATEGORIES: readonly RevenueCategory[] = [
   'carPark',
   'transit',
   'hotel',
+  'cargo',
 ];
 export const COST_CATEGORIES: readonly CostCategory[] = [
   'salary',
@@ -59,6 +62,7 @@ export const COST_CATEGORIES: readonly CostCategory[] = [
   'groundOps',
   'compensation',
   'disruption',
+  'cargoHandling',
 ];
 
 export type TimeWindow = 'morning' | 'daytime' | 'evening' | 'any';
@@ -188,6 +192,10 @@ export interface DailyReport {
   groundUtilization?: { kind: string; units: number; utilization: number }[];
   /** 資源待ちの内訳（5-02。当日の停止理由ごとの累計秒） */
   groundWaits?: { reason: string; sec: number }[];
+  /** 乗り遅れの詰まり箇所の内訳（乗り遅れがあった日だけ。人数の多い順。spotId は詰まったエリア/施設） */
+  missedBreakdown?: MissBreakdownEntry[];
+  /** 貨物の実績（5-12。貨物契約がある日だけ）: 実際に積み下ろしした量・積み残し・収支。収入と荷役費は台帳（revenue.cargo / cost.cargoHandling）にも計上済み */
+  cargo?: { carriedM3: number; leftoverM3: number; revenue: number; handlingCost: number; truckTrips: number };
   city?: { type: CityType; populationStart: number; populationEnd: number; demandCeiling: number; expectedPax: number; actualPax: number; cityFactor: number; roadQuality: number; railQuality: number; residentsStart?: number; residentsEnd?: number; residentDelta?: number; noiseMovements?: number; nightMovements?: number; noisePoints?: number; events?: CityEvent[]; eventDemandMultiplier?: number; eventTrafficMultiplier?: number };
 }
 
@@ -701,7 +709,7 @@ export function generatePhase4Offers(
 /**
  * 貨物契約の提案（5-12 CARGO-02）。専用の種で作り、従来の提案の乱数を消費しない。
  * 貨物機能が解放・有効化され、貨物サービスを持つ航空会社だけが対象。
- * 機種はその会社の保有機のうち貨物室容積が判明している最大のものを選ぶ（推定はしない）。
+ * 機種はその会社の保有機（旅客フリート＋貨物専用機）のうち貨物室容積が判明している最大のものを選ぶ（推定はしない）。
  */
 export function generateCargoOffers(
   c: CompanyState,
@@ -712,14 +720,17 @@ export function generateCargoOffers(
   const out: Contract[] = [];
   if (!featureOn(c, 'cargo') || !c.city) return out;
   const rng = new Rng(`${c.seed}:offersCargo:${c.day}`);
-  const open = () => contractsOf(c, 'offered').filter((k) => k.kind === 'cargo').length + out.length;
+  // addContract は生成と同時に c.contracts へ status 'offered' で登録するので、contractsOf だけで
+  // 生成直後の分も数えられる（out.length を足すと二重に数えて上限 2 件が実質 1 件になっていた）
+  const open = () => contractsOf(c, 'offered').filter((k) => k.kind === 'cargo').length;
   for (const a of airlinesFor(c)) {
     if (open() >= 2) break;
     if (!airlineCargoEligible(a.id)) continue;
     if (c.rating < (a.minimumAirportRating ?? 0)) continue;
     if (c.game?.goals && c.goals && a.unlock.minTier !== undefined && c.goals.tier < a.unlock.minTier) continue;
     const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && k.kind === 'cargo' && (k.status === 'active' || k.status === 'offered')).map((k) => k.destinationId));
-    const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId).filter((t) => operable.includes(t) && cargoHoldM3(t) !== null);
+    // 候補は旅客フリートのうち容積が判明している機種と、貨物専用機（cargoFleet。旅客フリートには入れない）
+    const own = [...new Set([...(c.fleets[a.id] ?? a.fleet).map((e) => e.typeId), ...(a.cargoFleet ?? [])])].filter((t) => operable.includes(t) && cargoHoldM3(t) !== null);
     if (own.length === 0) continue;
     const typeId = own.reduce((best, t) => ((cargoHoldM3(t) ?? 0) > (cargoHoldM3(best) ?? 0) ? t : best), own[0]!);
     const dests = destinationsFor(c).filter((d) => {

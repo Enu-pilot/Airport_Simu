@@ -4,13 +4,14 @@ import { serviceSecPerPax } from '../terminal/capacity';
 import type { SizeClass } from '../model/types';
 import { AIRCRAFT_TYPES, resolveType, type AircraftType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
 import { taskNeeds } from '../sim/tasks';
+import type { UnitKind } from '../sim/types';
 import { checkStand } from '../aircraft/compat';
 import { operableTypes, type SimContext } from '../sim/context';
 import { BALANCE } from './balance';
 import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
 import { planCargoDay } from './cargo';
 import { airlineDef, classifyRoute, destinationDef, HOME_COUNTRY_ID, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
-import { CITY_NIGHT_CURFEW, cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedPassengers } from './city';
+import { CITY_NIGHT_CURFEW, cityDemandCeiling, cityEventEffects, cityOperatingHours, contractTransferShare, expectedLocalPassengers } from './city';
 import { airportFireCategory, requiredFireCategory, towerCapacityPerHour, towerLevel } from '../safety';
 import { runwaySystemCapacity } from '../runwayCapacity';
 import { featureOn } from './unlocks';
@@ -330,12 +331,20 @@ export function planDayWithDemand(
       });
       const event = cityEventEffects(c.city, day);
       const ceiling = cityDemandCeiling(c.city, access) * event.demandMultiplier;
-      const total = plan.flights.reduce((s, f) => s + f.arrPax + f.depPax, 0);
-      if (total > ceiling && total > 0) {
-        const scale = ceiling / total;
+      // 乗継旅客は地元需要ではないので、上限は地元分（到着の非乗継分＋出発）にだけ効かせる（5-20 T8 の PO 判断）。
+      // 乗継分を残すことで、ハブ交通は地元上限を超えてよい
+      const contractsById = new Map(Object.values(c.contracts).map((k) => [k.id, k] as const));
+      const shareOf = (f: PlannedFlight): number => {
+        const k = contractsById.get(f.contractId);
+        return k ? contractTransferShare(c, k) : 0;
+      };
+      const localTotal = plan.flights.reduce((s, f) => s + f.arrPax * (1 - shareOf(f)) + f.depPax, 0);
+      if (localTotal > ceiling && localTotal > 0) {
+        const scale = ceiling / localTotal;
         for (const f of plan.flights) {
-          // 切り捨てで丸め直し、合計が上限を超えないことを保証する
-          f.arrPax = Math.floor(f.arrPax * scale);
+          // 乗継分はそのまま残し、地元分だけを切り捨てで縮める（合計の地元分が上限を超えないことを保証する）
+          const xfer = Math.round(f.arrPax * shareOf(f));
+          f.arrPax = xfer + Math.floor((f.arrPax - xfer) * scale);
           f.depPax = Math.floor(f.depPax * scale);
         }
       }
@@ -345,7 +354,8 @@ export function planDayWithDemand(
   const base = planDay(planningCompany, day, access, types, routeCapabilities);
   if (!c.city) return base;
   const event = cityEventEffects(c.city, day);
-  const expected = expectedPassengers(c, day, types, routeCapabilities);
+  // 係数の分母も地元分だけにする（乗継分まで上限で割ると、ハブ交通の源泉である到着旅客ごと削れてしまう）
+  const expected = expectedLocalPassengers(c, day, types, routeCapabilities);
   const factor = Math.min(1.1 * event.demandMultiplier, cityDemandCeiling(c.city, access) * event.demandMultiplier / Math.max(1, expected));
   return { ...planDay(planningCompany, day, access * factor, types, routeCapabilities), ...cutoff };
 }
@@ -465,6 +475,56 @@ export function turnaroundCapacity(ctx: SimContext): number {
     0,
     Math.min(Math.floor(v('staff') / STAFF_PER_TURNAROUND), eff('beltLoader'), eff('baggageTractor'), eff('fuelTruck') + ctx.hydrantStands.size, eff('cleaningVan'), eff('cateringTruck')),
   );
+}
+
+export interface TurnaroundCapacityDetail {
+  /** 同時に滞りなく処理できる折り返し機数（turnaroundCapacity と同じ前提） */
+  capacity: number;
+  /**
+   * 能力を 0 にしている前提不足（燃料施設・整備士・トーイングカー）。
+   * これらが 1 つでもある間は他の資源を増やしても能力は 0 のまま。
+   */
+  gates: { kind: 'fuelFarm' | 'engineer' | 'tug'; add: number }[];
+  /**
+   * 能力を決めている（ボトルネックの）資源と、同時処理を +1 機するために必要な追加数。
+   * 複数ある場合はすべてそろって初めて +1 機になる。
+   */
+  limiting: { kind: UnitKind; have: number; add: number }[];
+}
+
+/**
+ * turnaroundCapacity の内訳: どの資源が同時処理数を決めているかと、+1 機に必要な追加。
+ * 表示用（PropertiesPanel の地上支援詳細）。運航判定には使わない。
+ */
+export function turnaroundCapacityDetail(ctx: SimContext): TurnaroundCapacityDetail {
+  const u = groundUnitTotals(ctx);
+  const v = (k: string) => u[k] ?? 0;
+  const gates: TurnaroundCapacityDetail['gates'] = [];
+  if (!ctx.hasFuelFarm) gates.push({ kind: 'fuelFarm', add: 1 });
+  if (v('engineer') <= 0) gates.push({ kind: 'engineer', add: 1 });
+  if (v('tug') <= 0) gates.push({ kind: 'tug', add: 1 });
+  const capacity = turnaroundCapacity(ctx);
+  if (gates.length > 0) return { capacity, gates, limiting: [] };
+
+  const target = capacity + 1;
+  // 資源ごとの実効能力（turnaroundCapacity の式そのまま）と、target に届く最小の所持数
+  const rows: { kind: UnitKind; have: number; eff: number; add: number }[] = [];
+  const dutyRow = (kind: 'beltLoader' | 'baggageTractor' | 'fuelTruck' | 'cleaningVan' | 'cateringTruck') => {
+    const have = v(kind);
+    const duty = TURNAROUND_DUTY[kind] ?? 1;
+    const bonus = kind === 'fuelTruck' ? ctx.hydrantStands.size : 0;
+    let n = have;
+    while (Math.floor(n * duty) + bonus < target) n++;
+    rows.push({ kind, have, eff: Math.floor(have * duty) + bonus, add: n - have });
+  };
+  const staffHave = v('staff');
+  rows.push({ kind: 'staff', have: staffHave, eff: Math.floor(staffHave / STAFF_PER_TURNAROUND), add: Math.max(0, target * STAFF_PER_TURNAROUND - staffHave) });
+  dutyRow('beltLoader');
+  dutyRow('baggageTractor');
+  dutyRow('fuelTruck');
+  dutyRow('cleaningVan');
+  dutyRow('cateringTruck');
+  return { capacity, gates, limiting: rows.filter((r) => r.eff <= capacity).map(({ kind, have, add }) => ({ kind, have, add })) };
 }
 
 /**

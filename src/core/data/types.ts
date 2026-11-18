@@ -65,6 +65,9 @@ export interface AirlineInput {
   services: AirlineService[];
   /** 必須。1 件以上。機種は AIRCRAFT_TYPES に存在、座席 1〜機種の maxPax */
   fleet: { typeId: AircraftTypeId; seats: number }[];
+  /** 貨物専用機の機種 ID（5-12）。旅客フリートには入れない（座席を持たず、旅客提案にも混ぜない）。
+   * 貨物契約の提案でのみ候補になり、機種の貨物室容積が判明していること */
+  cargoFleet?: AircraftTypeId[];
   /** 便名の接頭辞。既定 = id */
   code?: string;
   /** 採算の基準搭乗率 0.3〜0.95。既定は種別値 */
@@ -118,6 +121,8 @@ export interface AirlineDef {
   code: string;
   name: string;
   type: AirlineType;
+  /** 貨物専用機の機種 ID（5-12。持つ会社だけ） */
+  cargoFleet?: AircraftTypeId[];
   fleet: FleetEntry[];
   priceSensitivity: number;
   minOtp: number;

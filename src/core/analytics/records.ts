@@ -1,7 +1,7 @@
 import type { Simulation } from '../sim/simulation';
 import { resolveType } from '../sim/aircraftTypes';
 import { TURNAROUND_TASKS } from '../sim/tasks';
-import { GROUND_MOVING_STATES, TERMINAL_STATES, type Aircraft, type ExternalDelayCause, type TaskKind } from '../sim/types';
+import { GROUND_MOVING_STATES, TERMINAL_STATES, isOvernightStay, type Aircraft, type ExternalDelayCause, type TaskKind } from '../sim/types';
 
 /**
  * 運営分析のための記録（docs/18_analytics.md）。シミュレーションの実際の状態から集める（推定値は含めない）。
@@ -60,6 +60,10 @@ export interface FlightRecord {
   international?: true;
   /** 乗継旅客を運んだ便だけ: 乗継旅客数（到着側の計画＋出発側の予定。0 や国内のみの記録にはキーがない） */
   transferPax?: number;
+  /** 夜間滞泊の記録だけ（折り返しではなく夜をまたいだ駐機。折り返し時間の集計から除く。滞泊でない記録にはキーがない） */
+  overnightStay?: true;
+  /** 貨物便の記録だけ（5-12。貨物は旅客評価とは別軸なので、航空会社評価と折り返し系の集計から除く。旅客便の記録にはキーがない） */
+  cargo?: true;
   busWaitSec?: number;
 }
 
@@ -170,6 +174,8 @@ function buildRecord(sim: Simulation, ac: Aircraft): FlightRecord {
     takeoffAt: dep.actual,
     ...(arr.externalDelaySec && Object.keys(arr.externalDelaySec).length > 0 ? { arrivalExternalDelaySec: { ...arr.externalDelaySec } } : {}),
     ...(arr.routeType === 'international' || dep.routeType === 'international' ? { international: true as const } : {}),
+    ...(isOvernightStay(arr, dep) ? { overnightStay: true as const } : {}),
+    ...(arr.cargo || dep.cargo ? { cargo: true as const } : {}),
     ...((arr.transferPlan?.reduce((sum, t) => sum + t.pax, 0) ?? 0) + (dep.plannedTransferIn ?? 0) > 0
       ? { transferPax: (arr.transferPlan?.reduce((sum, t) => sum + t.pax, 0) ?? 0) + (dep.plannedTransferIn ?? 0) }
       : {}),

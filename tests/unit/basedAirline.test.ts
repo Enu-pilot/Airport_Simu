@@ -17,6 +17,8 @@ function basedCompany(seed: string, opts: { perDay?: number; basedAircraft?: num
   for (let i = 1; i <= (opts.basedAircraft ?? 2); i++) {
     c.basedFleet[`ba_${i}`] = { id: `ba_${i}`, airlineId: 'SK', contractId: k.id, typeId: opts.typeId ?? 'B737-800', cycles: 0, lastCheckDay: null };
   }
+  // SAS（SK）は最低評価 80 で初期関係が作られないため、拠点会社として使うには関係の初期化が要る
+  c.airlines['SK'] ??= { satisfaction: 60, lowDays: 0 };
   return { c, k };
 }
 

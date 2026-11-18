@@ -323,7 +323,7 @@ export function intlProcessingReady(model: TerminalModel): boolean {
 
 const isLift = (k: TerminalAreaKind): boolean => k === 'stairs' || k === 'escalator' || k === 'elevator';
 
-function defaultVerticalCapacityPerHour(kind: TerminalAreaKind): number {
+export function defaultVerticalCapacityPerHour(kind: TerminalAreaKind): number {
   switch (kind) {
     case 'stairs': return 1800;
     case 'escalator': return 2400;

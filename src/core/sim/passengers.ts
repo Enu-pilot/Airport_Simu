@@ -2,7 +2,7 @@ import { Rng, seedFromString } from '../rng';
 import { compareIds } from '../model/ids';
 import { terminalLinkCapacityPerHour, WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
 import { findPaxRoute, linkBetween } from '../terminal/route';
-import { serviceSecPerPax } from '../terminal/capacity';
+import { areaServerCount, serviceSecPerPax } from '../terminal/capacity';
 import { resolveType } from './aircraftTypes';
 import { demandFactorAt } from './disruptions';
 import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt, reconcileDepartureBags, transferArrivalBags } from './baggage';
@@ -17,6 +17,7 @@ import { BALANCE } from '../economy/balance';
 import { onPaxDeplaned, onPaxMissed, onShopDone, onTransferMissed } from '../economy/ops';
 import { accessArrival, accessDeparture } from '../access/runtime';
 import { recordLinkUsage, unrecordLinkUsage } from './linkUsage';
+import { recordMissBreakdown, type MissBottleneck } from './missBreakdown';
 import type { Simulation } from './simulation';
 import {
   EVENT_LOG_LIMIT,
@@ -126,7 +127,7 @@ export function serversOf(sim: Simulation, key: string): number {
   if (key.startsWith('gate:')) return sim.state.closures.gates.includes(key.slice('gate:'.length)) ? 0 : 1;
   const a = sim.ctx.layout.terminalAreas[key];
   if (!a || isClosed(sim.state, key)) return 0;
-  return Math.max(0, Number(a.props.counters ?? a.props.booths ?? a.props.lanes ?? a.props.fixtures ?? a.props.capacity ?? 0));
+  return areaServerCount(a.props);
 }
 
 function perPaxSec(sim: Simulation, key: string): number {
@@ -177,6 +178,7 @@ export function stepPassengers(sim: Simulation): void {
   const { state } = sim;
   // 便・グループは ID の発行順に挿入されるため、Object の列挙順がそのまま決定的な処理順になる
   for (const f of Object.values(state.flights)) {
+    if (f.cargo) continue; // 貨物便（5-12）は旅客を生成しない
     if (f.pax.boarding === 'closed' && f.direction === 'departure') continue;
     if (f.direction === 'arrival' && f.pax.generated && f.pax.deplaneRemaining <= 0) continue;
     if (f.direction === 'departure') stepDepartureFlight(sim, f);
@@ -295,6 +297,61 @@ export function hubStatsOf(state: SimState): NonNullable<SimState['hubStats']> {
   return (state.hubStats ??= { spawned: 0, connected: 0, missed: 0, noShow: 0, byLink: {} });
 }
 
+/** エリア種別・ステップ → 詰まり分類（手続き系だけを対応付ける。それ以外は分類しない） */
+const AREA_KIND_BOTTLENECK: Partial<Record<AreaNode['kind'], MissBottleneck>> = {
+  checkIn: 'checkIn',
+  security: 'security',
+  emigration: 'emigration',
+  immigration: 'immigration',
+  customs: 'customs',
+  transferSecurity: 'transferSecurity',
+};
+const STEP_BOTTLENECK: Partial<Record<PaxStep, MissBottleneck>> = { ...AREA_KIND_BOTTLENECK };
+
+/**
+ * 乗り遅れが確定した瞬間の詰まり箇所を分類する（missGroups が area / facility を捨てる前に呼ぶ）。
+ * 判定の根拠:
+ * - 理由が構造的なもの（ゲートなし・到達不能・施設閉鎖・バスなし）は、その理由自体を分類にする。
+ * - 'late' は確定時点の状態で分ける。行列にいる間は、並んでいる施設がボトルネック
+ *   （facility キーはゲートが `gate:<施設ID>`、それ以外はエリア ID で、その種別が手続き先）。
+ *   移動中は徒歩、搭乗開始を待つ待機は搭乗口、空港へ向かう途中はアクセスとする。
+ * - 乗継客が手続きの行列の外（移動・待機）で締切を迎えた場合は、個別の手続きではなく乗継時間の不足として分ける
+ *   （乗継保安・入国審査の行列にいる場合はそちらの分類を優先する）。
+ */
+function classifyMiss(sim: Simulation, g: PaxGroup, reason: MissReason): { category: MissBottleneck; spotId: string | null } {
+  if (reason === 'noGate') return { category: 'noGate', spotId: null };
+  if (reason === 'noBus') return { category: 'bus', spotId: null };
+  if (reason === 'unreachable') return { category: 'unreachable', spotId: g.area };
+  if (reason === 'facilityClosed') return { category: 'facilityClosed', spotId: g.area };
+  // reason === 'late'（forced の場合に備え、状態由来の理由もここで拾う）
+  if (g.state === 'stranded') return { category: 'unreachable', spotId: g.area };
+  if (g.state === 'waitingFacility') return { category: 'facilityClosed', spotId: g.area };
+  if (g.state === 'waitingBus' || g.state === 'onBus') return { category: 'bus', spotId: null };
+  if (g.state === 'toAirport' || g.state === 'accessWalk' || g.state === 'waitingTransport') {
+    return { category: 'access', spotId: g.accessLeg?.facilityId ?? null };
+  }
+  if (g.state === 'queuing' || g.state === 'inService' || g.state === 'boardingQueue') {
+    const key = g.facility;
+    if (key) {
+      if (key.startsWith('gate:')) return { category: 'gate', spotId: key.slice('gate:'.length) };
+      const kind = sim.ctx.terminal.areas[key]?.kind;
+      const byKind = kind ? AREA_KIND_BOTTLENECK[kind] : undefined;
+      if (byKind) return { category: byKind, spotId: key };
+    }
+    const step = g.steps[g.stepIndex];
+    const byStep = step ? STEP_BOTTLENECK[step] : undefined;
+    if (byStep) return { category: byStep, spotId: g.area };
+    // トイレ・店舗など手続き系でない行列で締切を迎えた
+    return { category: 'other', spotId: g.area };
+  }
+  const step = g.steps[g.stepIndex];
+  if (step === 'transferSecurity') return { category: 'transferSecurity', spotId: g.area };
+  if (g.transfer) return { category: 'transferLate', spotId: g.area };
+  if (g.state === 'walking') return { category: 'walking', spotId: g.area };
+  if (g.state === 'dwelling' || step === 'gate') return { category: 'gate', spotId: g.area };
+  return { category: 'other', spotId: g.area };
+}
+
 export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null, pred: (g: PaxGroup) => boolean = () => true): number {
   const { state } = sim;
   const p = f.pax;
@@ -304,6 +361,8 @@ export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null
     if (PAX_FINAL_STATES.includes(g.state) || !pred(g)) continue;
     const reason: MissReason =
       forced ?? (!p.gateId ? 'noGate' : g.state === 'stranded' ? 'unreachable' : g.state === 'waitingFacility' ? 'facilityClosed' : 'late');
+    // 乗り遅れの内訳: area / facility を捨てる前に詰まり箇所を分類して記録する（欠航は乗り遅れに数えない）
+    const miss = reason !== 'cancelled' ? classifyMiss(sim, g, reason) : null;
     leaveFacility(state, g);
     g.state = reason === 'cancelled' ? 'cancelled' : 'missed';
     g.reason = reason;
@@ -312,6 +371,7 @@ export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null
     g.route = [];
     delete g.busTrip;
     if (reason !== 'cancelled') {
+      if (miss) recordMissBreakdown(state, miss.category, miss.spotId, g.count);
       p.missed += g.count;
       state.paxStats.missed += g.count;
       missed += g.count;
@@ -599,6 +659,8 @@ function addTransferGroup(
     g.finishedAt = state.now;
     g.area = null;
     if (!cancelled) {
+      // 乗り遅れの内訳: 締切後に生まれた乗継は、接続できなかったこと自体が理由（乗継時間の不足）
+      recordMissBreakdown(state, 'transferLate', null, size);
       dep.pax.missed += size;
       state.paxStats.missed += size;
       onTransferMissed(sim, size);

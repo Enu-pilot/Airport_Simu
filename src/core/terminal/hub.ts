@@ -1,6 +1,6 @@
 import type { AirportLayout } from '../model/types';
 import { canMove, WALK_SPEED_MPS, type TerminalModel } from './model';
-import { serviceSecPerPax } from './capacity';
+import { areaServerCount, serviceSecPerPax } from './capacity';
 
 export type TransferKind = 'DD' | 'DI' | 'ID' | 'II';
 export const TRANSFER_KINDS: readonly TransferKind[] = ['DD', 'DI', 'ID', 'II'];
@@ -38,7 +38,7 @@ const MIN_MCT_SEC = 30 * 60;
 function serversOfArea(layout: AirportLayout, areaId: string): number {
   const a = layout.terminalAreas[areaId];
   if (!a) return 0;
-  return Math.max(0, Number(a.props.counters ?? a.props.booths ?? a.props.lanes ?? a.props.fixtures ?? a.props.capacity ?? 0));
+  return areaServerCount(a.props);
 }
 
 /** 境界の工程の目安: 処理時間 × 5 人 / 窓口数 + 300 秒（窓口 0 なら通れない） */
