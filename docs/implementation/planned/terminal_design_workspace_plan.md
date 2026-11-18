@@ -100,3 +100,10 @@
 - 品質ゲート: 未実行
 - 未実行/未検証: すべて未実行
 - 残件: T1〜T7
+
+## Phase 6との関係
+
+- 本書は Phase 5 / 5-18「ターミナル専用設計Workspace」の詳細計画・進捗の正本であり、Phase 6では同じWorkspaceを作り直さない。
+- [Phase 6 総合計画](phase6_airport_facility_expansion_plan.md) の P2 は、本書のフロア・内部設備・接続・保存境界を前提として、施設能力インスペクター、サービス設定、能力オーバーレイを接続する。
+- 旅客工程能力・時系列・ピーク計測は [5-21](peak_hour_passenger_capacity_plan.md)、ターミナル詳細Simulationとの接続は [5-19](terminal_simulation_modes_plan.md) を参照する。
+- 本書のplanned状態・T1〜T7の進捗と受入条件は維持する。Phase 6への登録だけで実装開始・完了扱いにしない。
