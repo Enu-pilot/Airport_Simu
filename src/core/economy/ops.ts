@@ -136,7 +136,7 @@ export function dailyFixedCosts(ctx: SimContext, access: AccessAnalysis = analyz
     if (f.buildState !== 'operational') continue;
     if (f.kind === 'gate') counterStaff += D.gate;
     if (f.kind === 'terminal') utilities += f.w * f.h * Math.max(1, Number(f.props.levels ?? 1)) * D.utilitiesPerTerminalTile;
-    if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'hotel') accessOps += D.access[f.kind];
+    if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'busTerminal' || f.kind === 'hotel') accessOps += D.access[f.kind];
     if (f.kind === 'railStation') accessOps += D.access.railStation * RAIL_SERVICE[railServiceOf(f.props.railService)].operatingCostMultiplier;
   }
   return {

@@ -292,15 +292,15 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
   facilities.push({ id: 'access:curb', name: '車寄せ', kind: '車寄せ', state: 'operational', capacity: access.curbCapacityPerHour > 0 ? access.curbCapacityPerHour : null, demand: null, unit: 'vehicles/h', status: 'uncomputed', basis: `ターミナルに接する一般道路のタイル × ${BALANCE.accessModel.curbPerTile} 台/時。需要・実績は未算出` });
   const usableAccess = new Set(ACCESS_MODES.flatMap((m) => access.modes[m].facilities));
   for (const f of Object.values(ctx.layout.facilities).sort((a, b) => compareIds(a.id, b.id))) {
-    if (f.kind !== 'parking' && f.kind !== 'busStop' && f.kind !== 'taxiStand') continue;
+    if (f.kind !== 'parking' && f.kind !== 'busStop' && f.kind !== 'busTerminal' && f.kind !== 'taxiStand') continue;
     const used = f.buildState === 'operational' && usableAccess.has(f.id);
     const M = BALANCE.accessModel;
     const value = f.kind === 'parking'
       ? { cap: Number(f.props.spaces ?? 0), unit: 'units' as const, text: `駐車 ${Number(f.props.spaces ?? 0)} 台` }
-      : f.kind === 'busStop'
-        ? (() => { const perHour = Math.min(Number(f.props.busesPerHour ?? 0), Number(f.props.busBays ?? 0) * M.busesPerBay); return { cap: perHour * M.busSeats, unit: 'pax/h' as const, text: `バス ${perHour} 便/時 × ${M.busSeats} 人` }; })()
+      : f.kind === 'busStop' || f.kind === 'busTerminal'
+        ? (() => { const perHour = Math.min(Number(f.props.busesPerHour ?? 0), Number((f.kind === 'busTerminal' ? f.props.berths : f.props.busBays) ?? 0) * M.busesPerBay); return { cap: perHour * M.busSeats, unit: 'pax/h' as const, text: `バス ${perHour} 便/時 × ${M.busSeats} 人` }; })()
         : { cap: Number(f.props.berths ?? 0) * M.taxiPaxPerBerth, unit: 'pax/h' as const, text: `乗車枠 ${Number(f.props.berths ?? 0)} × ${M.taxiPaxPerBerth} 人/時` };
-    facilities.push({ id: f.id, name: f.name, kind: f.kind === 'parking' ? '駐車場' : f.kind === 'busStop' ? 'バス乗り場' : 'タクシー乗り場', state: stateOf(f.buildState), capacity: used ? value.cap : null, demand: null, unit: value.unit, status: 'uncomputed', basis: used ? `${value.text}。需要・実績は未算出` : `${f.buildState === 'operational' ? '外部道路への接続・ターミナルからの距離の条件を満たさず、アクセス手段として使われていない' : '運用状態ではない'}。容量は未算出` });
+    facilities.push({ id: f.id, name: f.name, kind: f.kind === 'parking' ? '駐車場' : f.kind === 'busStop' ? 'バス乗り場' : f.kind === 'busTerminal' ? 'バスターミナル' : 'タクシー乗り場', state: stateOf(f.buildState), capacity: used ? value.cap : null, demand: null, unit: value.unit, status: 'uncomputed', basis: used ? `${value.text}。需要・実績は未算出` : `${f.buildState === 'operational' ? '外部道路への接続・ターミナルからの距離の条件を満たさず、アクセス手段として使われていない' : '運用状態ではない'}。容量は未算出` });
   }
   const peakHour = analysis.hourly.movements.reduce((best, movements, hour) => movements > best.movements ? { hour, movements, departingPax: analysis.hourly.depPax[hour] ?? 0 } : best, { hour: 0, movements: 0, departingPax: 0 });
   const bottlenecks = summary.filter((m) => m.status === 'shortage' || m.status === 'warning').sort((a, b) => (b.utilization ?? 0) - (a.utilization ?? 0));

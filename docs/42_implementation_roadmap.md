@@ -182,15 +182,15 @@
 | 5-09 | 階層の未定義事項の決定と実装（内部設備の接続警告、建物の地下階、地下に置ける種類、全レイヤ表示中の配置先）。道路・鉄道ランプの画面からの建設 | docs/39 §10.3・§10.4 |
 | 5-10 | テスト不足の解消: 検証コード 29 種、都市イベント、旧形式の実ファイル、複合障害、保存サイズの上限。カバレッジ計測の導入（未計測を達成扱いにしない） | docs/39 §3 |
 | 5-11 | 保存データの間引き（運航状態が 1 日約 2.2 MB 増える） | docs/39 §3.1 |
-| 5-12 | 貨物（旅客の未完成部分の後） | docs/39 §7 A6 |
-| 5-13 | 旅客動線の3段階接続判定: 経路全体を「通行可能／建設完了待ち／未接続」に分類する。運用中経路を優先し、建設中経路は完成後の接続予測にだけ使う。旅客移動・構造検証・建設完了後の再探索へ反映し、内部通路の建設状態表現と連絡設備の工事進捗連携を整える | PO 依頼（2026-11-18）、[実装計画](implementation/planned/passenger_connectivity_status_plan.md) |
-| 5-14 | ターミナル階層・駅/バスターミナルの構造化: B3〜4Fを内部床階として扱い、railStation/busTerminalを独立構造物かつ建物内包可能にする。旧busStop・旧save互換を維持 | PO依頼（2026-11-18）、docs/34・39 §10.3 | [terminal_building_structure_plan.md](implementation/planned/terminal_building_structure_plan.md) |
-| 5-15 | ターミナル形状・複合体: 凹形ポリゴン建物に対応。辺接触または完成済み高層連絡通路で同一ターミナル複合体を判定。ただし同一complexと旅客通行可能は分離 | PO依頼（2026-11-18）、docs/22・35 | [terminal_complex_geometry_plan.md](implementation/planned/terminal_complex_geometry_plan.md) |
+| 5-12 | 貨物輸送・貨物取扱（旅客基盤の未完成部分の後に実装。空港格Tier3〜7で段階解放し、格解放の器は5-20と連携） | docs/39 §7 A6、[貨物計画](implementation/active/cargo_operations_plan.md)（着手 2026-11-18: PO 指示により随時実装。CARGO-01 需要モデル・航空会社適格と CARGO-03 機種容量の基盤を実施済み） |
+| 5-13 | 旅客動線の3段階接続判定: 経路全体を「通行可能／建設完了待ち／未接続」に分類する。運用中経路を優先し、建設中経路は完成後の接続予測にだけ使う。旅客移動・構造検証・建設完了後の再探索へ反映し、内部通路の建設状態表現と連絡設備の工事進捗連携を整える | PO 依頼（2026-11-18）、[実装計画](implementation/active/passenger_connectivity_status_plan.md)（中核実施済み 2026-11-18: 3状態判定 classifyPaxConnection と連絡設備の建設プロジェクト連携。旅客/検証への反映は残件） |
+| 5-14 | ターミナル階層・駅/バスターミナルの構造化: B3〜4Fを内部床階として扱い、railStation/busTerminalを独立構造物かつ建物内包可能にする。旧busStop・旧save互換を維持 | PO依頼（2026-11-18）、docs/34・39 §10.3 | [terminal_building_structure_plan.md](implementation/active/terminal_building_structure_plan.md)（実施済み 2026-11-18: B3〜4F は PR #21、busTerminal 新規種別・階層優先の明文化・内部施設の能力非加算をテストで固定。内包駅の能力接続は 5-16 のポータル設計へ） |
+| 5-15 | ターミナル形状・複合体: 凹形ポリゴン建物に対応。辺接触または完成済み高層連絡通路で同一ターミナル複合体を判定。ただし同一complexと旅客通行可能は分離 | PO依頼（2026-11-18）、docs/22・35 | [terminal_complex_geometry_plan.md](implementation/active/terminal_complex_geometry_plan.md)（基盤実施済み 2026-11-18: footprint 形状・タイル化・複合体導出。描画 UI・割当て分離・描画/性能は残件） |
 | 5-16 | 対外交通を含む階層旅客動線: 駐車場・車寄せ・タクシー・バス・鉄道・徒歩の外部接続から徒歩Portal・ターミナル入口・各搭乗口/到着出口までを統合し、往路/復路・階層・Step-free・建設状態を検証してPaxGroupへ反映 | PO依頼（2026-11-18）、docs/15・34・35、5-13〜5-15 | [passenger_network_unification_plan.md](implementation/planned/passenger_network_unification_plan.md) |
 | 5-17 | 誘導路実幅・機体適合・高速離脱誘導路: 実幅/肩幅/主脚・翼端余裕・曲線フィレットを分離し、RETの角度/半径/占有時間を運航へ反映 | PO依頼（2026-11-18）、FAA AC 150/5300-13B Chg1、EASA ADR-DSN.D.245/.295 | [taxiway_realism_plan.md](implementation/planned/taxiway_realism_plan.md) |
 | 5-18 | ターミナル専用設計画面: 建物選択から専用workspaceを開き、B3〜4Fの平面・接続・設備・能力・メッシュを編集し、対外交通6手段×方向×ゲート/出口の接続状況をマトリクス/経路ハイライトで検証 | PO依頼（2026-11-18）、docs/15・34・35 | [terminal_design_workspace_plan.md](implementation/planned/terminal_design_workspace_plan.md) |
 | 5-19 | 2種類の運航モード: 空港全体を既存clockで1日進行させる運航モード（ターミナルは全館/メッシュ集約）と、独立clockで選択ターミナル/複合体を詳細シミュレーションするモードを実装。両方で車・送迎・タクシー・バス・鉄道・徒歩を含む旅客アクセスと、外部〜入口〜搭乗口/到着出口〜外部の動線を検証 | PO依頼（2026-11-18）、docs/12・15・34・35・44、5-16・5-18 | [terminal_simulation_modes_plan.md](implementation/planned/terminal_simulation_modes_plan.md) |
-| 5-20 | 空港格の8段階化・成長判定の多軸化: 飛行場〜メガハブの8段階、規模・運営品質・施設能力・ネットワーク・経営継続性による昇格、格別の機能解放と旧格3の互換移行 | PO依頼（2026-11-18）、docs/30 §4・docs/44 §1 | [airport_tier_progression_plan.md](implementation/planned/airport_tier_progression_plan.md) |
+| 5-20 | 空港格の8段階化・成長判定の多軸化: 飛行場〜メガハブの8段階、規模・運営品質・施設能力・ネットワーク・経営継続性による昇格、格別の機能解放と旧格3の互換移行。貨物はTier3国内貨物→Tier4国際貨物→Tier5〜7取扱規模・物流網の拡張として段階解放し、昇格の必須条件にはしない | PO依頼（2026-11-18）、docs/30 §4・docs/44 §1、[貨物計画](implementation/planned/cargo_operations_plan.md) | [airport_tier_progression_plan.md](implementation/planned/airport_tier_progression_plan.md) |
 | 5-21 | 最混雑60分の評価・ターミナル別工程能力: アクセス、チェックイン、保安検査、トイレ、ランプバス等について、理論能力・同一60分窓の需要・実績処理人数・使用率・待ちを分けて表示。共有設備の能力をターミナルごとに重複計上しない | PO依頼（2026-11-18）、docs/33・35 | [peak_hour_passenger_capacity_plan.md](implementation/planned/peak_hour_passenger_capacity_plan.md) |
 | 5-22 | 空港全体/ターミナル詳細の共通シナリオ定義と比較: Phase 8の既存比較機能を再利用し、同一需要・便・アクセス供給・seedから両モードを実行。ベースライン/代替案の差分と比較可能なKPIを表示 | PO依頼（2026-11-18）、既存Phase 8、5-19・5-21 | [scenario_comparison_plan.md](implementation/planned/scenario_comparison_plan.md) |
 | 5-23 | 旅客Door-to-Door KPI: 外部交通境界〜搭乗ゲート、到着ゲート〜外部退出、乗継ゲート間の全所要時間・工程別時間p50/p95、搭乗締切前到達/搭乗完了率、Step-free率を計測。人数重み付き分位点と未計測を正しく扱う | PO依頼（2026-11-18）、5-16・5-19・5-21 | [passenger_door_to_door_kpi_plan.md](implementation/planned/passenger_door_to_door_kpi_plan.md) |
@@ -210,10 +210,14 @@
 - 5-09 階層の残件: 完了（建物の地下階はターミナル拡張 B3〜4F で対応済み）。W-3 内部設備の接続警告、W-7 地下に置ける種類の確定（駐車場・従業員駐車場・鉄道駅のみ）、W-11 全レイヤ表示中の配置先の分離、W-9 階層接続の候補への距離・可否表示。仕様は docs/34。単体テスト levels509 5 件＋検証まわりの回帰で確認。
 - 翌朝持ち越し便の出発準備完了判定の修正（OD 計画）: 完了。詳細は docs/implementation/completed/overnight_departure_readiness_fix_plan.md と docs/44 §8。
 - 運航フィンガープリント: 5-02/5-03/5-04 の日報追加項目により会社データを含む 2 件の基準値を再採取した（2026-11-18、ユーザー承認済み）。追加項目を除いたハッシュは旧基準値と一致し、運航は無変更。
+- 5-11（保存データの間引き）: 保存スナップショットを作るときに、前日以前に終わった便と付随する旅客グループ・手荷物・
+  タスク・機体を取り除く（`src/core/sim/thin.ts`、buildProject の複製にだけ適用し実行中の状態は変えない＝フィンガープリント不変）。
+  生きている機体の参照便と当日の便はすべて残し、復元時の整合性チェックが通ることを実セーブと 2 日運用のテストで確認。
+  保存サイズは「レイアウト＋会社＋約 1 日分の運航状態」で頭打ちになる。
 - 5-07 目標の連鎖・都市イベントの判断化: 完了。目標は固定 12 個の達成後に生成目標が 1 つずつ続く（発着→旅客→定時率連続の 3 種を繰り返し、1 周ごとに目標値と報酬が上がる。`goals.ts` の chainGoalAt、状態は goals.chain）。都市イベントは協力費（規模² × 日数 × 40,000 cr、開催前の取消は全額返金）と混雑リスク（規模で 20〜30%、ID から決定的に判定。混雑時は需要の伸び半分・交通 2 倍）を持つ判断にした。従来の無償イベントは対象外で効果は不変。単体テスト goalsEvents507 6 件で確認。
-- 5-11 保存データの間引き: 完了。保存スナップショット作成時に前日以前の終了便と付随する旅客グループ・手荷物・タスク・機体を取り除く（`src/core/sim/thin.ts`、buildProject の複製にだけ適用し実行中の状態は変えない＝フィンガープリント不変）。生きている機体の参照便と当日の便は残し、復元の整合性が保たれることを実セーブと 2 日運用のテスト（thinSave 2 件）で確認。保存サイズは約 1 日分で頭打ちになる。
-- 5-10 テスト補完: 完了。検証コード 29 種すべてに個別テストを追加（validationCodes510 29 件）。都市イベントのストアテスト（協力費・資金不足・返金）、複合障害（悪天候＋滑走路閉鎖＋スポット閉鎖の同時発生で不変条件を維持）、実ファイル（プレイヤーの実セーブ v6）の読み込み検証を追加（gaps510 5 件）。実ファイル検証で、持ち越し便を含むセーブが読み込み検証で弾かれる不具合（G2/O1 の判定が運航側の skip・離陸済みと不整合）を発見し検証側を修正した。カバレッジ計測は @vitest/coverage-v8 と `npm run test:coverage` を導入（対象は src/core）。全体の計測値は全テスト実行時に取得するもので、未計測の数値を達成扱いにしない。
-- 未着手: 5-12（貨物。詳細計画は [cargo_operations_plan.md](implementation/planned/cargo_operations_plan.md)、基盤ゲート待ち）。5-13〜5-25 は個別計画（docs/implementation/README.md）を参照。
+- 5-10 テスト補完: 完了（PR #26）。検証コード 29 種の個別テスト、都市イベントのストアテスト、複合障害テスト、実セーブの読み込み検証、カバレッジ計測の導入（全体の計測値は未計測）。
+- 5-12 貨物: 着手（2026-11-18、PO 指示により基盤ゲートに先行して随時実装）。CARGO-01（貨物需要モデル・航空会社の貨物適格）と CARGO-03（機種の貨物室容積の参照）の基盤を実施済み。格による段階解放（CARGO-08）は 5-20 の基盤と連携して後続で実装する。
+- 5-13〜5-25 は個別計画（docs/implementation/README.md）を参照。
 
 ### 3.6 フェーズをまたぐ依存関係
 
@@ -260,7 +264,7 @@
 | F3 | [風向・風速に応じた滑走路運用方向](implementation/planned/wind_runway_direction_plan.md) | 計画作成済み・基盤待ち | 5-24の方向別夜間運用との整合、滑走路予約/占有の設計レビュー |
 | F4 | [除雪・路面雪氷処理・航空機防除氷](implementation/planned/snow_removal_deicing_plan.md) | 計画作成済み・基盤待ち | 5-17の誘導路実幅、5-25のWork Order/整備シフト、5-21の能力計測 |
 
-- A6 は既存の Phase 5 5-12 を詳細化したもので、別の貨物要求を重複作成しない。
+- A6 は既存の Phase 5 5-12 を詳細化したもので、別の貨物要求を重複作成しない。貨物はTier3〜7で段階解放し、貨物運営を格昇格の必須条件にしない。詳細な解放表は空港格計画と貨物計画を正本とする。
 - D4 はブランド特性の表示と航空会社提案への効果を段階分離する。空港格・総合評価の変更はこの計画だけで承認されたものと扱わない。
 - K1 は既存の手動シナリオ比較を基盤にする。候補の自動適用や幾何レイアウトの自動設計は初期範囲に含めない。
 - F3/F4 はいずれもゲーム用の簡略モデルとし、現実の航空安全・気象・除雪基準への適合を主張しない。

@@ -39,6 +39,8 @@ const FACILITY_DAYS: Partial<Record<FacilityKind, number>> = {
   staffParking: 1,
   taxiStand: 1,
   busStop: 1,
+  busTerminal: 3,
+  cargoTerminal: 4,
   railStation: 5,
   hotel: 4,
 };
@@ -47,10 +49,13 @@ const FACILITY_DAYS: Partial<Record<FacilityKind, number>> = {
 type Buildable = { buildState: BuildState };
 
 function entityOf(layout: AirportLayout, id: string): Buildable | undefined {
-  return layout.runways[id] ?? layout.taxiways[id] ?? layout.roads[id] ?? layout.stands[id] ?? layout.facilities[id];
+  return layout.runways[id] ?? layout.taxiways[id] ?? layout.roads[id] ?? layout.stands[id] ?? layout.facilities[id] ?? layout.terminalLinks?.[id];
 }
 
 export function buildDays(layout: AirportLayout, id: string): number {
+  // 5-13 T4: ターミナル間連絡設備も建設プロジェクトの対象。工期は既存の道路と同じ 1 日
+  // （新しい値を根拠なく追加しない。計画書 §3.4 の判断記録参照）。
+  if (layout.terminalLinks?.[id]) return BUILD_DAYS.road;
   const f = layout.facilities[id];
   if (f) return FACILITY_DAYS[f.kind] ?? BUILD_DAYS.facility;
   const t = entityTypeOf(id);
@@ -72,6 +77,8 @@ function geometry(layout: AirportLayout, id: string): string {
   if (s) return JSON.stringify([s.origin, s.size, s.rotation]);
   const f = layout.facilities[id];
   if (f) return JSON.stringify([f.origin, f.w, f.h, f.rotation, f.kind === 'terminal' ? f.props.levels : 0]);
+  const lk = layout.terminalLinks?.[id];
+  if (lk) return JSON.stringify([lk.fromAreaId, lk.toAreaId, lk.kind]);
   return '';
 }
 
@@ -100,6 +107,7 @@ function allIds(layout: AirportLayout): string[] {
     ...Object.keys(layout.roads),
     ...Object.keys(layout.stands),
     ...Object.keys(layout.facilities),
+    ...Object.keys(layout.terminalLinks ?? {}),
   ];
 }
 

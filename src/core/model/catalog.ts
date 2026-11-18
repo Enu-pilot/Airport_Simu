@@ -23,7 +23,7 @@ export const ROAD_DRAW_WIDTH_M = { road: 12, rail: 8, walkway: 5, fuel: 2 } as c
 export const FACILITY_HEIGHT_M: Partial<Record<FacilityKind, number>> = {
   terminal: 18, tower: 45, hangar: 24, maintenance: 14, fuelFarm: 10, fireStation: 9,
   gseBase: 6, baggageSort: 10, serviceArea: 6, parking: 3, gate: 6, apron: 0.2,
-  railStation: 8, taxiStand: 2, busStop: 3, staffParking: 1, hotel: 18,
+  railStation: 8, taxiStand: 2, busStop: 3, busTerminal: 6, cargoTerminal: 9, staffParking: 1, hotel: 18,
 };
 
 /** 占有判定のレイヤー。重なりの可否は validation の互換表で決める */
@@ -73,6 +73,8 @@ export const FACILITY_SPECS: Record<FacilityKind, FacilitySpec> = {
   parking: { layer: 'area', defaultW: 8, defaultH: 5, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
   taxiStand: { layer: 'area', defaultW: 3, defaultH: 2, resizable: false, minW: 3, minH: 2, dragPlace: false, needsAirsideAccess: false },
   busStop: { layer: 'area', defaultW: 4, defaultH: 2, resizable: false, minW: 4, minH: 2, dragPlace: false, needsAirsideAccess: false },
+  busTerminal: { layer: 'building', defaultW: 8, defaultH: 3, resizable: true, minW: 4, minH: 2, dragPlace: false, needsAirsideAccess: false },
+  cargoTerminal: { layer: 'building', defaultW: 10, defaultH: 6, resizable: true, minW: 6, minH: 4, dragPlace: false, needsAirsideAccess: true },
   railStation: { layer: 'building', defaultW: 6, defaultH: 3, resizable: false, minW: 6, minH: 3, dragPlace: false, needsAirsideAccess: false },
   staffParking: { layer: 'area', defaultW: 6, defaultH: 4, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
   hotel: { layer: 'building', defaultW: 5, defaultH: 4, resizable: false, minW: 5, minH: 4, dragPlace: false, needsAirsideAccess: false },
@@ -143,6 +145,11 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
     { key: 'busBays', type: 'int', min: 1, max: 10 },
     { key: 'busesPerHour', type: 'int', min: 1, max: 30 },
   ],
+  busTerminal: [
+    { key: 'berths', type: 'int', min: 1, max: 20 },
+    { key: 'busesPerHour', type: 'int', min: 1, max: 60 },
+  ],
+  cargoTerminal: [{ key: 'throughputM3PerHour', type: 'int', min: 10, max: 500 }],
   railStation: [
     { key: 'level', type: 'int', min: -5, max: 10 },
     { key: 'trainsPerHour', type: 'int', min: 1, max: 20 },
@@ -169,6 +176,8 @@ export const DEFAULT_PROPS: Record<FacilityKind, Record<string, PropValue>> = {
   parking: { spaces: 400 },
   taxiStand: { berths: 4 },
   busStop: { busBays: 2, busesPerHour: 4 },
+  busTerminal: { berths: 4, busesPerHour: 12 },
+  cargoTerminal: { throughputM3PerHour: 60 },
   railStation: { trainsPerHour: 4 },
   staffParking: { spaces: 120 },
   hotel: { rooms: 200 },

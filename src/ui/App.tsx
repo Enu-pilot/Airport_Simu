@@ -47,7 +47,7 @@ const OVERLAY_LABEL: Record<keyof Overlays, string> = {
 export function App() {
   useEffect(() => {
     const isEditable = (t: EventTarget | null) =>
-      t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA');
+      t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.tagName === 'SUMMARY');
     const down = (e: KeyboardEvent) => {
       if (isEditable(e.target)) return;
       // 運航モードの大きなオーバーレイは Esc で閉じる（他のキー処理より先）

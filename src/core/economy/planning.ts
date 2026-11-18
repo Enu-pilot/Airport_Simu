@@ -188,6 +188,8 @@ export function planDay(
   const dropped: string[] = [];
   const unsupportedRoutes: DayPlan['unsupportedRoutes'] = [];
   for (const k of activeContractsOn(c, day)) {
+    // 貨物契約（5-12）は旅客便を生成しない。貨物の運搬量は cargo.ts の planCargoDay が別に計算する
+    if (k.kind === 'cargo') continue;
     const availability = routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities);
     if (availability !== 'available') {
       unsupportedRoutes.push({ contractId: k.id, destinationId: k.destinationId, reason: availability });

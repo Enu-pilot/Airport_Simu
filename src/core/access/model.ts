@@ -169,8 +169,9 @@ export function analyzeAccess(
     walkTiles: number;
     walkMin?: number;
   }
-  const usable = (kind: Facility['kind'], conn: Record<number, Set<string>>, maxWalk: number): Usable => {
-    const all = facilities.filter((f) => f.kind === kind);
+  const usable = (kind: Facility['kind'] | readonly Facility['kind'][], conn: Record<number, Set<string>>, maxWalk: number): Usable => {
+    const kinds = Array.isArray(kind) ? kind : [kind];
+    const all = facilities.filter((f) => kinds.includes(f.kind));
     if (all.length === 0) return { facilities: [], reason: 'noFacility', walkTiles: 0 };
     const connected = all.filter((f) => touchesTilesAtLevel(f, conn, facilityLevel(f)));
     if (connected.length === 0) return { facilities: [], reason: 'notConnected', walkTiles: 0 };
@@ -181,7 +182,7 @@ export function analyzeAccess(
 
   const parking = usable('parking', net.publicTilesByLevel, PARKING_MAX_WALK_TILES);
   const taxi = usable('taxiStand', net.publicTilesByLevel, ACCESS_MAX_WALK_TILES);
-  const bus = usable('busStop', net.publicTilesByLevel, ACCESS_MAX_WALK_TILES);
+  const bus = usable(['busStop', 'busTerminal'], net.publicTilesByLevel, ACCESS_MAX_WALK_TILES);
   const railNetwork = usable('railStation', net.railTilesByLevel, Number.MAX_SAFE_INTEGER);
   const terminalsForAccess = terminals.filter((f) => f.buildState === 'operational');
   const railRoutes = new Map<string, WalkRoute>();
@@ -218,7 +219,7 @@ export function analyzeAccess(
   const hotel = usable('hotel', net.publicTilesByLevel, ACCESS_MAX_WALK_TILES);
   const parkingSpaces = parking.facilities.reduce((s, f) => s + num(f.props.spaces), 0);
   const taxiBerths = taxi.facilities.reduce((s, f) => s + num(f.props.berths), 0);
-  const busesPerHour = bus.facilities.reduce((s, f) => s + Math.min(num(f.props.busesPerHour), num(f.props.busBays) * M.busesPerBay), 0);
+  const busesPerHour = bus.facilities.reduce((s, f) => s + Math.min(num(f.props.busesPerHour), num(f.kind === 'busTerminal' ? f.props.berths : f.props.busBays) * M.busesPerBay), 0);
   const declaredTrainsPerHour = rail.facilities.reduce((s, f) => s + num(f.props.trainsPerHour), 0);
   // フェーズ 4 §6.2: 区間能力モデルのときだけ区間解析を行い、鉄道の実効本数を使う（集約の値は比較用に残す）
   const segments = layout.accessCapacityModel === 'segment'

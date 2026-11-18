@@ -2,6 +2,7 @@ import { STAND_DIMS, FACILITY_SPECS, type FootprintLayer } from '../model/catalo
 import type { AirportLayout, Facility, NetNode, Rotation, Stand } from '../model/types';
 import { rasterizePolygon, rasterizeSegment, type Tile, type Vec2 } from '../geometry/vec';
 import { tilesOverlappingPolygon } from '../geometry/raster';
+import { orthogonalPolygonTiles, rectRing } from '../geometry/polygon';
 import type { WorldPoint } from '../geometry/frames';
 import { isFreeRunway } from '../model/types';
 import { runwayPolygon, runwayStripPolygon } from './runway';
@@ -26,8 +27,17 @@ export function facilityDims(f: Pick<Facility, 'w' | 'h' | 'rotation'>): { w: nu
 }
 
 export function facilityTiles(f: Facility): Tile[] {
+  // 5-15: footprint（直交ポリゴン）があればそれを占有形状とする。なければ従来の矩形。
+  if (f.footprint && f.footprint.length >= 4) return orthogonalPolygonTiles(f.footprint);
   const d = facilityDims(f);
   return rectTiles(f.origin, d.w, d.h);
+}
+
+/** 施設の外形リング（footprint があればそれ、なければ矩形リング）。複合体判定・描画の共通入口 */
+export function facilityOutline(f: Facility): Tile[] {
+  if (f.footprint && f.footprint.length >= 4) return [...f.footprint];
+  const d = facilityDims(f);
+  return rectRing(f.origin, d.w, d.h);
 }
 
 export function standDims(s: Pick<Stand, 'size' | 'rotation'>): { w: number; h: number } {

@@ -69,3 +69,32 @@ export function findPaxRoute(model: TerminalModel, q: PaxRouteQuery): PaxRoute |
 export function linkBetween(model: TerminalModel, a: string, b: string) {
   return (model.links[a] ?? []).find((l) => l.to === b) ?? null;
 }
+
+/* ------------------------------------------------------------------ */
+/* 旅客接続の3状態判定（5-13）                                          */
+/* ------------------------------------------------------------------ */
+
+export type PaxConnectionStatus = 'operational' | 'underConstruction' | 'unreachable';
+
+export interface PaxConnection {
+  status: PaxConnectionStatus;
+  /** 現在通行できる経路（operational のときのみ）。実際に旅客を歩かせてよいのはこれだけ */
+  route: PaxRoute | null;
+  /** 建設完了後に成立する経路（underConstruction のときのみ）。診断専用で、旅客に設定してはならない */
+  futureRoute: PaxRoute | null;
+}
+
+/**
+ * 起点から目的地までの接続を3状態で判定する。
+ * current は operational のみのモデル、future は underConstruction も含むモデル
+ * （buildTerminalModel(layout, { includeUnderConstruction: true })）。
+ * 運用中の迂回路があれば、建設中設備が別にあっても operational を優先する。
+ * planned のリンクはどちらのモデルにも含まれないため「完成待ち」にはならない。
+ */
+export function classifyPaxConnection(current: TerminalModel, future: TerminalModel, q: PaxRouteQuery): PaxConnection {
+  const route = findPaxRoute(current, q);
+  if (route) return { status: 'operational', route, futureRoute: null };
+  const futureRoute = findPaxRoute(future, q);
+  if (futureRoute) return { status: 'underConstruction', route: null, futureRoute };
+  return { status: 'unreachable', route: null, futureRoute: null };
+}

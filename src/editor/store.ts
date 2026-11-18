@@ -556,7 +556,7 @@ export function setCompanyCity(city: CityConfig | null): void {
 }
 
 /** フェーズ 4 の機能の有効化を付け外しする（建設モード。解放の判定は unlocks.ts） */
-export function setCompanyFeatures(features: { overnight?: true; based?: true; international?: true; hub?: true } | null): void {
+export function setCompanyFeatures(features: { overnight?: true; based?: true; international?: true; hub?: true; cargo?: true } | null): void {
   const s = get();
   if (s.mode === 'operate') return;
   const company = structuredClone(s.company);

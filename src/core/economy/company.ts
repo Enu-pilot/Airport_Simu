@@ -10,6 +10,7 @@ import { checkAirlineEval, type AirlineEvalState } from './airlineEval';
 import { checkMarket, type MarketSettings } from './market';
 import type { BasedAircraft, CarryOverAircraft, HubSettings } from './phase4Types';
 import { featureForContractKind, featureOn } from './unlocks';
+import { airlineCargoEligible, cargoHoldM3, routeCargoDemandM3 } from './cargo';
 import { aircraftIsLow, complaintCount, COMPLAINTS_BLOCK_INCREASE, increaseMinSatRelief, offerBoost, tierBonus } from './evalRules';
 import { checkGoals, type GoalState } from './goals';
 import { isCityConfig, type CityConfig, type CityEvent, type CityType } from './city';
@@ -62,7 +63,7 @@ export const COST_CATEGORIES: readonly CostCategory[] = [
 
 export type TimeWindow = 'morning' | 'daytime' | 'evening' | 'any';
 
-export type ContractKind = 'turnaround' | 'overnight' | 'based';
+export type ContractKind = 'turnaround' | 'overnight' | 'based' | 'cargo';
 
 export interface Contract {
   id: string;
@@ -245,7 +246,7 @@ export interface CompanyState {
   /** 路線需要モデル（フェーズ 3）。city がある会社だけ有効 */
   market?: MarketSettings;
   /** フェーズ 4 の機能の有効化（解放は unlocks.ts の判定が別にある） */
-  features?: { overnight?: true; based?: true; international?: true; hub?: true };
+  features?: { overnight?: true; based?: true; international?: true; hub?: true; cargo?: true };
   /** 日付をまたぐ機体の記録（フェーズ 4 §3.3） */
   carryOver?: { forDay: number; aircraft: CarryOverAircraft[] };
   /** 拠点契約の所属機 */
@@ -635,6 +636,7 @@ export function generateOffers(
     }
   });
   out.push(...generatePhase4Offers(c, operable, originCountryId, internationalPassengerProcessing));
+  out.push(...generateCargoOffers(c, operable, originCountryId, internationalPassengerProcessing));
   return out;
 }
 
@@ -692,6 +694,49 @@ export function generatePhase4Offers(
         }));
       }
     }
+  }
+  return out;
+}
+
+/**
+ * 貨物契約の提案（5-12 CARGO-02）。専用の種で作り、従来の提案の乱数を消費しない。
+ * 貨物機能が解放・有効化され、貨物サービスを持つ航空会社だけが対象。
+ * 機種はその会社の保有機のうち貨物室容積が判明している最大のものを選ぶ（推定はしない）。
+ */
+export function generateCargoOffers(
+  c: CompanyState,
+  operable: readonly AircraftTypeId[],
+  originCountryId = HOME_COUNTRY_ID,
+  internationalPassengerProcessing = false,
+): Contract[] {
+  const out: Contract[] = [];
+  if (!featureOn(c, 'cargo') || !c.city) return out;
+  const rng = new Rng(`${c.seed}:offersCargo:${c.day}`);
+  const open = () => contractsOf(c, 'offered').filter((k) => k.kind === 'cargo').length + out.length;
+  for (const a of airlinesFor(c)) {
+    if (open() >= 2) break;
+    if (!airlineCargoEligible(a.id)) continue;
+    if (c.rating < (a.minimumAirportRating ?? 0)) continue;
+    if (c.game?.goals && c.goals && a.unlock.minTier !== undefined && c.goals.tier < a.unlock.minTier) continue;
+    const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && k.kind === 'cargo' && (k.status === 'active' || k.status === 'offered')).map((k) => k.destinationId));
+    const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId).filter((t) => operable.includes(t) && cargoHoldM3(t) !== null);
+    if (own.length === 0) continue;
+    const typeId = own.reduce((best, t) => ((cargoHoldM3(t) ?? 0) > (cargoHoldM3(best) ?? 0) ? t : best), own[0]!);
+    const dests = destinationsFor(c).filter((d) => {
+      if (served.has(d.id)) return false;
+      if (c.rating < (d.minimumAirportRating ?? 0)) return false;
+      if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
+      if (routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) !== 'available') return false;
+      return (routeCargoDemandM3(c, d) ?? 0) >= BALANCE.cargo.minRouteDemandM3;
+    });
+    if (dests.length === 0) continue;
+    const dest = dests[rng.int(0, dests.length - 1)]!;
+    out.push(addContract(c, {
+      airlineId: a.id, destinationId: dest.id, typeId,
+      perDay: rng.int(1, 2), window: 'any', feeDiscount: 0.1,
+      startDay: c.day, endDay: c.day + BALANCE.offers.contractDays - 1, status: 'offered',
+      offerExpiresDay: c.day + BALANCE.offers.expireDays, kind: 'cargo',
+    }));
   }
   return out;
 }

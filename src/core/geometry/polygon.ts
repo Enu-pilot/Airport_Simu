@@ -173,3 +173,94 @@ export function polygonMinDistance(A: readonly Vec2[], B: readonly Vec2[]): numb
   }
   return best;
 }
+
+/* ------------------------------------------------------------------ */
+/* 直交ポリゴン（5-15: ターミナル建物の複雑形状）                        */
+/* ------------------------------------------------------------------ */
+
+export type OrthogonalPolygonIssue =
+  | 'tooFewPoints'
+  | 'nonInteger'
+  | 'nonOrthogonal'
+  | 'zeroLengthEdge'
+  | 'duplicatePoint'
+  | 'selfIntersecting'
+  | 'zeroArea';
+
+/** 2 区間（軸平行）の交差判定（端点共有を含む） */
+function segmentsTouchOrCross(a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean {
+  const abH = a.y === b.y;
+  const cdH = c.y === d.y;
+  if (abH && cdH) {
+    if (a.y !== c.y) return false;
+    return Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x)) <= Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x));
+  }
+  if (!abH && !cdH) {
+    if (a.x !== c.x) return false;
+    return Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y)) <= Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+  }
+  const h = abH ? [a, b] : [c, d];
+  const v = abH ? [c, d] : [a, b];
+  const x = v[0]!.x;
+  const y = h[0]!.y;
+  return x >= Math.min(h[0]!.x, h[1]!.x) && x <= Math.max(h[0]!.x, h[1]!.x)
+    && y >= Math.min(v[0]!.y, v[1]!.y) && y <= Math.max(v[0]!.y, v[1]!.y);
+}
+
+/**
+ * 直交ポリゴンの検証。頂点はタイル境界の整数座標、辺は軸平行、単純（自己交差なし）、
+ * 面積 > 0 を要求する。凹形は許可する。曲線・穴・複数島は対象外。
+ */
+export function validateOrthogonalPolygon(points: readonly Vec2[]): OrthogonalPolygonIssue[] {
+  const issues: OrthogonalPolygonIssue[] = [];
+  if (points.length < 4) return ['tooFewPoints'];
+  if (points.some((p) => !Number.isInteger(p.x) || !Number.isInteger(p.y))) issues.push('nonInteger');
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const a = points[i]!;
+    const b = points[(i + 1) % n]!;
+    if (a.x === b.x && a.y === b.y) issues.push('duplicatePoint');
+    else if (a.x !== b.x && a.y !== b.y) issues.push('nonOrthogonal');
+  }
+  if (issues.length > 0) return [...new Set(issues)];
+  // 自己交差: 隣接しない辺同士が触れたり交わったりしてはならない
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // 始点と終点の辺は隣接
+      if (segmentsTouchOrCross(points[i]!, points[(i + 1) % n]!, points[j]!, points[(j + 1) % n]!)) {
+        issues.push('selfIntersecting');
+      }
+    }
+  }
+  if (Math.abs(signedArea(points)) <= 0) issues.push('zeroArea');
+  return [...new Set(issues)];
+}
+
+/** 矩形の外周リング（CCW） */
+export function rectRing(origin: Vec2, w: number, h: number): Vec2[] {
+  return [
+    { x: origin.x, y: origin.y },
+    { x: origin.x + w, y: origin.y },
+    { x: origin.x + w, y: origin.y + h },
+    { x: origin.x, y: origin.y + h },
+  ];
+}
+
+/**
+ * 直交ポリゴンが占有するタイル。規則: タイル中心がポリゴン内部にあるタイルを占有する。
+ * 頂点が整数座標のため、タイル中心（.5 座標）が境界上に来ることはない。
+ */
+export function orthogonalPolygonTiles(points: readonly Vec2[]): { x: number; y: number }[] {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  const out: { x: number; y: number }[] = [];
+  for (let y = minY; y < maxY; y++) {
+    for (let x = minX; x < maxX; x++) {
+      if (polygonContains(points, { x: x + 0.5, y: y + 0.5 })) out.push({ x, y });
+    }
+  }
+  return out;
+}

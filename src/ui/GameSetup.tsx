@@ -51,7 +51,7 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
   const [cityEnabled, setCityEnabled] = useState(kind === 'new' || !!currentCompany.city);
   const [cityType, setCityType] = useState<CityType>(currentCompany.city?.type ?? 'regional');
   const [marketEnabled, setMarketEnabled] = useState(!!currentCompany.market);
-  const [features, setFeatures] = useState<{ overnight?: true; based?: true; international?: true; hub?: true }>(currentCompany.features ?? {});
+  const [features, setFeatures] = useState<{ overnight?: true; based?: true; international?: true; hub?: true; cargo?: true }>(currentCompany.features ?? {});
   const toggleFeature = (f: FeatureKey, on: boolean) => setFeatures((x) => ({ ...x, [f]: on ? true : undefined }));
   const patch = (p: Partial<GameSettings>) => setG((x) => ({ ...x, ...p }));
   const submit = () => {
@@ -134,6 +134,7 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
             ['based', GAME_UI.setupFeatureBased],
             ['international', GAME_UI.setupFeatureInternational],
             ['hub', GAME_UI.setupFeatureHub],
+            ['cargo', GAME_UI.setupFeatureCargo],
           ] as [FeatureKey, string][]).map(([f, label]) => {
             const locked = !isUnlocked(currentCompany, f);
             return (

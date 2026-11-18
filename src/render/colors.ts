@@ -25,6 +25,8 @@ export const FACILITY_COLOR: Record<FacilityKind, number> = {
   parking: 0x5d6673,
   taxiStand: 0xf2c230,
   busStop: 0x3d8fd6,
+  busTerminal: 0x2a9d8f,
+  cargoTerminal: 0xb45309,
   railStation: 0x9c5fbf,
   staffParking: 0x4d5560,
   hotel: 0xc98a5c,

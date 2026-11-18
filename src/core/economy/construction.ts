@@ -34,7 +34,7 @@ export function facilityValue(f: Facility): number {
   const perTile = C.perTile[f.kind];
   if (perTile !== undefined) return tiles * perTile * (f.kind === 'terminal' ? Math.max(1, num(f.props.levels)) : 1);
   if (f.kind === 'staffParking') return tiles * C.access.staffParkingPerTile;
-  if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'railStation' || f.kind === 'hotel') return C.access[f.kind];
+  if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'busTerminal' || f.kind === 'railStation' || f.kind === 'hotel') return C.access[f.kind];
   let v = C.facility[f.kind] ?? 0;
   if (f.kind === 'gate' && f.props.jetBridge) v += C.jetBridge;
   if (f.kind === 'gseBase') for (const [prop, kind] of VEHICLE_PROPS) v += num(f.props[prop]) * (C.vehicle[kind] ?? 0);

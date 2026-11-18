@@ -7,7 +7,7 @@ import type { TerminalAreaKind } from '../model/types';
  * サンドボックスと、game.goals がない会社（従来の会社を含む）は全解放。
  * 解放と有効化は別: 解放済みでも features が ON になるまで新機能は動かない。
  */
-export type FeatureId = 'overnight' | 'based' | 'maintenance' | 'international' | 'hub';
+export type FeatureId = 'overnight' | 'based' | 'maintenance' | 'international' | 'hub' | 'cargo';
 
 export interface UnlockDef {
   feature: FeatureId;
@@ -27,6 +27,9 @@ export const UNLOCKS: readonly UnlockDef[] = [
     areaKinds: ['emigration', 'immigration', 'customs'], gateRouteTypes: ['international', 'swing'], settings: ['international'],
   },
   { feature: 'hub', tier: 3, areaKinds: ['transferSecurity'], settings: ['hub'] },
+  // 貨物（5-12）: 現行の格尺度では最上位の格 3 を暫定要件とする。5-20 の 8 段階化で
+  // Tier 3（国内）/ Tier 4（国際）へ再配置する（貨物計画 CARGO-08）。
+  { feature: 'cargo', tier: 3, contractKinds: ['cargo'], settings: ['cargo'] },
 ];
 
 const BY_FEATURE = new Map<FeatureId, UnlockDef>(UNLOCKS.map((u) => [u.feature, u]));
@@ -59,6 +62,7 @@ export function featureOn(c: CompanyState, f: FeatureId): boolean {
 export function featureForContractKind(kind: ContractKind | undefined): FeatureId | null {
   if (kind === 'overnight') return 'overnight';
   if (kind === 'based') return 'based';
+  if (kind === 'cargo') return 'cargo';
   return null;
 }
 
