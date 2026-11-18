@@ -32,7 +32,7 @@ import { CONNECTOR_DETOUR, DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_L
 import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
-import { ACCESS_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTilesAtLevel } from '../access/landside';
+import { ACCESS_MAX_WALK_TILES, PARKING_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTilesAtLevel } from '../access/landside';
 import { connectorFits, facilityLevel, roadEdgeLevelValid, DEFAULT_LEVEL_HEIGHT_M } from '../model/levels';
 import { findPedestrianRoute } from '../access/verticalWalk';
 import { busGateStatus } from '../terminal/busGateAssignment';
@@ -940,11 +940,16 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
 }
 
 function checkRoads(layout: AirportLayout, parts: FootprintPart[], sink: IssueSink): void {
+  // 連結の扱いは buildLandsideNetwork（旅客ルート判定）と一致させる:
+  // 運用中の区間だけ、階層接続が有効な区間だけを数える（工事中・ランプ無しの階層跳びは接続扱いしない）。
+  // 敷地外周への到達は階層を問わない（地下トンネル状の出入口も可）点もランドサイド側と共通。
+  const usableRoad = (e: (typeof layout.roads)[string]): boolean =>
+    e.buildState === 'operational' && roadEdgeLevelValid(e, layout.roadNodes[e.from], layout.roadNodes[e.to]);
   const uf = new UnionFind();
-  for (const e of Object.values(layout.roads)) if (e.roadClass === 'public' || e.roadClass === 'service') uf.union(e.from, e.to);
+  for (const e of Object.values(layout.roads)) if ((e.roadClass === 'public' || e.roadClass === 'service') && usableRoad(e)) uf.union(e.from, e.to);
   const comps = new Map<string, string[]>();
   for (const e of sortedValues(layout.roads)) {
-    if (e.roadClass !== 'public') continue;
+    if (e.roadClass !== 'public' || !usableRoad(e)) continue;
     const root = uf.find(e.from);
     comps.set(root, [...(comps.get(root) ?? []), e.id]);
   }
@@ -954,7 +959,7 @@ function checkRoads(layout: AirportLayout, parts: FootprintPart[], sink: IssueSi
       .some((p) => p.tiles.some((t) => isSiteEdge(layout.site, t.x, t.y)));
     // 同じ連結成分のサービス道路が出口に届いていても可
     const viaService = Object.values(layout.roads)
-      .filter((e) => (e.roadClass === 'public' || e.roadClass === 'service') && uf.find(e.from) === uf.find(layout.roads[ids[0]!]!.from))
+      .filter((e) => (e.roadClass === 'public' || e.roadClass === 'service') && usableRoad(e) && uf.find(e.from) === uf.find(layout.roads[ids[0]!]!.from))
       .some((e) => {
         const a = layout.roadNodes[e.from]?.pos;
         const b = layout.roadNodes[e.to]?.pos;
@@ -995,9 +1000,11 @@ function checkRoadLayers(layout: AirportLayout, sink: IssueSink): void {
   }
 }
 
-/** 空港アクセスの施設: 外部とつながる道路・鉄道、ターミナルまでの距離 */
+/** 空港アクセスの施設: 外部とつながる道路・鉄道、ターミナルまでの距離。
+ *  analyzeAccess（旅客ルート判定）の usable() と対象・条件を一致させる:
+ *  駐車場も対象（従来は欠落していて、未接続でも警告が出なかった）。 */
 function checkAccess(layout: AirportLayout, sink: IssueSink): void {
-  const kinds = ['taxiStand', 'busStop', 'busTerminal', 'railStation', 'staffParking', 'hotel'];
+  const kinds = ['parking', 'taxiStand', 'busStop', 'busTerminal', 'railStation', 'staffParking', 'hotel'];
   const facilities = sortedValues(layout.facilities).filter((f) => kinds.includes(f.kind));
   if (facilities.length === 0) return;
   const net = buildLandsideNetwork(layout);
@@ -1012,8 +1019,10 @@ function checkAccess(layout: AirportLayout, sink: IssueSink): void {
       sink.add('ACCESS_NOT_CONNECTED', [f.id], {}, f.origin);
     }
     if (f.kind !== 'staffParking') {
+      // 距離の上限は analyzeAccess と同じにする（駐車場は 24 タイルまで使える）
+      const maxWalk = f.kind === 'parking' ? PARKING_MAX_WALK_TILES : ACCESS_MAX_WALK_TILES;
       const d = distanceToTerminal(layout, f);
-      if (d > ACCESS_MAX_WALK_TILES) sink.add('ACCESS_FAR_FROM_TERMINAL', [f.id], { distance: Number.isFinite(d) ? d : -1 }, f.origin);
+      if (d > maxWalk) sink.add('ACCESS_FAR_FROM_TERMINAL', [f.id], { distance: Number.isFinite(d) ? d : -1 }, f.origin);
     }
   }
 }
