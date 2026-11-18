@@ -40,7 +40,7 @@ Phase 6 は Phase 5 の置き換えではない。Phase 5 が整備している�
 
 ## 2. 既存機能・計画との関係
 
-着手前には各リンク先の最新状態とコード・テストを再確認する。下表の「現状」は 2026-11-18 時点の Docs に記載された状態であり、実装完了を保証するものではない。
+着手前には各リンク先の最新状態とコード・テストを再確認する。詳細計画: [5-14](../active/terminal_building_structure_plan.md) / [5-15](../active/terminal_complex_geometry_plan.md) / [5-16](../active/passenger_network_unification_plan.md) / [5-18](terminal_design_workspace_plan.md) / [5-19](terminal_simulation_modes_plan.md) / [5-20](../active/airport_tier_progression_plan.md) / [5-21](peak_hour_passenger_capacity_plan.md) / [5-24](urban_night_runway_operations_plan.md) / [5-25](nighttime_work_order_plan.md) / [A6 貨物](../active/cargo_operations_plan.md)。下表の「現状」は 2026-11-18 時点の Docs に記載された状態であり、実装完了を保証するものではない。
 
 | 既存機能・計画 | 既存の役割・現在の状態 | Phase 6 での扱い |
 |---|---|---|
@@ -178,7 +178,7 @@ P0〜P4 は推奨実装順であり、各段階の開始時には HANDOFF を更
 
 貨物は Phase 5 / 5-12（A6）の既存計画が active である。2026-11-18 時点で、貨物需要モデル、契約/計画層、機種の貨物室容積参照、貨物上屋と荷役能力の基盤、貨物収支計算層、保存検証、格解放の基盤が一部実装されている。一方、貨物便のSimulation実機化、貨物専用機、実運航での荷役、日報表示・永続化、道路区間との競合、格5〜7の規模拡張・関連テストには残件がある。
 
-**詳細タスクと進捗は [貨物輸送計画](cargo_operations_plan.md) が唯一の正本。** Phase 6 は貨物計画を複製せず、以下の優先順・能力UI接続を管理する。
+**詳細タスクと進捗は [貨物輸送計画](../active/cargo_operations_plan.md) が唯一の正本。** Phase 6 は貨物計画を複製せず、以下の優先順・能力UI接続を管理する。
 
 ### 5.2 完成に必要な機能
 
