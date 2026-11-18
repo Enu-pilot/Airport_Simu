@@ -10,6 +10,8 @@ import { tasksOf } from '../core/sim/ground';
 import { SIM_START_SEC } from '../core/sim/rules';
 import type { Simulation } from '../core/sim/simulation';
 import { areaOccupancy, facilityLoad, serversOf } from '../core/sim/passengers';
+import { peekMissBreakdown } from '../core/sim/missBreakdown';
+import { summarizeMissedBreakdown } from '../core/analytics/review';
 import type { BagState, BlockReason, DisruptionKind, Flight, RunwayMode, SimState, WeatherKind } from '../core/sim/types';
 import { designatorsOf } from '../core/layout/designators';
 import type { AirportLayout, Runway } from '../core/model/types';
@@ -37,6 +39,7 @@ import {
   DISRUPTION_KIND_LABEL,
   DISRUPTION_STATUS_LABEL,
   WEATHER_LABEL,
+  MISS_BOTTLENECK_LABEL,
   displayName,
   eventText,
   formatClock,
@@ -556,6 +559,8 @@ export function TerminalBoard() {
     return s + (g.area ? g.count : 0);
   }, 0);
   const ps = state.paxStats;
+  // 当日ここまでの乗り遅れ内訳（締めで日報へ移る前の集計を読む）
+  const missSummary = summarizeMissedBreakdown(peekMissBreakdown(state));
   const stranded = state.activePax.reduce((s, id) => s + (['stranded', 'waitingFacility'].includes(state.paxGroups[id]!.state) ? state.paxGroups[id]!.count : 0), 0);
   const rows = Object.values(model.areas).sort((a, b) => a.level - b.level || compareIds(a.id, b.id));
   return (
@@ -570,6 +575,17 @@ export function TerminalBoard() {
         <span>平均待ち {ps.finished ? Math.round(ps.waitTotal / ps.finished / 6) / 10 : 0}分</span>
         <span>平均歩行 {ps.finished ? Math.round(ps.walkTotal / ps.finished / 6) / 10 : 0}分</span>
       </div>
+      {missSummary.length > 0 && (
+        <div className="issues-header" data-testid="pax-missed-breakdown">
+          <span>乗り遅れの内訳（本日ここまで）</span>
+          {missSummary.slice(0, 4).map((s) => (
+            <span key={s.category} className={s === missSummary[0] ? 'warn-text' : ''}>
+              {MISS_BOTTLENECK_LABEL[s.category]} {s.count}人{s.topSpotId ? `（${displayName(ctx.layout, s.topSpotId)}）` : ''}
+            </span>
+          ))}
+          {missSummary.length > 4 && <span>ほか {missSummary.length - 4} 件</span>}
+        </div>
+      )}
       <div className="issues-list">
         <table className="board">
           <thead>

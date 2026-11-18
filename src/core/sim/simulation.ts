@@ -298,7 +298,7 @@ export function addTurnaround(
     inboundDelaySec?: number;
     airline?: string;
     numbers?: [string, string];
-    plan?: { contractId: string; destinationId: string; arrPax: number; depPax: number; standId: string | null; seats?: number; overnight?: true; basedAircraftId?: string; routeType?: 'international' };
+    plan?: { contractId: string; destinationId: string; arrPax: number; depPax: number; standId: string | null; seats?: number; overnight?: true; basedAircraftId?: string; routeType?: 'international'; cargo?: { volumeM3: number } };
   } = {},
 ): Aircraft {
   const { state } = sim;
@@ -337,6 +337,7 @@ export function addTurnaround(
     ...(plan?.overnight ? { overnight: true as const } : {}),
     ...(plan?.basedAircraftId ? { basedAircraftId: plan.basedAircraftId } : {}),
     ...(plan?.routeType ? { routeType: plan.routeType } : {}),
+    ...(plan?.cargo ? { cargo: plan.cargo } : {}),
   });
   const arrEst = arrivalAt + (opts.inboundDelaySec ?? 0);
   state.flights[arrId] = flight(arrId, 'arrival', arrNumber, arrivalAt, arrEst);
@@ -345,6 +346,8 @@ export function addTurnaround(
     addExternalDelay(state.flights[arrId]!, 'inboundDelay', arrEst - arrivalAt);
   }
   state.flights[depId] = flight(depId, 'departure', depNumber, depAt, Math.max(depAt, arrEst + type.turnaroundSec));
+  // 貨物便（5-12）は搭乗手続きを持たない。出発準備の判定（搭乗締切待ち）で止まらないよう締切済みにしておく
+  if (plan?.cargo) state.flights[depId]!.pax.boarding = 'closed';
   const ac: Aircraft = {
     id: acId,
     typeId,
@@ -456,6 +459,16 @@ function generateContractSchedule(sim: Simulation, day: number): void {
     });
     arrIdByKey.set(p.key, ac.arrivalFlightId);
     depIdByKey.set(p.key, ac.departureFlightId);
+  }
+  // 貨物便の計画（5-12）を実便へ流す。旅客は生成せず、貨物タスクで折り返す通常の機体として運航する
+  for (const cf of plan.cargoFlights ?? []) {
+    const arrivalAt = Math.max(day * DAY_SEC + cf.arrivalAt, Math.ceil(earliest / 60) * 60);
+    addTurnaround(sim, cf.typeId, arrivalAt, {
+      departureAt: Math.max(day * DAY_SEC + cf.departureAt, arrivalAt + resolveType(ctx.types, cf.typeId).turnaroundSec),
+      airline: cf.airlineId,
+      numbers: [cf.arrNumber, cf.depNumber],
+      plan: { contractId: cf.contractId, destinationId: cf.destinationId, arrPax: 0, depPax: 0, standId: null, cargo: { volumeM3: cf.volumeM3 } },
+    });
   }
   // 乗継の計画を実便へ移す（到着便の transferPlan・出発便の plannedTransferIn）
   for (const p of plan.flights) {

@@ -67,7 +67,14 @@ const BASELINE: Record<string, string> = {
   // 2026-11-18 再々採取（SIM_MODEL_VERSION 10.5、ユーザー承認済み）: 羽田・成田就航の実在 20 社を
   // market カタログへ追加したため city core の提案の乱数列が変わり、SK を実在の SAS へ置き換えて
   // サンドボックス初期契約の旧 SK 枠を NP へ移したため sample が変わった。レイアウトのみの 4 件は不変。
-  'city core 3 days (no nightOps)': 'df72dbf61c566b75be7df00a2769a3180e0e62d3b7122594c63e3dedc718def3',
+  // 2026-11-18 再々々採取（PO 要望）: 日報へ乗り遅れ内訳（missedBreakdown）を追加したため
+  // city core のみ変化。フィールドを除いたハッシュは前基準値と完全一致し、運航は無変更。
+  // 2026-11-18 再々々々採取（PO 判断・5-20 T8 対応）: 都市人口を引き上げた（core 120万→400万）ため
+  // city core のみ変化（会社データに埋め込まれる人口そのものと需要挙動）。sample・レイアウトのみは不変。
+  // 2026-11-18 再々々々々採取（PR #32 マージ追随）: ホールド理由の拡充でスポット割当が段階化され、
+  // 理由の分類が noStand → standTooSmall 等へ変わったため city core のみ変化。他 6 件は不変。
+  // stress ゴールデンでも差分は failCauses の hold:noStand 2 → hold:standTooSmall 2 のみ（件数不変）を確認済み。
+  'city core 3 days (no nightOps)': '6ba7cdd1097a81c5d9383e79b71946c0d39426790f97ec451a6c92fbd1dce7de',
   'sample airport 1 day': 'bd2c859fabd0fcef00cc9db44dbb41e4f2ef3338bb283323742edb8276d9208f',
 };
 

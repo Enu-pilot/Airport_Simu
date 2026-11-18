@@ -1,5 +1,5 @@
 import { airlineDef } from '../../../core/economy/registry';
-import { AIRLINE_TYPE_LABEL, OPS_UI, SCORE_LABEL, SCORE_LEVEL_LABEL, lackingText, scoreText } from '../../../i18n/ja';
+import { AIRLINE_TYPE_LABEL, OPS_UI, SCORE_LABEL, SCORE_LEVEL_LABEL, complaintDetailText, lackingText, scoreText } from '../../../i18n/ja';
 import { useScorecard } from './useScorecard';
 import { useOps } from '../../OpsPanels';
 import { GAME_UI } from '../../../i18n/ja';
@@ -47,11 +47,15 @@ export function AirlineScoreTable() {
                   </div>
                 ))}
               </div>
-              {evalState?.[s.airlineId]?.complaints.map((x) => (
-                <div key={x.key} className="score-lacking ng-text" data-testid={`airline-complaint-${s.airlineId}-${x.key}`}>
-                  {GAME_UI.complaintTitle}: {GAME_UI.complaintOf(SCORE_LABEL[x.key])}
-                </div>
-              ))}
+              {evalState?.[s.airlineId]?.complaints.map((x) => {
+                const comp = s.components.find((c) => c.key === x.key);
+                return (
+                  <div key={x.key} className="score-lacking ng-text" data-testid={`airline-complaint-${s.airlineId}-${x.key}`}>
+                    {GAME_UI.complaintTitle}: {GAME_UI.complaintOf(SCORE_LABEL[x.key])}
+                    {comp ? <div className="muted small">{complaintDetailText(comp)}</div> : null}
+                  </div>
+                );
+              })}
               {evalState?.[s.airlineId]?.requests.map((x) => (
                 <div key={x.id} className="score-lacking warn-text" data-testid={`airline-request-${s.airlineId}-${x.kind}`}>
                   {GAME_UI.requestTitle}: {GAME_UI.requestText(x.kind, x.arg)}（{GAME_UI.requestDue(x.dueDay)}）

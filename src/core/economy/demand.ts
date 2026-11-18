@@ -1,6 +1,6 @@
 import { AIRCRAFT_TYPES, type TypeTable } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
-import { cityDemandCeiling, cityEventEffects } from './city';
+import { cityDemandCeiling, cityEventEffects, contractTransferShare } from './city';
 import { activeContractsOn, seatsFor, type CompanyState } from './company';
 import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirport, type DestinationDef, type RouteCapabilities } from './registry';
 
@@ -99,20 +99,28 @@ export function routeDemandSummary(
 ): Map<string, RouteDemandInfo> | null {
   if (!c.city) return null;
   const seatsByDest = new Map<string, number>();
+  const xferSeatsByDest = new Map<string, number>();
   for (const k of activeContractsOn(c, day)) {
     if (routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities) !== 'available') continue;
-    seatsByDest.set(k.destinationId, (seatsByDest.get(k.destinationId) ?? 0) + k.perDay * seatsFor(c, k.airlineId, k.typeId, types) * 2);
+    const seats = k.perDay * seatsFor(c, k.airlineId, k.typeId, types) * 2;
+    seatsByDest.set(k.destinationId, (seatsByDest.get(k.destinationId) ?? 0) + seats);
+    const share = contractTransferShare(c, k);
+    if (share > 0) xferSeatsByDest.set(k.destinationId, (xferSeatsByDest.get(k.destinationId) ?? 0) + seats * share);
   }
   const raw = new Map<string, number>();
-  let total = 0;
+  let localTotal = 0;
   for (const destId of seatsByDest.keys()) {
     const dest = destinationDef(destId);
     const d = (routeDemand(c, dest, access) ?? 0) * seasonalWeekdayFactor(dest, day);
     raw.set(destId, d);
-    total += d;
+    // 上限は地元需要にだけ効かせる（5-20 T8 の PO 判断）。需要は両方向なので、到着側の乗継分だけを地元から外す:
+    // 地元分 = D × (1 − share/2)（share はその路線の座席加重平均の乗継割合）
+    const seats = seatsByDest.get(destId) ?? 0;
+    const share = seats > 0 ? (xferSeatsByDest.get(destId) ?? 0) / seats : 0;
+    localTotal += d * (1 - share / 2);
   }
   const ceiling = cityDemandCeiling(c.city, access) * cityEventEffects(c.city, day).demandMultiplier;
-  const scale = total > 0 ? Math.min(1, ceiling / total) : 1;
+  const scale = localTotal > 0 ? Math.min(1, ceiling / localTotal) : 1;
   const out = new Map<string, RouteDemandInfo>();
   for (const [destId, seats] of seatsByDest) {
     const demand = (raw.get(destId) ?? 0) * scale;

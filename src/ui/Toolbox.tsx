@@ -88,41 +88,52 @@ export function Toolbox() {
   const layout = useLayout();
   const rotatable = tool === 'stand' || (kind !== null && !FACILITY_SPECS[kind].dragPlace);
 
+  const renderToolButton = (t: ToolDef) => {
+    // フェーズ 4 のエリアは、格で解放されるまで選べない（理由を表示）
+    const areaKind = t.id.startsWith('area:') ? (t.id.slice(5) as TerminalAreaKind) : null;
+    const feature = areaKind ? featureForAreaKind(areaKind) : null;
+    const lock = feature && company ? lockLabel(company, feature) : null;
+    return (
+      <button
+        key={t.id}
+        className={tool === t.id ? 'tool active' : 'tool'}
+        title={lock ?? t.hint}
+        data-testid={`tool-${t.id}`}
+        disabled={!!lock}
+        onClick={() => actions.setTool(t.id)}
+      >
+        {t.label}
+        {lock ? `（${lock}）` : ''}
+      </button>
+    );
+  };
+
   return (
     <div className="toolbox" data-testid="toolbox">
-      {GROUPS.map((g) => (
-        <details
-          key={g.title}
-          className="tool-group"
-          open={g.tools.some((t) => t.id === tool)}
-        >
-          <summary className="tool-group-title">
-            <span>{g.title}</span>
-            <span className="tool-group-count">{g.tools.length}</span>
-          </summary>
-          <div className="tool-buttons">
-            {g.tools.map((t) => {
-              // フェーズ 4 のエリアは、格で解放されるまで選べない（理由を表示）
-              const areaKind = t.id.startsWith('area:') ? (t.id.slice(5) as TerminalAreaKind) : null;
-              const feature = areaKind ? featureForAreaKind(areaKind) : null;
-              const lock = feature && company ? lockLabel(company, feature) : null;
-              return (
-                <button
-                  key={t.id}
-                  className={tool === t.id ? 'tool active' : 'tool'}
-                  title={lock ?? t.hint}
-                  data-testid={`tool-${t.id}`}
-                  disabled={!!lock}
-                  onClick={() => actions.setTool(t.id)}
-                >
-                  {t.label}
-                  {lock ? `（${lock}）` : ''}
-                </button>
-              );
-            })}
+      {GROUPS.map((g, gi) =>
+        gi === 0 ? (
+          // 「編集」（選択・移動）だけはアコーディオンにせず常時表示する（PO 要望）
+          <div key={g.title} className="tool-group">
+            <div className="tool-group-title">
+              <span>{g.title}</span>
+              <span className="tool-group-count">{g.tools.length}</span>
+            </div>
+            <div className="tool-buttons">{g.tools.map(renderToolButton)}</div>
           </div>
-        </details>
-      ))}
+        ) : (
+          <details
+            key={g.title}
+            className="tool-group"
+            open={g.tools.some((t) => t.id === tool)}
+          >
+            <summary className="tool-group-title">
+              <span>{g.title}</span>
+              <span className="tool-group-count">{g.tools.length}</span>
+            </summary>
+            <div className="tool-buttons">{g.tools.map(renderToolButton)}</div>
+          </details>
+        ),
+      )}
 
       <div className="tool-options">
         <div className="tool-group-title">配置オプション</div>

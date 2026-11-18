@@ -4,7 +4,9 @@ import { TILE_M } from '../model/catalog';
 import { mapToWorld } from '../geometry/frames';
 import { resolveType } from './aircraftTypes';
 import { lightningStop } from './weather';
-import { TASK_DEFS, TURNAROUND_TASKS, taskNeeds, taskWorkSec } from './tasks';
+import { CARGO_TASKS, TASK_DEFS, TURNAROUND_TASKS, cargoTaskSec, taskNeeds, taskWorkSec } from './tasks';
+import { cargoHandlingCapacityM3PerHour } from '../economy/cargo';
+import { recordCargoHandled } from './cargoStats';
 import {
   BAG_CUTOFF_AFTER_BOARDING_SEC,
   HANDLE_SEC_PER_BAG,
@@ -163,6 +165,12 @@ export function setUnitBroken(sim: Simulation, unitId: string, broken: boolean, 
 export function createTurnaroundTasks(sim: Simulation, ac: Aircraft, opts: { skip?: readonly string[] } = {}): void {
   const { state } = sim;
   if ((state.aircraftTasks[ac.id] ?? []).length > 0) return;
+  // 貨物便（5-12）は旅客の折り返し作業を作らず、貨物タスクだけを作る（手荷物タスクも流用しない）
+  const cargo = state.flights[ac.arrivalFlightId]?.cargo;
+  if (cargo) {
+    createCargoTasks(sim, ac, cargo.volumeM3);
+    return;
+  }
   // 省略した作業を機体に記録する（出発準備完了の判定で「要求されていない作業」として扱うため。保存にも残る）
   if (opts.skip?.length) ac.skippedTasks = [...opts.skip] as TaskKind[];
   const type = resolveType(sim.ctx.types, ac.typeId);
@@ -198,6 +206,38 @@ export function createTurnaroundTasks(sim: Simulation, ac: Aircraft, opts: { ski
       task.workSec += DEFECT_EXTRA_SEC;
       task.note = '不具合あり（追加整備）';
     }
+  }
+}
+
+/**
+ * 貨物便の荷役タスクを生成する（5-12）。所要時間は搭載量 ÷ 貨物上屋の処理能力で決まる
+ * （cargoTaskSec）ので、上屋の能力が折り返し時間に直接効く。必要ユニットは作業員のみ。
+ * 旅客便の生成と同じく、空港にある作業員が基本の必要数より少なければ、ある人数で時間をかけて行う。
+ */
+export function createCargoTasks(sim: Simulation, ac: Aircraft, volumeM3: number): void {
+  const { state } = sim;
+  const type = resolveType(sim.ctx.types, ac.typeId);
+  const throughput = cargoHandlingCapacityM3PerHour(sim.ctx.layout);
+  const totals = unitTotals(sim);
+  for (const kind of CARGO_TASKS) {
+    const task = newTask(state, ac, kind);
+    task.needs = taskNeeds(type, kind);
+    task.workSec = cargoTaskSec(volumeM3, throughput);
+    let slow = 1;
+    const base = TASK_DEFS[kind].needs;
+    for (const [k, n] of Object.entries(task.needs) as [UnitKind, number][]) {
+      const total = totals[k] ?? 0;
+      const reduced = Math.max(base[k] ?? 0, Math.min(n, total));
+      if (reduced < n) {
+        slow = Math.max(slow, n / reduced);
+        task.needs[k] = reduced;
+      }
+    }
+    if (slow > 1) {
+      task.workSec = Math.round(task.workSec * slow);
+      task.note = `必要な車両・作業員が足りないため時間がかかる（×${slow.toFixed(1)}）`;
+    }
+    if (throughput <= 0 && volumeM3 > 0) task.note = '貨物上屋がないため仮置きの時間で扱う';
   }
 }
 
@@ -263,7 +303,9 @@ export function allTurnaroundDone(state: SimState, acId: string): boolean {
   if (!ac) return false;
   const skipped = new Set(ac.skippedTasks ?? []);
   const tasks = tasksOf(state, acId).filter((t) => t.kind !== 'pushback');
-  for (const kind of TURNAROUND_TASKS) {
+  // 必須タスクの集合は便種別で分ける（5-12）: 貨物便は貨物タスクだけ、旅客便は従来の折り返しタスクだけ
+  const required = state.flights[ac.arrivalFlightId]?.cargo ? CARGO_TASKS : TURNAROUND_TASKS;
+  for (const kind of required) {
     if (skipped.has(kind)) continue;
     if (!tasks.some((t) => t.kind === kind && t.state === 'done')) return false;
   }
@@ -355,6 +397,12 @@ function finishTask(sim: Simulation, t: GroundTask): void {
   t.doneAt = state.now;
   t.blockedReason = null;
   state.groundStats.tasksDone++;
+  // 貨物タスクの完了 = 実際に積み下ろしした量として記録する（5-12。締めで実績収支に使う）
+  if (t.kind === 'cargoUnload' || t.kind === 'cargoLoad') {
+    const ac = state.aircraft[t.aircraftId]!;
+    const f = state.flights[t.kind === 'cargoUnload' ? ac.arrivalFlightId : ac.departureFlightId];
+    if (f?.cargo) recordCargoHandled(state, t.kind === 'cargoUnload' ? 'unloaded' : 'loaded', f.cargo.volumeM3);
+  }
   onTaskDone(sim, t);
   log(state, { t: state.now, kind: 'taskDone', aircraftId: t.aircraftId, note: t.kind });
 }

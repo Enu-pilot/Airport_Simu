@@ -13,6 +13,7 @@ import type { ScenarioKpis } from '../core/scenario/scenario';
 import type { CompatReason, CompatStatus } from '../core/aircraft/compat';
 import type { FleetResult } from '../core/economy/company';
 import type { ResponseResult } from '../core/sim/disruptions';
+import type { MissBottleneck } from '../core/sim/missBreakdown';
 import type { PlanIssueCode } from '../core/economy/planning';
 import type { AirlineScore, ScoreComponent, ScoreKey, ScoreLevel } from '../core/economy/airlineScore';
 import type { ReviewMetric } from '../core/analytics/review';
@@ -547,6 +548,25 @@ export const AREA_PROP_LABEL: Record<string, string> = {
   levels: '階数',
 };
 
+/** 乗り遅れの詰まり箇所（ボトルネック）の分類名 */
+export const MISS_BOTTLENECK_LABEL: Record<MissBottleneck, string> = {
+  checkIn: 'チェックイン待ち',
+  security: '保安検査待ち',
+  emigration: '出国審査待ち',
+  immigration: '入国審査待ち',
+  customs: '税関待ち',
+  transferSecurity: '乗継保安検査待ち',
+  gate: '搭乗口・待合で待機',
+  walking: '移動中',
+  bus: 'バス待ち・乗車中',
+  access: '空港へのアクセス中',
+  transferLate: '乗継時間の不足',
+  unreachable: '到達不能',
+  noGate: 'ゲートなし',
+  facilityClosed: '施設閉鎖',
+  other: 'その他',
+};
+
 export const PAX_STATE_LABEL: Record<PaxState, string> = {
   toAirport: '空港へ移動中',
   accessWalk: '交通施設から移動中',
@@ -675,6 +695,7 @@ export const REVENUE_LABEL: Record<RevenueCategory, string> = {
   carPark: '駐車場収入',
   transit: '交通事業者の使用料（タクシー・バス・鉄道）',
   hotel: '空港ホテル収入',
+  cargo: '貨物収入',
 };
 
 export const COST_LABEL: Record<CostCategory, string> = {
@@ -688,6 +709,7 @@ export const COST_LABEL: Record<CostCategory, string> = {
   groundOps: '地上作業費',
   compensation: '補償・対応費',
   disruption: '障害の修理・早期復旧費',
+  cargoHandling: '貨物荷役費',
 };
 
 export const WINDOW_LABEL: Record<TimeWindow, string> = {
@@ -769,7 +791,7 @@ export const KPI_LABEL: Record<keyof DailyKpi, { label: string; formula: string 
   facilityUtil: { label: '窓口稼働率', formula: 'チェックイン・保安検査で処理中の窓口・秒 ÷ 開いていた窓口・秒' },
   avgWaitMin: { label: '平均待ち時間', formula: '搭乗・退出した旅客の待ち時間の平均（分）' },
   avgWalkMin: { label: '平均歩行時間', formula: '搭乗・退出した旅客の歩行時間の平均（分）' },
-  avgGroundMin: { label: '平均地上作業時間', formula: '出発準備完了 − ブロックイン の平均（分）' },
+  avgGroundMin: { label: '平均地上作業時間', formula: '出発準備完了 − ブロックイン の平均（分。夜間滞泊・貨物便を除く）' },
   unprocessedPax: { label: '未処理旅客', formula: '締めの時点でターミナル内に残り、手続きが終わっていない旅客' },
   missedPax: { label: '乗り遅れ', formula: '搭乗締切までに搭乗できなかった旅客' },
   leftBags: { label: '積み残し手荷物', formula: '搭乗した旅客の手荷物のうち、機体に積めなかった個数' },
@@ -1187,10 +1209,15 @@ export function scoreText(c: ScoreComponent): string {
       if ((f.value ?? 0) > 0) return `${typeNames(f.names)} に対応するスポット・滑走路がない`;
       if ((f.target ?? 0) > 0) return `保有機材のうち ${typeNames(f.names)} は運航できない`;
       return '契約の機材はすべて運航できる';
-    case 'pax':
-      return `乗り遅れ ${pctText(f.value ?? 0)}・手荷物の積み残し ${pctText(f.target ?? 0)}`;
-    case 'demand':
-      return `搭乗率 ${pctText(f.value ?? 0)}（基準 ${pctText(f.target ?? 0)}）`;
+    case 'pax': {
+      const missed = `乗り遅れ ${pctText(f.missedRate ?? f.value ?? 0)}${f.missedCount !== undefined && f.bookedCount !== undefined ? `（${f.missedCount}/${f.bookedCount}人）` : ''}`;
+      const left = `手荷物の積み残し ${pctText(f.leftRate ?? f.target ?? 0)}${f.leftCount !== undefined && f.bagsCount !== undefined ? `（${f.leftCount}/${f.bagsCount}個）` : ''}`;
+      return `${missed}・${left}`;
+    }
+    case 'demand': {
+      const worst = f.worstRoute && f.worstRouteLf !== undefined ? `。最も低いのは ${f.worstRoute}線 ${pctText(f.worstRouteLf)}` : '';
+      return `搭乗率 ${pctText(f.value ?? 0)}（基準 ${pctText(f.target ?? 0)}）${worst}`;
+    }
   }
 }
 
@@ -1198,6 +1225,65 @@ export function scoreText(c: ScoreComponent): string {
 export function lackingText(s: AirlineScore): string {
   if (s.lacking.length === 0) return '足りないもの: 特になし';
   return `足りないもの: ${s.lacking.map((c) => `${SCORE_LABEL[c.key]}（${scoreText(c)}）`).join(' / ')}`;
+}
+
+/** 率の差をポイント（百分率の差）で表す。例: 0.85 と 0.72 → 13 */
+const pointDiff = (target: number, value: number) => Math.round((target - value) * 1000) / 10;
+
+/**
+ * 不満の内訳の一行（表示のみ）。要素の事実から「何が・どれだけ足りないか」を具体化する。
+ * DayReview の不満行と経営画面の航空会社パネルの不満行で共通に使う。
+ */
+export function complaintDetailText(c: ScoreComponent): string {
+  const f = c.facts;
+  const label = SCORE_LABEL[c.key];
+  switch (c.key) {
+    case 'otp': {
+      const short = pointDiff(f.target ?? 0, f.value ?? 0);
+      const legs = f.lateCount !== undefined && f.n !== undefined ? `、遅延 ${f.lateCount}/${f.n} 区間` : '';
+      const cause = f.names?.[0] ? `。主な遅延理由: ${DELAY_CAUSE_LABEL[f.names[0] as DelayCause] ?? f.names[0]}` : '';
+      return `${label}: 定時率 ${pctText(f.value ?? 0)}（要求 ${pctText(f.target ?? 0)}${short > 0 ? `、${short}ポイント不足` : ''}${legs}）${f.fallback ? ' ※空港全体の値' : ''}${cause}`;
+    }
+    case 'turnaround': {
+      const std = f.target ?? 0;
+      const over = f.value ?? 0;
+      return over > 0 ? `${label}: 標準 ${std}分に対し平均 ${std + over}分（+${over}分、対象 ${f.n ?? 0}便）` : `${label}: 折り返しは標準（${std}分）以内（対象 ${f.n ?? 0}便）`;
+    }
+    case 'stand': {
+      const parts: string[] = [];
+      if ((f.value ?? 0) > 0) parts.push(`スポット競合 ${f.value}便`);
+      if ((f.target ?? 0) > 0) parts.push(`ゲートのないスポットへの割当 ${f.target}便`);
+      if ((f.n ?? 0) > 0) parts.push(`スポット待ちの遅れ ${f.n}便`);
+      if (f.busShare !== undefined && f.busShare > 0) parts.push(`ランプバス搭乗が全体の ${pctText(f.busShare)}`);
+      return parts.length ? `${label}: ${parts.join('・')}` : `${label}: スポット・ゲートは足りている`;
+    }
+    case 'fees': {
+      const eff = f.target ?? f.value ?? 1;
+      const vsStd = eff > 1 ? `標準より ${Math.round((eff - 1) * 100)}% 高い` : '標準以下';
+      return `${label}: 料金倍率 ×${(f.value ?? 1).toFixed(2)}（割引後 ×${eff.toFixed(2)}、${vsStd}）`;
+    }
+    case 'slots': {
+      const parts: string[] = [];
+      if ((f.value ?? 0) > 0) parts.push(`希望の時間帯の枠に入らない便 ${f.value}便`);
+      if ((f.n ?? 0) > 0) parts.push(`運用時間・時間帯に入らない契約 ${f.n}件`);
+      return parts.length ? `${label}: ${parts.join('・')}` : `${label}: 希望の枠に収まっている`;
+    }
+    case 'aircraft': {
+      if ((f.value ?? 0) > 0) return `${label}: ${typeNames(f.names)} に対応するスポット・滑走路がない（契約機材 ${f.value}種）`;
+      if ((f.target ?? 0) > 0) return `${label}: 保有機材のうち ${typeNames(f.names)} は運航できない（${f.target}種）`;
+      return `${label}: 契約の機材はすべて運航できる`;
+    }
+    case 'pax': {
+      const missed = `乗り遅れ ${pctText(f.missedRate ?? f.value ?? 0)}${f.missedCount !== undefined && f.bookedCount !== undefined ? `（${f.missedCount}/${f.bookedCount}人）` : ''}`;
+      const left = `手荷物の積み残し ${pctText(f.leftRate ?? f.target ?? 0)}${f.leftCount !== undefined && f.bagsCount !== undefined ? `（${f.leftCount}/${f.bagsCount}個）` : ''}`;
+      return `${label}: ${missed}・${left}`;
+    }
+    case 'demand': {
+      const short = pointDiff(f.target ?? 0, f.value ?? 0);
+      const worst = f.worstRoute && f.worstRouteLf !== undefined ? `。最も低いのは ${f.worstRoute}線 ${pctText(f.worstRouteLf)}` : '';
+      return `${label}: 搭乗率 ${pctText(f.value ?? 0)}（基準 ${pctText(f.target ?? 0)}${short > 0 ? `、${short}ポイント不足` : ''}）${worst}`;
+    }
+  }
 }
 
 // ---------------------------------------------------------------- 1 日のループ（12B-2）
@@ -1370,7 +1456,7 @@ export const GAME_UI = {
   setupFeatureInternational: '国際線（出入国審査・税関・国際ゲート）',
   setupFeatureHub: '乗継と波（乗継旅客・バンク）',
   setupFeatureCargo: '貨物輸送（貨物契約・運搬量の集計）',
-  cityType: { regional: '地方都市（人口 30 万）', core: '中核都市（人口 120 万）', metropolitan: '大都市（人口 600 万）' } as Record<string, string>,
+  cityType: { regional: '地方都市（人口 60 万）', core: '中核都市（人口 400 万）', metropolitan: '大都市（人口 2,000 万）' } as Record<string, string>,
   setupWeather: '天候 5 段階・予報（オフ = 従来の 4 種の天候の障害）',
   setupEval: '航空会社の評価要素・不満・要望',
   setupGoals: '目標・空港の格',
@@ -1424,6 +1510,24 @@ export const GAME_UI = {
   tier: ['飛行場', '地方空港', '地域拠点空港', '国内主要空港', '国際空港', '国際ハブ空港', '広域ハブ空港', 'メガハブ空港'] as readonly string[],
   tierLabel: (t: string) => `空港の格: ${t}`,
   tierUp: (t: string) => `空港の格が上がりました: ${t}`,
+  // 次の格までの到達度（5-20 T6）
+  nextTierTitle: (t: string) => `次の格（${t}）まで`,
+  nextTierMax: '最高格に到達しています',
+  nextTierMovements: '発着',
+  nextTierPax: '旅客',
+  nextTierRating: '評価',
+  nextTierHeavy: '大型機の運航',
+  nextTierIntlOps: '国際線の実績',
+  nextTierTransferOps: '乗継の実績',
+  nextTierRecordNote: '直近の締め日の記録で判定',
+  nextTierStreak: (cur: number, req: number) => `連続達成 ${cur}/${req} 日`,
+  nextTierShortfall: (n: string) => `あと ${n}`,
+  nextTierMet: '✓',
+  nextTierMissing: 'なし',
+  nextTierCannot: '不可',
+  nextTierUnknown: '—',
+  nextTierBasedOn: (day: number) => `直近の日報（${day + 1}日目）時点の値`,
+  nextTierNoReport: '日報はまだありません（発着・旅客は 0 として表示）',
   goalCompleted: (t: string) => `目標を達成しました: ${t}`,
   reviewGoals: '達成した目標',
   reviewNoGoals: 'この日に達成した目標はありません',

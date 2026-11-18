@@ -10,7 +10,8 @@ function overnightCompany(seed = 'ovn-1'): CompanyState {
   const c = createSandboxCompany(seed);
   c.features = { overnight: true };
   addContract(c, {
-    airlineId: 'SK', destinationId: 'KTA', typeId: 'B737-800', perDay: 2, window: 'evening',
+    // 国内線の滞泊契約なので、B737-800 で国内運航する HB を使う（SK=SAS は国際線のみ）
+    airlineId: 'HB', destinationId: 'KTA', typeId: 'B737-800', perDay: 2, window: 'evening',
     feeDiscount: 0.1, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0, kind: 'overnight',
   });
   return c;
@@ -41,7 +42,7 @@ describe('overnight: 夜間滞泊の計画（4B-1）', () => {
     // 従来の契約だけの会社では滞泊の項目は出ない
     const plain = createSandboxCompany('ovn-plain');
     addContract(plain, {
-      airlineId: 'SK', destinationId: 'KTA', typeId: 'B737-800', perDay: 2, window: 'evening',
+      airlineId: 'HB', destinationId: 'KTA', typeId: 'B737-800', perDay: 2, window: 'evening',
       feeDiscount: 0.1, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0,
     });
     const pp = planDay(plain, 1);

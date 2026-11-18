@@ -34,17 +34,18 @@ describe('運営分析（実績からの集計）', { timeout: 180_000 }, () => 
   runDay(sim);
   const recs = sim.state.analytics.records;
 
-  it('運航を終えた機体ごとに1件ずつ記録し、機種IDで 777-300ER と A350-900 を区別して集計する', () => {
+  it('運航を終えた機体ごとに1件ずつ記録し、機種IDで 777-300 と A350-900 を区別して集計する', () => {
     const finished = Object.values(sim.state.aircraft).filter((a) => ['departed', 'diverted', 'cannotOperate'].includes(a.state));
     expect(recs.length).toBe(finished.length);
     expect(new Set(recs.map((r) => r.aircraftId)).size).toBe(recs.length);
     const byModel = aggregate(recs, 'model', sim.ctx.types);
     const keys = byModel.map((g) => g.key);
-    expect(keys).toContain('B777-300ER');
+    // サンドボックス初期契約の大型機は B777-300（PR #28 で旧 SK の B777-300ER から変更）
+    expect(keys).toContain('B777-300');
     expect(keys).toContain('A350-900');
     expect(byModel.reduce((s, g) => s + g.n, 0)).toBe(recs.length);
     // 1日1便の機種はデータ不足として扱う
-    expect(byModel.find((g) => g.key === 'B777-300ER')!.lowSample).toBe(true);
+    expect(byModel.find((g) => g.key === 'B777-300')!.lowSample).toBe(true);
     expect(byModel.find((g) => g.key === 'A320-200')!.lowSample).toBe(byModel.find((g) => g.key === 'A320-200')!.n < MIN_SAMPLE);
   });
 
@@ -106,7 +107,7 @@ describe('シナリオ比較', { timeout: 300_000 }, () => {
     expect(s.results).toHaveLength(2);
     expect(a.simModelVersion).toBe(SIM_MODEL_VERSION);
     expect(a.catalogVersion).toBe(CATALOG_VERSION);
-    expect(Object.keys(s.catalog.models)).toContain('B777-300ER');
+    expect(Object.keys(s.catalog.models)).toContain('B777-300');
   });
 
   it('機材変更のシナリオ: A350-900 を 777-300 に変えると機種別の集計・座席数が変わり、元のシナリオは変わらない', () => {
@@ -132,18 +133,19 @@ describe('シナリオ比較', { timeout: 300_000 }, () => {
   it('保存した機種データで実行し、カタログが更新されても過去の結果は変わらない。最新カタログでの再実行は区別される', () => {
     const s = base();
     // 保存時のデータ（例: 古い版の座席数）を表すスナップショット
-    s.catalog.models['B777-300ER']!.defaultSeats = 290;
+    // 対象はサンドボックス初期契約の大型機 B777-300（運航会社 NP。PR #28 で旧 SK の B777-300ER から変更）
+    s.catalog.models['B777-300']!.defaultSeats = 290;
     s.catalog.version = '2025.01.0';
-    delete s.company.fleets.SK; // 航空会社の座席構成を使わず、機種の既定座席を使う
+    delete s.company.fleets.NP; // 航空会社の座席構成を使わず、機種の既定座席を使う
     const old = runScenario(s, NOW);
     const cur = runScenario(s, NOW, { useCurrentCatalog: true });
-    const seatsOf = (r: typeof old) => r.byModel.find((g) => g.key === 'B777-300ER')!;
+    const seatsOf = (r: typeof old) => r.byModel.find((g) => g.key === 'B777-300')!;
     expect(seatsOf(old).seats / Math.max(1, seatsOf(old).completed)).toBe(290);
-    expect(seatsOf(cur).seats / Math.max(1, seatsOf(cur).completed)).toBe(370);
+    expect(seatsOf(cur).seats / Math.max(1, seatsOf(cur).completed)).toBe(368); // B777-300 の現在の既定座席
     expect(old.catalogUsed).toBe('snapshot');
     expect(old.catalogVersion).toBe('2025.01.0');
     expect(cur.catalogUsed).toBe('current');
-    expect(catalogDiff(s.catalog.models).some((d) => d.id === 'B777-300ER' && d.field === 'defaultSeats')).toBe(true);
+    expect(catalogDiff(s.catalog.models).some((d) => d.id === 'B777-300' && d.field === 'defaultSeats')).toBe(true);
     // 旧結果は上書きされずに残る
     expect(s.results[0]!.catalogUsed).toBe('snapshot');
   });

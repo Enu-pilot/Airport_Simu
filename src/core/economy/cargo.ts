@@ -169,3 +169,22 @@ export function cargoDailyFinance(c: CompanyState, day: number, handlingCapacity
     truckTrips: Math.ceil(plan.carriedM3 / M.truckCapacityM3),
   };
 }
+
+/**
+ * 実績ベースの貨物収支（5-12 の sim 実便化）。計画値ではなく、その日に貨物タスクが
+ * 実際に完了して積み下ろしした量 (m3) から収入・荷役費・トラック台数を出す。
+ * 積み残しは「その日の路線需要 − 実績の運搬量」。日次締めが日報と台帳への計上に使う。
+ */
+export function cargoActualFinance(c: CompanyState, day: number, actualCarriedM3: number): CargoDailyFinance {
+  const plan = planCargoDay(c, day);
+  const carriedM3 = Math.max(0, actualCarriedM3);
+  const M = BALANCE.cargo;
+  return {
+    day,
+    carriedM3,
+    leftoverM3: Math.max(0, plan.demandM3 - carriedM3),
+    revenue: Math.round(carriedM3 * M.revenuePerM3),
+    handlingCost: Math.round(carriedM3 * M.handlingCostPerM3),
+    truckTrips: Math.ceil(carriedM3 / M.truckCapacityM3),
+  };
+}

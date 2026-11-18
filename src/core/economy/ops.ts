@@ -8,6 +8,7 @@ import type { Simulation } from '../sim/simulation';
 import {
   EVENT_LOG_LIMIT,
   PAX_FINAL_STATES,
+  isOvernightStay,
   type Aircraft,
   type Flight,
   type GroundStats,
@@ -22,6 +23,9 @@ import { railServiceOf, RAIL_SERVICE } from '../access/rail';
 import { terminalLinkCapacityPerHour } from '../terminal/model';
 import { runwaySystemCapacity } from '../runwayCapacity';
 import { takeLinkUsage } from '../sim/linkUsage';
+import { takeMissBreakdown } from '../sim/missBreakdown';
+import { takeCargoHandled } from '../sim/cargoStats';
+import { cargoActualFinance, planCargoDay } from './cargo';
 import { evaluateDelayPair } from './delayEvaluation';
 import {
   COST_CATEGORIES,
@@ -410,13 +414,13 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
   const avgWalkMin = dPax.finished > 0 ? dPax.walk / dPax.finished / 60 : 0;
   const avgDelayMin = done.length > 0 ? done.reduce((s, l) => s + l.delaySec, 0) / done.length / 60 : 0;
   const actualAvgDelayMin = done.length > 0 ? done.reduce((s, l) => s + l.actualDelaySec, 0) / done.length / 60 : 0;
-  // 地上作業時間 = 準備完了 − ブロックイン（期間内に準備完了した出発便）
+  // 地上作業時間 = 準備完了 − ブロックイン（期間内に準備完了した出発便。夜間滞泊は折り返しではなく、貨物便は旅客とは別軸なので除く）
   const ground: number[] = [];
   for (const f of Object.values(state.flights)) {
     if (f.direction !== 'departure' || f.readyAt === null || f.readyAt < from || f.readyAt >= state.now) continue;
     const acf = state.aircraft[f.aircraftId];
     const arr = acf ? state.flights[acf.arrivalFlightId] : undefined;
-    if (arr && arr.block !== null) ground.push(f.readyAt - arr.block);
+    if (arr && arr.block !== null && !isOvernightStay(arr, f) && !f.cargo) ground.push(f.readyAt - arr.block);
   }
   const runways = Object.values(ctx.runways).filter((r) => r.operational).length;
   const stands = Object.values(ctx.stands).filter((s) => s.operational).length;
@@ -601,6 +605,16 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   const offers = generateOffers(c, operableTypes(ctx), routeCapabilities.originCountryId, routeCapabilities.internationalPassengerProcessing);
   for (const k of offers) log(state, `${airlineDef(k.airlineId).name} から新しい契約の提案があります`);
 
+  // 貨物の実績収支（5-12）: 計画値ではなく、その期間に貨物タスクが完了して実際に積み下ろしした量から
+  // 計算し、台帳へ計上する。貨物契約のない日は従来どおり何も付けない
+  const cargoHandled = takeCargoHandled(state);
+  const cargoFinance = cargoHandled || planCargoDay(c, c.day).contracts.length > 0
+    ? cargoActualFinance(c, c.day, (cargoHandled?.unloadedM3 ?? 0) + (cargoHandled?.loadedM3 ?? 0))
+    : undefined;
+  if (cargoFinance) {
+    post(c, 'cargo', cargoFinance.revenue);
+    post(c, 'cargoHandling', -cargoFinance.handlingCost);
+  }
   const revenue: DailyReport['revenue'] = {};
   const cost: DailyReport['cost'] = {};
   for (const k of REVENUE_CATEGORIES) if (c.today[k]) revenue[k] = c.today[k]!;
@@ -726,6 +740,19 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
       if (sec > 0) waits.push({ reason, sec });
     }
     if (waits.length > 0) report.groundWaits = waits;
+  }
+  // 乗り遅れの内訳: 詰まり箇所ごとの人数を読み取り、記録を消す（乗り遅れがあった日だけ日報に付ける）
+  const missedBreakdown = takeMissBreakdown(state);
+  if (missedBreakdown) report.missedBreakdown = missedBreakdown;
+  // 貨物の実績（5-12。台帳への計上は上で済ませ、日報には量と収支の内訳を付ける）
+  if (cargoFinance) {
+    report.cargo = {
+      carriedM3: Math.round(cargoFinance.carriedM3 * 10) / 10,
+      leftoverM3: Math.round(cargoFinance.leftoverM3 * 10) / 10,
+      revenue: cargoFinance.revenue,
+      handlingCost: cargoFinance.handlingCost,
+      truckTrips: cargoFinance.truckTrips,
+    };
   }
   // リンク利用実績（5-03）: 連絡設備・上下移動の時間帯別人数を読み取り、記録を消す
   const linkUsageRecord = takeLinkUsage(state);

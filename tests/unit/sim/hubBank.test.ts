@@ -14,12 +14,12 @@ function bankCompany(seed = 'bank-1'): CompanyState {
     maxConnectMin: 240,
   };
   addContract(c, {
-    airlineId: 'SK', destinationId: 'KTA', typeId: 'B737-800', perDay: 3, window: 'any',
+    airlineId: 'HB', destinationId: 'KTA', typeId: 'B737-800', perDay: 3, window: 'any',
     feeDiscount: 0, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0,
     bankId: 'b1', transferShare: 0.4,
   });
   addContract(c, {
-    airlineId: 'SK', destinationId: 'TYO', typeId: 'B737-800', perDay: 3, window: 'any',
+    airlineId: 'HB', destinationId: 'TYO', typeId: 'B737-800', perDay: 3, window: 'any',
     feeDiscount: 0, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0,
     bankId: 'b1', transferShare: 0.4,
   });

@@ -55,6 +55,7 @@ function buildAirline(input: AirlineInput): AirlineDef {
     name: input.name,
     type: input.type,
     fleet: input.fleet.map((f) => ({ ...f })),
+    ...(input.cargoFleet && input.cargoFleet.length > 0 ? { cargoFleet: [...input.cargoFleet] } : {}),
     priceSensitivity: input.priceSensitivity ?? d.priceSensitivity,
     minOtp: input.minOtp ?? d.minOtp,
     ...(unlock.minRating !== undefined ? { minimumAirportRating: unlock.minRating } : {}),

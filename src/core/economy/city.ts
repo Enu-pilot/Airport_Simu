@@ -1,4 +1,5 @@
-import type { CompanyState } from './company';
+import type { CompanyState, Contract } from './company';
+import { featureOn } from './unlocks';
 import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../sim/aircraftTypes';
 import type { DayPlan } from './planning';
@@ -178,9 +179,11 @@ export function applyCityNoiseImpact(city: CityConfig, noisePoints: number, nigh
 export const CITY_TYPES: readonly CityType[] = ['regional', 'core', 'metropolitan'];
 
 const CITY_PROFILE: Record<CityType, Omit<CityConfig, 'version' | 'residents'>> = {
-  regional: { type: 'regional', population: 300_000, distanceKm: 25, roadQuality: 2, railQuality: 0 },
-  core: { type: 'core', population: 1_200_000, distanceKm: 18, roadQuality: 3, railQuality: 2 },
-  metropolitan: { type: 'metropolitan', population: 6_000_000, distanceKm: 30, roadQuality: 4, railQuality: 4 },
+  // 2026-11-18 PO 判断（5-20 T8）: 旧人口では需要上限が上位の格の旅客要件を下回り到達不能だったため引き上げ。
+  // growCity の閾値は基礎人口への相対値なので自動で追随する。既存セーブは人口を保持するため新規ゲームのみに効く
+  regional: { type: 'regional', population: 600_000, distanceKm: 25, roadQuality: 2, railQuality: 0 },
+  core: { type: 'core', population: 4_000_000, distanceKm: 18, roadQuality: 3, railQuality: 2 },
+  metropolitan: { type: 'metropolitan', population: 20_000_000, distanceKm: 30, roadQuality: 4, railQuality: 4 },
 };
 
 const TRIP_RATE: Record<CityType, number> = { regional: 0.004, core: 0.006, metropolitan: 0.009 };
@@ -267,12 +270,41 @@ export function growCity(city: CityConfig, dailyPax: number, demandCeiling: numb
   return events;
 }
 
+/** 契約の乗継割合（到着旅客のうち乗り継ぐ割合）。ハブ機能が有効な会社でのみ効く（planConnections と同じ条件） */
+export function contractTransferShare(company: CompanyState, contract: Pick<Contract, 'transferShare'>): number {
+  return featureOn(company, 'hub') ? (contract.transferShare ?? 0) : 0;
+}
+
 /** 契約便の基本搭乗率から計画旅客数を推定する。 */
 export function expectedPassengers(
   company: CompanyState,
   day: number,
   types: TypeTable = AIRCRAFT_TYPES,
   routeCapabilities: RouteCapabilities = routeCapabilitiesForAirport(),
+): number {
+  return expectedPassengersWeighted(company, day, types, routeCapabilities, false);
+}
+
+/**
+ * 地元需要分の推定（5-20 T8 の PO 判断: 乗継旅客は地元需要ではない）。
+ * 到着旅客のうち乗継分は都市が生む需要ではないので、往復の重みは到着側だけ (1 − share) になり (2 − share)。
+ * 都市需要上限の係数はこの地元分に対して効かせる。
+ */
+export function expectedLocalPassengers(
+  company: CompanyState,
+  day: number,
+  types: TypeTable = AIRCRAFT_TYPES,
+  routeCapabilities: RouteCapabilities = routeCapabilitiesForAirport(),
+): number {
+  return expectedPassengersWeighted(company, day, types, routeCapabilities, true);
+}
+
+function expectedPassengersWeighted(
+  company: CompanyState,
+  day: number,
+  types: TypeTable,
+  routeCapabilities: RouteCapabilities,
+  localOnly: boolean,
 ): number {
   return Object.values(company.contracts).reduce((sum, contract) => {
     if (contract.status !== 'active' || contract.startDay > day || contract.endDay < day) return sum;
@@ -281,7 +313,8 @@ export function expectedPassengers(
     const seats = company.fleets?.[contract.airlineId]?.find((entry) => entry.typeId === contract.typeId)?.seats
       ?? resolveType(types, contract.typeId).seats;
     const baseLoad = BALANCE.demand.baseLoadFactor[airline.type];
-    return sum + contract.perDay * seats * baseLoad * 2;
+    const share = localOnly ? contractTransferShare(company, contract) : 0;
+    return sum + contract.perDay * seats * baseLoad * (2 - share);
   }, 0);
 }
 

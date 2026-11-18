@@ -13,6 +13,7 @@ import { evaluateDelayPair } from '../economy/delayEvaluation';
 import { resolveType } from '../sim/aircraftTypes';
 import { designatorsOf } from '../layout/designators';
 import { internationalProcessingFor, routeCapabilitiesForAirport } from '../economy/registry';
+import type { MissBottleneck, MissBreakdownEntry } from '../sim/missBreakdown';
 
 /**
  * 1 日の振り返り（docs/14_management_rules.md §N）。日次の締めの直後に、既存の日報・運航の記録・障害の記録・
@@ -135,6 +136,50 @@ export interface ReviewFlight {
   impactKeys: ScoreKey[];
 }
 
+/** 乗り遅れ内訳の分類ごとの集約（振り返り表示用） */
+export interface MissedBreakdownSummary {
+  category: MissBottleneck;
+  /** 分類の合計人数 */
+  count: number;
+  /** その分類で最も詰まったエリア/施設（同数は先に記録された方） */
+  topSpotId: string | null;
+  topSpotCount: number;
+}
+
+/** 日報の乗り遅れ内訳を分類ごとに集約する（人数の多い順、同数は分類名順） */
+export function summarizeMissedBreakdown(entries: readonly MissBreakdownEntry[]): MissedBreakdownSummary[] {
+  const byCategory = new Map<MissBottleneck, MissedBreakdownSummary>();
+  for (const e of entries) {
+    const row = byCategory.get(e.category) ?? { category: e.category, count: 0, topSpotId: null, topSpotCount: 0 };
+    row.count += e.count;
+    if (e.spotId !== null && e.count > row.topSpotCount) {
+      row.topSpotId = e.spotId;
+      row.topSpotCount = e.count;
+    }
+    byCategory.set(e.category, row);
+  }
+  return [...byCategory.values()].sort((a, b) => b.count - a.count || (a.category < b.category ? -1 : 1));
+}
+
+/** 乗り遅れの分類ごとの改善の助言（記録された内訳に基づくものだけを出す） */
+export const MISSED_ADVICE: Record<MissBottleneck, string> = {
+  checkIn: 'チェックインカウンターの数や1人あたり処理時間を見直し、ピークの便に合わせて増強を検討してください。',
+  security: '保安検査のレーン数や処理時間を見直し、出発ピークに合わせて増強を検討してください。',
+  emigration: '出国審査の窓口数を見直し、国際線の出発ピークに合わせて増強を検討してください。',
+  immigration: '入国審査の窓口数を見直し、国際線の到着ピークに合わせて増強を検討してください。',
+  customs: '税関の窓口数を見直し、国際線の到着ピークに合わせて増強を検討してください。',
+  transferSecurity: '乗継保安検査の能力と、乗継に使える時間の余裕を確認してください。',
+  gate: '搭乗口までの動線・ゲート割当・搭乗開始のタイミングを確認してください。',
+  walking: 'ターミナル内の移動距離が長くなっています。動線の配置や連絡設備を確認してください。',
+  bus: 'ランプバスの台数・配車間隔とバスゲートの運用を確認してください。',
+  access: '空港へのアクセス（鉄道・バス・道路）の容量と所要時間を確認してください。',
+  transferLate: '乗継便同士の間隔が接続に必要な時間に対して不足しています。乗継便の時刻を確認してください。',
+  unreachable: '到達できない動線があります。ターミナル内の接続（エリア同士・上下移動）を確認してください。',
+  noGate: '便に搭乗口が割り当てられていません。ゲートとスポットの割当を確認してください。',
+  facilityClosed: '閉鎖中の施設が旅客の動線を塞いでいます。閉鎖の解除や代替の動線を確認してください。',
+  other: '乗り遅れた旅客の便記録とイベントを確認して原因を切り分けてください。',
+};
+
 export interface ReviewFlightDetails {
   arrRunwayName?: string | null;
   depRunwayName?: string | null;
@@ -169,6 +214,8 @@ export interface DayReview {
   delayCauses: { cause: string; flights: number }[];
   /** 日中に終了記録が作られた便の実ログに基づく原因・影響便・対応案 */
   bottlenecks: ReviewBottleneck[];
+  /** 乗り遅れの詰まり箇所の内訳と助言（日報に乗り遅れ内訳があるときだけ） */
+  missedBreakdown?: { summary: MissedBreakdownSummary[]; advice: { category: MissBottleneck; recommendation: string }[] };
   /** 新しい記録形式では当日内の問題便と実時系列を含む。旧保存レビューでは欠落する。 */
   flights?: ReviewFlight[];
   disruptions: ReviewDisruption[];
@@ -480,6 +527,8 @@ export function buildDayReview(input: ReviewInput): DayReview {
   const tomorrowPlan = planDayWithDemand(company, company.day, access, sim.ctx.types, routeCapabilitiesForAirport(sim.ctx.layout.countryId, { international: internationalProcessingFor(company, sim.ctx.terminal) }));
   const tomorrowAnalysis = analyzeDayPlan(tomorrowPlan, sim.ctx);
   const weather = company.game?.weather === 'levels' ? weatherOfDay(company, report.day, dayStart) : undefined;
+  // 乗り遅れの内訳（日報にあるときだけ）: 分類ごとに集約し、多い分類から助言を作る
+  const missedSummary = report.missedBreakdown && report.missedBreakdown.length > 0 ? summarizeMissedBreakdown(report.missedBreakdown) : null;
 
   return {
     day: report.day,
@@ -488,6 +537,14 @@ export function buildDayReview(input: ReviewInput): DayReview {
     compare: compareReports(prev, report),
     delayCauses: delayCauseCounts(records, dayStart, end),
     bottlenecks: buildReviewBottlenecks(records, dayStart, end),
+    ...(missedSummary
+      ? {
+          missedBreakdown: {
+            summary: missedSummary,
+            advice: missedSummary.slice(0, 3).map((s) => ({ category: s.category, recommendation: MISSED_ADVICE[s.category] })),
+          },
+        }
+      : {}),
     flights,
     disruptions,
     ...(weather ? { weather } : {}),
