@@ -182,7 +182,7 @@
 | 5-09 | 階層の未定義事項の決定と実装（内部設備の接続警告、建物の地下階、地下に置ける種類、全レイヤ表示中の配置先）。道路・鉄道ランプの画面からの建設 | docs/39 §10.3・§10.4 |
 | 5-10 | テスト不足の解消: 検証コード 29 種、都市イベント、旧形式の実ファイル、複合障害、保存サイズの上限。カバレッジ計測の導入（未計測を達成扱いにしない） | docs/39 §3 |
 | 5-11 | 保存データの間引き（運航状態が 1 日約 2.2 MB 増える） | docs/39 §3.1 |
-| 5-12 | 貨物輸送・貨物取扱（空港格Tier3〜7で段階解放。格解放の器は5-20と連携） | docs/39 §7 A6、[貨物計画](implementation/planned/cargo_operations_plan.md) |
+| 5-12 | 貨物輸送・貨物取扱（旅客基盤の未完成部分の後に実装。空港格Tier3〜7で段階解放し、格解放の器は5-20と連携） | docs/39 §7 A6、[貨物計画](implementation/planned/cargo_operations_plan.md) |
 | 5-13 | 旅客動線の3段階接続判定: 経路全体を「通行可能／建設完了待ち／未接続」に分類する。運用中経路を優先し、建設中経路は完成後の接続予測にだけ使う。旅客移動・構造検証・建設完了後の再探索へ反映し、内部通路の建設状態表現と連絡設備の工事進捗連携を整える | PO 依頼（2026-11-18）、[実装計画](implementation/planned/passenger_connectivity_status_plan.md) |
 | 5-14 | ターミナル階層・駅/バスターミナルの構造化: B3〜4Fを内部床階として扱い、railStation/busTerminalを独立構造物かつ建物内包可能にする。旧busStop・旧save互換を維持 | PO依頼（2026-11-18）、docs/34・39 §10.3 | [terminal_building_structure_plan.md](implementation/planned/terminal_building_structure_plan.md) |
 | 5-15 | ターミナル形状・複合体: 凹形ポリゴン建物に対応。辺接触または完成済み高層連絡通路で同一ターミナル複合体を判定。ただし同一complexと旅客通行可能は分離 | PO依頼（2026-11-18）、docs/22・35 | [terminal_complex_geometry_plan.md](implementation/planned/terminal_complex_geometry_plan.md) |
