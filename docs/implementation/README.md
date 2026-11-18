@@ -55,13 +55,13 @@ docs/42がフェーズの実装状況の正本、各計画書の状態とフォ�
 
 | ID / 既存要求 | 状態 | 正本の計画書 | 着手条件 |
 |---|---|---|---|
-| A6 / Phase 5 5-12 貨物輸送 | planned（基盤ゲート待ち） | [cargo_operations_plan.md](planned/cargo_operations_plan.md) | 5-14〜5-16、5-21 |
+| A6 / Phase 5 5-12 貨物輸送 | planned（基盤ゲート待ち） | [cargo_operations_plan.md](planned/cargo_operations_plan.md) | 5-14〜5-16、5-20、5-21。Tier3〜7で段階解放 |
 | D4 空港ブランド効果 | planned（基盤ゲート待ち） | [airport_brand_effects_plan.md](planned/airport_brand_effects_plan.md) | 5-04・5-21、指標/効果幅のPO承認 |
 | K1 自動最適化 | planned（基盤ゲート待ち） | [automatic_optimization_plan.md](planned/automatic_optimization_plan.md) | 5-19・5-21・5-22 |
 | F3 風向による滑走路方向選択 | planned（基盤ゲート待ち） | [wind_runway_direction_plan.md](planned/wind_runway_direction_plan.md) | 5-24、予約/占有の設計レビュー |
 | F4 除雪・防除氷 | planned（基盤ゲート待ち） | [snow_removal_deicing_plan.md](planned/snow_removal_deicing_plan.md) | 5-17・5-21・5-25 |
 
-A6 は既存の5-12を詳細化した計画であり、別要求ではありません。基盤ゲートを満たしただけでは着手せず、HANDOFF更新・計画書のactive移管・POによる実装順序確認を行います。
+A6 は既存の5-12を詳細化した計画であり、別要求ではありません。貨物はTier3で国内貨物、Tier4で国際貨物、Tier5〜7で取扱規模・物流網を段階的に拡張します。貨物運営は格昇格の必須条件ではなく、旅客中心の空港も格7に到達可能です。基盤ゲートを満たしただけでは着手せず、HANDOFF更新・計画書のactive移管・POによる実装順序確認を行います。
 
 ## ディレクトリの意味
 
