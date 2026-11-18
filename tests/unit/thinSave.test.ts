@@ -17,7 +17,7 @@ describe('5-11 保存データの間引き', () => {
       expect(state.flights[a.arrivalFlightId]).toBeDefined();
       expect(state.flights[a.departureFlightId]).toBeDefined();
     }
-    // 元のセーブ自体に既存の違反が 7 件ある（詰まった状態の記録）。間引きが違反を増やさないこと
+    // 間引きが復元の整合性結果を変えないこと（G2/O1 の判定を運航側の skip・離陸済みに合わせてあり、このセーブは違反 0 件）
     const original = restoreSimulation(raw.layout, raw.sim, effectiveModels(raw.catalog));
     const { violations } = restoreSimulation(raw.layout, { state, company: raw.sim.company }, effectiveModels(raw.catalog));
     expect(violations).toEqual(original.violations);

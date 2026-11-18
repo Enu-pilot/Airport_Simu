@@ -22,7 +22,9 @@ export function checkPhase4Invariants(sim: Simulation, full: boolean): string[] 
   for (const f of flightList) {
     if (!f.carryOver) continue;
     if (f.pax.booked !== 0 || f.pax.deplaned !== 0) problems.push(`O1: 合成の到着便 ${f.id} が旅客を持っています`);
-    if (f.aircraftId && s.aircraft[f.aircraftId] && s.standAssignments[f.standId ?? ''] !== f.aircraftId) {
+    // 占有の一致は「そのスポットにまだいる間」だけを見る。離陸済み（standId なし）やスポット変更後は記録側が古いだけ
+    const ac = f.aircraftId ? s.aircraft[f.aircraftId] : undefined;
+    if (ac && ac.standId !== null && ac.standId === f.standId && s.standAssignments[f.standId ?? ''] !== f.aircraftId) {
       problems.push(`O1: 置き直した機体 ${f.aircraftId} のスポット占有が一致しません`);
     }
   }

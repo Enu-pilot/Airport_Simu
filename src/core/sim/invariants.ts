@@ -276,7 +276,9 @@ export function checkGroundInvariants(sim: Simulation, full: boolean): string[] 
       owner.set(u, t.id);
       if (state.units[u]?.taskId !== t.id) out.push(`G1 ${u} の割り当て先が ${t.id} と不一致`);
     }
-    if ((t.state === 'inProgress' || t.state === 'dispatched') && !t.deps.every((k) => (state.aircraftTasks[t.aircraftId] ?? []).some((x) => state.tasks[x]!.kind === k && state.tasks[x]!.state === 'done'))) {
+    // 先行作業の完了判定は運航側の taskDone と同じく、skip した作業（持ち越し便の降機・荷降ろし）を完了扱いにする
+    const skipped = state.aircraft[t.aircraftId]?.skippedTasks ?? [];
+    if ((t.state === 'inProgress' || t.state === 'dispatched') && !t.deps.every((k) => skipped.includes(k) || (state.aircraftTasks[t.aircraftId] ?? []).some((x) => state.tasks[x]!.kind === k && state.tasks[x]!.state === 'done'))) {
       out.push(`G2 ${t.id}(${t.kind}) が先行作業の完了前に開始`);
     }
   }
