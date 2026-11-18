@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.4",
+ "simModelVersion": "skyport-sim-10.6",
  "flightsPerDay": 120,
  "runs": {
   "free-crossing|free-a": {

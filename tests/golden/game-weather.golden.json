@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.4",
+ "simModelVersion": "skyport-sim-10.6",
  "runs": {
   "day0-normal": {
    "day": 0,
@@ -40,43 +40,55 @@
     "cancelled": 0,
     "goArounds": 0,
     "conflicts": 0,
-    "taxiInSecTotal": 3152,
-    "taxiOutSecTotal": 4042
+    "taxiInSecTotal": 3215,
+    "taxiOutSecTotal": 4051
    },
    "weatherCancels": 0,
    "weatherGoArounds": 0,
    "randomDisruptions": [
-    "standClosed"
+    "demandSurge"
    ],
    "kpi": {
     "flights": 38,
     "movements": 38,
-    "paxDeparted": 2096,
-    "paxArrived": 2104,
+    "paxDeparted": 2197,
+    "paxArrived": 2204,
     "otp": 1,
-    "avgDelayMin": 0.2,
-    "actualAvgDelayMin": 2.4,
+    "avgDelayMin": 0.5,
+    "actualAvgDelayMin": 2.7,
     "runwayUtil": 0.07037037037037037,
-    "gateUtil": 0.15979595336076818,
-    "facilityUtil": 0.09934336419753087,
-    "avgWaitMin": 3.4,
-    "avgWalkMin": 9.9,
-    "avgGroundMin": 44.6,
+    "gateUtil": 0.15996742112482853,
+    "facilityUtil": 0.1022145061728395,
+    "avgWaitMin": 3.8,
+    "avgWalkMin": 9.7,
+    "avgGroundMin": 43.8,
     "unprocessedPax": 0,
     "missedPax": 0,
     "leftBags": 0,
     "diverted": 0,
     "cancelled": 0,
-    "paxSatisfaction": 93,
+    "paxSatisfaction": 91.8,
+    "paxSatisfactionDetail": {
+     "waitPenalty": 7.7,
+     "walkPenalty": 0,
+     "delayPenalty": 0.5,
+     "missedPenalty": 0,
+     "bagsPenalty": 0,
+     "avgWaitMin": 3.8,
+     "avgWalkMin": 9.7,
+     "avgDelayMin": 0.5,
+     "missedRate": 0,
+     "leftRate": 0
+    },
     "airlineSatisfaction": 62,
-    "rating": 59.6,
+    "rating": 59.5,
     "modePax": {
-     "car": 1604,
-     "dropoff": 2583,
+     "car": 1716,
+     "dropoff": 2669,
      "taxi": 0,
      "bus": 0,
      "rail": 0,
-     "walk": 13
+     "walk": 16
     },
     "parkingFull": 0,
     "roadDelayMin": 0,
@@ -84,15 +96,14 @@
     "accessFactor": 1.00187668174666
    },
    "airlineSatisfaction": {
-    "SK": 62,
     "NP": 62,
     "RJ": 62,
     "AQ": 62,
     "HB": 62,
     "ML": 60
    },
-   "stateSha256": "84912b42e3f5f4215bcfddffe56cb24da24e668b26bd97f4063ae3c8241c4997",
-   "stateLength": 2244701
+   "stateSha256": "f6b648365dba96caf65ec6d81c50e967d355a97b31975ff78867d2f20f2c54a0",
+   "stateLength": 2342735
   },
   "bad-winter-normal": {
    "day": 108,
@@ -127,66 +138,76 @@
    "ticks": 64801,
    "invariantViolations": 0,
    "stats": {
-    "arrivals": 17,
-    "departures": 17,
+    "arrivals": 18,
+    "departures": 18,
     "diverted": 0,
-    "cancelled": 2,
-    "goArounds": 2,
+    "cancelled": 1,
+    "goArounds": 4,
     "conflicts": 0,
-    "taxiInSecTotal": 3817,
-    "taxiOutSecTotal": 5018
+    "taxiInSecTotal": 3901,
+    "taxiOutSecTotal": 4818
    },
-   "weatherCancels": 2,
-   "weatherGoArounds": 2,
+   "weatherCancels": 1,
+   "weatherGoArounds": 4,
    "randomDisruptions": [
-    "standClosed",
-    "inboundDelay"
+    "standClosed"
    ],
    "kpi": {
-    "flights": 34,
-    "movements": 34,
-    "paxDeparted": 1923,
-    "paxArrived": 1932,
-    "otp": 0.868421052631579,
-    "avgDelayMin": 1.5,
-    "actualAvgDelayMin": 10.9,
-    "runwayUtil": 0.06296296296296296,
-    "gateUtil": 0.14282750342935527,
-    "facilityUtil": 0.09311496913580247,
-    "avgWaitMin": 3.6,
-    "avgWalkMin": 9.9,
-    "avgGroundMin": 44.6,
+    "flights": 36,
+    "movements": 36,
+    "paxDeparted": 1974,
+    "paxArrived": 1978,
+    "otp": 0.9473684210526315,
+    "avgDelayMin": 0.9,
+    "actualAvgDelayMin": 3,
+    "runwayUtil": 0.06666666666666667,
+    "gateUtil": 0.1490895061728395,
+    "facilityUtil": 0.09197453703703704,
+    "avgWaitMin": 3.5,
+    "avgWalkMin": 10.1,
+    "avgGroundMin": 40.7,
     "unprocessedPax": 0,
     "missedPax": 0,
     "leftBags": 0,
     "diverted": 0,
-    "cancelled": 2,
-    "paxSatisfaction": 91.4,
-    "airlineSatisfaction": 61,
-    "rating": 58.5,
+    "cancelled": 1,
+    "paxSatisfaction": 92,
+    "paxSatisfactionDetail": {
+     "waitPenalty": 7,
+     "walkPenalty": 0.1,
+     "delayPenalty": 0.9,
+     "missedPenalty": 0,
+     "bagsPenalty": 0,
+     "avgWaitMin": 3.5,
+     "avgWalkMin": 10.1,
+     "avgDelayMin": 0.9,
+     "missedRate": 0,
+     "leftRate": 0
+    },
+    "airlineSatisfaction": 61.4,
+    "rating": 59.1,
     "modePax": {
-     "car": 1518,
-     "dropoff": 2377,
+     "car": 1595,
+     "dropoff": 2345,
      "taxi": 0,
      "bus": 0,
      "rail": 0,
-     "walk": 7
+     "walk": 12
     },
     "parkingFull": 0,
-    "roadDelayMin": 0,
+    "roadDelayMin": 0.1,
     "transitWaitMin": 0,
     "accessFactor": 1.00187668174666
    },
    "airlineSatisfaction": {
-    "SK": 59.5,
-    "NP": 62,
-    "RJ": 59.5,
+    "NP": 59.5,
+    "RJ": 62,
     "AQ": 62,
     "HB": 62,
     "ML": 60
    },
-   "stateSha256": "9c896e7546f05d82b122c4b111c006c2269fb3e3fe4985168dd799ac5cb57d44",
-   "stateLength": 2160561
+   "stateSha256": "ec5dfb996d67519f43b36de6f490342dbe3c439c7c65aec513f1a70155a31a67",
+   "stateLength": 2142911
   },
   "bad-humid-expert": {
    "day": 10,
@@ -227,43 +248,57 @@
     "cancelled": 0,
     "goArounds": 0,
     "conflicts": 0,
-    "taxiInSecTotal": 3658,
-    "taxiOutSecTotal": 4548
+    "taxiInSecTotal": 3771,
+    "taxiOutSecTotal": 4542
    },
    "weatherCancels": 0,
    "weatherGoArounds": 0,
    "randomDisruptions": [
-    "standClosed"
+    "runwayClosed",
+    "taxiwayClosed",
+    "inboundDelay"
    ],
    "kpi": {
     "flights": 38,
     "movements": 38,
-    "paxDeparted": 2165,
-    "paxArrived": 2087,
+    "paxDeparted": 2268,
+    "paxArrived": 2182,
     "otp": 1,
     "avgDelayMin": 0.4,
-    "actualAvgDelayMin": 3.1,
+    "actualAvgDelayMin": 4.3,
     "runwayUtil": 0.07037037037037037,
-    "gateUtil": 0.15528120713305898,
-    "facilityUtil": 0.10223842592592593,
-    "avgWaitMin": 3.5,
+    "gateUtil": 0.15484224965706447,
+    "facilityUtil": 0.10489506172839506,
+    "avgWaitMin": 3.9,
     "avgWalkMin": 10.8,
-    "avgGroundMin": 43,
+    "avgGroundMin": 42.8,
     "unprocessedPax": 0,
     "missedPax": 0,
     "leftBags": 0,
     "diverted": 0,
     "cancelled": 0,
-    "paxSatisfaction": 91.7,
+    "paxSatisfaction": 90.9,
+    "paxSatisfactionDetail": {
+     "waitPenalty": 7.8,
+     "walkPenalty": 0.8,
+     "delayPenalty": 0.4,
+     "missedPenalty": 0,
+     "bagsPenalty": 0,
+     "avgWaitMin": 3.9,
+     "avgWalkMin": 10.8,
+     "avgDelayMin": 0.4,
+     "missedRate": 0,
+     "leftRate": 0
+    },
     "airlineSatisfaction": 62,
-    "rating": 59.4,
+    "rating": 59.3,
     "modePax": {
-     "car": 1748,
-     "dropoff": 2490,
+     "car": 1726,
+     "dropoff": 2718,
      "taxi": 0,
      "bus": 0,
      "rail": 0,
-     "walk": 14
+     "walk": 6
     },
     "parkingFull": 0,
     "roadDelayMin": 0.1,
@@ -271,15 +306,14 @@
     "accessFactor": 1.00187668174666
    },
    "airlineSatisfaction": {
-    "SK": 62,
     "NP": 62,
     "RJ": 62,
     "AQ": 62,
     "HB": 62,
     "ML": 60
    },
-   "stateSha256": "14b196016862b0853d4d0cc5cb1e9dbd04c63245be7e186b99a5586d9a35a7b6",
-   "stateLength": 2272934
+   "stateSha256": "ba709936c1daa14ec06fc76f0c2773792e6c38d3a6447032dd0f0f09246fec4b",
+   "stateLength": 2365127
   }
  }
 }

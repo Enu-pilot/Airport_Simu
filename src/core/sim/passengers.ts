@@ -10,6 +10,9 @@ import { boardingAllowed } from './ground';
 import { applyBusArrival, applyBusDeparture, pickBusGate, stepBusBoarding } from './apronBus';
 import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './busRules';
 import { gateMode } from '../model/gates';
+import { facilityTiles } from '../layout/footprint';
+import { TILE_M } from '../geometry/frames';
+import { sortedValues } from '../model/ids';
 import { BALANCE } from '../economy/balance';
 import { onPaxDeplaned, onPaxMissed, onShopDone, onTransferMissed } from '../economy/ops';
 import { accessArrival, accessDeparture } from '../access/runtime';
@@ -744,6 +747,31 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
 
 // ---------------------------------------------------------------- グループ
 
+/**
+ * エリアに接続する運用中ポータルがあれば、そのアクセス区間を返す（5-16 T5）。
+ * 区間の長さは交通施設とターミナル建物の最短タイル距離から決定的に求める。
+ * ポータルがない空港では常に null（従来の移動と同一）。
+ */
+function portalLegFor(sim: Simulation, areaId: string, phase: 'enter' | 'exit'): PaxGroup['accessLeg'] | null {
+  const layout = sim.ctx.layout;
+  const area = layout.terminalAreas[areaId];
+  if (!area) return null;
+  const terminal = layout.facilities[area.terminalId];
+  if (!terminal) return null;
+  for (const portal of sortedValues(layout.portals ?? {})) {
+    if (portal.areaId !== areaId || portal.buildState !== 'operational') continue;
+    const facility = layout.facilities[portal.facilityId];
+    if (!facility || (facility.buildState ?? 'operational') !== 'operational') continue;
+    let minDist = Number.POSITIVE_INFINITY;
+    for (const a of facilityTiles(facility)) for (const b of facilityTiles(terminal)) {
+      minDist = Math.min(minDist, Math.abs(a.x - b.x) + Math.abs(a.y - b.y));
+    }
+    if (!Number.isFinite(minDist)) continue;
+    return { facilityId: facility.id, portalId: portal.id, areaId, lengthM: Math.max(TILE_M, minDist * TILE_M), phase };
+  }
+  return null;
+}
+
 function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): void {
   const { state } = sim;
   switch (g.state) {
@@ -798,11 +826,36 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
           }
           return;
         }
-        g.area = withRng(state, (rng) => reachable[rng.int(0, reachable.length - 1)]!);
+        const entrance = withRng(state, (rng) => reachable[rng.int(0, reachable.length - 1)]!);
         state.paxStats.spawned += g.count;
+        // 5-16 T5: 入口に運用中ポータルがあれば、交通施設から実際に歩いて入る
+        const leg = portalLegFor(sim, entrance, 'enter');
+        if (leg) {
+          g.accessLeg = leg;
+          g.legLength = leg.lengthM;
+          g.legProgress = 0;
+          g.state = 'accessWalk';
+          return;
+        }
+        g.area = entrance;
         planStep(sim, g);
       }
       return;
+    case 'accessWalk': {
+      // ポータル区間の歩行（屋外のため混雑による減速なし。歩行時間は walkSec に記録する）
+      g.legProgress += WALK_SPEED_MPS;
+      g.walkSec++;
+      if (g.legProgress >= g.legLength) {
+        const leg = g.accessLeg!;
+        if (leg.phase === 'enter') {
+          g.area = leg.areaId;
+          planStep(sim, g);
+        } else {
+          completeExit(sim, g);
+        }
+      }
+      return;
+    }
     case 'walking':
       if (g.route.some((areaId) => state.closedAreas.includes(areaId))) {
         planStep(sim, g);
@@ -1155,6 +1208,17 @@ function arrive(sim: Simulation, g: PaxGroup): void {
     case 'exit':
       // 空港アクセス: タクシー・バス・鉄道は乗り場で待ってから退出する
       if (state.access && !g.accessDone && accessArrival(sim, g)) return;
+      // 5-16 T5: 出口に運用中ポータルがあれば、交通施設まで実際に歩いて退出する
+      if (g.area) {
+        const leg = portalLegFor(sim, g.area, 'exit');
+        if (leg) {
+          g.accessLeg = leg;
+          g.legLength = leg.lengthM;
+          g.legProgress = 0;
+          g.state = 'accessWalk';
+          return;
+        }
+      }
       completeExit(sim, g);
       return;
     default:

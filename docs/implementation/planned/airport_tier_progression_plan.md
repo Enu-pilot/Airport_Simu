@@ -1,5 +1,6 @@
 # Phase 5 実装計画: 空港格の8段階化と成長判定の多軸化
 
+> 注記: 正本は active/ 側（`docs/implementation/active/airport_tier_progression_plan.md`）。こちらは旧版であり、状態・進捗は正本を参照すること。
 > 管理状態: planned  
 > 作成日: 2026-11-18  
 > 更新日: 2026-11-18  

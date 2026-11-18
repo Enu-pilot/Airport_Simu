@@ -131,6 +131,9 @@ function finalize(d: AirportLayout): AirportLayout {
   for (const [id, link] of Object.entries(d.terminalLinks ?? {})) {
     if (!d.terminalAreas[link.fromAreaId] || !d.terminalAreas[link.toAreaId]) delete d.terminalLinks![id];
   }
+  for (const [id, portal] of Object.entries(d.portals ?? {})) {
+    if (!d.facilities[portal.facilityId] || !d.terminalAreas[portal.areaId]) delete d.portals![id];
+  }
   return d;
 }
 
@@ -534,6 +537,60 @@ export function deleteTerminalTransitLink(layout: AirportLayout, id: string): Op
   if (!layout.terminalLinks?.[id]) return fail('NOT_FOUND');
   const d = cloneLayout(layout);
   delete d.terminalLinks![id];
+  return ok(finalize(d));
+}
+
+/** ポータルで接続できる交通施設の種別（5-16 T2） */
+export const PORTAL_FACILITY_KINDS: readonly Facility['kind'][] = ['railStation', 'busTerminal', 'busStop', 'taxiStand', 'parking'];
+
+/** ポータル接続の健全性上限（タイル）。歩行時間のモデルではなく、無関係な遠隔接続を拒否するための上限 */
+export const PORTAL_MAX_DISTANCE_TILES = 64;
+
+export interface PortalOptions {
+  facilityId: string;
+  areaId: string;
+  name?: string;
+  /** 省略時は接続先エリアの階を使う。指定時はエリアの階と一致しなければ拒否 */
+  floorIndex?: number;
+  /** 省略時は交通施設の地図階層を使う。指定時は施設の階層と一致しなければ拒否 */
+  mapLevel?: number;
+  buildState?: BuildState;
+}
+
+/**
+ * 歩行ポータルを追加する（5-16 T2）。交通施設とターミナル内エリアを明示接続する。
+ * 参照切れ・対象外の施設種別・階の不一致・遠隔すぎる接続は拒否する。
+ */
+export function addPortal(layout: AirportLayout, opts: PortalOptions): OpResult {
+  const facility = layout.facilities[opts.facilityId];
+  const area = layout.terminalAreas[opts.areaId];
+  if (!facility || !area) return fail('NOT_FOUND');
+  if (!PORTAL_FACILITY_KINDS.includes(facility.kind)) return fail('INVALID_VALUE');
+  const floorIndex = opts.floorIndex ?? area.level;
+  if (floorIndex !== area.level) return fail('INVALID_VALUE');
+  const mapLevel = opts.mapLevel ?? facilityLevel(facility);
+  if (mapLevel !== facilityLevel(facility)) return fail('INVALID_VALUE');
+  const terminal = layout.facilities[area.terminalId];
+  if (!terminal) return fail('NOT_FOUND');
+  const fTiles = facilityTiles(facility);
+  const tTiles = facilityTiles(terminal);
+  let minDist = Number.POSITIVE_INFINITY;
+  for (const a of fTiles) for (const b of tTiles) minDist = Math.min(minDist, Math.abs(a.x - b.x) + Math.abs(a.y - b.y));
+  if (minDist > PORTAL_MAX_DISTANCE_TILES) return fail('INVALID_VALUE');
+  const d = cloneLayout(layout);
+  d.portals ??= {};
+  const id = allocId(d, 'por');
+  d.portals[id] = {
+    id, name: opts.name ?? '', facilityId: facility.id, areaId: area.id,
+    floorIndex, mapLevel, buildState: opts.buildState ?? 'operational',
+  };
+  return ok(finalize(d), [id]);
+}
+
+export function deletePortal(layout: AirportLayout, id: string): OpResult {
+  if (!layout.portals?.[id]) return fail('NOT_FOUND');
+  const d = cloneLayout(layout);
+  delete d.portals![id];
   return ok(finalize(d));
 }
 

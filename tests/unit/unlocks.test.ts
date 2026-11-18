@@ -18,21 +18,24 @@ describe('unlocks: 格による解放（4-01）', () => {
     expect(at(0)).toEqual([]);
     expect(at(1)).toEqual(['overnight']);
     expect(at(2)).toEqual(['based', 'maintenance', 'overnight']);
-    expect(at(3)).toEqual(['based', 'cargo', 'hub', 'international', 'maintenance', 'overnight']);
+    // 5-20: 格 3 は国内貨物まで。国際線は格 4、ハブは格 5 で解放される
+    expect(at(3)).toEqual(['based', 'cargo', 'maintenance', 'overnight']);
+    expect(at(4)).toEqual(['based', 'cargo', 'international', 'maintenance', 'overnight']);
+    expect(at(5)).toEqual(['based', 'cargo', 'hub', 'international', 'maintenance', 'overnight']);
   });
 
   it('サンドボックスと目標のない会社は全解放', () => {
     const sandbox = createSandboxCompany();
-    expect(effectiveTier(sandbox)).toBe(3);
+    expect(effectiveTier(sandbox)).toBe(7);
     const plain = createCompany('career', 'unlocks-plain');
-    expect(effectiveTier(plain)).toBe(3);
+    expect(effectiveTier(plain)).toBe(7);
     for (const u of UNLOCKS) expect(isUnlocked(plain, u.feature)).toBe(true);
   });
 
   it('lockLabel は解放前だけ文を返し、格と名前を含む', () => {
     expect(lockLabel(careerAtTier(0), 'overnight')).toBe('格 1（地方空港）で解放');
-    expect(lockLabel(careerAtTier(0), 'international')).toBe('格 3（国際ハブ）で解放');
-    expect(lockLabel(careerAtTier(3), 'international')).toBeNull();
+    expect(lockLabel(careerAtTier(0), 'international')).toBe('格 4（国際空港）で解放');
+    expect(lockLabel(careerAtTier(4), 'international')).toBeNull();
     expect(lockLabel(createSandboxCompany(), 'hub')).toBeNull();
   });
 
@@ -81,14 +84,14 @@ describe('unlocks: 格による解放（4-01）', () => {
     const c = careerAtTier(0);
     c.features = { overnight: true }; // 格 0 では解放されていない
     const k = addContract(c, {
-      airlineId: 'SK', destinationId: 'KTA', typeId: 'B737-800', perDay: 1, window: 'evening',
+      airlineId: 'NP', destinationId: 'KTA', typeId: 'B737-800', perDay: 1, window: 'evening',
       feeDiscount: 0.1, startDay: 0, endDay: 30, status: 'offered', offerExpiresDay: 7, kind: 'overnight',
     });
     expect(acceptOffer(c, k.id, true)).toEqual({ ok: false, reason: 'LOCKED' });
     const s = createSandboxCompany('unlocks-accept');
     s.features = { overnight: true };
     const k2 = addContract(s, {
-      airlineId: 'SK', destinationId: 'KTA', typeId: 'B737-800', perDay: 1, window: 'evening',
+      airlineId: 'NP', destinationId: 'KTA', typeId: 'B737-800', perDay: 1, window: 'evening',
       feeDiscount: 0.1, startDay: 0, endDay: 30, status: 'offered', offerExpiresDay: 7, kind: 'overnight',
     });
     expect(acceptOffer(s, k2.id, true)).toEqual({ ok: true });

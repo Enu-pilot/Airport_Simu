@@ -14,15 +14,20 @@ export interface GoalGrant {
   amount: number;
 }
 
-export type Tier = 0 | 1 | 2 | 3;
+export type Tier = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export interface GoalState {
   /** 達成した目標 ID → 達成した日（0 始まり） */
   done: Record<string, number>;
   /** 連続日数を数える目標・格の昇格の連続 */
   streaks: Record<string, number>;
-  /** 空港の格（0 飛行場 / 1 地方空港 / 2 拠点空港 / 3 国際ハブ） */
+  /** 空港の格（0 飛行場 〜 7 メガハブ空港。5-20 で 8 段階化） */
   tier: Tier;
+  /**
+   * 格の尺度の版（5-20）。2 = 8 段階尺度。欠落 = 旧 4 段階尺度で、
+   * 読み込み時に一度だけ新尺度へ移行する（旧 3 → 新 5、他は同値）。
+   */
+  tierScale?: 2;
   /** 報酬の記録（日報の営業収支には入れない。直近 100 件） */
   grants: GoalGrant[];
   /** 契約提案の確率が上がる期限（日） */
@@ -33,7 +38,7 @@ export interface GoalState {
   chain?: { index: number; streak: number };
 }
 
-export const initialGoals = (): GoalState => ({ done: {}, streaks: {}, tier: 0, grants: [], boostUntil: 0 });
+export const initialGoals = (): GoalState => ({ done: {}, streaks: {}, tier: 0, tierScale: 2, grants: [], boostUntil: 0 });
 
 export const GRANT_LIMIT = 100;
 
@@ -117,19 +122,49 @@ export function chainGoalAt(index: number): GoalDef {
   return base;
 }
 
-/** 空港の格の条件（その日の実績で判定し、満たす日が TIER_STREAK 日続くと昇格。降格しない） */
+/** 空港の格の条件（5-20 で 8 段階化。その日の実績で判定し、満たす日が streakDays 日続くと昇格。降格しない） */
 export const TIER_STREAK = 3;
-export const TIER_NAMES = ['飛行場', '地方空港', '拠点空港', '国際ハブ'] as const;
-export const TIER_REQ: Record<1 | 2 | 3, { movements: number; pax: number; rating: number; heavy: boolean }> = {
-  1: { movements: 20, pax: 2_000, rating: 0, heavy: false },
-  2: { movements: 80, pax: 10_000, rating: 60, heavy: false },
-  3: { movements: 200, pax: 30_000, rating: 70, heavy: true },
+export const TIER_NAMES = ['飛行場', '地方空港', '地域拠点空港', '国内主要空港', '国際空港', '国際ハブ空港', '広域ハブ空港', 'メガハブ空港'] as const;
+
+export interface TierReq {
+  movements: number;
+  pax: number;
+  rating: number;
+  /** L 区分の機種が運航できること */
+  heavy: boolean;
+  /** 条件を満たし続ける日数 */
+  streakDays: number;
+  /** 国際線の実運航実績（完了した国際線の記録）がその日にあること */
+  intlOps?: boolean;
+  /** 乗継の実績（乗継旅客を運んだ記録）がその日にあること */
+  transferOps?: boolean;
+}
+
+/** 格 1・2 の要件は旧尺度と同一。格 3 以降は 5-20 計画 §3.2 の仮案（ゲーム値） */
+export const TIER_REQ: Record<1 | 2 | 3 | 4 | 5 | 6 | 7, TierReq> = {
+  1: { movements: 20, pax: 2_000, rating: 0, heavy: false, streakDays: 3 },
+  2: { movements: 80, pax: 10_000, rating: 60, heavy: false, streakDays: 3 },
+  3: { movements: 200, pax: 30_000, rating: 70, heavy: true, streakDays: 5 },
+  4: { movements: 300, pax: 45_000, rating: 75, heavy: true, streakDays: 7 },
+  5: { movements: 450, pax: 75_000, rating: 78, heavy: true, streakDays: 7, intlOps: true },
+  6: { movements: 650, pax: 120_000, rating: 82, heavy: true, streakDays: 10, transferOps: true },
+  7: { movements: 900, pax: 180_000, rating: 85, heavy: true, streakDays: 14 },
 };
 
-function meetsTier(t: 1 | 2 | 3, x: GoalCtx): boolean {
+function meetsTier(t: 1 | 2 | 3 | 4 | 5 | 6 | 7, x: GoalCtx): boolean {
   const r = TIER_REQ[t];
-  return mov(x) >= r.movements && pax(x) >= r.pax && x.c.rating >= r.rating && (!r.heavy || x.largeOperable);
+  if (mov(x) < r.movements || pax(x) < r.pax || x.c.rating < r.rating) return false;
+  if (r.heavy && !x.largeOperable) return false;
+  if (r.intlOps && !x.records.some((rec) => rec.result === 'completed' && rec.international)) return false;
+  if (r.transferOps && !x.records.some((rec) => (rec.transferPax ?? 0) > 0)) return false;
+  return true;
 }
+
+/**
+ * 旧尺度（4 段階）の格を新尺度（8 段階）へ移す対応（5-20 §3.7）。
+ * 旧 3 は国際・ハブ機能の解放済み範囲を保つため新 5 へ移す。それ以外は同値。
+ */
+export const LEGACY_TIER_MAP: Record<number, Tier> = { 0: 0, 1: 1, 2: 2, 3: 5 };
 
 export interface GoalResult {
   /** 今回達成した目標 ID */
@@ -191,10 +226,10 @@ export function evaluateGoals(c: CompanyState, x: Omit<GoalCtx, 'c'>): GoalResul
   if (g.grants.length > GRANT_LIMIT) g.grants.splice(0, g.grants.length - GRANT_LIMIT);
   // 空港の格: 次の格の条件を満たす日が続くと昇格（降格しない。1 日に 1 段）
   let tierUp: Tier | null = null;
-  if (g.tier < 3) {
-    const next = (g.tier + 1) as 1 | 2 | 3;
+  if (g.tier < 7) {
+    const next = (g.tier + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7;
     g.streaks.tier = meetsTier(next, ctx) ? (g.streaks.tier ?? 0) + 1 : 0;
-    if ((g.streaks.tier ?? 0) >= TIER_STREAK) {
+    if ((g.streaks.tier ?? 0) >= TIER_REQ[next].streakDays) {
       g.tier = next;
       g.tierDay = day;
       g.streaks.tier = 0;
@@ -223,7 +258,8 @@ export function checkGoals(raw: unknown): string[] {
   const errors: string[] = [];
   if (!isObj(raw.done) || Object.entries(raw.done).some(([k, v]) => !GOAL_IDS.includes(k) || !Number.isInteger(v))) errors.push('目標: done が不正です（目標 ID・日）');
   if (!isObj(raw.streaks) || Object.values(raw.streaks).some((v) => !Number.isInteger(v) || (v as number) < 0)) errors.push('目標: streaks が不正です');
-  if (raw.tier !== 0 && raw.tier !== 1 && raw.tier !== 2 && raw.tier !== 3) errors.push('目標: tier（空港の格）が 0〜3 ではありません');
+  if (!Number.isInteger(raw.tier) || (raw.tier as number) < 0 || (raw.tier as number) > 7) errors.push('目標: tier（空港の格）が 0〜7 ではありません');
+  if (raw.tierScale !== undefined && raw.tierScale !== 2) errors.push('目標: tierScale（格の尺度）が不正です');
   if (!Array.isArray(raw.grants) || raw.grants.some((x) => !isObj(x) || !Number.isInteger(x.day) || !(GOAL_IDS.includes(x.id as string) || /^chain-\d+$/.test(x.id as string)) || typeof x.amount !== 'number' || !Number.isFinite(x.amount))) errors.push('目標: grants が不正です');
   if (raw.chain !== undefined && (!isObj(raw.chain) || !Number.isInteger(raw.chain.index) || (raw.chain.index as number) < 0 || !Number.isInteger(raw.chain.streak) || (raw.chain.streak as number) < 0)) errors.push('目標: chain が不正です');
   if (typeof raw.boostUntil !== 'number' || !Number.isFinite(raw.boostUntil)) errors.push('目標: boostUntil が数値ではありません');

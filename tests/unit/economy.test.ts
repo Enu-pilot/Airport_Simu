@@ -186,7 +186,7 @@ describe('運航計画', () => {
   });
 
   it('運航できない機種（L級）は SIZE_UNSUPPORTED、時間帯に収まらない便は OUTSIDE_HOURS', () => {
-    const c = companyWith({ airlineId: 'SK', typeId: 'wide300', perDay: 1 });
+    const c = companyWith({ airlineId: 'NP', typeId: 'wide300', perDay: 1 });
     expect(analyzeDayPlan(planDay(c, 0), ctx).issues.map((i) => i.code)).toContain('SIZE_UNSUPPORTED');
     const d = companyWith({ airlineId: 'RJ', typeId: 'regional70', perDay: 2, window: 'evening' });
     setHours(d, { openMin: 6 * 60, closeMin: 13 * 60 });

@@ -263,7 +263,7 @@ export interface GroundUnit {
   trip?: string;
 }
 
-export type TaskKind = 'deplane' | 'unload' | 'fuel' | 'clean' | 'cater' | 'inspect' | 'board' | 'load' | 'pushback';
+export type TaskKind = 'deplane' | 'unload' | 'fuel' | 'clean' | 'cater' | 'inspect' | 'board' | 'load' | 'pushback' | 'cargoUnload' | 'cargoLoad';
 export type TaskState = 'pending' | 'blocked' | 'dispatched' | 'inProgress' | 'done' | 'cancelled';
 export type BlockReason =
   | 'dependency' // 先行作業の完了待ち
@@ -367,6 +367,7 @@ export interface GroundStats {
  */
 export type PaxState =
   | 'toAirport'
+  | 'accessWalk'
   | 'walking'
   | 'queuing'
   | 'inService'
@@ -406,6 +407,12 @@ export interface PaxGroup {
   stepIndex: number;
   /** 現在いるエリア（歩行中は出発側のエリア）。空港到着前・搭乗後は null */
   area: string | null;
+  /**
+   * 歩行ポータル経由のアクセス区間（5-16 T5）。交通施設とターミナル入口/出口の間を
+   * 実際に歩いている（state = 'accessWalk'）間だけ意味を持つが、通過実績として残す。
+   * ポータルのない空港では常に欠落し、従来の移動と同一になる。
+   */
+  accessLeg?: { facilityId: string; portalId: string; areaId: string; lengthM: number; phase: 'enter' | 'exit' };
   /** これから通るエリア（先頭が次のエリア） */
   route: string[];
   /** 歩行中の区間の進み具合（m） */

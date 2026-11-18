@@ -84,23 +84,23 @@ describe('12B-3a B5: 航空会社の評価', () => {
     const rng = [...c.rng];
     for (let d = 0; d < 40; d++) {
       c.day = d;
-      stepAirlineEval(c, { scores: [card('SK', { ...all(90), slots: 30, aircraft: 40 })], operable });
+      stepAirlineEval(c, { scores: [card('NP', { ...all(90), slots: 30, aircraft: 40 })], operable });
     }
     expect(c.rng).toEqual(rng);
-    const e = c.airlineEval!.SK!;
+    const e = c.airlineEval!.NP!;
     expect(e.requests.length).toBeLessThanOrEqual(1);
-    c.airlineEval!.SK = { ...emptyE(), requests: [{ id: 'rq_x', kind: 'slot', sinceDay: 0, dueDay: 99 }] };
+    c.airlineEval!.NP = { ...emptyE(), requests: [{ id: 'rq_x', kind: 'slot', sinceDay: 0, dueDay: 99 }] };
     c.day = 50;
-    const r = stepAirlineEval(c, { scores: [card('SK', all(100))], operable });
-    expect(r.bonus.SK).toBe(5);
-    expect(c.airlineEval!.SK!.boostUntil).toBe(57);
+    const r = stepAirlineEval(c, { scores: [card('NP', all(100))], operable });
+    expect(r.bonus.NP).toBe(5);
+    expect(c.airlineEval!.NP!.boostUntil).toBe(57);
     // 契約更新: 不満 2 件なら増便なし
-    const k = contractsOf(c, 'active').find((x) => x.airlineId === 'SK')!;
+    const k = contractsOf(c, 'active').find((x) => x.airlineId === 'NP')!;
     k.endDay = 0;
     c.day = 60;
     const before = k.perDay;
-    c.airlines.SK!.satisfaction = 90;
-    c.airlineEval!.SK!.complaints = [{ key: 'fees', sinceDay: 1 }, { key: 'otp', sinceDay: 1 }];
+    c.airlines.NP!.satisfaction = 90;
+    c.airlineEval!.NP!.complaints = [{ key: 'fees', sinceDay: 1 }, { key: 'otp', sinceDay: 1 }];
     updateContracts(c, {});
     expect(k.perDay).toBe(before);
   });
@@ -118,19 +118,19 @@ describe('12B-3a B5: 航空会社の評価', () => {
     expect(JSON.stringify(mk(false))).toBe(JSON.stringify(mk(false)));
     const c = createSandboxCompany('rel');
     c.game = defaultGame();
-    c.airlineEval = { SK: { ...emptyE(), ema: { slots: 80 } } };
-    c.airlines.SK!.satisfaction = 55;
-    const k = contractsOf(c, 'active').find((x) => x.airlineId === 'SK')!;
+    c.airlineEval = { NP: { ...emptyE(), ema: { slots: 80 } } };
+    c.airlines.NP!.satisfaction = 55;
+    const k = contractsOf(c, 'active').find((x) => x.airlineId === 'NP')!;
     expect(changeFrequency(c, k.id, 1)).toEqual({ ok: true }); // slots の移動平均が高いと下限 60 → 50
     // フラグがなければ、データがあっても従来どおり（評価・目標の効果はゲーム設定のフラグで決まる）
     c.game = { ...defaultGame(), airlineEval: false };
     expect(changeFrequency(c, k.id, 1)).toEqual({ ok: false, reason: 'AIRLINE_REFUSED' });
-    expect(complaintCount(c, 'SK')).toBe(0);
+    expect(complaintCount(c, 'NP')).toBe(0);
     expect(tierBonus({ game: { ...defaultGame(), goals: false }, goals: { ...initialGoals(), tier: 3 } })).toBe(0);
     expect(tierBonus({ game: defaultGame(), goals: { ...initialGoals(), tier: 3 } })).toBe(3);
     const d = createSandboxCompany('rel');
-    d.airlines.SK!.satisfaction = 55;
-    expect(changeFrequency(d, contractsOf(d, 'active').find((x) => x.airlineId === 'SK')!.id, 1)).toEqual({ ok: false, reason: 'AIRLINE_REFUSED' });
+    d.airlines.NP!.satisfaction = 55;
+    expect(changeFrequency(d, contractsOf(d, 'active').find((x) => x.airlineId === 'NP')!.id, 1)).toEqual({ ok: false, reason: 'AIRLINE_REFUSED' });
   });
 
   it('検証: 不正な形を拒否する', () => {

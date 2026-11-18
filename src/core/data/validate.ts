@@ -47,7 +47,7 @@ export function validateCatalog(raw: CatalogRaw): CatalogIssue[] {
   const unlock = (kind: CatalogIssue['kind'], id: string, u: DestinationInput['unlock']) => {
     if (!u) return;
     if (u.minRating !== undefined) range(kind, id, 'unlock.minRating', u.minRating, 0, 100, true);
-    if (u.minTier !== undefined) range(kind, id, 'unlock.minTier', u.minTier, 0, 5, true);
+    if (u.minTier !== undefined) range(kind, id, 'unlock.minTier', u.minTier, 0, 7, true);
   };
 
   const countryIds = new Set(raw.countries.map((c) => c.id));

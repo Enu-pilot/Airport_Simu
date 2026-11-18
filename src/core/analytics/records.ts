@@ -56,6 +56,10 @@ export interface FlightRecord {
   disruptions: string[];
   /** ランプバスで搭乗した便だけ: 搭乗方式と、旅客 1 人あたりのバス待ち時間（運行の作成からバスの出発まで、秒）。従来の記録にはキーがない */
   boarding?: 'bus';
+  /** 国際線の便だけ（5-20 の格判定の材料。国内線・従来の記録にはキーがない） */
+  international?: true;
+  /** 乗継旅客を運んだ便だけ: 乗継旅客数（到着側の計画＋出発側の予定。0 や国内のみの記録にはキーがない） */
+  transferPax?: number;
   busWaitSec?: number;
 }
 
@@ -165,6 +169,10 @@ function buildRecord(sim: Simulation, ac: Aircraft): FlightRecord {
     depScheduled: dep.scheduled,
     takeoffAt: dep.actual,
     ...(arr.externalDelaySec && Object.keys(arr.externalDelaySec).length > 0 ? { arrivalExternalDelaySec: { ...arr.externalDelaySec } } : {}),
+    ...(arr.routeType === 'international' || dep.routeType === 'international' ? { international: true as const } : {}),
+    ...((arr.transferPlan?.reduce((sum, t) => sum + t.pax, 0) ?? 0) + (dep.plannedTransferIn ?? 0) > 0
+      ? { transferPax: (arr.transferPlan?.reduce((sum, t) => sum + t.pax, 0) ?? 0) + (dep.plannedTransferIn ?? 0) }
+      : {}),
     airborneHoldSec: live.airborneHoldSec,
     taxiInSec: arr.actual !== null && arr.block !== null ? arr.block - arr.actual : 0,
     taxiOutSec: dep.block !== null && dep.actual !== null ? dep.actual - dep.block : 0,

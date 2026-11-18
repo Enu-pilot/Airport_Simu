@@ -63,13 +63,13 @@
 
 | ID | 状態 | 変更内容 | 主な対象 | テスト・受入条件 |
 |---|---|---|---|---|
-| T1 | 未着手 | FAA TDG / EASA OMGWSの適用profile・用語・表を確定 | design profile / docs/design/research_ground_geometry.md | 異なる標準の値を混ぜず、出典・改訂・定義・参考用途を記録 |
+| T1 | 完了（基盤範囲） | FAA TDG / EASA OMGWSの適用profile・用語・表を確定 | design profile / docs/design/research_ground_geometry.md | 異なる標準の値を混ぜず、出典・改訂・定義・参考用途を記録 |
 | T2 | 未着手 | aircraft catalogの実寸項目・出典・不明値ルールを整理 | aircraft catalog/types / manufacturer references | 各寸法の定義・測定点が一致。未取得値はunknown |
-| T3 | 未着手 | 誘導路の実舗装幅・肩幅・Design Group・legacy変換 | TaxiwayEdge / catalog / io / validation | 新旧エッジが読み書きでき、旧結果はlegacy profileで不変 |
+| T3 | 完了（基盤・未接続） | 誘導路の実舗装幅・肩幅・Design Group・legacy変換 | TaxiwayEdge / catalog / io / validation | 新旧エッジが読み書きでき、旧結果はlegacy profileで不変 |
 | T4 | 未着手 | 曲線中心線・フィレット・機体旋回/余裕判定 | geometry / footprint / airside network / validation | 直線/曲線/合流/交差で機体の主脚/翼端が条件どおり。範囲外は警告/不可 |
-| T5 | 未着手 | RETの役割・角度・半径・throat・離脱後停止距離 | runway/taxiway geometry / editor / validation | FAA・EASAのprofileを個別テスト。profile混在0 |
+| T5 | 一部完了 | RETの役割・角度・半径・throat・離脱後停止距離 | runway/taxiway geometry / editor / validation | FAA・EASAのprofileを個別テスト。profile混在0 |
 | T6 | 未着手 | RETを到着経路・滑走路占有時間へ接続 | airside network / arrival simulation / runway occupancy | RETの有無・速度profileで滑走路占有が期待方向へ変化し、他機侵入/デッドロック0 |
-| T7 | 未着手 | editor/renderer・保存・回帰テスト・Docs | UI / 2D / 3D / io / tests | 幅・曲線・RETを視認/編集でき、旧レイアウト読み込みとモデル版判断が整合 |
+| T7 | 一部完了 | editor/renderer・保存・回帰テスト・Docs | UI / 2D / 3D / io / tests | 幅・曲線・RETを視認/編集でき、旧レイアウト読み込みとモデル版判断が整合 |
 
 ## 5. 互換性・リスク
 
@@ -109,6 +109,7 @@
 ## 9. 完了記録
 
 - 完了日: 未完了
-- 品質ゲート: 未実行
-- 未実行/未検証: すべて未実行
-- 残件: T1〜T7
+- 完了した受入条件: T1 の基盤範囲（出典付きプロファイル表。taxiwayDesign517 8 件）、T3 の基盤（実幅の分離と幅適合判定。ただし assessTaxiwayWidth は未接続で、現状ゲームの挙動には影響しない）
+- 品質ゲート: T1/T3 実施時に型・lint・回帰を確認（§8）
+- 未実行/未検証: T2（出典データの追加）は未着手。T4（曲線フィレット）・T6（速度・占有時間・運航接続）は未着手。T5 は RET の role 種別のみで、形状・検証はない。T7 は保存の確認までで、UI・2D/3D 描画はなし
+- 残件: T2、T4、T5（形状・検証）、T6、T7（UI・描画）

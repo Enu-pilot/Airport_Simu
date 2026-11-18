@@ -1,5 +1,6 @@
 # Phase 5 / 5-16 実装計画: 対外交通・階層歩行ネットワーク・ターミナル旅客経路の統合
 
+> 注記: 正本は active/ 側（`docs/implementation/active/passenger_network_unification_plan.md`）。こちらは旧版であり、状態・進捗は正本を参照すること。
 > 管理状態: **planned（計画済み・実装未着手）**
 > 作成日・更新日: 2026-11-18
 > 根拠: PO依頼（2026-11-18）、docs/42 §3.4 要件5-16、既存5-13・docs/34・35
