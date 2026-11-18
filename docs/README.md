@@ -11,6 +11,7 @@
 | 現在の機能仕様 | [11〜37 の機能別仕様](#機能別仕様) | 現行実装で確認した挙動・判定基準 |
 | 個別の追加要求・受入条件 | [40. 出発時刻制限](40_departure_time_limit.md)、[41. 能力拡張計画](41_capacity_expansion_plan.md) | 要求・設計上の前提・実装記録 |
 | 空港格の拡張計画 | [Phase 5 / 5-20 実装計画](implementation/planned/airport_tier_progression_plan.md)、[42. 実装ロードマップ](42_implementation_roadmap.md) | 8段階化・多軸昇格・機能解放・旧セーブ互換の実装前計画。現行仕様ではない |
+| 基盤完成後の再検討計画 | [implementation/README.md](implementation/README.md#基盤完成後に再検討する個別計画)、[docs/42 §3.8](42_implementation_roadmap.md) | 貨物・ブランド効果・自動最適化・風向運用・除雪/防除氷の計画と着手ゲート |
 | 未決事項・既知の制限 | [10. 未決事項一覧](10_open_issues.md) | 判断待ち・既知制限の台帳。全項目が未解決という意味ではない |
 | 監査の結果・テスト不足・当時の不具合 | [39. 総合テスト・監査](39_comprehensive_test_audit_and_handover.md) | 実施時点の監査記録。現在の実装状態は再確認する |
 | 長期のフェーズ経緯・候補 | [09. フェーズ別ロードマップ](09_roadmap.md) | 初期ロードマップと後続候補。現在の進捗は 42 を優先 |
