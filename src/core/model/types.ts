@@ -124,6 +124,9 @@ export interface NetNode {
   holdShort: boolean;
 }
 
+/** 誘導路の設計プロファイル（5-17）。基準が異なるため値を混ぜない */
+export type TaxiwayDesignProfile = 'faa-tdg' | 'easa-omgws' | 'legacy-game';
+
 export interface TaxiwayEdge {
   id: string;
   from: string;
@@ -138,6 +141,18 @@ export interface TaxiwayEdge {
   codeF?: boolean;
   /** 区間ごとに進む地上走行（taxiMode 'block'）で、この誘導路を含む区間に同時に入れる機数の上限（1〜10。計算値より小さくする方向だけ） */
   blockMaxAircraft?: number;
+  /**
+   * 実寸設計データ（5-17、任意）。未設定の旧エッジは widthClass / codeF の従来判定のまま
+   * （legacy-game プロファイル）で、通行可否とゴールデンは変わらない。
+   * designProfile は 'faa-tdg' | 'easa-omgws' | 'legacy-game' を混ぜずに保持する。
+   */
+  pavementWidthM?: number;
+  shoulderWidthM?: number;
+  designProfile?: TaxiwayDesignProfile;
+  /** プロファイル内の設計グループ（FAA: TDG '1A'〜'6'、EASA: OMGWS バンドの識別子） */
+  designGroup?: string;
+  /** 高速離脱誘導路（RET）かどうか。未設定は通常誘導路 */
+  role?: 'normal' | 'rapidExit';
 }
 
 /** public: 一般道路 / service: 構内サービス道路（業務用）/ rail: 鉄道（空港連絡線） */
@@ -200,6 +215,8 @@ export type FacilityKind =
   // 空港アクセス・周辺施設（Phase 6）
   | 'taxiStand'
   | 'busStop'
+  | 'busTerminal'
+  | 'cargoTerminal'
   | 'railStation'
   | 'staffParking'
   | 'hotel';
@@ -225,6 +242,11 @@ export interface Facility {
   floorIndex?: number;
   /** 種別ごとのプロパティ（catalog の PROP_SCHEMAS 参照） */
   props: Record<string, PropValue>;
+  /**
+   * 任意の建物外形（5-15）: タイル座標の直交ポリゴンの外周リング（整数座標）。
+   * 未設定のときは origin/w/h/rotation の矩形が外形。設定時は origin/w/h は外接矩形として保持する。
+   */
+  footprint?: readonly Tile[];
 }
 
 /** ターミナル内部のエリア種別 */

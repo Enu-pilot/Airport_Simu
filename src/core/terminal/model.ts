@@ -101,7 +101,10 @@ export function terminalLinkCapacityPerHour(link: { capacityPerHour?: number; wi
   return link.capacityPerHour ?? Math.max(1, Math.floor((link.widthM ?? DEFAULT_TERMINAL_LINK_WIDTH_M) * 200));
 }
 
-export function buildTerminalModel(layout: AirportLayout): TerminalModel {
+export function buildTerminalModel(
+  layout: AirportLayout,
+  opts: { includeUnderConstruction?: boolean } = {},
+): TerminalModel {
   const areas: Record<string, AreaNode> = {};
   const links: Record<string, AreaLink[]> = {};
   const byTerminal: Record<string, string[]> = {};
@@ -154,7 +157,9 @@ export function buildTerminalModel(layout: AirportLayout): TerminalModel {
     }
   }
   for (const link of sortedValues(layout.terminalLinks ?? {})) {
-    if (link.buildState !== 'operational') continue;
+    // 5-13: 建設完了後グラフでは underConstruction のリンクも含める（planned は含めない）。
+    // 既定（現在グラフ）は operational のみで、従来の結果は変わらない。
+    if (link.buildState !== 'operational' && !(opts.includeUnderConstruction && link.buildState === 'underConstruction')) continue;
     const from = areas[link.fromAreaId];
     const to = areas[link.toAreaId];
     if (!from || !to || from.terminalId === to.terminalId) continue;

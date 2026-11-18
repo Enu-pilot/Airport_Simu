@@ -1,4 +1,4 @@
-import { createSite } from '../model/site';
+import { createSite, siteSizeById } from '../model/site';
 import type { AirportLayout, FacilityKind, TerminalAreaKind } from '../model/types';
 import type { Tile } from '../geometry/vec';
 import {
@@ -29,8 +29,9 @@ import { findNodeAt } from '../layout/network';
  *   y=49-56         ターミナル（2階建て。1F 到着・入口、2F 出発）
  *   y=57  ───────── 一般道路 ─────────
  */
-export function createSampleAirport(seed = 'skyport'): AirportLayout {
-  let layout = createEmptyLayout(createSite({ seed }), 'サンプル空港');
+export function createSampleAirport(seed = 'skyport', sizeId?: string): AirportLayout {
+  const size = sizeId && sizeId !== 'standard' ? siteSizeById(sizeId) : null;
+  let layout = createEmptyLayout(createSite({ seed, ...(size ? { width: size.width, height: size.height } : {}) }), 'サンプル空港');
   const run = (r: OpResult): string[] => {
     if (!r.ok) throw new Error(`sample generation failed: ${r.reason}`);
     layout = r.layout;
@@ -100,7 +101,7 @@ export function createSampleAirport(seed = 'skyport'): AirportLayout {
   fac('baggageSort', { x: 42, y: 49 }, { name: '手荷物仕分け場' });
 
   // 道路と駐車場
-  run(addRoadPath(layout, [{ x: 30, y: 57 }, { x: 110, y: 57 }, { x: 110, y: 105 }], { roadClass: 'public', name: '空港通り' }));
+  run(addRoadPath(layout, [{ x: 30, y: 57 }, { x: 110, y: 57 }, { x: 110, y: layout.site.height - 7 }], { roadClass: 'public', name: '空港通り' }));
   run(addRoadPath(layout, [{ x: 104, y: 48 }, { x: 104, y: 57 }], { roadClass: 'service', name: '構内道路' }));
   fac('parking', { x: 60, y: 58 }, { w: 30, h: 8, name: '駐車場' });
 

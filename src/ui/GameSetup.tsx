@@ -2,6 +2,7 @@ import { useState, useSyncExternalStore } from 'react';
 import { CLIMATES, DIFFICULTIES, defaultGame, type GameSettings } from '../core/economy/game';
 import { CITY_TYPES, defaultCity, defaultCityNightOps, type CityType } from '../core/economy/city';
 import { editorStore, newGame, setCompanyCity, setCompanyFeatures, setCompanyMarket, setGameSettings } from '../editor/store';
+import { SITE_SIZES } from '../core/model/site';
 import { isUnlocked, lockLabel } from '../core/economy/unlocks';
 import type { CompanyState } from '../core/economy/company';
 
@@ -46,17 +47,18 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
   const [legacy, setLegacy] = useState(kind === 'settings' && !current);
   const [g, setG] = useState<GameSettings>(current ?? defaultGame());
   const [mode, setMode] = useState<'career' | 'sandbox'>('career');
+  const [siteSize, setSiteSize] = useState('standard');
   const [cityEnabled, setCityEnabled] = useState(kind === 'new' || !!currentCompany.city);
   const [cityType, setCityType] = useState<CityType>(currentCompany.city?.type ?? 'regional');
   const [marketEnabled, setMarketEnabled] = useState(!!currentCompany.market);
-  const [features, setFeatures] = useState<{ overnight?: true; based?: true; international?: true; hub?: true }>(currentCompany.features ?? {});
+  const [features, setFeatures] = useState<{ overnight?: true; based?: true; international?: true; hub?: true; cargo?: true }>(currentCompany.features ?? {});
   const toggleFeature = (f: FeatureKey, on: boolean) => setFeatures((x) => ({ ...x, [f]: on ? true : undefined }));
   const patch = (p: Partial<GameSettings>) => setG((x) => ({ ...x, ...p }));
   const submit = () => {
     if (kind === 'new') {
       if (!window.confirm(GAME_UI.setupConfirm)) return;
       // 新規ゲームで都市を選んだときだけ、夜間の運用（最終出発時刻 21:15）を既定で有効にする。defaultCity 自体は変えない
-      newGame(mode, legacy ? null : g, cityEnabled ? { ...defaultCity(cityType), nightOps: defaultCityNightOps() } : null);
+      newGame(mode, legacy ? null : g, cityEnabled ? { ...defaultCity(cityType), nightOps: defaultCityNightOps() } : null, siteSize);
       if (marketEnabled && cityEnabled) setCompanyMarket(true);
       setCompanyFeatures(features);
     } else {
@@ -82,6 +84,15 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
                 {m === 'career' ? GAME_UI.setupModeCareer : GAME_UI.setupModeSandbox}
               </label>
             ))}
+          </fieldset>
+        )}
+        {kind === 'new' && (
+          <fieldset>
+            <legend>敷地の広さ</legend>
+            <select value={siteSize} onChange={(e) => setSiteSize(e.target.value)} data-testid="setup-site-size">
+              {SITE_SIZES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+            <span className="muted small">空港の配置は標準の位置のまま、周りの敷地が広がります</span>
           </fieldset>
         )}
         <fieldset disabled={legacy}>
@@ -123,6 +134,7 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
             ['based', GAME_UI.setupFeatureBased],
             ['international', GAME_UI.setupFeatureInternational],
             ['hub', GAME_UI.setupFeatureHub],
+            ['cargo', GAME_UI.setupFeatureCargo],
           ] as [FeatureKey, string][]).map(([f, label]) => {
             const locked = !isUnlocked(currentCompany, f);
             return (

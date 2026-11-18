@@ -49,6 +49,7 @@ import {
 import { headingVector, runwayAxis, runwayEnd, runwayMidpoint } from './runway';
 import { TERMINAL_AREA_MIN_LEVEL, undergroundFacilityProblem } from './levelRules';
 import { facilityLevel, roadEdgeLevelValid } from '../model/levels';
+import { orthogonalPolygonTiles, validateOrthogonalPolygon } from '../geometry/polygon';
 import { DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, DEFAULT_TERMINAL_LINK_WIDTH_M } from '../terminal/model';
 import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
 
@@ -1228,3 +1229,38 @@ export function nodeDegree(layout: AirportLayout, id: string): number {
 }
 
 export { runwayEnd };
+
+/**
+ * 施設の外形（footprint）を直交ポリゴンへ変更する（5-15 T2/T3 の編集プリミティブ）。
+ * points が null のときは矩形へ戻す。origin/w/h は外接矩形へ同期する。
+ * ポリゴンが不正・敷地外・占有タイルなしの場合は変更しない。
+ */
+export function setFacilityFootprint(
+  layout: AirportLayout,
+  facilityId: string,
+  points: readonly Tile[] | null,
+): OpResult {
+  const d = cloneLayout(layout);
+  const f = d.facilities[facilityId];
+  if (!f) return fail('NOT_FOUND');
+  if (points === null) {
+    if (!f.footprint) return fail('NO_CHANGE');
+    delete f.footprint;
+    return ok(finalize(d));
+  }
+  if (validateOrthogonalPolygon(points).length > 0) return fail('INVALID_VALUE');
+  const tiles = orthogonalPolygonTiles(points);
+  if (tiles.length === 0) return fail('INVALID_VALUE');
+  const { width, height } = d.site;
+  if (tiles.some((t) => t.x < 0 || t.y < 0 || t.x >= width || t.y >= height)) return fail('INVALID_VALUE');
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const pt of points) {
+    minX = Math.min(minX, pt.x); maxX = Math.max(maxX, pt.x);
+    minY = Math.min(minY, pt.y); maxY = Math.max(maxY, pt.y);
+  }
+  f.footprint = points.map((pt) => ({ x: pt.x, y: pt.y }));
+  f.origin = { x: minX, y: minY };
+  f.w = maxX - minX;
+  f.h = maxY - minY;
+  return ok(finalize(d));
+}

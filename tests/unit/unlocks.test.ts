@@ -18,7 +18,7 @@ describe('unlocks: 格による解放（4-01）', () => {
     expect(at(0)).toEqual([]);
     expect(at(1)).toEqual(['overnight']);
     expect(at(2)).toEqual(['based', 'maintenance', 'overnight']);
-    expect(at(3)).toEqual(['based', 'hub', 'international', 'maintenance', 'overnight']);
+    expect(at(3)).toEqual(['based', 'cargo', 'hub', 'international', 'maintenance', 'overnight']);
   });
 
   it('サンドボックスと目標のない会社は全解放', () => {

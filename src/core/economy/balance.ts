@@ -35,6 +35,7 @@ export const BALANCE = {
       fireStation: 500_000,
       gseBase: 400_000,
       baggageSort: 700_000,
+      cargoTerminal: 1_500_000,
     } as Partial<Record<FacilityKind, number>>,
     jetBridge: 150_000,
     /** 車両の購入費（GSE基地のプロパティの台数分） */
@@ -45,7 +46,7 @@ export const BALANCE = {
     /** 撤去・縮小したときに戻る割合 */
     refundRate: 0.25,
     /** 空港アクセス・周辺施設（Phase 6） */
-    access: { taxiStand: 60_000, busStop: 90_000, railStation: 2_500_000, hotel: 1_800_000, staffParkingPerTile: 600, railPerTile: 25_000 },
+    access: { taxiStand: 60_000, busStop: 90_000, busTerminal: 600_000, railStation: 2_500_000, hotel: 1_800_000, staffParkingPerTile: 600, railPerTile: 25_000 },
     /** 土地の購入費（1タイルあたり） */
     landPerTile: 2_000,
   },
@@ -94,7 +95,7 @@ export const BALANCE = {
     /** 光熱費（ターミナル1タイル・1階あたり） */
     utilitiesPerTerminalTile: 30,
     /** 交通施設の運営費（1か所あたり） */
-    access: { taxiStand: 300, busStop: 800, railStation: 6_000, hotel: 2_000 },
+    access: { taxiStand: 300, busStop: 800, busTerminal: 2_400, railStation: 6_000, hotel: 2_000 },
     /** 職員用駐車場が足りない分の通勤対策費（1台分あたり） */
     staffCommutePerMissing: 600,
   },
@@ -141,6 +142,26 @@ export const BALANCE = {
     weekdayLeisure: [0.92, 0.9, 0.92, 0.98, 1.08, 1.12, 1.08],
     monthBusiness: [1.0, 1.05, 1.05, 1.02, 0.98, 1.05, 1.0, 0.88, 1.02, 1.03, 1.0, 0.92],
     monthLeisure: [1.02, 0.85, 1.02, 0.95, 1.12, 0.85, 1.03, 1.2, 0.98, 1.0, 0.92, 1.06],
+  },
+  /**
+   * 貨物需要モデル（5-12 CARGO-01。ゲーム値であり実績統計ではない）。
+   * 路線貨物需要 (m3/日・両方向) = K × (P_o/1e6)^alpha × (P_d/1e6)^beta × cargoIndex × g_cargo(d)
+   * 旅客需要とは独立に計算し、既存の乱数列は消費しない。opt-in（貨物契約がある会社だけが使う）。
+   */
+  cargo: {
+    K: 140,
+    alpha: 0.6,
+    beta: 0.4,
+    /** 国際路線の貨物需要係数 */
+    internationalFactor: 0.8,
+    /** 貨物契約の提案を出す路線需要の下限 (m3/日) */
+    minRouteDemandM3: 20,
+    /** 貨物収入 (cr/m3、運搬量に対して。ゲーム値) */
+    revenuePerM3: 900,
+    /** 荷役費 (cr/m3、上屋で処理した量に対して。ゲーム値) */
+    handlingCostPerM3: 120,
+    /** 貨物トラック 1 台の積載量 (m3。搬出入台数の集約換算にだけ使うゲーム値) */
+    truckCapacityM3: 40,
   },
   offers: { baseProb: 0.12, ratingProb: 0.3, maxOpen: 6, expireDays: 3, contractDays: 30 },
   contracts: { renewGoodSat: 70, renewOkSat: 45, withdrawSat: 25, withdrawDays: 3, increaseMinSat: 60, decreasePenaltySat: 10 },

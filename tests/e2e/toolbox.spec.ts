@@ -33,9 +33,7 @@ for (const size of [
 test('建設ツールの分類をアコーディオンで開閉できる', async ({ page }) => {
   await page.goto('/');
   const toolbox = page.getByTestId('toolbox');
-  const group = toolbox.locator('details.tool-group').filter({
-    has: toolbox.getByText('滑走路・誘導路', { exact: true }),
-  });
+  const group = toolbox.locator('details.tool-group').filter({ hasText: '滑走路・誘導路' });
   const summary = group.locator('summary');
 
   await expect(summary).toBeVisible();

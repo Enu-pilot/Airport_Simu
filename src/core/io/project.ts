@@ -363,7 +363,7 @@ function checkPhase4Company(raw: Record<string, unknown>, company: CompanyState,
   const errors: string[] = [];
   const features = isObj(raw.features) ? raw.features : undefined;
   if (raw.features !== undefined && !features) errors.push(`${where}: 機能の設定（features）が不正です`);
-  for (const key of ['overnight', 'based', 'international', 'hub'] as const) {
+  for (const key of ['overnight', 'based', 'international', 'hub', 'cargo'] as const) {
     if (features && features[key] !== undefined && features[key] !== true) errors.push(`${where}: 機能の設定（features.${key}）が不正です`);
   }
   for (const key of ['carryOver', 'basedFleet', 'hub'] as const) {
@@ -391,7 +391,7 @@ function checkPhase4Company(raw: Record<string, unknown>, company: CompanyState,
   }
   for (const [key, k] of Object.entries(company.contracts)) {
     if (!isObj(k)) continue;
-    if (k.kind !== undefined && !['turnaround', 'overnight', 'based'].includes(k.kind as string)) errors.push(`${where}: 契約 ${key} の種類（kind）が不正です`);
+    if (k.kind !== undefined && !['turnaround', 'overnight', 'based', 'cargo'].includes(k.kind as string)) errors.push(`${where}: 契約 ${key} の種類（kind）が不正です`);
     if (k.transferShare !== undefined && (typeof k.transferShare !== 'number' || k.transferShare < 0 || k.transferShare > 0.5)) errors.push(`${where}: 契約 ${key} の乗継の割合（transferShare）が範囲外です（0〜0.5）`);
     if (k.basedAircraft !== undefined && (typeof k.basedAircraft !== 'number' || !Number.isInteger(k.basedAircraft) || k.basedAircraft < 1 || k.basedAircraft > 6)) errors.push(`${where}: 契約 ${key} の常駐機数（basedAircraft）が範囲外です（1〜6）`);
   }

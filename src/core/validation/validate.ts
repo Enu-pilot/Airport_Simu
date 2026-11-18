@@ -995,7 +995,7 @@ function checkRoadLayers(layout: AirportLayout, sink: IssueSink): void {
 
 /** 空港アクセスの施設: 外部とつながる道路・鉄道、ターミナルまでの距離 */
 function checkAccess(layout: AirportLayout, sink: IssueSink): void {
-  const kinds = ['taxiStand', 'busStop', 'railStation', 'staffParking', 'hotel'];
+  const kinds = ['taxiStand', 'busStop', 'busTerminal', 'railStation', 'staffParking', 'hotel'];
   const facilities = sortedValues(layout.facilities).filter((f) => kinds.includes(f.kind));
   if (facilities.length === 0) return;
   const net = buildLandsideNetwork(layout);

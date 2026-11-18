@@ -182,10 +182,10 @@
 | 5-09 | 階層の未定義事項の決定と実装（内部設備の接続警告、建物の地下階、地下に置ける種類、全レイヤ表示中の配置先）。道路・鉄道ランプの画面からの建設 | docs/39 §10.3・§10.4 |
 | 5-10 | テスト不足の解消: 検証コード 29 種、都市イベント、旧形式の実ファイル、複合障害、保存サイズの上限。カバレッジ計測の導入（未計測を達成扱いにしない） | docs/39 §3 |
 | 5-11 | 保存データの間引き（運航状態が 1 日約 2.2 MB 増える） | docs/39 §3.1 |
-| 5-12 | 貨物輸送・貨物取扱（旅客基盤の未完成部分の後に実装。空港格Tier3〜7で段階解放し、格解放の器は5-20と連携） | docs/39 §7 A6、[貨物計画](implementation/planned/cargo_operations_plan.md) |
-| 5-13 | 旅客動線の3段階接続判定: 経路全体を「通行可能／建設完了待ち／未接続」に分類する。運用中経路を優先し、建設中経路は完成後の接続予測にだけ使う。旅客移動・構造検証・建設完了後の再探索へ反映し、内部通路の建設状態表現と連絡設備の工事進捗連携を整える | PO 依頼（2026-11-18）、[実装計画](implementation/planned/passenger_connectivity_status_plan.md) |
-| 5-14 | ターミナル階層・駅/バスターミナルの構造化: B3〜4Fを内部床階として扱い、railStation/busTerminalを独立構造物かつ建物内包可能にする。旧busStop・旧save互換を維持 | PO依頼（2026-11-18）、docs/34・39 §10.3 | [terminal_building_structure_plan.md](implementation/planned/terminal_building_structure_plan.md) |
-| 5-15 | ターミナル形状・複合体: 凹形ポリゴン建物に対応。辺接触または完成済み高層連絡通路で同一ターミナル複合体を判定。ただし同一complexと旅客通行可能は分離 | PO依頼（2026-11-18）、docs/22・35 | [terminal_complex_geometry_plan.md](implementation/planned/terminal_complex_geometry_plan.md) |
+| 5-12 | 貨物輸送・貨物取扱（旅客基盤の未完成部分の後に実装。空港格Tier3〜7で段階解放し、格解放の器は5-20と連携） | docs/39 §7 A6、[貨物計画](implementation/active/cargo_operations_plan.md)（着手 2026-11-18: PO 指示により随時実装。CARGO-01 需要モデル・航空会社適格と CARGO-03 機種容量の基盤を実施済み） |
+| 5-13 | 旅客動線の3段階接続判定: 経路全体を「通行可能／建設完了待ち／未接続」に分類する。運用中経路を優先し、建設中経路は完成後の接続予測にだけ使う。旅客移動・構造検証・建設完了後の再探索へ反映し、内部通路の建設状態表現と連絡設備の工事進捗連携を整える | PO 依頼（2026-11-18）、[実装計画](implementation/active/passenger_connectivity_status_plan.md)（中核実施済み 2026-11-18: 3状態判定 classifyPaxConnection と連絡設備の建設プロジェクト連携。旅客/検証への反映は残件） |
+| 5-14 | ターミナル階層・駅/バスターミナルの構造化: B3〜4Fを内部床階として扱い、railStation/busTerminalを独立構造物かつ建物内包可能にする。旧busStop・旧save互換を維持 | PO依頼（2026-11-18）、docs/34・39 §10.3 | [terminal_building_structure_plan.md](implementation/active/terminal_building_structure_plan.md)（実施済み 2026-11-18: B3〜4F は PR #21、busTerminal 新規種別・階層優先の明文化・内部施設の能力非加算をテストで固定。内包駅の能力接続は 5-16 のポータル設計へ） |
+| 5-15 | ターミナル形状・複合体: 凹形ポリゴン建物に対応。辺接触または完成済み高層連絡通路で同一ターミナル複合体を判定。ただし同一complexと旅客通行可能は分離 | PO依頼（2026-11-18）、docs/22・35 | [terminal_complex_geometry_plan.md](implementation/active/terminal_complex_geometry_plan.md)（基盤実施済み 2026-11-18: footprint 形状・タイル化・複合体導出。描画 UI・割当て分離・描画/性能は残件） |
 | 5-16 | 対外交通を含む階層旅客動線: 駐車場・車寄せ・タクシー・バス・鉄道・徒歩の外部接続から徒歩Portal・ターミナル入口・各搭乗口/到着出口までを統合し、往路/復路・階層・Step-free・建設状態を検証してPaxGroupへ反映 | PO依頼（2026-11-18）、docs/15・34・35、5-13〜5-15 | [passenger_network_unification_plan.md](implementation/planned/passenger_network_unification_plan.md) |
 | 5-17 | 誘導路実幅・機体適合・高速離脱誘導路: 実幅/肩幅/主脚・翼端余裕・曲線フィレットを分離し、RETの角度/半径/占有時間を運航へ反映 | PO依頼（2026-11-18）、FAA AC 150/5300-13B Chg1、EASA ADR-DSN.D.245/.295 | [taxiway_realism_plan.md](implementation/planned/taxiway_realism_plan.md) |
 | 5-18 | ターミナル専用設計画面: 建物選択から専用workspaceを開き、B3〜4Fの平面・接続・設備・能力・メッシュを編集し、対外交通6手段×方向×ゲート/出口の接続状況をマトリクス/経路ハイライトで検証 | PO依頼（2026-11-18）、docs/15・34・35 | [terminal_design_workspace_plan.md](implementation/planned/terminal_design_workspace_plan.md) |
@@ -215,7 +215,9 @@
   生きている機体の参照便と当日の便はすべて残し、復元時の整合性チェックが通ることを実セーブと 2 日運用のテストで確認。
   保存サイズは「レイアウト＋会社＋約 1 日分の運航状態」で頭打ちになる。
 - 5-07 目標の連鎖・都市イベントの判断化: 完了。目標は固定 12 個の達成後に生成目標が 1 つずつ続く（発着→旅客→定時率連続の 3 種を繰り返し、1 周ごとに目標値と報酬が上がる。`goals.ts` の chainGoalAt、状態は goals.chain）。都市イベントは協力費（規模² × 日数 × 40,000 cr、開催前の取消は全額返金）と混雑リスク（規模で 20〜30%、ID から決定的に判定。混雑時は需要の伸び半分・交通 2 倍）を持つ判断にした。従来の無償イベントは対象外で効果は不変。単体テスト goalsEvents507 6 件で確認。
-- 未着手: 5-10（テスト補完）、5-11（保存データの間引き）、5-12（貨物。詳細計画は [cargo_operations_plan.md](implementation/planned/cargo_operations_plan.md)、基盤ゲート待ち）。5-13〜5-25 は個別計画（docs/implementation/README.md）を参照。
+- 5-10 テスト補完: 完了（PR #26）。検証コード 29 種の個別テスト、都市イベントのストアテスト、複合障害テスト、実セーブの読み込み検証、カバレッジ計測の導入（全体の計測値は未計測）。
+- 5-12 貨物: 着手（2026-11-18、PO 指示により基盤ゲートに先行して随時実装）。CARGO-01（貨物需要モデル・航空会社の貨物適格）と CARGO-03（機種の貨物室容積の参照）の基盤を実施済み。格による段階解放（CARGO-08）は 5-20 の基盤と連携して後続で実装する。
+- 5-13〜5-25 は個別計画（docs/implementation/README.md）を参照。
 
 ### 3.6 フェーズをまたぐ依存関係
 

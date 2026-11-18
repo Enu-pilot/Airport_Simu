@@ -9,6 +9,15 @@ export const MAX_MAP_LEVEL = 10;
 
 export const levelOf = (node: NetNode | undefined): number => node?.level ?? 0;
 export const elevationOf = (node: NetNode | undefined): number => node?.elevationM ?? levelOf(node) * DEFAULT_LEVEL_HEIGHT_M;
+/**
+ * 施設の地図階層の優先順位（5-14 T4 で明文化）:
+ *   1. facility.mapLevel（配置時に確定する明示値）
+ *   2. railStation の props.level（駅が属する鉄道ネットワークの階層。独立駅の互換表現）
+ *   3. 0（地上）
+ * 親施設に内包された施設（parentFacilityId あり）では、内部の階は floorIndex が表し、
+ * 地図階層は原則として親の階層に従う。内包された駅の props.level は「接続先の鉄道の
+ * 階層」を保持するが、歩行ポータルによる明示接続（5-16）まではアクセス能力に加算されない。
+ */
 export const facilityLevel = (facility: Facility): number =>
   Number.isInteger(facility.mapLevel)
     ? Number(facility.mapLevel)

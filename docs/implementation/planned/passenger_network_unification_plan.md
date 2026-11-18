@@ -133,6 +133,7 @@
 |---|---|---|---|---|
 | 2026-11-18 | 計画作成 | RoadEdge.walkwayは駅アクセスに利用される一方、通常PaxGroup経路とは別系統であることを確認。Portalを介した複合グラフ案を追加 | Docsのみ | Portalの最小データ項目・集約アクセスとの人数計上を実装前に確定 |
 | 2026-11-18 | 要件拡張 | 駐車場・車寄せ・タクシー・バス・鉄道・徒歩を、外部ネットワークからターミナル入口/ゲートまで接続する双方向の旅客動線として追加 | Docsのみ | 5-19の2モード、5-18の動線チェックUIと統合。コードテスト未実行 |
+| 2026-11-18 | T1 監査・前提整備 | 5-13 の3状態判定（classifyPaxConnection）を TerminalModel の任意のペアへ適用できる形で実装済み（現在/将来モデルの2構築）。グラフ接点は §1 のとおり: findPedestrianRoute（walkway RoadEdge、駅アクセス分析専用）と TerminalModel（PaxGroup 用）は未接続で、analyzeAccess の鉄道だけが前者を集約利用する。Portal の最小データ項目の提案: 任意項目として TerminalArea 側に置かず、独立エンティティ PedestrianPortal { id, facilityId（交通施設または駅）, areaId（接続先 TerminalArea）, floorIndex（建物内階）, mapLevel（地図階層）, buildState } を layout の任意レコードに追加する案。旧セーブは欠落=ポータルなし（自動接続の推測をしない原則どおり） | 5-13 テスト 7 件・回帰確認済み | Portal 案の PO 確認後に T2 以降へ。PaxGroup の route 形式変更は SIM_MODEL_VERSION の判断とセットで PO 確認が必要 |
 
 ## 9. 完了記録
 
