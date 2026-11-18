@@ -13,18 +13,34 @@
 | [docs/39](../39_comprehensive_test_audit_and_handover.md) | 監査を実施した時点の結果。現在の状態は再確認する |
 | [HANDOFF_PROMPT.md](../../HANDOFF_PROMPT.md) | セッション・担当者をまたぐ現在の作業と再開情報 |
 
-## 現在のフェーズ状態（2026-11-17）
+## フェーズ全体の実装状況（2026-11-18、正本: docs/42）
 
-| フェーズ | 計画状態 | 正本の計画書 | 状況 |
+| フェーズ | 実装状況 | 詳細計画書の配置 | 状況 |
 |---|---|---|---|
-| Phase 1 | completed | [completed/phase1_plan.md](completed/phase1_plan.md) | 2026-11-17 完了。docs/42 §2・§5.1 に完了根拠を記録 |
-| Phase 2 | active | [active/phase2_plan.md](active/phase2_plan.md) | 実装中。タスク・チェックポイント・未検証項目は計画書と HANDOFF を参照 |
-| Phase 2.5 | planned | [planned/phase2_5_map_expansion_plan.md](planned/phase2_5_map_expansion_plan.md) | マップ最大サイズ320×320タイル。Phase 2完了後・Phase 3開始前に実施 |
-| Phase 3 | planned | [planned/phase3_plan.md](planned/phase3_plan.md) | Phase 2.5 の受入完了後に着手 |
-| Phase 4 | planned | [planned/phase4_plan.md](planned/phase4_plan.md) | 計画作成済み・実装未着手 |
-| Phase 5 | backlog | — | docs/42 §3.4 の候補。着手時に要求・完了条件・詳細計画を整える |
+| Phase 1 | completed | completed | docs/42 §2・§5.1に完了根拠 |
+| Phase 2 | completed | active（移管未反映） | docs/42 §3.1は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
+| Phase 2.5 | planned | planned | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
+| Phase 3 | completed | planned（移管未反映） | docs/42 §3.2は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
+| Phase 4 | 実装完了・一部受入計測未検証 | planned（監査継続） | docs/42 §3.3。4-03/4-10等の未検証条件を解消するまでcompletedへ移さない |
+| Phase 5 | backlog / 個別計画あり | planned | 5-13〜5-20を依存関係に従って個別実施 |
 
-状態は文書整理時点の記録です。タスクの存在やテストファイルの存在だけで完了と判定せず、計画書の受入条件と実行結果を確認してください。
+docs/42がフェーズの実装状況の正本、各計画書の状態とフォルダ配置は実装計画のライフサイクルを表します。過去の計画書配置が現在の実装状況と一致していない箇所は、受入記録を確認してから移管し、フォルダ名だけで実装済み/未実装を判断しません。
+
+## フェーズ内の個別実装計画
+
+フェーズ全体の計画と独立して着手できる要求は、個別の計画書で管理します。
+
+| 要求 | 状態 | 正本の計画書 | 備考 |
+|---|---|---|---|
+| Phase 5 / 5-13 旅客動線の3段階接続判定 | planned | [passenger_connectivity_status_plan.md](planned/passenger_connectivity_status_plan.md) | 接続グラフ全体を通行可能/建設完了待ち/未接続に分類。5-16と統合 |
+| Phase 5 / 5-14 ターミナル階層・駅/バスターミナル | planned | [terminal_building_structure_plan.md](planned/terminal_building_structure_plan.md) | B3〜4F、駅/バスターミナル独立・内包 |
+| Phase 5 / 5-15 複雑形状・ターミナル複合体 | planned | [terminal_complex_geometry_plan.md](planned/terminal_complex_geometry_plan.md) | 凹形ポリゴンと複合体判定。旅客の実経路とは分離 |
+| Phase 5 / 5-16 対外交通・階層歩行網とPaxGroup統合 | planned | [passenger_network_unification_plan.md](planned/passenger_network_unification_plan.md) | 車・送迎・タクシー・バス・鉄道・徒歩からPortal/ターミナル/各ゲートまでの双方向経路 |
+| Phase 5 / 5-17 誘導路実幅・高速離脱 | planned | [taxiway_realism_plan.md](planned/taxiway_realism_plan.md) | FAA TDG/EASA OMGWSのprofileを混同しない |
+| Phase 5 / 5-18 ターミナル専用設計Workspace | planned | [terminal_design_workspace_plan.md](planned/terminal_design_workspace_plan.md) | フロア・内部設備・メッシュ能力、対外交通の接続マトリクス/経路ハイライト |
+| Phase 5 / 5-19 空港全体1日運航・ターミナル単独詳細Simulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 2モードのclock/state分離、対外交通6手段、全方向の旅客動線/容量検証 |
+| Phase 5 / 5-20 空港格の8段階化・成長判定の多軸化 | planned | [airport_tier_progression_plan.md](planned/airport_tier_progression_plan.md) | 既存格解放・契約提案・旧セーブ互換を含めて段階的に拡張 |
+
 
 ## ディレクトリの意味
 

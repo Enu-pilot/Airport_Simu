@@ -104,6 +104,12 @@
   - 実装担当 A の依頼 1（`taxiBlocks.priorityAt` の保存時の検証）: `project.ts` で実装済み（priority は実在の機体のみ、priorityAt は priority があるときだけ・有限数）で、検証テストも合格していることを確認した。
   - 品質ゲート（2026-11-18）: 型検査・lint・ビルド成功。全体テスト 1040 件合格・8 件失敗（失敗はすべて変更前からあるもの: golden.ops のゴールデン不一致（既知の G-1）、qa の処理速度のしきい値、その他は実行環境の制限時間超過で、単独の再実行または同一内容の検証で合格を確認）。`legacyFingerprint` は全件合格（従来方式は不変）。E2E `taxiBlocks.spec.ts` 6 件合格。
 
+#### フェーズ 2.5: マップ最大サイズの拡張（個別計画）
+
+- 状態: **計画・未着手**。最大寸法は幅・高さそれぞれ320タイル（1タイル25m、最大8,000m×8,000m）、最大102,400タイル。標準マップ160×112は維持する（PO決定K-9）。
+- 詳細タスク・受入条件: [Phase 2.5実装計画](implementation/planned/phase2_5_map_expansion_plan.md)。
+- 羽田相当の4滑走路・主要ターミナル・エプロン・貨物/整備地区・アクセスを、建設余白を残して320×320以内へ配置できることを全体受入ケースにする。公表面積の比だけで寸法適合を断定しない。
+
 ### 3.2 フェーズ 3: 航空会社の輸送人員と、拡張できる就航都市データ
 
 根拠: 決定 K-4、docs/39 §7 の T4・B1。**データを書き足すだけで都市・航空会社を増やせること**を最優先にする。
@@ -177,30 +183,42 @@
 | 5-10 | テスト不足の解消: 検証コード 29 種、都市イベント、旧形式の実ファイル、複合障害、保存サイズの上限。カバレッジ計測の導入（未計測を達成扱いにしない） | docs/39 §3 |
 | 5-11 | 保存データの間引き（運航状態が 1 日約 2.2 MB 増える） | docs/39 §3.1 |
 | 5-12 | 貨物（旅客の未完成部分の後） | docs/39 §7 A6 |
+| 5-13 | 旅客動線の3段階接続判定: 経路全体を「通行可能／建設完了待ち／未接続」に分類する。運用中経路を優先し、建設中経路は完成後の接続予測にだけ使う。旅客移動・構造検証・建設完了後の再探索へ反映し、内部通路の建設状態表現と連絡設備の工事進捗連携を整える | PO 依頼（2026-11-18）、[実装計画](implementation/planned/passenger_connectivity_status_plan.md) |
+| 5-14 | ターミナル階層・駅/バスターミナルの構造化: B3〜4Fを内部床階として扱い、railStation/busTerminalを独立構造物かつ建物内包可能にする。旧busStop・旧save互換を維持 | PO依頼（2026-11-18）、docs/34・39 §10.3 | [terminal_building_structure_plan.md](implementation/planned/terminal_building_structure_plan.md) |
+| 5-15 | ターミナル形状・複合体: 凹形ポリゴン建物に対応。辺接触または完成済み高層連絡通路で同一ターミナル複合体を判定。ただし同一complexと旅客通行可能は分離 | PO依頼（2026-11-18）、docs/22・35 | [terminal_complex_geometry_plan.md](implementation/planned/terminal_complex_geometry_plan.md) |
+| 5-16 | 対外交通を含む階層旅客動線: 駐車場・車寄せ・タクシー・バス・鉄道・徒歩の外部接続から徒歩Portal・ターミナル入口・各搭乗口/到着出口までを統合し、往路/復路・階層・Step-free・建設状態を検証してPaxGroupへ反映 | PO依頼（2026-11-18）、docs/15・34・35、5-13〜5-15 | [passenger_network_unification_plan.md](implementation/planned/passenger_network_unification_plan.md) |
+| 5-17 | 誘導路実幅・機体適合・高速離脱誘導路: 実幅/肩幅/主脚・翼端余裕・曲線フィレットを分離し、RETの角度/半径/占有時間を運航へ反映 | PO依頼（2026-11-18）、FAA AC 150/5300-13B Chg1、EASA ADR-DSN.D.245/.295 | [taxiway_realism_plan.md](implementation/planned/taxiway_realism_plan.md) |
+| 5-18 | ターミナル専用設計画面: 建物選択から専用workspaceを開き、B3〜4Fの平面・接続・設備・能力・メッシュを編集し、対外交通6手段×方向×ゲート/出口の接続状況をマトリクス/経路ハイライトで検証 | PO依頼（2026-11-18）、docs/15・34・35 | [terminal_design_workspace_plan.md](implementation/planned/terminal_design_workspace_plan.md) |
+| 5-19 | 2種類の運航モード: 空港全体を既存clockで1日進行させる運航モード（ターミナルは全館/メッシュ集約）と、独立clockで選択ターミナル/複合体を詳細シミュレーションするモードを実装。両方で車・送迎・タクシー・バス・鉄道・徒歩を含む旅客アクセスと、外部〜入口〜搭乗口/到着出口〜外部の動線を検証 | PO依頼（2026-11-18）、docs/12・15・34・35・44、5-16・5-18 | [terminal_simulation_modes_plan.md](implementation/planned/terminal_simulation_modes_plan.md) |
+| 5-20 | 空港格の8段階化・成長判定の多軸化: 飛行場〜メガハブの8段階、規模・運営品質・施設能力・ネットワーク・経営継続性による昇格、格別の機能解放と旧格3の互換移行 | PO依頼（2026-11-18）、docs/30 §4・docs/44 §1 | [airport_tier_progression_plan.md](implementation/planned/airport_tier_progression_plan.md) |
 
 フェーズ 5 は項目ごとに独立しているので、フェーズ 2〜4 の合間に小さいものから入れてよい。各項目の完了の条件は着手時に定める。
 
 ### 3.6 フェーズをまたぐ依存関係
 
-- フェーズ 2 の完了 → フェーズ 2.5（マップ最大サイズ）→ フェーズ 3。フェーズ 3 は 2.5 の受入完了後に着手する。
+- Phase 2.5 は引き続き未着手。最大マップ・羽田相当レイアウトの全体E2Eを行う前に受入を完了する。Phase 3・4は既に実装済みのため、2.5未完了を理由に完了済み機能を巻き戻さない。
+- 5-14（ターミナル階層・駅/バスターミナル）→ 5-15（複雑形状・複合体）→ 5-16（複合歩行網）。5-13の3状態判定は5-16の歩行グラフ全体に適用する。
+- 5-14・5-15・5-16 → 5-18（専用設計Workspace）→ 5-19（空港全体1日運航/ターミナル単独詳細）。5-16は6種の対外交通と歩行Portalを含む複合経路の正本、5-18は接続検査UIと能力編集、5-19はその経路を使う運行/分析エンジンの正本とする。
+- 5-17（誘導路実幅・高速離脱）はターミナル系とは独立して進められるが、航空機寸法データ・地上走行Phase2・保存/ゴールデン規則に依存する。
 - 2-12（夜間のスポット待機）→ 4-02（夜間滞泊）: 同じ「日付をまたいでスポットにいる機体」の扱いを使う。
 - 2-01〜2-05（地上走行）→ 4-03（朝の波）・4-10（ハブの波）。
 - 3-01・3-02（データの構成）→ 4-01（解放の条件をデータに持つ）・4-06（国際の別）・4-04（拠点にできる会社）。
 - 3-04・3-05（輸送人員）→ 4-07（乗継旅客は路線の需要とは別枠）。
 - 1-11（スポットのターミナル属性）・1-14（スポット変更）→ 4-07（ターミナル間の移動）。
+- 5-20（空港格の8段階化）は、既存の格解放 4-01・国際線/乗継 4-06〜4-10 と、航空会社・都市のデータ/需要モデル 3-01〜3-08 に依存する。施設能力を昇格条件に採用する場合は、5-01〜5-03 の算出範囲・実績計測が確認できる項目だけを利用する。4-03・4-10 の未検証計測は、ハブ能力を昇格条件に使う前に解消する。
 
 ### 3.7 実装計画書とフェーズ全体の進捗
 
 詳細な実装計画・タスク分解は [docs/implementation/README.md](implementation/README.md) で状態別に管理する。ここではフェーズ全体の状態を示し、個別タスクの進捗は各計画書の正本を参照する。
 
-| フェーズ | 状態 | 詳細計画 | 備考 |
+| フェーズ | 実装状況（根拠は各状況欄） | 詳細計画 | 備考 |
 |---|---|---|---|
-| 1 | 完了 | [completed/phase1_plan.md](implementation/completed/phase1_plan.md) | 2026-11-17 完了。受入条件・品質ゲート・ゴールデンの根拠は §2・§5.1 |
-| 2 | 実装中 | [active/phase2_plan.md](implementation/active/phase2_plan.md) | 現在の作業。タスク単位の進捗は計画書と HANDOFF を確認 |
-| 2.5 | 計画・未着手 | [planned/phase2_5_map_expansion_plan.md](implementation/planned/phase2_5_map_expansion_plan.md) | Phase 2 の後、Phase 3 の前に実施 |
-| 3 | 計画・未着手 | [planned/phase3_plan.md](implementation/planned/phase3_plan.md) | Phase 2.5 の受入完了後に着手 |
-| 4 | 計画・未着手 | [planned/phase4_plan.md](implementation/planned/phase4_plan.md) | 先行フェーズとの依存関係を確認して着手 |
-| 5 | 候補 | — | §3.5 の候補。着手時に要求・受入条件と詳細計画を作成 |
+| 1 | 完了 | [completed/phase1_plan.md](implementation/completed/phase1_plan.md) | 2026-11-17完了。受入条件・品質ゲート・ゴールデンの根拠は §2・§5.1 |
+| 2 | 完了 | [active/phase2_plan.md](implementation/active/phase2_plan.md) | docs/42 §3.1は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
+| 2.5 | 計画・未着手 | [planned/phase2_5_map_expansion_plan.md](implementation/planned/phase2_5_map_expansion_plan.md) | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
+| 3 | 完了 | [planned/phase3_plan.md](implementation/planned/phase3_plan.md) | docs/42 §3.2は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
+| 4 | 実装完了・一部受入計測未検証 | [planned/phase4_plan.md](implementation/planned/phase4_plan.md) | docs/42 §3.3。4-03/4-10等の計測・2ターミナル波は未検証。計画書はcompleted扱いにしない |
+| 5 | 個別計画を作成 | 個別計画を下段に列挙 | 5-13〜5-20を依存関係に従って実施 |
 
 計画書を `planned/` から `active/` に移すのは実装開始時、`completed/` に移すのは全受入条件と品質ゲートの完了後とする。部分完了・中断では `active/` に残す。
 
