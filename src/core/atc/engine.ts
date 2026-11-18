@@ -1,4 +1,14 @@
+import type { AirsideNetwork } from '../airside/network';
 import { Rng } from '../rng';
+import {
+  advanceMovement,
+  createMovement,
+  finishMovement,
+  getAtcNetwork,
+  nodePosition,
+  positionAlongRoute,
+  standNodeId,
+} from './movement';
 import {
   activateAssignmentsForAircraft,
   generateScheduledAssignments,
@@ -122,7 +132,11 @@ export function createAtcSession(scenario: AtcScenarioDefinition): AtcSessionSta
   return session;
 }
 
-function spawnDue(state: AtcSessionState, scenario: AtcScenarioDefinition): void {
+function spawnDue(
+  state: AtcSessionState,
+  scenario: AtcScenarioDefinition,
+  network: AirsideNetwork,
+): void {
   const due = scenario.traffic
     .filter((e) => e.atSec <= state.clockSec && state.aircraft[`ac_${e.id}`] === undefined)
     .sort((a, b) => a.atSec - b.atSec || (a.id < b.id ? -1 : 1));
@@ -145,6 +159,9 @@ function spawnDue(state: AtcSessionState, scenario: AtcScenarioDefinition): void
       nextRequestAtSec: state.clockSec,
       activeRequestId: null,
       activeClearanceId: null,
+      position:
+        entry.kind === 'departure' ? nodePosition(network, standNodeId(entry.standId)) : null,
+      movement: null,
       completedAtSec: null,
       totalWaitSec: 0,
     };
@@ -193,6 +210,7 @@ function generateRequests(state: AtcSessionState): void {
 
 function stepClearances(
   state: AtcSessionState,
+  network: AirsideNetwork,
   revalidate?: {
     safety: import('./types').AtcSafetyProvider;
     airport: import('./types').AtcAirportSnapshot;
@@ -266,6 +284,27 @@ function stepClearances(
       clearance.status = 'executing';
       clearance.executionStartedAtSec = state.clockSec;
       aircraft.waitingSinceSec = null;
+      // 物理移動の開始（ATC-06/07 基礎）: 実行開始時にだけ経路を計画し、
+      // 許可のない機体には移動を作らない。経路が取れない場合は時間のみの
+      // 実行にフォールバックし、警告を残す（黙って瞬間移動はしない）。
+      const movement = createMovement(
+        network,
+        aircraft,
+        clearance.kind,
+        ATC_STEP_DURATION_SEC[clearance.kind],
+      );
+      if (movement) {
+        aircraft.movement = movement;
+        const startPos = positionAlongRoute(network, movement, 0);
+        if (startPos) aircraft.position = startPos;
+      } else if (clearance.kind !== 'runwayCrossing') {
+        pushEvent(state, {
+          kind: 'safetyWarning',
+          aircraftId: aircraft.id,
+          clearanceId: clearance.id,
+          message: `${aircraft.callsign}: no route for ${clearance.kind}; timed movement only`,
+        });
+      }
       const startPhase = PHASE_ON_EXECUTION_START[clearance.kind];
       if (startPhase) {
         aircraft.phase = startPhase;
@@ -286,6 +325,7 @@ function stepClearances(
     }
     if (clearance.status === 'executing' && clearance.executionStartedAtSec !== undefined) {
       if (state.clockSec >= clearance.executionStartedAtSec + ATC_STEP_DURATION_SEC[clearance.kind]) {
+        finishMovement(network, aircraft);
         clearance.status = 'completed';
         if (aircraft.activeClearanceId === clearance.id) aircraft.activeClearanceId = null;
         if (aircraft.activeRequestId === clearance.requestId) aircraft.activeRequestId = null;
@@ -310,6 +350,9 @@ function stepClearances(
             message: `${aircraft.callsign}: ${next}`,
           });
         }
+      } else {
+        // 実行中: 物理移動を1秒分前進させる（位置・占有の進行）
+        advanceMovement(network, aircraft, 1);
       }
     }
   }
@@ -338,12 +381,13 @@ export function tickAtcSession(
   },
 ): void {
   if (!Number.isInteger(dtSec) || dtSec < 0) throw new Error('atc-dt-must-be-nonnegative-integer');
+  const network = getAtcNetwork(scenario.airport);
   for (let i = 0; i < dtSec; i++) {
     if (state.finished) return;
     state.clockSec += 1;
-    spawnDue(state, scenario);
+    spawnDue(state, scenario, network);
     generateRequests(state);
-    stepClearances(state, opts);
+    stepClearances(state, network, opts);
     accumulateWait(state);
     const allSpawned = scenario.traffic.every((e) => state.aircraft[`ac_${e.id}`] !== undefined);
     const allCompleted =
@@ -361,7 +405,16 @@ export function atcSessionDigest(state: AtcSessionState): string {
     clockSec: state.clockSec,
     aircraft: Object.values(state.aircraft)
       .sort((a, b) => (a.id < b.id ? -1 : 1))
-      .map((a) => [a.id, a.phase, a.completedAtSec, a.totalWaitSec]),
+      .map((a) => [
+        a.id,
+        a.phase,
+        a.completedAtSec,
+        a.totalWaitSec,
+        a.position?.nodeId ?? '',
+        Math.round((a.position?.x ?? 0) * 100),
+        Math.round((a.position?.y ?? 0) * 100),
+        a.movement ? Math.round(a.movement.traveledM) : -1,
+      ]),
     clearances: Object.values(state.clearances)
       .sort((a, b) => a.seq - b.seq)
       .map((c) => [c.id, c.status]),

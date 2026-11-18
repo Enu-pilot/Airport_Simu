@@ -1,3 +1,4 @@
+import { buildAirsideNetwork } from '../airside/network';
 import { diagnoseAtcAirport } from './scenario';
 import type {
   AtcRequestKind,
@@ -60,6 +61,21 @@ export function createSessionSafetyProvider(): AtcSafetyProvider {
           ) {
             reasons.push('runway-occupied');
             break;
+          }
+        }
+        // 位置ベースの占有（ATC-06/07 物理移動）: 着陸後に滑走路上を
+        // 走行中（taxiIn で滑走路ノード上に位置する）機体も占有とみなす。
+        // 段階だけでは「滑走路を離脱し終えたか」を表せないため、位置を正とする。
+        if (!reasons.includes('runway-occupied')) {
+          const net = buildAirsideNetwork(layout);
+          for (const other of Object.values(session.aircraft)) {
+            if (other.id === aircraft.id || other.runwayId !== targetRunwayId) continue;
+            if (other.phase !== 'taxiIn' || !other.position) continue;
+            const node = net.nodes[other.position.nodeId];
+            if (node && node.runwayIds.includes(targetRunwayId)) {
+              reasons.push('runway-occupied');
+              break;
+            }
           }
         }
         if (reasons.length === 0) {

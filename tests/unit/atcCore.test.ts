@@ -14,7 +14,11 @@ import {
   createSessionSafetyProvider,
   createTutorialScenario,
   diagnoseAtcAirport,
+  getAtcNetwork,
   issueClearance,
+  nodePosition,
+  planRouteNodeIds,
+  standNodeId,
   openQueueByRole,
   parseAtcSessionFile,
   recordReadback,
@@ -355,6 +359,159 @@ describe('ATC §3.4.1 auto-generated assignments (GROUND/TOWER)', () => {
     const result = assignStand(session, scenario.airport, stand.id, 'std_does_not_exist');
     expect(result.ok).toBe(false);
     expect(session.assignments[stand.id]!.status).toBe('open');
+  });
+});
+
+describe('ATC-06/07 physical movement', () => {
+  it('departure starts at its stand node; pushback moves it to the stand link node', () => {
+    const { scenario, session } = tutorialSetup();
+    const safety = createSessionSafetyProvider();
+    const net = getAtcNetwork(scenario.airport);
+    tickAtcSession(session, scenario, 61);
+    const dep = Object.values(session.aircraft).find((a) => a.kind === 'departure')!;
+    expect(dep.position?.nodeId).toBe(standNodeId(dep.standId));
+    const request = Object.values(session.requests).find(
+      (r) => r.aircraftId === dep.id && r.status === 'open',
+    )!;
+    expect(request.kind).toBe('pushback');
+    expect(issueClearance(session, scenario.airport, safety, {
+      aircraftId: dep.id,
+      requestId: request.id,
+    }).ok).toBe(true);
+    tickAtcSession(session, scenario, 70, { safety, airport: scenario.airport });
+    expect(session.clearances[request.clearanceId!]!.status).toBe('completed');
+    expect(dep.phase).toBe('pushback');
+    expect(dep.movement).toBeNull();
+    expect(dep.position?.nodeId).toBe(net.standLinks[dep.standId]);
+  });
+
+  it('position never changes without a clearance', () => {
+    const { scenario, session } = tutorialSetup();
+    tickAtcSession(session, scenario, 600);
+    for (const ac of Object.values(session.aircraft)) {
+      expect(ac.movement).toBeNull();
+      if (ac.kind === 'departure') {
+        expect(ac.position?.nodeId).toBe(standNodeId(ac.standId));
+      } else {
+        expect(ac.position).toBeNull();
+      }
+    }
+  });
+
+  it('taxiOut progresses along a connected route and stops at a hold-short node', () => {
+    const { scenario, session } = tutorialSetup();
+    const net = getAtcNetwork(scenario.airport);
+    const dep = () => Object.values(session.aircraft).find((a) => a.callsign === 'ANA101')!;
+    let sawMoving = false;
+    for (let t = 0; t < 2000; t++) {
+      autoControl(session, scenario);
+      tickAtcSession(session, scenario, 1, {
+        safety: createSessionSafetyProvider(),
+        airport: scenario.airport,
+      });
+      if (!Object.values(session.aircraft).some((a) => a.callsign === 'ANA101')) continue;
+      if (dep().phase === 'holdShort') break;
+      const mv = dep().movement;
+      if (mv?.kind === 'taxiOut') {
+        sawMoving = true;
+        expect(mv.traveledM).toBeGreaterThanOrEqual(0);
+        expect(mv.traveledM).toBeLessThanOrEqual(mv.totalLengthM);
+        // 経路は実在エッジでつながっている
+        for (let i = 0; i + 1 < mv.nodeIds.length; i++) {
+          const edges = (net.outgoing[mv.nodeIds[i]!] ?? []).map((eid) => net.edges[eid]!);
+          expect(
+            edges.some((e) => e.to === mv.nodeIds[i + 1] || (e.bidirectional && e.from === mv.nodeIds[i + 1])),
+          ).toBe(true);
+        }
+      }
+    }
+    expect(sawMoving).toBe(true);
+    expect(dep().phase).toBe('holdShort');
+    const pos = dep().position!.nodeId;
+    const isHoldShort = Object.values(net.edges).some(
+      (e) => e.holdShortAt?.nodeId === pos && e.holdShortAt.runwayId === dep().runwayId,
+    );
+    expect(isHoldShort).toBe(true);
+  });
+
+  it('planned taxiOut route is a connected sequence ending at a hold-short node', () => {
+    const { scenario, session } = tutorialSetup();
+    const net = getAtcNetwork(scenario.airport);
+    tickAtcSession(session, scenario, 1);
+    const dep = Object.values(session.aircraft).find((a) => a.kind === 'departure')!;
+    const nodes = planRouteNodeIds(net, dep, 'taxiOut');
+    expect(nodes).not.toBeNull();
+    expect(nodes![0]).toBe(standNodeId(dep.standId));
+    const last = nodes![nodes!.length - 1]!;
+    expect(
+      Object.values(net.edges).some(
+        (e) => e.holdShortAt?.nodeId === last && e.holdShortAt.runwayId === dep.runwayId,
+      ),
+    ).toBe(true);
+  });
+
+  it('after the full flow, arrivals are at their stand node and departures on the runway', () => {
+    const { scenario, session } = tutorialSetup();
+    const net = getAtcNetwork(scenario.airport);
+    runToFinish(session, scenario);
+    expect(session.finished).toBe(true);
+    for (const ac of Object.values(session.aircraft)) {
+      expect(ac.movement).toBeNull();
+      if (ac.kind === 'arrival') {
+        expect(ac.position?.nodeId).toBe(standNodeId(ac.standId));
+      } else {
+        expect(net.runwayNodes[ac.runwayId]).toContain(ac.position?.nodeId);
+      }
+    }
+  });
+
+  it('an aircraft still on the runway during taxiIn blocks a line-up clearance', () => {
+    const { scenario, session } = tutorialSetup();
+    const safety = createSessionSafetyProvider();
+    const net = getAtcNetwork(scenario.airport);
+    tickAtcSession(session, scenario, 121);
+    const arrival = Object.values(session.aircraft).find((a) => a.kind === 'arrival')!;
+    const dep = Object.values(session.aircraft).find((a) => a.kind === 'departure')!;
+    const runwayNodes = net.runwayNodes[arrival.runwayId]!;
+    arrival.phase = 'taxiIn';
+    arrival.position = nodePosition(net, runwayNodes[runwayNodes.length - 1]!);
+    dep.phase = 'holdShort';
+    const id = 'req_manual_lineup';
+    session.requests[id] = {
+      id,
+      aircraftId: dep.id,
+      kind: 'lineUp',
+      createdAtSec: session.clockSec,
+      status: 'open',
+    };
+    dep.activeRequestId = id;
+    const denied = issueClearance(session, scenario.airport, safety, {
+      aircraftId: dep.id,
+      requestId: id,
+    });
+    expect(denied.ok).toBe(false);
+    expect(denied.reasons).toContain('runway-occupied');
+  });
+
+  it('movement state survives save/load mid-execution and finishes identically', () => {
+    const a = tutorialSetup();
+    runToFinish(a.session, a.scenario);
+
+    const b = tutorialSetup();
+    const safety = createSessionSafetyProvider();
+    for (let t = 0; t < 1200; t++) {
+      autoControl(b.session, b.scenario);
+      tickAtcSession(b.session, b.scenario, 1, { safety, airport: b.scenario.airport });
+      if (Object.values(b.session.aircraft).some((ac) => ac.movement && ac.movement.traveledM > 0)) break;
+    }
+    expect(
+      Object.values(b.session.aircraft).some((ac) => ac.movement && ac.movement.traveledM > 0),
+    ).toBe(true);
+    const parsed = parseAtcSessionFile(JSON.stringify(serializeAtcSession(b.scenario, b.session)));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    runToFinish(parsed.file.session, parsed.file.scenario);
+    expect(atcSessionDigest(parsed.file.session)).toBe(atcSessionDigest(a.session));
   });
 });
 
