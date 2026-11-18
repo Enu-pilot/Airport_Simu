@@ -190,6 +190,7 @@
 | 5-17 | 誘導路実幅・機体適合・高速離脱誘導路: 実幅/肩幅/主脚・翼端余裕・曲線フィレットを分離し、RETの角度/半径/占有時間を運航へ反映 | PO依頼（2026-11-18）、FAA AC 150/5300-13B Chg1、EASA ADR-DSN.D.245/.295 | [taxiway_realism_plan.md](implementation/planned/taxiway_realism_plan.md) |
 | 5-18 | ターミナル専用設計画面: 建物選択から専用workspaceを開き、B3〜4Fの平面・接続・設備・能力・メッシュを編集 | PO依頼（2026-11-18）、docs/34・35 | [terminal_design_workspace_plan.md](implementation/planned/terminal_design_workspace_plan.md) |
 | 5-19 | ターミナルの運航モデル分離: 通常航空機運航ではターミナル全館/メッシュの集約能力・時間を使い、別の詳細ターミナル運用モードで動線・待ち・乗継を計算 | PO依頼（2026-11-18）、docs/12・35・44 | [terminal_simulation_modes_plan.md](implementation/planned/terminal_simulation_modes_plan.md) |
+| 5-20 | 空港格の8段階化・成長判定の多軸化: 飛行場〜メガハブの8段階、規模・運営品質・施設能力・ネットワーク・経営継続性による昇格、格別の機能解放と旧格3の互換移行 | PO依頼（2026-11-18）、docs/30 §4・docs/44 §1 | [airport_tier_progression_plan.md](implementation/planned/airport_tier_progression_plan.md) |
 
 フェーズ 5 は項目ごとに独立しているので、フェーズ 2〜4 の合間に小さいものから入れてよい。各項目の完了の条件は着手時に定める。
 
@@ -204,6 +205,7 @@
 - 3-01・3-02（データの構成）→ 4-01（解放の条件をデータに持つ）・4-06（国際の別）・4-04（拠点にできる会社）。
 - 3-04・3-05（輸送人員）→ 4-07（乗継旅客は路線の需要とは別枠）。
 - 1-11（スポットのターミナル属性）・1-14（スポット変更）→ 4-07（ターミナル間の移動）。
+- 5-20（空港格の8段階化）は、既存の格解放 4-01・国際線/乗継 4-06〜4-10 と、航空会社・都市のデータ/需要モデル 3-01〜3-08 に依存する。施設能力を昇格条件に採用する場合は、5-01〜5-03 の算出範囲・実績計測が確認できる項目だけを利用する。4-03・4-10 の未検証計測は、ハブ能力を昇格条件に使う前に解消する。
 
 ### 3.7 実装計画書とフェーズ全体の進捗
 
@@ -216,7 +218,7 @@
 | 2.5 | 計画・未着手 | [planned/phase2_5_map_expansion_plan.md](implementation/planned/phase2_5_map_expansion_plan.md) | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
 | 3 | 完了 | [planned/phase3_plan.md](implementation/planned/phase3_plan.md) | docs/42 §3.2は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
 | 4 | 実装完了・一部受入計測未検証 | [planned/phase4_plan.md](implementation/planned/phase4_plan.md) | docs/42 §3.3。4-03/4-10等の計測・2ターミナル波は未検証。計画書はcompleted扱いにしない |
-| 5 | 個別計画を作成 | 個別計画を下段に列挙 | 5-13〜5-19を依存関係に従って実施 |
+| 5 | 個別計画を作成 | 個別計画を下段に列挙 | 5-13〜5-20を依存関係に従って実施 |
 
 計画書を `planned/` から `active/` に移すのは実装開始時、`completed/` に移すのは全受入条件と品質ゲートの完了後とする。部分完了・中断では `active/` に残す。
 
