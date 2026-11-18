@@ -244,10 +244,10 @@
 
 | フェーズ | 実装状況（根拠は各状況欄） | 詳細計画 | 備考 |
 |---|---|---|---|
-| 1 | 完了 | [design/impl_phase1_plan.md](design/impl_phase1_plan.md) | 2026-11-17完了。受入条件・品質ゲート・ゴールデンの根拠は §2・§5.1 |
-| 2 | 完了 | [implementation/completed/phase2_plan.md](implementation/completed/phase2_plan.md) | docs/42 §3.1は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
-| 2.5 | 計画・未着手 | （計画書未作成） | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
-| 3 | 完了 | [implementation/completed/phase3_plan.md](implementation/completed/phase3_plan.md) | docs/42 §3.2は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
+| 1 | 完了 | [implementation/completed/phase1_plan.md](implementation/completed/phase1_plan.md) | 2026-11-17完了。受入条件・品質ゲート・ゴールデンの根拠は §2・§5.1 |
+| 2 | 完了 | [implementation/completed/phase2_plan.md](implementation/completed/phase2_plan.md) | 計画書もcompletedへ移管済み。詳細は§3.1・計画書§9 |
+| 2.5 | 計画・未着手 | [implementation/planned/phase2_5_map_expansion_plan.md](implementation/planned/phase2_5_map_expansion_plan.md) | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
+| 3 | 完了 | [implementation/completed/phase3_plan.md](implementation/completed/phase3_plan.md) | 計画書もcompletedへ移管済み。詳細は§3.2・計画書§11 |
 | 4 | 実装完了・一部受入計測未検証 | [implementation/active/phase4_plan.md](implementation/active/phase4_plan.md) | docs/42 §3.3。4-03/4-10等の計測・2ターミナル波は未検証。計画書はcompleted扱いにしない |
 | 5 | 個別計画を作成 | 個別計画を下段に列挙 | 5-13〜5-25を依存関係に従って実施 |
 
