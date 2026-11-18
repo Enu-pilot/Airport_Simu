@@ -13,7 +13,7 @@ import { analyzeAccess, type AccessMode } from '../core/access/model';
 import { companyActions } from '../editor/simRunner';
 import { addCityEvent, setCompanyCity, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
 import { NightOpsSettings } from './NightOpsSettings';
-import { CITY_EVENT_KINDS, type CityEventKind, type CityEventLocation } from '../core/economy/city';
+import { CITY_EVENT_KINDS, cityEventCost, cityEventOutcome, cityEventRisk, type CityEventKind, type CityEventLocation } from '../core/economy/city';
 import {
   ACCESS_MODE_LABEL,
   GAME_UI,
@@ -460,10 +460,12 @@ function CityEventPlanner({ company }: { company: CompanyState }) {
   return (
     <section className="city-event-planner" data-testid="city-event-planner">
       <h4>都市イベント</h4>
-      <p className="muted small">イベント日は旅客需要と道路混雑が増えます。開催規模と場所はゲーム内モデルです。</p>
+      <p className="muted small">イベント日は旅客需要と道路混雑が増えます。予定には協力費がかかり、規模が大きいほど混雑に転ぶリスクがあります（混雑時は需要の伸びが半分・交通が倍）。開催前に取り消せば協力費は全額戻ります。</p>
       {events.length > 0 && <ul>{events.map((event) => (
         <li key={event.id}>
           {event.day + 1}日目〜{event.day + event.durationDays}日目 · {labels[event.kind]} · 規模{event.scale} · {event.location === 'cityCenter' ? '市街地' : '空港周辺'}
+          {event.wagered && <> · 協力費 {formatCr(cityEventCost(event))}</>}
+          {event.wagered && event.day <= company.day && <span data-testid={`event-outcome-${event.id}`}> · 結果: {cityEventOutcome(event) === 'congested' ? '混雑' : '順調'}</span>}
           {mode !== 'operate' && <button type="button" onClick={() => removeCityEvent(event.id)} aria-label="イベントを削除">削除</button>}
         </li>
       ))}</ul>}
@@ -474,7 +476,8 @@ function CityEventPlanner({ company }: { company: CompanyState }) {
           <label>種類 <select value={kind} onChange={(e) => setKind(e.target.value as CityEventKind)}>{CITY_EVENT_KINDS.map((value) => <option key={value} value={value}>{labels[value]}</option>)}</select></label>
           <label>規模 <select value={scale} onChange={(e) => setScale(Number(e.target.value) as 1 | 2 | 3)}><option value={1}>地域</option><option value={2}>広域</option><option value={3}>大規模</option></select></label>
           <label>場所 <select value={location} onChange={(e) => setLocation(e.target.value as CityEventLocation)}><option value="cityCenter">市街地</option><option value="airportDistrict">空港周辺</option></select></label>
-          <button type="submit">イベントを予定</button>
+          <span className="muted small" data-testid="event-cost-preview">協力費 {formatCr(cityEventCost({ scale, durationDays }))} · 混雑リスク {Math.round(cityEventRisk({ scale }) * 100)}%</span>
+          <button type="submit" disabled={company.cash < cityEventCost({ scale, durationDays })}>イベントを予定</button>
         </form>
       )}
     </section>

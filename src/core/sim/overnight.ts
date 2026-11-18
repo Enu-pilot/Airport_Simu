@@ -106,9 +106,12 @@ export function materializeCarryOver(sim: Simulation): void {
       plannedPax: 0, plannedStandId: standId, carryOver: true,
       ...(rec.routeType ? { routeType: rec.routeType } : {}),
     };
+    // 引き継ぐ遅延は当日中に収める。前日の見積りが翌朝までずれた遅延（夜間待機の解放時刻など）を
+    // そのまま足すと、見積りがさらに翌日になって搭乗が始まらず、遅延が毎日自己増殖する
+    const depEstimated = Math.min(depScheduled + rec.depDelaySec, dayStart + DAY_SEC - 1800);
     const dep: Flight = {
       id: depId, number: `${rec.callsign.replace(/\d+$/, '')}${rec.depNumber}`, direction: 'departure', aircraftId: acId,
-      scheduled: depScheduled, estimated: depScheduled + rec.depDelaySec, actual: null, block: null,
+      scheduled: depScheduled, estimated: depEstimated, actual: null, block: null,
       status: 'scheduled', runwayId: null, standId,
       delayCauses: [], pax: emptyFlightPax(), readyAt: null, criticalTask: null,
       airlineId: rec.airlineId, contractId: rec.contractId, destinationId: rec.destinationId,

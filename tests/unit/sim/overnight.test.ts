@@ -165,4 +165,30 @@ describe('翌朝便の出発準備完了判定（OD 修正）', () => {
     }
     for (const id of targets) expect(sim.state.aircraft[id]?.state, `機体 ${id} が離陸している`).toBe('departed');
   });
+
+  it('引き継ぐ遅延が大きくても、置き直した出発の見積りは当日中に収まる', { timeout: 300000 }, () => {
+    const c = overnightCompany();
+    const sim = createSimulation(createSampleAirport(), { company: c, seed: 'ovn-1' });
+    run(sim, DAY_SEC + 3600 - 6 * 3600);
+    // 前日の見積りが翌朝までずれた想定: 引き継ぐ遅延を約 23 時間にする
+    for (const rec of c.carryOver!.aircraft) rec.depDelaySec = 23 * 3600;
+    const c2 = structuredClone(c);
+    const sim2 = createSimulation(createSampleAirport(), { company: c2, seed: 'ovn-1' });
+    const deps = Object.values(sim2.state.flights).filter((f) => f.overnight && f.direction === 'departure' && f.scheduled < DAY_SEC);
+    expect(deps.length).toBeGreaterThanOrEqual(2);
+    for (const dep of deps) expect(dep.estimated).toBeLessThan(DAY_SEC);
+  });
+
+  it('見積りが異常に先でも、整備済みの持ち越し便は搭乗を始めて離陸する（実セーブで詰まった状態の再現）', { timeout: 600000 }, () => {
+    const sim = materializedSim();
+    const dep = Object.values(sim.state.flights).find((f) => f.overnight && f.direction === 'departure' && f.scheduled < DAY_SEC)!;
+    dep.estimated = dep.scheduled + 22 * 3600; // 毒入りの見積り（修正前は搭乗開始が翌日になり永遠に出発できない）
+    const acId = dep.aircraftId;
+    const end = sim.state.now + 6 * 3600;
+    while (sim.state.now < end) {
+      stepSimulation(sim);
+      if (sim.state.aircraft[acId]?.state === 'departed') break;
+    }
+    expect(sim.state.aircraft[acId]?.state).toBe('departed');
+  });
 });

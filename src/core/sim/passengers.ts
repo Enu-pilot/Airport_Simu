@@ -54,6 +54,8 @@ export const RESTROOM_PROB = 0.3;
 export const RESTROOM_SEC = 180;
 /** 搭乗開始（出発予定の何分前か）と搭乗締切 */
 export const BOARDING_LEAD_MIN = { S: 20, M: 30, L: 40 } as const;
+/** 出発見積りが現在よりこの秒数を超えて先なら「異常に先の見積り」として扱い、搭乗開始の詰まりを防ぐ */
+export const STUCK_ESTIMATE_SEC = 3 * 3600;
 export const DEADLINE_BEFORE_SEC = 10 * 60;
 /** 搭乗開始から締切までの最低時間（機体の到着が遅れた場合に締切を後ろへずらす） */
 export const MIN_BOARDING_WINDOW_SEC = 15 * 60;
@@ -243,8 +245,11 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
 
   if (p.boarding === 'notStarted') {
     const atStand = ac.state === 'turnaround' || ac.state === 'readyForPushback';
+    // 見積りが異常に先（夜間待機の遅延を持ち越し便が引き継いだ等）だと、搭乗開始が翌日になって
+    // 整備済みの機体が永遠に出発できない。予定を過ぎ・整備が終わり・夜間待機の指定もない便は今から搭乗を始める
+    const overdueReady = !f.nightHold && state.now >= f.scheduled && f.estimated - state.now > STUCK_ESTIMATE_SEC;
     // 降機・清掃・ケータリング・給油・点検が終わるまで搭乗を始めない
-    if (atStand && boardingAllowed(state, ac.id) && state.now >= f.estimated - boardingLeadSec(sim, f)) {
+    if (atStand && boardingAllowed(state, ac.id) && (state.now >= f.estimated - boardingLeadSec(sim, f) || overdueReady)) {
       p.boarding = 'open';
       p.boardingOpenedAt = state.now;
       log(state, { t: state.now, kind: 'boardingOpen', aircraftId: ac.id, note: f.number });

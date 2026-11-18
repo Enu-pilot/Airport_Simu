@@ -29,6 +29,8 @@ export interface GoalState {
   boostUntil: number;
   /** 最後に格が上がった日（なければ欠落） */
   tierDay?: number;
+  /** 目標の連鎖（5-07）: 固定 12 個をすべて達成した後に続く生成目標の進み具合。欠落 = 未開始 */
+  chain?: { index: number; streak: number };
 }
 
 export const initialGoals = (): GoalState => ({ done: {}, streaks: {}, tier: 0, grants: [], boostUntil: 0 });
@@ -86,6 +88,35 @@ export const GOALS: readonly GoalDef[] = [
 
 export const GOAL_IDS: readonly string[] = GOALS.map((g) => g.id);
 
+// ---------------------------------------------------------------- 目標の連鎖（5-07 / docs/39 E1）
+
+/**
+ * 固定 12 個をすべて達成した後に続く生成目標。3 種（発着・旅客・定時率の連続）が順に現れ、
+ * 1 周ごとに目標値が上がる。達成するたびに次の 1 つだけが出る（連鎖）。
+ */
+export interface ChainGoalInfo { kind: 'movements' | 'pax' | 'otp'; target: number; streakDays: number; cash: number }
+
+export function chainGoalInfo(index: number): ChainGoalInfo {
+  const cycle = index % 3;
+  const level = Math.floor(index / 3);
+  const cash = 2_000_000 * (index + 1);
+  if (cycle === 0) return { kind: 'movements', target: 600 + 400 * level, streakDays: 0, cash };
+  if (cycle === 1) return { kind: 'pax', target: 20_000 + 15_000 * level, streakDays: 0, cash };
+  return { kind: 'otp', target: level >= 1 ? 0.95 : 0.92, streakDays: level >= 1 ? 7 : 5, cash };
+}
+
+export function chainGoalAt(index: number): GoalDef {
+  const info = chainGoalInfo(index);
+  const base: GoalDef = {
+    id: `chain-${index}`,
+    tier: 3,
+    check: (x) => (info.kind === 'movements' ? mov(x) >= info.target : info.kind === 'pax' ? pax(x) >= info.target : x.report.kpi.otp !== null && x.report.kpi.otp >= info.target),
+    reward: { cash: info.cash, ...(info.kind === 'otp' ? { rating: 1 } : {}) },
+  };
+  if (info.kind === 'otp') base.streak = info.streakDays;
+  return base;
+}
+
 /** 空港の格の条件（その日の実績で判定し、満たす日が TIER_STREAK 日続くと昇格。降格しない） */
 export const TIER_STREAK = 3;
 export const TIER_NAMES = ['飛行場', '地方空港', '拠点空港', '国際ハブ'] as const;
@@ -137,6 +168,26 @@ export function evaluateGoals(c: CompanyState, x: Omit<GoalCtx, 'c'>): GoalResul
     if (r.rating) c.rating = Math.min(100, Math.round((c.rating + r.rating) * 10) / 10);
     if (r.offerBoostDays) g.boostUntil = Math.max(g.boostUntil, c.day + 1 + r.offerBoostDays);
   }
+  // 目標の連鎖: 固定 12 個をすべて達成したら、生成目標を 1 つずつ評価する
+  if (GOALS.every((d) => g.done[d.id] !== undefined)) {
+    const ch = (g.chain ??= { index: 0, streak: 0 });
+    const def = chainGoalAt(ch.index);
+    const ok = def.check(ctx);
+    if (def.streak) ch.streak = ok ? ch.streak + 1 : 0;
+    const complete = def.streak ? ch.streak >= def.streak : ok;
+    if (complete) {
+      completed.push(def.id);
+      const r = def.reward;
+      if (r.cash) {
+        c.cash += r.cash;
+        cash += r.cash;
+      }
+      g.grants.push({ day, id: def.id, amount: r.cash ?? 0 });
+      if (r.rating) c.rating = Math.min(100, Math.round((c.rating + r.rating) * 10) / 10);
+      ch.index += 1;
+      ch.streak = 0;
+    }
+  }
   if (g.grants.length > GRANT_LIMIT) g.grants.splice(0, g.grants.length - GRANT_LIMIT);
   // 空港の格: 次の格の条件を満たす日が続くと昇格（降格しない。1 日に 1 段）
   let tierUp: Tier | null = null;
@@ -153,11 +204,13 @@ export function evaluateGoals(c: CompanyState, x: Omit<GoalCtx, 'c'>): GoalResul
   return { completed, tierUp, cash };
 }
 
-/** 次に目指す目標（未達成を、格の低い順・登録順に最大 n 個） */
+/** 次に目指す目標（未達成を、格の低い順・登録順に最大 n 個）。固定をすべて達成したら連鎖の現在分 */
 export function nextGoals(g: GoalState | undefined, n = 3): GoalDef[] {
-  return GOALS.filter((d) => g?.done[d.id] === undefined)
+  const rest = GOALS.filter((d) => g?.done[d.id] === undefined)
     .sort((a, b) => a.tier - b.tier)
     .slice(0, n);
+  if (rest.length > 0) return rest;
+  return [chainGoalAt(g?.chain?.index ?? 0)];
 }
 
 // ---------------------------------------------------------------- 検証
@@ -171,7 +224,8 @@ export function checkGoals(raw: unknown): string[] {
   if (!isObj(raw.done) || Object.entries(raw.done).some(([k, v]) => !GOAL_IDS.includes(k) || !Number.isInteger(v))) errors.push('目標: done が不正です（目標 ID・日）');
   if (!isObj(raw.streaks) || Object.values(raw.streaks).some((v) => !Number.isInteger(v) || (v as number) < 0)) errors.push('目標: streaks が不正です');
   if (raw.tier !== 0 && raw.tier !== 1 && raw.tier !== 2 && raw.tier !== 3) errors.push('目標: tier（空港の格）が 0〜3 ではありません');
-  if (!Array.isArray(raw.grants) || raw.grants.some((x) => !isObj(x) || !Number.isInteger(x.day) || !GOAL_IDS.includes(x.id as string) || typeof x.amount !== 'number' || !Number.isFinite(x.amount))) errors.push('目標: grants が不正です');
+  if (!Array.isArray(raw.grants) || raw.grants.some((x) => !isObj(x) || !Number.isInteger(x.day) || !(GOAL_IDS.includes(x.id as string) || /^chain-\d+$/.test(x.id as string)) || typeof x.amount !== 'number' || !Number.isFinite(x.amount))) errors.push('目標: grants が不正です');
+  if (raw.chain !== undefined && (!isObj(raw.chain) || !Number.isInteger(raw.chain.index) || (raw.chain.index as number) < 0 || !Number.isInteger(raw.chain.streak) || (raw.chain.streak as number) < 0)) errors.push('目標: chain が不正です');
   if (typeof raw.boostUntil !== 'number' || !Number.isFinite(raw.boostUntil)) errors.push('目標: boostUntil が数値ではありません');
   if (raw.tierDay !== undefined && !Number.isInteger(raw.tierDay)) errors.push('目標: tierDay が整数ではありません');
   return errors;
