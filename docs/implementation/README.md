@@ -40,7 +40,10 @@ docs/42がフェーズの実装状況の正本、各計画書の状態とフォ�
 | Phase 5 / 5-18 ターミナル専用設計Workspace | planned | [terminal_design_workspace_plan.md](planned/terminal_design_workspace_plan.md) | フロア・内部設備・メッシュ能力、対外交通の接続マトリクス/経路ハイライト |
 | Phase 5 / 5-19 空港全体1日運航・ターミナル単独詳細Simulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 2モードのclock/state分離、対外交通6手段、全方向の旅客動線/容量検証 |
 | Phase 5 / 5-20 空港格の8段階化・成長判定の多軸化 | planned | [airport_tier_progression_plan.md](planned/airport_tier_progression_plan.md) | 既存格解放・契約提案・旧セーブ互換を含めて段階的に拡張 |
+| Phase 5 / 5-21 最混雑時間帯・ターミナル別工程能力 | planned | [peak_hour_passenger_capacity_plan.md](planned/peak_hour_passenger_capacity_plan.md) | ローリング60分・工程別の能力/需要/実績。共有アクセス・ランプバスの能力を重複計上しない |
 
+
+| Overnight carry-over departure readiness | planned | [overnight_departure_readiness_fix_plan.md](planned/overnight_departure_readiness_fix_plan.md) | skip された地上作業と固定タスク数の不整合。修正・翌朝便の離陸検証は未実施 |
 
 ## ディレクトリの意味
 
