@@ -22,7 +22,9 @@ import {
   setFleetEntry,
   type FleetResult,
   changeFrequency,
+  counterOffer,
   rejectOffer,
+  setDedicatedStand,
   setFees,
   setHours,
   type CompanyState,
@@ -435,13 +437,13 @@ function endOps(): void {
   const keep = { ...initialDayFlow(), review: df.review };
   if (o?.sim.company) {
     const report = o.sim.company.bankrupt || atClose ? null : settleDay(o.sim, true);
-    set({ mode: 'build', ops: null, company: o.sim.company, dayFlow: keep });
+    set({ mode: 'build', ops: null, company: o.sim.company, dayFlow: keep, buildBaseline: get().history.present });
     if (report) showToast(`${report.day + 1}日目を締めました（営業利益 ${formatCr(report.operatingProfit)}）`);
     else if (atClose && df.review) showToast(`${df.review.day + 1}日目の締めは済んでいます（営業利益 ${formatCr(df.review.report.operatingProfit)}）。次の日の準備ができます`);
     applyFinishedProjects();
     return;
   }
-  set({ mode: 'build', ops: null, dayFlow: keep });
+  set({ mode: 'build', ops: null, dayFlow: keep, buildBaseline: get().history.present });
 }
 
 /**
@@ -488,6 +490,12 @@ export const companyActions = {
   },
   rejectOffer(id: string): void {
     mutateCompany((c) => rejectOffer(c, id));
+  },
+  counterOffer(id: string, changes: { window?: 'morning' | 'daytime' | 'evening' | 'any'; perDay?: number; feeDiscount?: number }): void {
+    if (mutateCompany((c) => counterOffer(c, id, changes))) showToast('逆提案が受け入れられました（条件が変わりました）');
+  },
+  setDedicatedStand(id: string, standId: string | null): void {
+    mutateCompany((c) => setDedicatedStand(c, id, standId));
   },
   changeFrequency(id: string, delta: 1 | -1): void {
     const s = get();

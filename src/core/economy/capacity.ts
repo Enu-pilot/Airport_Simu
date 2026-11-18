@@ -11,6 +11,8 @@ import { taxiwayCapacityPerHour } from '../sim/taxiBlocks';
 import { BLOCK_REQ_M } from '../sim/rules';
 import { resolveType } from '../sim/aircraftTypes';
 import { cityOperatingHours } from './city';
+import { airportFireCategory, requiredFireCategory, towerCapacityPerHour, towerLevel } from '../safety';
+import { runwaySystemCapacity } from '../runwayCapacity';
 import type { CompanyState, Contract, TimeWindow } from './company';
 import { addContract } from './company';
 import { internationalProcessingFor, routeCapabilitiesForAirport } from './registry';
@@ -139,12 +141,19 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
   const capHours = company.city?.nightOps ? cityOperatingHours(company.hours, company.city) : company.hours;
   const operatingHours = Math.max(0, (capHours.closeMin - capHours.openMin) / 60);
   const peakMovements = peak(analysis.hourly.movements);
+  // 消防区分・管制塔（5-05）: 助言的な制限の表示値
+  const fireCat = airportFireCategory(ctx.layout);
+  const maxRequiredFireCat = plan.flights.reduce((m, f) => Math.max(m, requiredFireCategory(resolveType(ctx.types, f.typeId).lengthM)), 0);
+  const towerLvl = towerLevel(ctx.layout);
+  const towerCap = towerCapacityPerHour(towerLvl);
   const peakDepartingPax = peak(analysis.hourly.depPax);
   const closedRunways = new Set(live?.closedRunwayIds ?? []);
   const closedStands = new Set(live?.closedStandIds ?? []);
   const liveNote = live ? '。運航中の閉鎖を反映' : '';
   const operationalRunways = Object.values(ctx.runways).filter((r) => r.operational && !closedRunways.has(r.id)).length;
-  const runwayHourly = operationalRunways * RUNWAY_HOURLY_CAPACITY;
+  // 滑走路の能力は構成から算出する（5-01）
+  const runwaySystem = runwaySystemCapacity(ctx.layout, (r) => (ctx.runways[r.id]?.operational ?? false) && !closedRunways.has(r.id));
+  const runwayHourly = runwaySystem.perHour;
   const overnightCount = plan.flights.filter((f) => f.overnight).length;
   const terminalIds = Object.keys(ctx.terminal.byTerminal).sort(compareIds);
   const terminalRows = terminalIds.map((terminalId) => {
@@ -201,7 +210,7 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
   const peakStandUse = standDemand.total;
   const buses = ctx.bases.reduce((sum, b) => sum + (b.units.apronBus ?? 0), 0);
   const summary = [
-    metric('滑走路', 'movements/h', runwayHourly, peakMovements, `稼働滑走路 ${operationalRunways} 本 × 計画基準 ${RUNWAY_HOURLY_CAPACITY} 回/時。日計は運用時間 ${operatingHours.toFixed(1)} 時間を使用${liveNote}`),
+    metric('滑走路', 'movements/h', runwayHourly, peakMovements, `滑走路の構成から算出（${runwaySystem.basis}）。稼働 ${operationalRunways} 本、日計は運用時間 ${operatingHours.toFixed(1)} 時間を使用${liveNote}`),
     metric('スポット同時駐機', 'aircraft', availableStands, peakStandUse, `運用中・誘導路接続済み ${availableStands} 箇所（直結 ${contactStands} / リモート ${remoteStands}）。需要は計画割当の同時駐機ピーク${liveNote}`),
     // フェーズ 4 §3.4: 朝の 1 時間に出せる始発の数（能力は滑走路の時間能力を流用。滞泊の計画がない日は未算出）
     metric('朝の始発（1 時間）', 'movements/h', overnightCount > 0 ? runwayHourly : null, overnightCount > 0 ? overnightCount : null, overnightCount > 0 ? `滞泊の出発 ${overnightCount} 便が朝の波を作る。能力は滑走路の時間能力 ${runwayHourly} 回/時を流用（地上走行の競合は含めない）` : '滞泊の契約がないため未算出'),
@@ -216,6 +225,8 @@ export function analyzeAirportCapacity(company: CompanyState, ctx: SimContext, c
     metric('駅からターミナルへの連絡通路', 'pax/h', access.railWalkCapacityPerHour, null, access.railWalkCapacityPerHour === null ? '歩行路の実経路は接続確認するが、全区間に明示能力がないため処理人数は未算出' : '地下・地上・高架の運用歩行路の最小明示能力。乗客実績の需要は未算出'),
     metric('1日総処理（滑走路・理論値）', 'movements/day', runwayHourly > 0 ? runwayHourly * operatingHours : 0, plan.flights.length * 2, `滑走路の時間能力 × 運用時間 ${operatingHours.toFixed(1)} h。ピーク偏在や滑走路構成・閉鎖は別途確認が必要`),
     metric('1日旅客処理（理論値）', 'pax/day', totalTerminalThroughput > 0 ? totalTerminalThroughput * operatingHours : null, plan.flights.reduce((sum, f) => sum + f.arrPax + f.depPax, 0), `ターミナル工程ボトルネック × 運用時間 ${operatingHours.toFixed(1)} h。便の集中を反映しない理論値`),
+    metric('消防区分', 'units', fireCat > 0 ? fireCat : null, maxRequiredFireCat > 0 ? maxRequiredFireCat : null, fireCat > 0 ? `消防施設の区分（最大 ${fireCat}）。需要は計画便の機体長から求めた必要区分の最大。不足しても運航は止まらない（助言的な制限、5-05）` : '消防施設がないため未算出'),
+    metric('管制塔', 'movements/h', towerCap > 0 ? towerCap : null, peakMovements, towerCap > 0 ? `管制塔レベル ${towerLvl} の処理能力の目安。需要は計画のピーク 1 時間の発着回数。超過しても運航は止まらない（助言的な制限、5-05）` : '管制塔がないため未算出'),
     metric('スポットの回転数', 'movements/h', standTurnover, peakMovements, standTurnover === null ? '計画の便がないため平均占有時間が求められず未算出' : `運用中スポット ${availableStands} 箇所 ÷ 計画の平均占有時間 ${occupancyHours.toFixed(2)} 時間（降機〜出発＋スポット間隔 ${STAND_GAP_SEC / 60} 分）× 2（到着・出発）${liveNote}`),
     metric('空港全体の離発着能力', 'movements/h', overall.capacity, peakMovements, `滑走路・スポットの回転数・折り返し能力（折り返し能力 × 2 ÷ 平均の折り返し時間${turnaroundHours > 0 ? ` ${turnaroundHours.toFixed(2)} 時間` : ''}）の最小。制約: ${overall.limitedBy === 'runway' ? '滑走路' : overall.limitedBy === 'stand' ? 'スポットの回転数' : overall.limitedBy === 'turnaround' ? '折り返し能力' : '未算出'}。誘導路は能力が未算出のため含めない${standTurnover === null ? '（計画の便がないためスポット・折り返しは未算出）' : ''}${liveNote}`),
     metric('空港アクセス（合計）', 'pax/h', accessTotalPerHour, null, accessBasis),
@@ -324,6 +335,26 @@ function newlyIntroducedIssues(before: PlanAnalysis, after: PlanAnalysis): PlanA
 }
 
 /** Add a temporary contract to a deep copy; no company, layout, save slot, or running simulation is mutated. */
+/** 投資効果のプレビュー（5-04 / B4）: 2 つの能力スナップショットの差分（容量が変わった指標だけ） */
+export interface CapacityDelta {
+  name: string;
+  unit: CapacityMetric['unit'];
+  before: number | null;
+  after: number | null;
+  delta: number | null;
+}
+
+export function capacityDelta(before: AirportCapacitySnapshot, after: AirportCapacitySnapshot): CapacityDelta[] {
+  const prev = new Map(before.summary.map((m) => [m.name, m]));
+  const out: CapacityDelta[] = [];
+  for (const m of after.summary) {
+    const b = prev.get(m.name)?.capacity ?? null;
+    if (b === m.capacity) continue;
+    out.push({ name: m.name, unit: m.unit, before: b, after: m.capacity, delta: b !== null && m.capacity !== null ? m.capacity - b : null });
+  }
+  return out;
+}
+
 export function previewContractCapacity(company: CompanyState, ctx: SimContext, input: CapacityPreviewInput, closedBusGateIds: readonly string[] = [], access = 1): CapacityPreview {
   const routeCapabilities = routeCapabilitiesForAirport(ctx.layout.countryId, { international: internationalProcessingFor(company, ctx.terminal) });
   const beforePlan = planDayWithDemand(company, company.day, access, ctx.types, routeCapabilities);

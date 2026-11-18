@@ -121,6 +121,8 @@ export interface EditorState {
   toast: Toast | null;
   /** build: 建設（編集）モード / operate: 運航モード（レイアウトの編集は不可） */
   mode: 'build' | 'operate';
+  /** 投資効果プレビューの基準レイアウト（建設モードに入った時点の敷地。5-04 / B4） */
+  buildBaseline: AirportLayout | null;
   ops: OpsState | null;
   /** 空港会社（経営）。運航中は ops.sim.company が最新で、運航終了時にここへ戻す */
   company: CompanyState;
@@ -298,6 +300,7 @@ export const editorStore = createStore<EditorState>(() => ({
   mapLevel: 0,
   toast: null,
   mode: 'build',
+  buildBaseline: null,
   ops: null,
   company: loadInitialCompany(),
   charges: { past: [], future: [] },
@@ -524,7 +527,7 @@ export function newGame(mode: CompanyState['mode'], game: GameSettings | null = 
   const company = mode === 'career' ? createCareerCompany() : createSandboxCompany();
   startGame(company, game);
   if (city) company.city = structuredClone(city);
-  set({ history: createHistory(layout), company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select', scenarios: [], projectId: null, projectName: '無題のプロジェクト', catalogPin: null, journal: createJournal(), dayFlow: initialDayFlow() });
+  set({ history: createHistory(layout), buildBaseline: layout, company, charges: { past: [], future: [] }, selection: null, draft: null, tool: 'select', scenarios: [], projectId: null, projectName: '無題のプロジェクト', catalogPin: null, journal: createJournal(), dayFlow: initialDayFlow() });
   void clearUnsavedHistory();
   showToast(mode === 'career' ? `新しいゲーム: 小さな飛行場から（資金 ${formatCr(company.cash)}）` : 'サンドボックス: サンプル空港と潤沢な資金で始めます');
 }
@@ -673,7 +676,8 @@ export const actions = {
     set((s) => ({ interiorLevel: level, overlays: { ...s.overlays, interior: true } }));
   },
   setMapLevel(level: number | 'all'): void {
-    set((s) => ({ mapLevel: level, options: { ...s.options, roadLevel: level === 'all' ? 0 : level } }));
+    // 「全レイヤ」は表示だけの切り替えで、配置先の階は最後に選んだ階のままにする（5-09 / W-11 で確定）
+    set((s) => ({ mapLevel: level, options: level === 'all' ? s.options : { ...s.options, roadLevel: level } }));
   },
   setViewMode(viewMode: '2d' | '3d'): void {
     set({ viewMode });

@@ -138,6 +138,8 @@ export interface Aircraft {
   heldCrossings?: CrossingGrant[];
   /** 運航者が指定したスポット（reassignStand, E-3）。割り当てたら消す */
   requestedStandId?: string;
+  /** 折り返し作業のうち、この機体では生成しない作業（夜間滞泊の持ち越しは deplane/unload を省略する）。出発準備完了の判定で「未完了」ではなく「要求されていない作業」として扱う */
+  skippedTasks?: TaskKind[];
   history: HistoryEntry[];
 }
 

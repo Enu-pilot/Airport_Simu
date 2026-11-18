@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
-import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type DailyKpi, type DailyReport } from '../core/economy/company';
+import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type DailyKpi, type DailyReport } from '../core/economy/company';
 import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
 import { airlineDef, airlinesFor, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
+import { renewalOutlook, RENEWAL_LEVEL_LABEL } from '../core/economy/renewal';
 import { routeDemandSummary } from '../core/economy/demand';
 import { BALANCE } from '../core/economy/balance';
 import { forecastForDay } from '../core/sim/weather';
@@ -92,6 +93,8 @@ export function PlanPanel() {
                 <th>時間帯</th>
                 <th>割引</th>
                 <th>期間</th>
+                <th>更新の先行き</th>
+                <th>専用スポット</th>
                 <th></th>
               </tr>
             </thead>
@@ -141,6 +144,25 @@ export function PlanPanel() {
                   <td>{Math.round(k.feeDiscount * 100)}%</td>
                   <td>
                     {k.startDay + 1}〜{k.endDay + 1}日目
+                  </td>
+                  <td data-testid={`contract-outlook-${k.id}`}>
+                    {(() => {
+                      const o = renewalOutlook(c, k);
+                      return <span title={o.reason}>{RENEWAL_LEVEL_LABEL[o.level]}（残り {Math.max(0, o.daysLeft)} 日）</span>;
+                    })()}
+                  </td>
+                  <td>
+                    <select
+                      value={k.dedicatedStandId ?? ''}
+                      onChange={(e) => companyActions.setDedicatedStand(k.id, e.target.value || null)}
+                      title="専用スポット: この契約の便が優先して使い、付属のゲートも占有されます。他の契約の便は空きがないときだけ使います"
+                      data-testid={`dedicated-stand-${k.id}`}
+                    >
+                      <option value="">専用なし</option>
+                      {Object.values(ctx.layout.stands).map((s) => (
+                        <option key={s.id} value={s.id}>{s.id}</option>
+                      ))}
+                    </select>
                   </td>
                   <td>
                     <button onClick={() => companyActions.changeFrequency(k.id, 1)} title="増便を依頼（満足度60以上で応じる）" data-testid={`freq-up-${k.id}`}>
@@ -201,6 +223,9 @@ export function PlanPanel() {
                         契約
                       </button>
                       <button onClick={() => companyActions.rejectOffer(k.id)}>辞退</button>
+                    </td>
+                    <td data-testid={`counter-${k.id}`}>
+                      <CounterOfferCell contract={k} />
                     </td>
                   </tr>
                 );
@@ -385,6 +410,39 @@ export function PlanPanel() {
         </section>
       </div>
     </div>
+  );
+}
+
+/** 契約の逆提案（5-08）: 時間帯・便数・割引の変更を航空会社に申し入れる小さなフォーム */
+function CounterOfferCell({ contract: k }: { contract: Contract }) {
+  const [window, setWindow] = useState(k.window);
+  const [perDay, setPerDay] = useState(k.perDay);
+  const [discountPct, setDiscountPct] = useState(Math.round(k.feeDiscount * 100));
+  return (
+    <span className="counter-offer">
+      <select value={window} onChange={(e) => setWindow(e.target.value as Contract['window'])} title="希望する時間帯" data-testid={`counter-window-${k.id}`}>
+        {(Object.keys(WINDOW_LABEL) as Contract['window'][]).map((w) => (
+          <option key={w} value={w}>{WINDOW_LABEL[w]}</option>
+        ))}
+      </select>
+      <select value={perDay} onChange={(e) => setPerDay(Number(e.target.value))} title="希望する便数/日" data-testid={`counter-perday-${k.id}`}>
+        {[1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => (
+          <option key={n} value={n}>{n}便</option>
+        ))}
+      </select>
+      <select value={discountPct} onChange={(e) => setDiscountPct(Number(e.target.value))} title="提示する割引率" data-testid={`counter-discount-${k.id}`}>
+        {[0, 5, 10, 15, 20, 25, 30, 35, 40].map((n) => (
+          <option key={n} value={n}>割引{n}%</option>
+        ))}
+      </select>
+      <button
+        onClick={() => companyActions.counterOffer(k.id, { window, perDay, feeDiscount: discountPct / 100 })}
+        title="この条件で航空会社に逆提案します。割引を増やすと通りやすく、便数を増やすと通りにくくなります。断られると満足度が少し下がります"
+        data-testid={`counter-submit-${k.id}`}
+      >
+        逆提案
+      </button>
+    </span>
   );
 }
 

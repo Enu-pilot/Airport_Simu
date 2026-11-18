@@ -35,12 +35,13 @@ function minimalAirport(): AirportLayout {
 
 describe('配置エラー', () => {
   it('立体占有では別階層を重複扱いせず、同階層の実干渉は検出する', () => {
-    let l = must(placeFacility(emptyLayout(), 'baggageSort', { x: 30, y: 30 }, { mapLevel: -1 })).layout;
-    l = must(placeFacility(l, 'baggageSort', { x: 30, y: 30 }, { mapLevel: 0 })).layout;
+    // 地下に単独で置ける種類（駐車場）で階層の重なりを確かめる（5-09 / W-7 で地下の種類を制限したため）
+    let l = must(placeFacility(emptyLayout(), 'parking', { x: 30, y: 30 }, { mapLevel: -1 })).layout;
+    l = must(placeFacility(l, 'parking', { x: 30, y: 30 }, { mapLevel: 0 })).layout;
     expect(codes(l)).not.toContain('OVERLAP');
-    l = must(placeFacility(l, 'baggageSort', { x: 30, y: 30 }, { mapLevel: 2 })).layout;
+    l = must(placeFacility(l, 'parking', { x: 30, y: 30 }, { mapLevel: 2 })).layout;
     expect(codes(l)).not.toContain('OVERLAP');
-    l = must(placeFacility(l, 'baggageSort', { x: 30, y: 30 }, { mapLevel: 0 })).layout;
+    l = must(placeFacility(l, 'parking', { x: 30, y: 30 }, { mapLevel: 0 })).layout;
     expect(codes(l)).toContain('OVERLAP');
   });
 

@@ -133,6 +133,14 @@ export const BALANCE = {
     noise: 0.08,
     /** 国際路線の需要係数 */
     internationalFactor: 0.6,
+    /**
+     * 季節・曜日係数（5-06）。各表は平均が 1 になるよう正規化してあり、年間需要はほぼ変わらない。
+     * 曜日は day % 7（0 = 月曜）。月は day % 365 を非うるう年の月日に割り当てる。
+     */
+    weekdayBusiness: [1.08, 0.98, 0.97, 1.02, 1.12, 0.88, 0.95],
+    weekdayLeisure: [0.92, 0.9, 0.92, 0.98, 1.08, 1.12, 1.08],
+    monthBusiness: [1.0, 1.05, 1.05, 1.02, 0.98, 1.05, 1.0, 0.88, 1.02, 1.03, 1.0, 0.92],
+    monthLeisure: [1.02, 0.85, 1.02, 0.95, 1.12, 0.85, 1.03, 1.2, 0.98, 1.0, 0.92, 1.06],
   },
   offers: { baseProb: 0.12, ratingProb: 0.3, maxOpen: 6, expireDays: 3, contractDays: 30 },
   contracts: { renewGoodSat: 70, renewOkSat: 45, withdrawSat: 25, withdrawDays: 3, increaseMinSat: 60, decreasePenaltySat: 10 },

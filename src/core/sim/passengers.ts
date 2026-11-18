@@ -13,6 +13,7 @@ import { gateMode } from '../model/gates';
 import { BALANCE } from '../economy/balance';
 import { onPaxDeplaned, onPaxMissed, onShopDone, onTransferMissed } from '../economy/ops';
 import { accessArrival, accessDeparture } from '../access/runtime';
+import { recordLinkUsage, unrecordLinkUsage } from './linkUsage';
 import type { Simulation } from './simulation';
 import {
   EVENT_LOG_LIMIT,
@@ -1034,7 +1035,11 @@ function startLeg(sim: Simulation, g: PaxGroup): void {
   const reservedNow = g.count > capacity
     ? Math.min(remaining, available)
     : (alreadyReserved === 0 && g.count <= available ? g.count : 0);
-  if (reservedNow > 0) usage[transportId] = used + reservedNow;
+  if (reservedNow > 0) {
+    usage[transportId] = used + reservedNow;
+    // 利用実績（5-03）: 時間帯別の人数を積む。未開始の解放では同じ時間帯の分だけ戻す
+    recordLinkUsage(sim.state, transportId, hour % 24, reservedNow);
+  }
   const totalReserved = alreadyReserved + reservedNow;
   if (totalReserved < g.count) {
     if (totalReserved > 0) g.terminalLinkPaxAccumulated = totalReserved;
@@ -1062,6 +1067,7 @@ function releaseUnstartedTransportReservation(sim: Simulation, g: PaxGroup): voi
     const remaining = Math.max(0, used - g.count);
     if (remaining > 0) runtime.passengersByLink[g.terminalLinkId] = remaining;
     else delete runtime.passengersByLink[g.terminalLinkId];
+    unrecordLinkUsage(sim.state, g.terminalLinkId, g.terminalLinkReservedHour % 24, g.count);
   }
   delete g.terminalLinkId;
   delete g.terminalLinkReservedHour;

@@ -19,6 +19,9 @@ import {
 } from '../sim/types';
 import { BALANCE, ON_TIME_SEC } from './balance';
 import { railServiceOf, RAIL_SERVICE } from '../access/rail';
+import { terminalLinkCapacityPerHour } from '../terminal/model';
+import { runwaySystemCapacity } from '../runwayCapacity';
+import { takeLinkUsage } from '../sim/linkUsage';
 import { evaluateDelayPair } from './delayEvaluation';
 import {
   COST_CATEGORIES,
@@ -40,7 +43,7 @@ import { layoutValue, scaleFactor } from './construction';
 import { advanceProjects } from './expansion';
 import { analyzeAccess, type AccessAnalysis, type AccessFeedback } from '../access/model';
 import { takeAccessStats } from '../access/runtime';
-import { isPeak, RUNWAY_HOURLY_CAPACITY, analyzeDayPlan, planDayWithDemand } from './planning';
+import { isPeak, analyzeDayPlan, planDayWithDemand } from './planning';
 import { airlineScorecard } from './airlineScore';
 import { stepAirlineEval } from './airlineEval';
 import { evaluateGoals } from './goals';
@@ -424,9 +427,23 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
   }, 0);
   const paxTotal = dPax.boarded + dPax.missed;
   let paxSatisfaction: number | null = null;
+  let paxSatisfactionDetail: DailyKpi['paxSatisfactionDetail'];
   if (dPax.finished + dPax.missed > 0) {
     const missedRate = paxTotal > 0 ? dPax.missed / paxTotal : 0;
     const leftRate = e.leftBags / Math.max(1, bagsLoaded + e.leftBags);
+    // 内訳（5-04 / D1）: 満足度 = 100 − 各減点。表示用に材料も残す
+    paxSatisfactionDetail = {
+      waitPenalty: round1(2 * avgWaitMin),
+      walkPenalty: round1(Math.max(0, avgWalkMin - 10)),
+      delayPenalty: round1(avgDelayMin),
+      missedPenalty: round1(300 * missedRate),
+      bagsPenalty: round1(100 * leftRate),
+      avgWaitMin: round1(avgWaitMin),
+      avgWalkMin: round1(avgWalkMin),
+      avgDelayMin: round1(avgDelayMin),
+      missedRate,
+      leftRate,
+    };
     paxSatisfaction = round1(clamp(100 - 2 * avgWaitMin - Math.max(0, avgWalkMin - 10) - avgDelayMin - 300 * missedRate - 100 * leftRate));
   }
 
@@ -465,7 +482,7 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
     otp: legs.length > 0 ? onTime / legs.length : null,
     avgDelayMin: round1(avgDelayMin),
     actualAvgDelayMin: round1(actualAvgDelayMin),
-    runwayUtil: runways > 0 ? Math.min(1, movements / (runways * RUNWAY_HOURLY_CAPACITY * (elapsed / 3600))) : 0,
+    runwayUtil: runways > 0 ? Math.min(1, movements / (runwaySystemCapacity(ctx.layout, (r) => ctx.runways[r.id]?.operational ?? false).perHour * (elapsed / 3600))) : 0,
     gateUtil: stands > 0 ? Math.min(1, e.standBusySec / (stands * elapsed)) : 0,
     facilityUtil: e.facilityCap > 0 ? e.facilityBusy / e.facilityCap : 0,
     avgWaitMin: round1(avgWaitMin),
@@ -477,6 +494,7 @@ export function computeKpi(sim: Simulation, c: CompanyState): { kpi: DailyKpi; b
     diverted: state.stats.diverted - b.stats.diverted,
     cancelled: state.stats.cancelled - b.stats.cancelled,
     paxSatisfaction,
+    ...(paxSatisfactionDetail ? { paxSatisfactionDetail } : {}),
     airlineSatisfaction: null,
     rating: c.rating,
   };
@@ -534,6 +552,8 @@ function cityNoiseMetrics(state: SimState, ctx: SimContext, from: number, to: nu
  */
 /** 乗継統計の前回締め時点の累計（保存対象にしないため WeakMap で保持する） */
 const hubStatsPrev = new WeakMap<object, { spawned: number; connected: number; missed: number; noShow: number }>();
+/** 地上支援ユニットの稼働累計の前回締め時点（5-02。保存対象にしないため WeakMap で保持する） */
+const unitBusyPrev = new WeakMap<object, { at: number; busyById: Map<string, number> }>();
 
 export function settleDay(sim: Simulation, partial: boolean): DailyReport | null {
   if (!enabled(sim)) return null;
@@ -680,6 +700,74 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   if (p4.maintenance) report.maintenance = p4.maintenance;
   const wave = morningWave(sim, e.periodStart, state.now);
   if (wave) report.morningWave = wave;
+  // 資源別の稼働率と待ちの内訳（5-02）
+  {
+    const prevBusy = unitBusyPrev.get(state);
+    const elapsed = prevBusy ? state.now - prevBusy.at : 0;
+    const byKind = new Map<string, { units: number; busyDelta: number }>();
+    for (const u of Object.values(state.units)) {
+      const row = byKind.get(u.kind) ?? { units: 0, busyDelta: 0 };
+      row.units++;
+      row.busyDelta += u.busySec - (prevBusy?.busyById.get(u.id) ?? 0);
+      byKind.set(u.kind, row);
+    }
+    if (prevBusy && elapsed > 0) {
+      const rows: NonNullable<DailyReport['groundUtilization']> = [];
+      for (const [kind, row] of byKind) {
+        if (row.units <= 0) continue;
+        rows.push({ kind, units: row.units, utilization: Math.round((row.busyDelta / (row.units * elapsed)) * 1000) / 1000 });
+      }
+      if (rows.length > 0) report.groundUtilization = rows.sort((a, b) => b.utilization - a.utilization);
+    }
+    unitBusyPrev.set(state, { at: state.now, busyById: new Map(Object.values(state.units).map((u) => [u.id, u.busySec])) });
+    const waits: NonNullable<DailyReport['groundWaits']> = [];
+    for (const reason of ['noVehicle', 'noStaff', 'noEngineer'] as const) {
+      const sec = (state.groundStats.blockedSec[reason] ?? 0) - (e.base.ground.blockedSec[reason] ?? 0);
+      if (sec > 0) waits.push({ reason, sec });
+    }
+    if (waits.length > 0) report.groundWaits = waits;
+  }
+  // リンク利用実績（5-03）: 連絡設備・上下移動の時間帯別人数を読み取り、記録を消す
+  const linkUsageRecord = takeLinkUsage(state);
+  if (linkUsageRecord) {
+    const entries: NonNullable<DailyReport['linkUsage']> = [];
+    for (const [linkId, hourly] of Object.entries(linkUsageRecord)) {
+      const total = hourly.reduce((a, b) => a + b, 0);
+      if (total <= 0) continue;
+      let peakHour = 0;
+      for (let h = 1; h < 24; h++) if ((hourly[h] ?? 0) > (hourly[peakHour] ?? 0)) peakHour = h;
+      if (linkId.startsWith('vertical:')) {
+        const areaId = linkId.slice('vertical:'.length);
+        const area = ctx.layout.terminalAreas[areaId];
+        const link = Object.values(ctx.terminal.links).flat().find((l) => l.verticalTransportId === areaId);
+        entries.push({ linkId, kind: 'vertical', label: linkId, areaKind: area?.kind, total, peakHour, peakCount: hourly[peakHour] ?? 0, capacityPerHour: link?.capacityPerHour ?? null, hourly: [...hourly] });
+      } else {
+        const tlink = ctx.layout.terminalLinks?.[linkId];
+        entries.push({ linkId, kind: 'transfer', label: tlink?.name || `連絡設備（${linkId}）`, total, peakHour, peakCount: hourly[peakHour] ?? 0, capacityPerHour: tlink ? terminalLinkCapacityPerHour(tlink) : null, hourly: [...hourly] });
+      }
+    }
+    if (entries.length > 0) report.linkUsage = entries.sort((a, b) => b.total - a.total);
+  }
+  // アクセスの時間帯別交通量（5-03）: road/curb は台数、bus/rail は出発旅客の人数
+  if (state.access) {
+    const byMode = new Map<string, number[]>();
+    for (const [key, value] of Object.entries(state.access.hourly)) {
+      const [mode, hourText] = key.split(':');
+      const hour = Number(hourText);
+      if (!mode || !Number.isInteger(hour) || hour < 0 || hour > 23 || value <= 0) continue;
+      const arr = byMode.get(mode) ?? new Array(24).fill(0);
+      arr[hour] += value;
+      byMode.set(mode, arr);
+    }
+    const usage: NonNullable<DailyReport['accessUsage']> = [];
+    for (const [mode, hourly] of byMode) {
+      const total = hourly.reduce((a, b) => a + b, 0);
+      let peakHour = 0;
+      for (let h = 1; h < 24; h++) if (hourly[h]! > hourly[peakHour]!) peakHour = h;
+      usage.push({ mode, total, peakHour, peakCount: hourly[peakHour] ?? 0 });
+    }
+    if (usage.length > 0) report.accessUsage = usage;
+  }
   // 乗継の当日分（フェーズ 4 §5.6）。累計ではなく当日の増分を記録する
   if (c.features?.hub && state.hubStats) {
     const h = state.hubStats;

@@ -123,6 +123,7 @@ export function Toolbox() {
             <option value="all">全レイヤ</option>
             {Array.from({ length: 16 }, (_, i) => i - 5).map((l) => <option key={l} value={l}>{l === 0 ? '地上' : l < 0 ? `地下 ${-l}` : `高架 ${l}`}</option>)}
           </select>
+          {mapLevel === 'all' && <span className="muted small" data-testid="placement-level-note">配置先は {options.roadLevel === 0 ? '地上' : options.roadLevel < 0 ? `地下 ${-options.roadLevel}` : `高架 ${options.roadLevel}`} のままです</span>}
         </label>
         <label>
           施設の配置先

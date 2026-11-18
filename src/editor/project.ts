@@ -99,6 +99,7 @@ function applyProject(p: ProjectFile, id: string | null, keepScenarios?: Scenari
   const pin = { version: p.catalog.version, models: p.catalog.models };
   set({
     history: createHistory(p.layout),
+    buildBaseline: p.layout,
     company: p.company,
     charges: { past: [], future: [] },
     scenarios: keepScenarios ?? p.scenarios,

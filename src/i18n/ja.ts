@@ -302,6 +302,8 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   GATE_ARRIVAL_NO_EXIT: (n) => `${n[0]} から降りた旅客が出口へ行けません`,
   TERMINAL_DEPARTURE_ROUTE: (n) => `${n[0]} は入口から利用可能なチェックイン・保安検査まで連続して移動できません`,
   GATE_ARRIVAL_NO_BAGGAGE_ROUTE: (n) => `${n[0]} の到着旅客が手荷物受取所を経由して出口へ行けません`,
+  FACILITY_UNDERGROUND_KIND: (n) => `${n[0]} は地下に置けない種類の施設です（地下に置けるのは駐車場・従業員駐車場・鉄道駅だけです）`,
+  INTERIOR_FACILITY_UNLINKED: (n) => `${n[0]} は建物内の設備のため、地上サービス網に接続されず能力に数えられません`,
   FACILITY_INTERIOR_INVALID: (n, p) => `${n[0]} の建物内配置が無効です（階 ${p.floor ?? '不明'} または親建物・階層を確認してください）`,
   FACILITY_INTERIOR_OUTSIDE: (n) => `${n[0]} が親建物 ${n[1]} の範囲外にあります`,
   TERMINAL_LINK_CLEARANCE: (n, p) => `${n[0]} の連絡通路下の航空機クリアランスが不足しています（${p.clearance}m、必要 ${p.required}m）`,
@@ -709,6 +711,8 @@ export const CONTRACT_ACTION_LABEL: Record<Exclude<ContractActionResult, { ok: t
   AIRLINE_REFUSED: '航空会社の満足度が低いため、増便に応じてもらえません',
   MIN_FREQUENCY: 'これ以上減便できません（1日1便が最小）',
   LOCKED: 'この種類の契約はまだ解放されていないか、有効化されていません',
+  NO_CHANGE: '逆提案の内容が現在の条件と同じです',
+  COUNTER_TOO_SOON: '逆提案は断られた当日には再提案できません',
 };
 
 export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
@@ -730,6 +734,8 @@ export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {
   BASED_CONDITIONS_UNMET: '拠点契約の条件（滞泊の能力・整備・人員）を満たさない',
   INTL_GATE_MISSING: '国際のゲートがない',
   MCT_UNAVAILABLE: '乗継の経路がなく、最小乗継時間が出せない',
+  FIRE_CATEGORY_LOW: '消防区分が不足（機体に必要な区分に届かない）',
+  TOWER_CAPACITY_LOW: '管制塔の処理能力をピークの発着回数が超える',
 };
 
 /** KPI の名前と計算式（画面のツールチップに表示） */
@@ -760,6 +766,10 @@ export const KPI_LABEL: Record<keyof DailyKpi, { label: string; formula: string 
   paxSatisfaction: {
     label: '旅客満足度',
     formula: '100 − 2×平均待ち(分) − max(0, 平均歩行(分) − 10) − 平均遅延(分) − 300×乗り遅れ率 − 100×積み残し率（0〜100）',
+  },
+  paxSatisfactionDetail: {
+    label: '旅客満足度の内訳',
+    formula: '満足度の各減点（待ち時間・歩行・遅延・乗り遅れ・手荷物）と材料の平均値（5-04）',
   },
   airlineSatisfaction: { label: '航空会社満足度', formula: '契約中の航空会社の満足度の平均（定時率・乗り遅れ・積み残し・欠航・料金で日々変化）' },
   rating: { label: '空港評価', formula: '0.7 × 前日の評価 + 0.3 × (0.4×旅客満足度 + 0.4×航空会社満足度 + 0.2×定時運航率%)' },
