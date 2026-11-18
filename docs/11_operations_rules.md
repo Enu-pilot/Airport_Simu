@@ -139,7 +139,7 @@ scheduled ─→ inbound ⇄ holding ─→ approach ─→ landing ─→ vacat
 
 ### 7.4 区間ごとに進む地上走行（フェーズ 2。`layout.taxiMode === 'block'` のときだけ。選択式・既定は §7.2 の従来方式）
 
-仕様: [41](41_capacity_expansion_plan.md) §1、実装計画: [design/impl_phase2_plan.md](design/impl_phase2_plan.md) §1〜§2。数値はゲーム内の値。
+仕様: [41](41_capacity_expansion_plan.md) §1、実装計画: [implementation/completed/phase2_plan.md](implementation/completed/phase2_plan.md) §1〜§2。数値はゲーム内の値。
 
 - 誘導路を、交差点・行き止まり・滑走路ノード・スポット入口・条件の変わり目で区切り、さらに `taxiBlockTiles`（既定 10 タイル = 250 m、範囲 4〜40）ごとに等分した**区間**に分ける（`core/sim/taxiBlocks.ts` `buildTaxiBlocks`。配置から決まる派生データで保存しない）。
 - 区間の進入可能機数 = 使える長さ（長さ − 出口側の停止距離）を、機体の大きさ別の必要長（S 70 / M 90 / L 120 m、混在は合計）で割った値（最小 1。誘導路ごとの上限 `blockMaxAircraft` 1〜10 で小さくできる）。
