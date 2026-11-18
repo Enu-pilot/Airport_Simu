@@ -1,4 +1,4 @@
-import { createSite } from '../model/site';
+import { createSite, siteSizeById } from '../model/site';
 import type { AirportLayout, FacilityKind, TerminalAreaKind } from '../model/types';
 import type { Tile } from '../geometry/vec';
 import {
@@ -28,8 +28,9 @@ import {
  *   y=49-56         ターミナル（1F 到着・入口、2F 出発）
  *   y=57  ───── 一般道路 ─────
  */
-export function createStarterAirfield(seed = 'skyport-starter'): AirportLayout {
-  let layout = createEmptyLayout(createSite({ seed }), '小さな飛行場');
+export function createStarterAirfield(seed = 'skyport-starter', sizeId?: string): AirportLayout {
+  const size = sizeId && sizeId !== 'standard' ? siteSizeById(sizeId) : null;
+  let layout = createEmptyLayout(createSite({ seed, ...(size ? { width: size.width, height: size.height } : {}) }), '小さな飛行場');
   const run = (r: OpResult): string[] => {
     if (!r.ok) throw new Error(`starter generation failed: ${r.reason}`);
     layout = r.layout;
@@ -79,7 +80,7 @@ export function createStarterAirfield(seed = 'skyport-starter'): AirportLayout {
   });
   fac('fuelFarm', { x: 72, y: 49 }, { name: '燃料施設' });
 
-  run(addRoadPath(layout, [{ x: 30, y: 57 }, { x: 76, y: 57 }, { x: 76, y: 105 }], { roadClass: 'public', name: '空港通り' }));
+  run(addRoadPath(layout, [{ x: 30, y: 57 }, { x: 76, y: 57 }, { x: 76, y: layout.site.height - 7 }], { roadClass: 'public', name: '空港通り' }));
   run(addRoadPath(layout, [{ x: 71, y: 48 }, { x: 71, y: 57 }], { roadClass: 'service', name: '構内道路' }));
   fac('parking', { x: 50, y: 58 }, { w: 16, h: 6, name: '駐車場', props: { spaces: 200 } });
   return layout;

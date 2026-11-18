@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { SITE_SIZES, createSite, siteSizeById, terrainAt } from '../../src/core/model/site';
+import { createSampleAirport } from '../../src/core/sample/sampleAirport';
+import { createStarterAirfield } from '../../src/core/sample/starterAirfield';
+import { analyzeLayout } from '../../src/core/validation/validate';
+import { editorStore, newGame } from '../../src/editor/store';
 import { Terrain } from '../../src/core/model/types';
 import { createEmptyLayout } from '../../src/core/layout/operations';
 import { buildProject, serializeProject, validateProject } from '../../src/core/io/project';
@@ -22,6 +26,34 @@ describe('敷地サイズ', () => {
     expect(terrainAt(site, 0, 0)).toBe(Terrain.offsite);
     expect(terrainAt(site, 287, 207)).toBe(Terrain.offsite);
     expect(terrainAt(site, 144, 104)).toBe(Terrain.grass);
+  });
+
+  it('新規ゲームの空港（サンプル／スターター）も大きい敷地で作れ、検証結果は標準と同じ', () => {
+    const std = createSampleAirport();
+    const huge = createSampleAirport('skyport', 'huge');
+    expect(huge.site.width).toBe(288);
+    expect(huge.site.height).toBe(208);
+    expect(Object.keys(huge.stands)).toHaveLength(Object.keys(std.stands).length);
+    expect(Object.keys(huge.runways)).toHaveLength(Object.keys(std.runways).length);
+    const codes = (l: typeof std) => analyzeLayout(l).issues.map((i) => i.code).sort();
+    expect(codes(huge)).toEqual(codes(std));
+
+    const starterStd = createStarterAirfield();
+    const starterLarge = createStarterAirfield('skyport-starter', 'large');
+    expect(starterLarge.site.width).toBe(240);
+    expect(starterLarge.site.height).toBe(180);
+    expect(codes(starterLarge)).toEqual(codes(starterStd));
+  });
+
+  it('ストアの新規ゲームにサイズを渡すと、その敷地で始まる', () => {
+    newGame('sandbox', null, null, 'huge');
+    const layout = editorStore.getState().history.present;
+    expect(layout.site.width).toBe(288);
+    expect(layout.site.height).toBe(208);
+    newGame('career', null, null, 'medium');
+    const layout2 = editorStore.getState().history.present;
+    expect(layout2.site.width).toBe(200);
+    expect(layout2.site.height).toBe(144);
   });
 
   it('大きな敷地の空レイアウトが保存・読み込みできる', () => {

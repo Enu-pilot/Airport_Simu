@@ -521,9 +521,9 @@ export function closeTemporarily(id: string, days: number): void {
  * game を省くと新しいルール（天候 5 段階・評価・目標。難易度は標準）、null を渡すと従来のルール。
  * 初期資金は難易度の倍率を掛ける（標準は ×1 で従来と同じ）。
  */
-export function newGame(mode: CompanyState['mode'], game: GameSettings | null = defaultGame(), city?: CityConfig | null): void {
+export function newGame(mode: CompanyState['mode'], game: GameSettings | null = defaultGame(), city?: CityConfig | null, sizeId?: string): void {
   if (get().mode === 'operate') return;
-  const layout = mode === 'career' ? createStarterAirfield() : createSampleAirport();
+  const layout = mode === 'career' ? createStarterAirfield(undefined, sizeId) : createSampleAirport(undefined, sizeId);
   const company = mode === 'career' ? createCareerCompany() : createSandboxCompany();
   startGame(company, game);
   if (city) company.city = structuredClone(city);
