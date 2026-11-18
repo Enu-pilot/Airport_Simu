@@ -22,7 +22,7 @@
 | Phase 2.5 | planned | planned | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
 | Phase 3 | completed | planned（移管未反映） | docs/42 §3.2は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
 | Phase 4 | 実装完了・一部受入計測未検証 | planned（監査継続） | docs/42 §3.3。4-03/4-10等の未検証条件を解消するまでcompletedへ移さない |
-| Phase 5 | backlog / 個別計画あり | planned | 5-13〜5-20を依存関係に従って個別実施 |
+| Phase 5 | backlog / 個別計画あり | planned | 5-13〜5-25を依存関係に従って個別実施 |
 
 docs/42がフェーズの実装状況の正本、各計画書の状態とフォルダ配置は実装計画のライフサイクルを表します。過去の計画書配置が現在の実装状況と一致していない箇所は、受入記録を確認してから移管し、フォルダ名だけで実装済み/未実装を判断しません。
 
@@ -41,6 +41,10 @@ docs/42がフェーズの実装状況の正本、各計画書の状態とフォ�
 | Phase 5 / 5-19 空港全体1日運航・ターミナル単独詳細Simulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 2モードのclock/state分離、対外交通6手段、全方向の旅客動線/容量検証 |
 | Phase 5 / 5-20 空港格の8段階化・成長判定の多軸化 | planned | [airport_tier_progression_plan.md](planned/airport_tier_progression_plan.md) | 既存格解放・契約提案・旧セーブ互換を含めて段階的に拡張 |
 | Phase 5 / 5-21 最混雑時間帯・ターミナル別工程能力 | planned | [peak_hour_passenger_capacity_plan.md](planned/peak_hour_passenger_capacity_plan.md) | ローリング60分・工程別の能力/需要/実績。共有アクセス・ランプバスの能力を重複計上しない |
+| Phase 5 / 5-22 共通シナリオ管理・運航モード横断比較 | planned | [scenario_comparison_plan.md](planned/scenario_comparison_plan.md) | Phase 8の既存比較を再利用し、Airport Day / Terminal Detailを同じ入力条件から比較 |
+| Phase 5 / 5-23 旅客Door-to-Door KPI | planned | [passenger_door_to_door_kpi_plan.md](planned/passenger_door_to_door_kpi_plan.md) | 外部〜ゲート/外部退出・乗継の全所要時間、p50/p95、搭乗締切到達、Step-free |
+| Phase 5 / 5-24 都市上空回避型・方向別夜間運用 | planned | [urban_night_runway_operations_plan.md](planned/urban_night_runway_operations_plan.md) | 都市保護区域と到着/出発経路回廊を検証し、適合方向のみ夜間許可 |
+| Phase 5 / 5-25 夜間整備・工事Work Order | planned | [nighttime_work_order_plan.md](planned/nighttime_work_order_plan.md) | 既存機体周期整備と統合し、夜間シフト・資源・資産閉鎖・工事進捗を管理 |
 
 
 | Overnight carry-over departure readiness | planned | [overnight_departure_readiness_fix_plan.md](planned/overnight_departure_readiness_fix_plan.md) | skip された地上作業と固定タスク数の不整合。修正・翌朝便の離陸検証は未実施 |
