@@ -147,3 +147,10 @@ Work Orderの状態は、少なくともplanned / queued / inProgress / blocked 
 - 品質ゲート: Docsのみのためコードテスト未実行
 - 未実行/未検証: W1〜W9
 - 残件: 全タスク
+
+## Phase 6との関係
+
+- 本書は Phase 5 / 5-25 の夜間整備シフト・設備保守・工事時間帯の詳細計画の正本である。
+- [Phase 6 総合計画](phase6_airport_facility_expansion_plan.md) の P3 は、本書のWork Order、時間枠、必要資源、閉鎖調整を再利用し、GSE・空港インフラ・ターミナル設備等へ段階拡張する。
+- docs/44 の夜間滞泊は機体をスポットに置く軽量方式を維持する。すべての滞泊をWork Order化しない。また、既存の航空機周期整備をWork Orderで二重に判定・課金しない。
+- 夜間運航との施設閉鎖調整は Phase 5 / 5-24 と連携する。本書のplanned状態・既存受入条件は維持する。
