@@ -242,7 +242,7 @@
 | 2.5 | 計画・未着手 | [planned/phase2_5_map_expansion_plan.md](implementation/planned/phase2_5_map_expansion_plan.md) | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
 | 3 | 完了 | [planned/phase3_plan.md](implementation/planned/phase3_plan.md) | docs/42 §3.2は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
 | 4 | 実装完了・一部受入計測未検証 | [planned/phase4_plan.md](implementation/planned/phase4_plan.md) | docs/42 §3.3。4-03/4-10等の計測・2ターミナル波は未検証。計画書はcompleted扱いにしない |
-| 5 | 個別計画を作成 | 個別計画を下段に列挙 | 5-13〜5-21を依存関係に従って実施 |
+| 5 | 個別計画を作成 | 個別計画を下段に列挙 | 5-13〜5-25を依存関係に従って実施 |
 
 計画書を `planned/` から `active/` に移すのは実装開始時、`completed/` に移すのは全受入条件と品質ゲートの完了後とする。部分完了・中断では `active/` に残す。
 
