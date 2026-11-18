@@ -10,9 +10,10 @@
 | コード変更の詳細な実装方法・タスク進捗 | [implementation/](implementation/README.md) | どこを・どう変更し、どこまで検証したか |
 | 現在の機能仕様 | [11〜37 の機能別仕様](#機能別仕様) | 現行実装で確認した挙動・判定基準 |
 | 個別の追加要求・受入条件 | [40. 出発時刻制限](40_departure_time_limit.md)、[41. 能力拡張計画](41_capacity_expansion_plan.md) | 要求・設計上の前提・実装記録 |
-| 空港格の拡張計画 | [Phase 5 / 5-20 実装計画](implementation/planned/airport_tier_progression_plan.md)、[42. 実装ロードマップ](42_implementation_roadmap.md) | 8段階化・多軸昇格・機能解放・旧セーブ互換の実装前計画。現行仕様ではない |
-| 管制官モードの独立実装計画 | [管制官モード実装計画](implementation/planned/air_traffic_control_mode_plan.md)、[42. 実装ロードマップ §3.9](42_implementation_roadmap.md) | 経営モードと独立したGROUND/TOWER管制ゲームの計画。未実装・着手承認前 |
-| 基盤完成後の再検討計画 | [implementation/README.md](implementation/README.md#基盤完成後に再検討する個別計画)、[docs/42 §3.8](42_implementation_roadmap.md) | 貨物・ブランド効果・自動最適化・風向運用・除雪/防除氷の計画と着手ゲート |
+| 空港格の拡張計画・実装状況 | [Phase 5 / 5-20 実装計画](implementation/active/airport_tier_progression_plan.md)、[42. 実装ロードマップ](42_implementation_roadmap.md) | 8段階化・多軸昇格・機能解放は実装済み部分あり。T6・T8等の残件と受入状況はactive計画を参照。現行挙動はdocs/30・44とコードを正とする |
+| 管制官モードの独立実装計画 | [管制官モード実装計画](implementation/planned/air_traffic_control_mode_plan.md)、[42. 実装ロードマップ §3.9](42_implementation_roadmap.md) | 経営モードと独立したGROUND/TOWER管制ゲームの計画。既定ブランチでは未統合。別作業コピーの実装状況はHANDOFFを参照 |
+| Phase 5 / 貨物輸送 | [貨物実装計画](implementation/active/cargo_operations_plan.md)、[42. 実装ロードマップ](42_implementation_roadmap.md) | PO指示で基盤ゲートに先行して部分実装。sim実便化・日報・道路競合等の残件あり |
+| 基盤完成後の再検討計画 | [implementation/README.md](implementation/README.md#基盤完成後に再検討する個別計画)、[docs/42 §3.8](42_implementation_roadmap.md) | ブランド効果・自動最適化・風向運用・除雪/防除氷の計画と着手ゲート |
 | 未決事項・既知の制限 | [10. 未決事項一覧](10_open_issues.md) | 判断待ち・既知制限の台帳。全項目が未解決という意味ではない |
 | 監査の結果・テスト不足・当時の不具合 | [39. 総合テスト・監査](39_comprehensive_test_audit_and_handover.md) | 実施時点の監査記録。現在の実装状態は再確認する |
 | 長期のフェーズ経緯・候補 | [09. フェーズ別ロードマップ](09_roadmap.md) | 初期ロードマップと後続候補。現在の進捗は 42 を優先 |
