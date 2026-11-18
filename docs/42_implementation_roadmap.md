@@ -186,10 +186,10 @@
 | 5-13 | 旅客動線の3段階接続判定: 経路全体を「通行可能／建設完了待ち／未接続」に分類する。運用中経路を優先し、建設中経路は完成後の接続予測にだけ使う。旅客移動・構造検証・建設完了後の再探索へ反映し、内部通路の建設状態表現と連絡設備の工事進捗連携を整える | PO 依頼（2026-11-18）、[実装計画](implementation/planned/passenger_connectivity_status_plan.md) |
 | 5-14 | ターミナル階層・駅/バスターミナルの構造化: B3〜4Fを内部床階として扱い、railStation/busTerminalを独立構造物かつ建物内包可能にする。旧busStop・旧save互換を維持 | PO依頼（2026-11-18）、docs/34・39 §10.3 | [terminal_building_structure_plan.md](implementation/planned/terminal_building_structure_plan.md) |
 | 5-15 | ターミナル形状・複合体: 凹形ポリゴン建物に対応。辺接触または完成済み高層連絡通路で同一ターミナル複合体を判定。ただし同一complexと旅客通行可能は分離 | PO依頼（2026-11-18）、docs/22・35 | [terminal_complex_geometry_plan.md](implementation/planned/terminal_complex_geometry_plan.md) |
-| 5-16 | 階層旅客歩行網: RoadEdge.walkway・階層コネクタ・駅/バスターミナル・建物Portal・TerminalArea・TerminalTransitLinkを統合し、PaxGroupの実経路と検証へ反映 | PO依頼（2026-11-18）、docs/34・35、5-13 | [passenger_network_unification_plan.md](implementation/planned/passenger_network_unification_plan.md) |
+| 5-16 | 対外交通を含む階層旅客動線: 駐車場・車寄せ・タクシー・バス・鉄道・徒歩の外部接続から徒歩Portal・ターミナル入口・各搭乗口/到着出口までを統合し、往路/復路・階層・Step-free・建設状態を検証してPaxGroupへ反映 | PO依頼（2026-11-18）、docs/15・34・35、5-13〜5-15 | [passenger_network_unification_plan.md](implementation/planned/passenger_network_unification_plan.md) |
 | 5-17 | 誘導路実幅・機体適合・高速離脱誘導路: 実幅/肩幅/主脚・翼端余裕・曲線フィレットを分離し、RETの角度/半径/占有時間を運航へ反映 | PO依頼（2026-11-18）、FAA AC 150/5300-13B Chg1、EASA ADR-DSN.D.245/.295 | [taxiway_realism_plan.md](implementation/planned/taxiway_realism_plan.md) |
-| 5-18 | ターミナル専用設計画面: 建物選択から専用workspaceを開き、B3〜4Fの平面・接続・設備・能力・メッシュを編集 | PO依頼（2026-11-18）、docs/34・35 | [terminal_design_workspace_plan.md](implementation/planned/terminal_design_workspace_plan.md) |
-| 5-19 | ターミナルの運航モデル分離: 通常航空機運航ではターミナル全館/メッシュの集約能力・時間を使い、別の詳細ターミナル運用モードで動線・待ち・乗継を計算 | PO依頼（2026-11-18）、docs/12・35・44 | [terminal_simulation_modes_plan.md](implementation/planned/terminal_simulation_modes_plan.md) |
+| 5-18 | ターミナル専用設計画面: 建物選択から専用workspaceを開き、B3〜4Fの平面・接続・設備・能力・メッシュを編集し、対外交通6手段×方向×ゲート/出口の接続状況をマトリクス/経路ハイライトで検証 | PO依頼（2026-11-18）、docs/15・34・35 | [terminal_design_workspace_plan.md](implementation/planned/terminal_design_workspace_plan.md) |
+| 5-19 | 2種類の運航モード: 空港全体を既存clockで1日進行させる運航モード（ターミナルは全館/メッシュ集約）と、独立clockで選択ターミナル/複合体を詳細シミュレーションするモードを実装。両方で車・送迎・タクシー・バス・鉄道・徒歩を含む旅客アクセスと、外部〜入口〜搭乗口/到着出口〜外部の動線を検証 | PO依頼（2026-11-18）、docs/12・15・34・35・44、5-16・5-18 | [terminal_simulation_modes_plan.md](implementation/planned/terminal_simulation_modes_plan.md) |
 | 5-20 | 空港格の8段階化・成長判定の多軸化: 飛行場〜メガハブの8段階、規模・運営品質・施設能力・ネットワーク・経営継続性による昇格、格別の機能解放と旧格3の互換移行 | PO依頼（2026-11-18）、docs/30 §4・docs/44 §1 | [airport_tier_progression_plan.md](implementation/planned/airport_tier_progression_plan.md) |
 
 フェーズ 5 は項目ごとに独立しているので、フェーズ 2〜4 の合間に小さいものから入れてよい。各項目の完了の条件は着手時に定める。
@@ -198,7 +198,7 @@
 
 - Phase 2.5 は引き続き未着手。最大マップ・羽田相当レイアウトの全体E2Eを行う前に受入を完了する。Phase 3・4は既に実装済みのため、2.5未完了を理由に完了済み機能を巻き戻さない。
 - 5-14（ターミナル階層・駅/バスターミナル）→ 5-15（複雑形状・複合体）→ 5-16（複合歩行網）。5-13の3状態判定は5-16の歩行グラフ全体に適用する。
-- 5-14・5-15・5-16 → 5-18（専用設計Workspace）→ 5-19（集約運航/詳細ターミナル運用）。5-19は5-16の実旅客経路と5-18の能力編集を利用する。
+- 5-14・5-15・5-16 → 5-18（専用設計Workspace）→ 5-19（空港全体1日運航/ターミナル単独詳細）。5-16は6種の対外交通と歩行Portalを含む複合経路の正本、5-18は接続検査UIと能力編集、5-19はその経路を使う運行/分析エンジンの正本とする。
 - 5-17（誘導路実幅・高速離脱）はターミナル系とは独立して進められるが、航空機寸法データ・地上走行Phase2・保存/ゴールデン規則に依存する。
 - 2-12（夜間のスポット待機）→ 4-02（夜間滞泊）: 同じ「日付をまたいでスポットにいる機体」の扱いを使う。
 - 2-01〜2-05（地上走行）→ 4-03（朝の波）・4-10（ハブの波）。
