@@ -47,6 +47,7 @@ import {
   type NetKind,
 } from './network';
 import { headingVector, runwayAxis, runwayEnd, runwayMidpoint } from './runway';
+import { TERMINAL_AREA_MIN_LEVEL } from './levelRules';
 import { facilityLevel, roadEdgeLevelValid } from '../model/levels';
 import { DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, DEFAULT_TERMINAL_LINK_WIDTH_M } from '../terminal/model';
 import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
@@ -454,7 +455,7 @@ export function placeTerminalArea(
   const levels = Number(t.props.levels ?? 1);
   const w = opts.w ?? spec.defaultW;
   const h = opts.h ?? spec.defaultH;
-  if (!isInt(level, 0, levels - 1) || w < spec.minW || h < spec.minH) return fail('INVALID_VALUE');
+  if (!isInt(level, TERMINAL_AREA_MIN_LEVEL, levels - 1) || w < spec.minW || h < spec.minH) return fail('INVALID_VALUE');
   if (opts.zone && !spec.zoneEditable && opts.zone !== spec.zone) return fail('INVALID_VALUE');
   const d = cloneLayout(layout);
   const id = allocId(d, 'ta');
@@ -1100,7 +1101,7 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
         } else if (k === 'w' || k === 'h') {
           if (!isInt(v, k === 'w' ? spec.minW : spec.minH, 150)) return fail('INVALID_VALUE');
         } else if (k === 'level') {
-          if (!isInt(v, 0, levels - 1)) return fail('INVALID_VALUE');
+          if (!isInt(v, TERMINAL_AREA_MIN_LEVEL, levels - 1)) return fail('INVALID_VALUE');
         } else if (k === 'zone') {
           if (!spec.zoneEditable || !['landside', 'departure', 'arrival'].includes(v as string)) return fail('INVALID_VALUE');
         } else if (k === 'props') {

@@ -22,7 +22,7 @@ import {
 import { distance } from '../core/geometry/vec';
 import { facilityDims, standEntry } from '../core/layout/footprint';
 import { facilityLevel } from '../core/model/levels';
-import { INTERIOR_MIN_FLOOR, levelsInUse } from '../core/layout/levelRules';
+import { INTERIOR_MIN_FLOOR, TERMINAL_AREA_MIN_LEVEL, levelsInUse } from '../core/layout/levelRules';
 import { edgesOfNode } from '../core/layout/network';
 import {
   deleteEntity,
@@ -697,9 +697,9 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         <Info label="種類">{AREA_KIND_LABEL[a.kind]}</Info>
         <Field label="階">
           <select value={a.level} onChange={(e) => update(layout, id, { level: Number(e.target.value) })} data-testid="prop-level">
-            {Array.from({ length: levels }, (_, l) => (
+            {Array.from({ length: levels - TERMINAL_AREA_MIN_LEVEL }, (_, i) => i + TERMINAL_AREA_MIN_LEVEL).map((l) => (
               <option key={l} value={l}>
-                {l + 1}F
+                {l < 0 ? `地下${-l}階` : `${l + 1}F`}
               </option>
             ))}
           </select>

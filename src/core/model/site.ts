@@ -3,6 +3,25 @@ import { Terrain, type Site, type TerrainType } from './types';
 
 export const DEFAULT_SITE_WIDTH = 160;
 export const DEFAULT_SITE_HEIGHT = 112;
+
+/** 「空の敷地」で選べる敷地の大きさ（タイル数。1 タイル = 25 m） */
+export interface SiteSize {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+}
+
+export const SITE_SIZES: SiteSize[] = [
+  { id: 'standard', label: '標準（160 × 112）', width: DEFAULT_SITE_WIDTH, height: DEFAULT_SITE_HEIGHT },
+  { id: 'medium', label: '中（200 × 144）', width: 200, height: 144 },
+  { id: 'large', label: '大（240 × 180）', width: 240, height: 180 },
+  { id: 'huge', label: '特大（288 × 208）', width: 288, height: 208 },
+];
+
+export function siteSizeById(id: string): SiteSize {
+  return SITE_SIZES.find((s) => s.id === id) ?? SITE_SIZES[0]!;
+}
 /** 外周の未取得地の幅（タイル） */
 export const DEFAULT_OFFSITE_MARGIN = 6;
 
