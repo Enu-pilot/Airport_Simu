@@ -15,8 +15,8 @@ export interface SiteSize {
 export const SITE_SIZES: SiteSize[] = [
   { id: 'standard', label: '標準（160 × 112）', width: DEFAULT_SITE_WIDTH, height: DEFAULT_SITE_HEIGHT },
   { id: 'medium', label: '中（200 × 144）', width: 200, height: 144 },
-  { id: 'large', label: '大（240 × 180）', width: 288, height: 208 },
-  { id: 'huge', label: '特大（288 × 208）', width: 350, height: 332 },
+  { id: 'large', label: '大（288 × 208）', width: 288, height: 208 },
+  { id: 'huge', label: '特大（350 × 332）', width: 350, height: 332 },
 ];
 
 export function siteSizeById(id: string): SiteSize {
