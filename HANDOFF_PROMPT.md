@@ -12,13 +12,15 @@
 6. 作業終了・中断時は実施内容・検証結果・残件を記録し、状態を完了または中断に更新する。
 
 ## 現在の作業
-- 状態: 進行中
-- 開始: 2026-11-18
-- 目的: 建設画面左側の構造物ツール分類を、開閉可能なアコーディオンUIへ変更する。
-- 対象: `src/ui/Toolbox.tsx`、`src/ui/styles.css`、`tests/e2e/toolbox.spec.ts`、本ファイル。
-- 方針: 既存GROUPS/ツールID/配置オプション/選択状態を維持。選択中分類を初期展開し、ネイティブdetails/summaryで開閉。狭い画面のスクロールとキーボード操作を検証。
+- 状態: 中断（実装済み・テスト未検証）
+- 開始/中断: 2026-11-18
+- 目的: 建設画面左側の構造物ツール分類を開閉式アコーディオンUIへ変更。PR #25。
+- 対象: `src/ui/Toolbox.tsx`、`src/ui/styles.css`、`tests/e2e/toolbox.spec.ts`。
+- 結果: 既存分類・ツールID・配置オプションを維持し、native details/summary化。選択中分類は初期展開。E2Eに開閉/キーボード/狭い画面の確認を追加。
+- 検証: GitHub上の差分確認済み。typecheck/lint/npm test/build/Playwrightは未実行。PRのVercel statusは確認時点でpending、Actions workflow runなし。
 
 ## 次の作業
+- PR #25: ローカルで `npx playwright test tests/e2e/toolbox.spec.ts --trace off`、typecheck/lint/npm test/buildを実行し、失敗があれば原因を切り分ける。
 - フェーズ 5 の残り: 5-11（保存データの間引き）、5-10（テスト補完）、5-12（貨物）。順序は貨物を最後にする。
 - 5-13〜5-21 は個別計画が正本（docs/implementation/README.md）。5-21 実装時は 5-19 と共通の工程メトリクスを使う。
 - Phase 4 の未検証: 朝の波・バンクの区間走行再計測、2 ターミナル波（docs/44 §8）。
