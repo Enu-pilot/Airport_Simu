@@ -17,9 +17,9 @@
 
 | フェーズ | 実装状況 | 詳細計画書の配置 | 状況 |
 |---|---|---|---|
-| Phase 1 | completed | completed | docs/42 §2・§5.1に完了根拠 |
+| Phase 1 | completed | completed | [phase1_plan.md](completed/phase1_plan.md)。docs/42 §2・§5.1に完了根拠 |
 | Phase 2 | completed | completed | [phase2_plan.md](completed/phase2_plan.md)。docs/42 §3.1・§5.2の完了記録と実測を参照 |
-| Phase 2.5 | planned | planned | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
+| Phase 2.5 | planned | planned | [phase2_5_map_expansion_plan.md](planned/phase2_5_map_expansion_plan.md)。最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
 | Phase 3 | completed | completed | [phase3_plan.md](completed/phase3_plan.md)。docs/42 §3.2の実装・検証記録を参照 |
 | Phase 4 | 実装完了・一部受入計測未検証 | active（受入検証継続） | [phase4_plan.md](active/phase4_plan.md)。4-03/4-10等の未検証条件を解消するまでcompletedへ移さない |
 | Phase 5 | 個別計画ごとに実施中 | active（5-13〜5-17・5-20）／ planned（5-18・5-19・5-21〜5-25） | 計画書が存在する要求はすべて下表にリンク。状態・タスク進捗は各正本を参照 |
