@@ -23,8 +23,11 @@
 | Phase 3 | completed | completed | [phase3_plan.md](completed/phase3_plan.md)。docs/42 §3.2の実装・検証記録を参照 |
 | Phase 4 | 実装完了・一部受入計測未検証 | active（受入検証継続） | [phase4_plan.md](active/phase4_plan.md)。4-03/4-10等の未検証条件を解消するまでcompletedへ移さない |
 | Phase 5 | 個別計画ごとに実施中 | active（5-13〜5-17・5-20）／ planned（5-18・5-19・5-21〜5-25） | 計画書が存在する要求はすべて下表にリンク。状態・タスク進捗は各正本を参照 |
+| Phase 6 | planned（総合計画のみ登録・実装未着手） | planned | [phase6_airport_facility_expansion_plan.md](planned/phase6_airport_facility_expansion_plan.md)。Phase 5の既存基盤・個別計画を再利用し、P0能力基盤→P1貨物→P2ターミナル→P3夜間→P4空港基盤の順に統合拡張 |
 
 docs/42がフェーズの実装状況の正本、各計画書の状態とフォルダ配置は実装計画のライフサイクルを表します。過去の計画書配置が現在の実装状況と一致していない箇所は、受入記録を確認してから移管し、フォルダ名だけで実装済み/未実装を判断しません。
+
+Phase 6 は親計画です。5-18 / 5-19 / 5-20 / 5-21 / 5-25 と A6（Phase 5 5-12）の詳細は各既存計画書を正本として維持し、Phase 6計画へコピーしません。特にA6はactiveのまま継続し、Phase 6への登録を理由に状態・ID・着手ゲートを変更しません。
 
 ## フェーズ内の個別実装計画
 
