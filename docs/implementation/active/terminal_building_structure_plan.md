@@ -1,6 +1,6 @@
 # Phase 5 / 5-14 実装計画: ターミナル建物の階層拡張と駅・バスターミナルの内包
 
-> 管理状態: **active（T1〜T7 実施済み 2026-11-18。内包駅の能力接続のみ 5-16 のポータル設計に委ねる）**
+> 管理状態: **active（T1〜T5 実施済み 2026-11-18。T6 は未接続の内包施設が能力に加算されないところまで、T7 は一部。接続後の能力集計は 5-16 側の残件）**
 > 作成日・更新日: 2026-11-18
 > 根拠: PO 依頼（2026-11-18）、docs/42 §3.4 要件 5-14、docs/34・35・39
 > 正本: 本書は実装計画。現行仕様は docs/34・35 と関連コードを参照。
@@ -66,13 +66,13 @@
 
 | ID | 状態 | 変更内容 | 主な対象 | テスト・受入条件 |
 |---|---|---|---|---|
-| T1 | 未着手 | 既存floor index / map level / terminal level / railStation.props.levelの意味・参照を棚卸し | model/types、model/levels、catalog、validation、UI、save | 全参照と旧データ解釈を図示。意味が曖昧な値を実装者判断で変更しない |
-| T2 | 未着手 | ターミナル床階-3〜3の定義、階数UI、親内配置検証を実装 | catalog / types / operations / levelRules / PropertiesPanel | B3・B2・B1・1F〜4Fが選べる。B4・5Fは拒否。階indexと表示ラベルの対応テスト |
-| T3 | 未着手 | TerminalAreaの負階対応、階別グラフ、上下接続を拡張 | terminal/model / route / validation / terminal types | 同一階・上下階の隣接条件を満たすルートのみ到達。ゾーン・stepFree・閉鎖判定を維持 |
-| T4 | 未着手 | 既存railStationを独立/内包両対応へ整理し、旧props.levelを互換処理 | catalog / operations / access / project validation | 独立地下駅・地上駅・親内B2駅の接続。旧駅セーブの位置/アクセス/表示が一致 |
-| T5 | 未着手 | 新規busTerminal構造物を追加し、busStopは旧互換として保持 | FacilityKind / catalog / access / validation / Toolbox | 独立・ターミナル内の双方に配置可能。バース能力と外部バス接続を検証 |
-| T6 | 未着手 | 内部駅・バスターミナル・各種施設の運用接続と能力集計 | access / terminal / economy / validation | 接続されていない内包施設は運用能力へ加算されず、接続後だけ集計される |
-| T7 | 未着手 | 保存・移行・描画・E2E・Docsを整備 | io / renderer / UI / tests | 旧保存データ往復、建物の階数変更、Undo/Redo、2D/3D、全品質ゲート合格 |
+| T1 | 完了 | 既存floor index / map level / terminal level / railStation.props.levelの意味・参照を棚卸し | model/types、model/levels、catalog、validation、UI、save | 全参照と旧データ解釈を図示。意味が曖昧な値を実装者判断で変更しない |
+| T2 | 完了 | ターミナル床階-3〜3の定義、階数UI、親内配置検証を実装 | catalog / types / operations / levelRules / PropertiesPanel | B3・B2・B1・1F〜4Fが選べる。B4・5Fは拒否。階indexと表示ラベルの対応テスト |
+| T3 | 完了 | TerminalAreaの負階対応、階別グラフ、上下接続を拡張 | terminal/model / route / validation / terminal types | 同一階・上下階の隣接条件を満たすルートのみ到達。ゾーン・stepFree・閉鎖判定を維持 |
+| T4 | 完了（テスト不足） | 既存railStationを独立/内包両対応へ整理し、旧props.levelを互換処理 | catalog / operations / access / project validation | 独立地下駅・地上駅・親内B2駅の接続。旧駅セーブの位置/アクセス/表示が一致 |
+| T5 | 完了 | 新規busTerminal構造物を追加し、busStopは旧互換として保持 | FacilityKind / catalog / access / validation / Toolbox | 独立・ターミナル内の双方に配置可能。バース能力と外部バス接続を検証 |
+| T6 | 一部完了 | 内部駅・バスターミナル・各種施設の運用接続と能力集計 | access / terminal / economy / validation | 接続されていない内包施設は運用能力へ加算されず、接続後だけ集計される |
+| T7 | 一部完了 | 保存・移行・描画・E2E・Docsを整備 | io / renderer / UI / tests | 旧保存データ往復、建物の階数変更、Undo/Redo、2D/3D、全品質ゲート合格 |
 
 ## 5. 互換性・リスク
 
@@ -111,7 +111,7 @@
 ## 9. 完了記録
 
 - 完了日: 未完了
-- 完了した受入条件: なし
-- 品質ゲート: 未実行（計画書のみ）
-- 未実行/未検証: すべて未実行
-- 残件: T1〜T7
+- 完了した受入条件: T1（棚卸し）、T2（B3〜4F 定義・UI。PR #21、terminalLevels 6 件）、T3（負階・階別グラフ）、T5（busTerminal 新規種別。busTerminal514 4 件）
+- 品質ゲート: T4〜T7 実施時に回帰 39 件・typecheck・eslint を確認（§8）
+- 未実行/未検証: T4 は facilityLevel 優先順位の明文化までで、独立地下駅・地上駅・親内 B2 駅の接続検証は不足。T6 は「接続されていない内包施設は加算されない」をテストで固定済みだが、受入条件の後半「接続後だけ集計される」は未達（5-16 ポータル実装後も内包駅/busTerminal の能力集計への接続はなく、現行挙動のまま）。T7 は E2E・2D/3D・階数変更時の Undo/Redo 検証が未確認
+- 残件: T6（接続後の能力集計）、T7（E2E・描画・Undo/Redo の検証）

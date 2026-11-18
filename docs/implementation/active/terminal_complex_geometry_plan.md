@@ -53,13 +53,13 @@
 
 | ID | 状態 | 変更内容 | 主な対象 | テスト・受入条件 |
 |---|---|---|---|---|
-| T1 | 未着手 | 現行の矩形前提箇所を全監査し、Polygon APIとFacility/TerminalAreaの依存関係を整理 | geometry / footprint / operations / validation / renderer / pick / io | 全矩形前提を一覧化し、変更責務を割当て |
-| T2 | 未着手 | 直交凹ポリゴンの型・検証・タイル化を実装 | geometry/polygon.ts、layout/footprint.ts | L字・T字・コの字、辺/角接触、自己交差、重複点、ゼロ面積、bounds外を単体テスト |
+| T1 | 完了（テスト不足） | 現行の矩形前提箇所を全監査し、Polygon APIとFacility/TerminalAreaの依存関係を整理 | geometry / footprint / operations / validation / renderer / pick / io | 全矩形前提を一覧化し、変更責務を割当て |
+| T2 | 完了 | 直交凹ポリゴンの型・検証・タイル化を実装 | geometry/polygon.ts、layout/footprint.ts | L字・T字・コの字、辺/角接触、自己交差、重複点、ゼロ面積、bounds外を単体テスト |
 | T3 | 未着手 | 建物作図・編集・形状プレビューUI | editor tools / Toolbox / PropertiesPanel / map renderer | 描画、選択、移動、回転、複製、Undo/Redo後に形状が一致 |
-| T4 | 未着手 | 複合体の連結成分導出・キャッシュを実装 | terminal complex model / terminal/model.ts | 辺接触・高層連絡橋・planned・工事中・角接触・高さ違い・ループで決定的 |
+| T4 | 完了 | 複合体の連結成分導出・キャッシュを実装 | terminal complex model / terminal/model.ts | 辺接触・高層連絡橋・planned・工事中・角接触・高さ違い・ループで決定的 |
 | T5 | 未着手 | gate / terminal assignment / passenger ownership / capacityをcomplex IDと物理IDに分ける | terminal/model.ts、gates.ts、passengers.ts、validation | 接触したビル同士の同一complex化、ゲートの複合体割当て、物理建物ID維持 |
 | T6 | 未着手 | 旅客の建物間経路を明示リンクに基づき構築 | terminal graph、5-16との接続 | 同一complexでも通路なしは到達不可、operational linkのみ通行可、区域越境は既存ルール |
-| T7 | 未着手 | 2D/3D描画、保存互換、性能とE2E | renderer / io / tests / docs | 旧矩形セーブの往復一致、500建物相当の合成テストで上限・計測値を記録 |
+| T7 | 一部完了 | 2D/3D描画、保存互換、性能とE2E | renderer / io / tests / docs | 旧矩形セーブの往復一致、500建物相当の合成テストで上限・計測値を記録 |
 
 ## 5. 互換性・リスク
 
@@ -98,6 +98,7 @@
 ## 9. 完了記録
 
 - 完了日: 未完了
-- 品質ゲート: 未実行
-- 未実行/未検証: すべて未実行
-- 残件: T1〜T7
+- 完了した受入条件: T2（footprint 任意項目と検証。complexShape515 5 件）、T4（複合体の導出。complex515 4 件。ただし導出は未利用で、src 内に呼び出し元はない）
+- 品質ゲート: T1〜T4 実施時に回帰 46 件・typecheck・eslint・build を確認（§8）
+- 未実行/未検証: T1 は §8 の実施記録のみで、監査用の成果物一覧は未充足。T3（配置 UI）は未着手で、footprint を UI から作る手段はない。T5（隣接施設の割当て分離）・T6（旅客経路の複合体対応）は未着手。T7 は保存往復の一部のみで、2D/3D 描画は矩形のまま、性能計測は未実施
+- 残件: T3、T5、T6、T7（描画・性能）
