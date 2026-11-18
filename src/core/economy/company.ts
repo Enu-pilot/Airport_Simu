@@ -9,10 +9,10 @@ import { checkGameSettings, otpAddOf, type GameSettings } from './game';
 import { checkAirlineEval, type AirlineEvalState } from './airlineEval';
 import { checkMarket, type MarketSettings } from './market';
 import type { BasedAircraft, CarryOverAircraft, HubSettings } from './phase4Types';
-import { featureForContractKind, featureOn } from './unlocks';
+import { effectiveTier, featureForContractKind, featureOn } from './unlocks';
 import { airlineCargoEligible, cargoHoldM3, routeCargoDemandM3 } from './cargo';
 import { aircraftIsLow, complaintCount, COMPLAINTS_BLOCK_INCREASE, increaseMinSatRelief, offerBoost, tierBonus } from './evalRules';
-import { checkGoals, type GoalState } from './goals';
+import { checkGoals, LEGACY_TIER_MAP, type GoalState } from './goals';
 import { isCityConfig, type CityConfig, type CityEvent, type CityType } from './city';
 import type { AirlineRequest, RequestKind } from './airlineEval';
 import type { ScoreComponent, ScoreKey } from './airlineScore';
@@ -727,6 +727,8 @@ export function generateCargoOffers(
       if (c.rating < (d.minimumAirportRating ?? 0)) return false;
       if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
       if (routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) !== 'available') return false;
+      // 国際貨物は格 4（国際空港）が必要（CARGO-08）。国内貨物は貨物解放の格 3 で足りる
+      if (d.countryId !== originCountryId && effectiveTier(c) < 4) return false;
       return (routeCargoDemandM3(c, d) ?? 0) >= BALANCE.cargo.minRouteDemandM3;
     });
     if (dests.length === 0) continue;
@@ -856,8 +858,8 @@ export function createSandboxCompany(seed = 'sandbox'): CompanyState {
   const c = createCompany('sandbox', seed);
   const base = { feeDiscount: 0.1, startDay: 0, endDay: 9999, status: 'active' as const, offerExpiresDay: 0 };
   const list: [string, string, AircraftTypeId, number, TimeWindow][] = [
-    ['SK', 'TWN', 'B737-800W', 3, 'any'],
-    ['SK', 'HSM', 'B777-300ER', 1, 'daytime'],
+    ['NP', 'TWN', 'A320neo', 3, 'any'],
+    ['NP', 'HSM', 'B777-300', 1, 'daytime'],
     ['NP', 'YKH', 'A320neo', 3, 'any'],
     ['NP', 'AOS', 'A350-900', 1, 'evening'],
     ['RJ', 'KTA', 'regional70', 4, 'any'],
@@ -890,6 +892,13 @@ export function importCompany(json: string): CompanyState | null {
     }
     // Phase 5 の保存データ: アクセス関連の項目を補う
     c.fees = Object.assign({ carPark: 1, taxi: 1, bus: 1, rail: 1 }, c.fees);
+    // 格の尺度の移行（5-20 §3.7）: 旧 4 段階尺度のセーブを一度だけ新 8 段階尺度へ移す。
+    // tierScale が付いたデータには二度と適用しない。旧 3 → 新 5 で国際・ハブの解放を保つ。
+    if (c.goals && c.goals.tierScale !== 2) {
+      const mapped = LEGACY_TIER_MAP[c.goals.tier];
+      if (mapped !== undefined) c.goals.tier = mapped;
+      c.goals.tierScale = 2;
+    }
     c.accessFeedback ??= { ...NO_FEEDBACK, waitMin: {} };
     c.parkedCars ??= [];
     c.projects ??= {};

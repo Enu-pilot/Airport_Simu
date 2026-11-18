@@ -133,6 +133,7 @@ export type IssueCode =
   | 'FACILITY_UNDERGROUND_KIND'
   | 'INTERIOR_FACILITY_UNLINKED'
   | 'TERMINAL_LINK_CLEARANCE'
+  | 'PORTAL_LEVEL_MISMATCH'
   // 空港全体
   | 'NO_RUNWAY'
   | 'NO_TOWER'
@@ -222,6 +223,7 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   FACILITY_UNDERGROUND_KIND: 'warning',
   INTERIOR_FACILITY_UNLINKED: 'info',
   TERMINAL_LINK_CLEARANCE: 'error',
+  PORTAL_LEVEL_MISMATCH: 'warning',
   NO_RUNWAY: 'warning',
   NO_TOWER: 'warning',
   NO_GSE_BASE: 'warning',
@@ -1125,6 +1127,16 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     if (clearance < required || elevation < clearance) {
       const area = layout.terminalAreas[link.fromAreaId];
       sink.add('TERMINAL_LINK_CLEARANCE', [link.id], { clearance, required, elevation }, area?.origin);
+    }
+  }
+
+  // 歩行ポータル（5-16）: 階・階層が相手と食い違うポータルは接続として機能しない
+  for (const portal of Object.values(layout.portals ?? {})) {
+    const facility = layout.facilities[portal.facilityId];
+    const area = layout.terminalAreas[portal.areaId];
+    if (!facility || !area) continue;
+    if (portal.floorIndex !== area.level || portal.mapLevel !== facilityLevel(facility)) {
+      sink.add('PORTAL_LEVEL_MISMATCH', [portal.id], { floorIndex: portal.floorIndex, areaLevel: area.level }, facility.origin);
     }
   }
 

@@ -64,8 +64,11 @@ const BASELINE: Record<string, string> = {
   // 2026-11-18 再採取（ユーザー承認済み）: フェーズ 5 の 5-02/5-03/5-04 が日報へ記録項目
   // （リンク利用実績・資源別稼働率・満足度内訳）を追加したため、会社データを含む 2 件だけが変わった。
   // 追加項目を除いたハッシュは旧基準値と完全一致することを確認済みで、運航そのものは無変更。
-  'city core 3 days (no nightOps)': '4ca1e5a0aad960812c2582ff56c4c291049d50050971c589f1bebef2f76730b9',
-  'sample airport 1 day': '1957cfab08d0bf684826eb67a4958fd9e97281d33fae1d76b93bd1a7f0abb566',
+  // 2026-11-18 再々採取（SIM_MODEL_VERSION 10.5、ユーザー承認済み）: 羽田・成田就航の実在 20 社を
+  // market カタログへ追加したため city core の提案の乱数列が変わり、SK を実在の SAS へ置き換えて
+  // サンドボックス初期契約の旧 SK 枠を NP へ移したため sample が変わった。レイアウトのみの 4 件は不変。
+  'city core 3 days (no nightOps)': 'df72dbf61c566b75be7df00a2769a3180e0e62d3b7122594c63e3dedc718def3',
+  'sample airport 1 day': 'bd2c859fabd0fcef00cc9db44dbb41e4f2ef3338bb283323742edb8276d9208f',
 };
 
 describe('legacyFingerprint: taxiMode / nightOps なしの運航は T0 の基準値と一致', () => {

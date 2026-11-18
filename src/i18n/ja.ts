@@ -309,6 +309,7 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   FACILITY_INTERIOR_INVALID: (n, p) => `${n[0]} の建物内配置が無効です（階 ${p.floor ?? '不明'} または親建物・階層を確認してください）`,
   FACILITY_INTERIOR_OUTSIDE: (n) => `${n[0]} が親建物 ${n[1]} の範囲外にあります`,
   TERMINAL_LINK_CLEARANCE: (n, p) => `${n[0]} の連絡通路下の航空機クリアランスが不足しています（${p.clearance}m、必要 ${p.required}m）`,
+  PORTAL_LEVEL_MISMATCH: (n, p) => `${n[0]} の歩行ポータルの階が接続先と一致しません（ポータル ${p.floorIndex} 階、エリア ${p.areaLevel} 階）`,
   NO_RUNWAY: () => '滑走路がありません',
   NO_TOWER: () => '管制塔がありません',
   NO_GSE_BASE: () => 'GSE基地がありません（作業員・車両がいないため折り返し作業ができません）',
@@ -542,6 +543,7 @@ export const AREA_PROP_LABEL: Record<string, string> = {
 
 export const PAX_STATE_LABEL: Record<PaxState, string> = {
   toAirport: '空港へ移動中',
+  accessWalk: '交通施設から移動中',
   walking: '移動中',
   queuing: '順番待ち',
   inService: '手続き中',
@@ -594,6 +596,8 @@ export const TASK_LABEL: Record<TaskKind, string> = {
   board: '搭乗',
   load: '積み込み',
   pushback: 'プッシュバック',
+  cargoUnload: '貨物荷下ろし',
+  cargoLoad: '貨物積み込み',
 };
 
 export const TASK_STATE_LABEL: Record<TaskState, string> = {
@@ -1411,7 +1415,7 @@ export const GAME_UI = {
   goalsAllDone: 'すべての目標を達成しました',
   goalsDone: (day: number) => `達成（${day + 1}日目）`,
   goalsOverlayNote: '報酬の現金は営業収支に入らず、別枠で資金に加わります（ゲーム用の値）',
-  tier: ['飛行場', '地方空港', '拠点空港', '国際ハブ'] as readonly string[],
+  tier: ['飛行場', '地方空港', '地域拠点空港', '国内主要空港', '国際空港', '国際ハブ空港', '広域ハブ空港', 'メガハブ空港'] as readonly string[],
   tierLabel: (t: string) => `空港の格: ${t}`,
   tierUp: (t: string) => `空港の格が上がりました: ${t}`,
   goalCompleted: (t: string) => `目標を達成しました: ${t}`,

@@ -8,6 +8,7 @@ import { checkStand } from '../aircraft/compat';
 import { operableTypes, type SimContext } from '../sim/context';
 import { BALANCE } from './balance';
 import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
+import { planCargoDay } from './cargo';
 import { airlineDef, classifyRoute, destinationDef, HOME_COUNTRY_ID, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
 import { CITY_NIGHT_CURFEW, cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedPassengers } from './city';
 import { airportFireCategory, requiredFireCategory, towerCapacityPerHour, towerLevel } from '../safety';
@@ -73,9 +74,27 @@ export interface PlannedFlight {
   dedicatedStandId?: string;
 }
 
+/** 貨物便の計画（5-12。旅客便とは別枠で、旅客グループは生成しない） */
+export interface PlannedCargoFlight {
+  key: string;
+  contractId: string;
+  airlineId: string;
+  destinationId: string;
+  typeId: AircraftTypeId;
+  arrNumber: string;
+  depNumber: string;
+  /** 日内の秒 */
+  arrivalAt: number;
+  departureAt: number;
+  /** この便（片道）が運ぶ貨物量 (m3) */
+  volumeM3: number;
+}
+
 export interface DayPlan {
   day: number;
   flights: PlannedFlight[];
+  /** 貨物便の計画（5-12）。貨物契約がない日は undefined */
+  cargoFlights?: PlannedCargoFlight[];
   /** 前日の夜間滞泊の便（当日の朝に出発する。分析で朝までスポットを占有する分。フェーズ 4 §3.2） */
   prevOvernight?: PlannedFlight[];
   /** 運用時間・時間帯に収まらず計画できなかった便（契約ID） */
@@ -185,11 +204,36 @@ export function planDay(
   paxModel?: (k: Contract, u: number) => number,
 ): DayPlan {
   const flights: PlannedFlight[] = [];
+  const cargoFlights: PlannedCargoFlight[] = [];
   const dropped: string[] = [];
   const unsupportedRoutes: DayPlan['unsupportedRoutes'] = [];
+  const cargoPlan = planCargoDay(c, day);
   for (const k of activeContractsOn(c, day)) {
-    // 貨物契約（5-12）は旅客便を生成しない。貨物の運搬量は cargo.ts の planCargoDay が別に計算する
-    if (k.kind === 'cargo') continue;
+    // 貨物契約（5-12）は旅客便を生成しない。貨物便として別枠に計画する
+    if (k.kind === 'cargo') {
+      const range = arrivalRange(k.window, k.typeId, c.hours, types);
+      if (!range) {
+        dropped.push(k.id);
+        continue;
+      }
+      const code = airlineDef(k.airlineId).code;
+      const alloc = cargoPlan.contracts.find((r) => r.contractId === k.id);
+      const perLegM3 = alloc && k.perDay > 0 ? alloc.carriedM3 / (k.perDay * 2) : 0;
+      for (let i = 0; i < k.perDay; i++) {
+        const rng = new Rng(`${c.seed}:${k.id}:${day}:${i}`);
+        const [from, to] = range;
+        const pos = (i + 0.5 + (rng.next() - 0.5) * 0.6) / k.perDay;
+        const arrMin = Math.round((from + (to - from) * pos) / 5) * 5;
+        const arrivalAt = Math.min(to, Math.max(from, arrMin)) * 60;
+        const departureAt = arrivalAt + resolveType(types, k.typeId).turnaroundSec + PLAN_TURN_BUFFER_SEC;
+        const n = k.numberBase + i * 2;
+        cargoFlights.push({
+          key: `${k.id}:${day}:${i}`, contractId: k.id, airlineId: k.airlineId, destinationId: k.destinationId,
+          typeId: k.typeId, arrNumber: `${code}${n}`, depNumber: `${code}${n + 1}`, arrivalAt, departureAt, volumeM3: perLegM3,
+        });
+      }
+      continue;
+    }
     const availability = routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities);
     if (availability !== 'available') {
       unsupportedRoutes.push({ contractId: k.id, destinationId: k.destinationId, reason: availability });
@@ -261,7 +305,7 @@ export function planDay(
     }
     if (prev.length > 0) prevOvernight = prev;
   }
-  return { day, flights, dropped, unsupportedRoutes, ...(prevOvernight ? { prevOvernight } : {}) };
+  return { day, flights, dropped, unsupportedRoutes, ...(prevOvernight ? { prevOvernight } : {}), ...(cargoFlights.length > 0 ? { cargoFlights: cargoFlights.sort((a, b) => a.arrivalAt - b.arrivalAt || compareIds(a.key, b.key)) } : {}) };
 }
 
 /** 都市設定があるときだけ、アクセス性に都市需要上限を反映する計画。設定なしは従来の計画を返す。 */

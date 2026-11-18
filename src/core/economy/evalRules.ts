@@ -42,4 +42,6 @@ export const aircraftIsLow = (c: Pick<CompanyState, 'airlineEval' | 'game'>, air
 };
 
 /** 契約提案の 1 日の便数の上限への加算（空港の格。目標が無効なら 0） */
-export const tierBonus = (c: Pick<CompanyState, 'goals' | 'game'>): number => goalsOf(c)?.tier ?? 0;
+/** 契約提案の 1 日あたり便数上限への格ボーナス（5-20 §3.5。格の数値そのものではなく専用表を使う） */
+export const TIER_BONUS: readonly number[] = [0, 1, 2, 3, 3, 3, 4, 5];
+export const tierBonus = (c: Pick<CompanyState, 'goals' | 'game'>): number => TIER_BONUS[goalsOf(c)?.tier ?? 0] ?? 0;

@@ -23,12 +23,14 @@ export const UNLOCKS: readonly UnlockDef[] = [
   { feature: 'maintenance', tier: 2 },
   { feature: 'based', tier: 2, contractKinds: ['based'], settings: ['based'] },
   {
-    feature: 'international', tier: 3,
+    // 5-20: 国際線は新格 4（国際空港）へ再配置。旧格 3 の会社は移行で新格 5 になるため解放を失わない
+    feature: 'international', tier: 4,
     areaKinds: ['emigration', 'immigration', 'customs'], gateRouteTypes: ['international', 'swing'], settings: ['international'],
   },
-  { feature: 'hub', tier: 3, areaKinds: ['transferSecurity'], settings: ['hub'] },
-  // 貨物（5-12）: 現行の格尺度では最上位の格 3 を暫定要件とする。5-20 の 8 段階化で
-  // Tier 3（国内）/ Tier 4（国際）へ再配置する（貨物計画 CARGO-08）。
+  // 5-20: 乗継・ハブは新格 5（国際ハブ空港）へ再配置
+  { feature: 'hub', tier: 5, areaKinds: ['transferSecurity'], settings: ['hub'] },
+  // 貨物（5-12 / CARGO-08）: 国内貨物は格 3（国内主要空港）で解放。
+  // 国際貨物は格 4 が必要で、提案生成側で就航先ごとに判定する（company.ts の generateCargoOffers）。
   { feature: 'cargo', tier: 3, contractKinds: ['cargo'], settings: ['cargo'] },
 ];
 
@@ -36,7 +38,7 @@ const BY_FEATURE = new Map<FeatureId, UnlockDef>(UNLOCKS.map((u) => [u.feature, 
 
 /** 判定に使う格。サンドボックス・目標のない会社は最上位（全解放） */
 export function effectiveTier(c: CompanyState): Tier {
-  if (c.mode === 'sandbox' || !c.game?.goals || !c.goals) return 3;
+  if (c.mode === 'sandbox' || !c.game?.goals || !c.goals) return 7;
   return c.goals.tier;
 }
 

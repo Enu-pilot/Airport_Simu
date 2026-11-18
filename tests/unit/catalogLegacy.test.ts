@@ -4,40 +4,39 @@ import { AIRLINES, COUNTRIES, DESTINATIONS, REGIONS } from '../../src/core/econo
 /**
  * フェーズ 3 の回帰固定（計画 A1）: 旧 registry の 8 社・21 都市・9 国・10 地域の値と順序を逐語で固定する。
  * この表が崩れると market なしの旧ゲームの提案の乱数列が変わる。値を変えるときは計画の手順（docs/43）に従うこと。
+ * 例外: SK は 2026-11-18 の PO 判断で架空のスカイライン航空から実在の SAS（スカンジナビア航空）に置き換えた。
+ * ID・順序は不変だが、国内線サービスを持たないため旧 SK 枠の国内提案は出なくなる（意図した変更として記録）。
  */
 const LEGACY_AIRLINES = [
  {
   "id": "SK",
   "code": "SK",
-  "name": "スカイライン航空",
+  "name": "スカンジナビア航空",
   "type": "fullService",
   "fleet": [
    {
-    "typeId": "B737-800W",
-    "seats": 166
+    "typeId": "A320neo",
+    "seats": 180
    },
    {
-    "typeId": "B787-9",
-    "seats": 266
+    "typeId": "A321neo",
+    "seats": 157
    },
    {
-    "typeId": "B777-300ER",
-    "seats": 316
+    "typeId": "A330-300",
+    "seats": 262
    },
    {
-    "typeId": "B787-10",
-    "seats": 320
-   },
-   {
-    "typeId": "B767-300ER",
-    "seats": 250
+    "typeId": "A350-900",
+    "seats": 300
    }
   ],
-  "priceSensitivity": 0.3,
+  "priceSensitivity": 0.35,
   "minOtp": 0.85,
+  "minimumAirportRating": 80,
   "services": [
-   "domesticPassenger",
-   "internationalPassenger"
+   "internationalPassenger",
+   "cargo"
   ]
  },
  {
@@ -75,7 +74,8 @@ const LEGACY_AIRLINES = [
   "minOtp": 0.8,
   "services": [
    "domesticPassenger",
-   "internationalPassenger"
+   "internationalPassenger",
+   "cargo"
   ]
  },
  {

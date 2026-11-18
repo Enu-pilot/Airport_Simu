@@ -324,6 +324,26 @@ export interface TerminalTransitLink {
  */
 export const SCHEMA_VERSION = 3;
 
+/**
+ * 歩行ポータル（5-16 T2）: 交通施設（駅・バスターミナル・バス停・タクシー乗り場・駐車場）と
+ * ターミナル内エリアを明示接続する境界。座標や階が近いだけでは接続しない。
+ * floorIndex は接続先エリアの建物内階、mapLevel は交通施設側の地図階層で、
+ * 2 つを変換する境界であることを明示する。
+ */
+export interface PedestrianPortal {
+  id: string;
+  name: string;
+  /** 交通施設（PORTAL_FACILITY_KINDS のいずれか） */
+  facilityId: string;
+  /** 接続先のターミナル内エリア */
+  areaId: string;
+  /** 建物内階（接続先エリアの level と一致すること） */
+  floorIndex: number;
+  /** 地図階層（交通施設の facilityLevel と一致すること） */
+  mapLevel: number;
+  buildState: BuildState;
+}
+
 export interface AirportLayout {
   schemaVersion: number;
   name: string;
@@ -342,6 +362,8 @@ export interface AirportLayout {
   terminalAreas: Record<string, TerminalArea>;
   /** Optional in old layouts. Explicit inter-terminal passenger links; independent of road and gate graphs. */
   terminalLinks?: Record<string, TerminalTransitLink>;
+  /** 歩行ポータル（5-16）。欠落 = ポータルなし（自動接続の推測はしない） */
+  portals?: Record<string, PedestrianPortal>;
   /** 磁気偏角（度、東偏差を正、[-180, 180]）。欠落 = 0（手入力のみ） */
   magneticVariationDeg?: number;
   /** 判定ルール。欠落 = 'classic' */
