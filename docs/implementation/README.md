@@ -35,10 +35,10 @@ docs/42がフェーズの実装状況の正本、各計画書の状態とフォ�
 | Phase 5 / 5-13 旅客動線の3段階接続判定 | planned | [passenger_connectivity_status_plan.md](planned/passenger_connectivity_status_plan.md) | 接続グラフ全体を通行可能/建設完了待ち/未接続に分類。5-16と統合 |
 | Phase 5 / 5-14 ターミナル階層・駅/バスターミナル | planned | [terminal_building_structure_plan.md](planned/terminal_building_structure_plan.md) | B3〜4F、駅/バスターミナル独立・内包 |
 | Phase 5 / 5-15 複雑形状・ターミナル複合体 | planned | [terminal_complex_geometry_plan.md](planned/terminal_complex_geometry_plan.md) | 凹形ポリゴンと複合体判定。旅客の実経路とは分離 |
-| Phase 5 / 5-16 階層歩行網とPaxGroup統合 | planned | [passenger_network_unification_plan.md](planned/passenger_network_unification_plan.md) | walkway RoadGraph/Portal/TerminalModel/PaxGroup |
+| Phase 5 / 5-16 対外交通・階層歩行網とPaxGroup統合 | planned | [passenger_network_unification_plan.md](planned/passenger_network_unification_plan.md) | 車・送迎・タクシー・バス・鉄道・徒歩からPortal/ターミナル/各ゲートまでの双方向経路 |
 | Phase 5 / 5-17 誘導路実幅・高速離脱 | planned | [taxiway_realism_plan.md](planned/taxiway_realism_plan.md) | FAA TDG/EASA OMGWSのprofileを混同しない |
-| Phase 5 / 5-18 ターミナル専用設計Workspace | planned | [terminal_design_workspace_plan.md](planned/terminal_design_workspace_plan.md) | フロア・内部設備・メッシュ能力の編集 |
-| Phase 5 / 5-19 集約運航・詳細TerminalSimulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 通常運航の計算軽量化と別詳細モード |
+| Phase 5 / 5-18 ターミナル専用設計Workspace | planned | [terminal_design_workspace_plan.md](planned/terminal_design_workspace_plan.md) | フロア・内部設備・メッシュ能力、対外交通の接続マトリクス/経路ハイライト |
+| Phase 5 / 5-19 空港全体1日運航・ターミナル単独詳細Simulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 2モードのclock/state分離、対外交通6手段、全方向の旅客動線/容量検証 |
 | Phase 5 / 5-20 空港格の8段階化・成長判定の多軸化 | planned | [airport_tier_progression_plan.md](planned/airport_tier_progression_plan.md) | 既存格解放・契約提案・旧セーブ互換を含めて段階的に拡張 |
 
 
