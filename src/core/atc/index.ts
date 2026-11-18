@@ -3,6 +3,7 @@ export * from './events';
 export * from './scenario';
 export * from './assignments';
 export * from './safety';
+export * from './movement';
 export * from './commands';
 export * from './engine';
 export * from './persistence';

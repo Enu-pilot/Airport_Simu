@@ -132,6 +132,32 @@ export interface AtcClearance {
   executionStartedAtSec?: number;
 }
 
+/** 航空機の現在位置（ネットワークノード＋タイル座標。UI/安全判定の正本） */
+export interface AtcAircraftPosition {
+  /** 現在いる（最後に通過した）ネットワークノード */
+  nodeId: string;
+  /** タイル座標（小数あり。ノード間の補間位置） */
+  x: number;
+  y: number;
+}
+
+/**
+ * 実行中の物理移動（ATC-06/07 の基礎表現）。
+ * 経路は airside ネットワーク上のノード列であり、占有はこの経路と
+ * 現在位置から導出する。経営側 simulation の Route/予約とは別物。
+ */
+export interface AtcMovement {
+  kind: AtcRequestKind;
+  /** 移動経路のノード列（先頭 = 開始ノード、末尾 = 目的地ノード） */
+  nodeIds: string[];
+  /** 経路全長（m） */
+  totalLengthM: number;
+  /** 移動開始からの累積移動距離（m） */
+  traveledM: number;
+  /** 移動速度（m/s。実行所要時間と経路長から決定的に決まる） */
+  speedMps: number;
+}
+
 export interface AtcAircraft {
   id: string;
   /** シナリオ交通エントリのID（割当要求との対応付け） */
@@ -154,6 +180,10 @@ export interface AtcAircraft {
   nextRequestAtSec: number;
   activeRequestId: string | null;
   activeClearanceId: string | null;
+  /** 現在位置。到着機が着陸実行を開始するまでは null（上空） */
+  position: AtcAircraftPosition | null;
+  /** 実行中の物理移動。移動していなければ null */
+  movement: AtcMovement | null;
   completedAtSec: number | null;
   /** 累積待機秒（スコア用） */
   totalWaitSec: number;
