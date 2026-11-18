@@ -91,9 +91,8 @@
 | T5 | 未着手 | PaxGroup routeを複合経路ステップで進行させる | sim/passengers、sim/types、terminal route | 旅客が駅・地下通路・ターミナル内部階・高層通路を正しい順に移動し、実歩行時分を記録 |
 | T6 | 未着手 | 能力予約・待機・stepFree・再探索・ゲート再割当てを統合 | access/runtime、terminal transit、passengers | 各辺能力以下、能力超過は待機、閉鎖後再探索、stepFree経路だけ利用 |
 | T7 | 未着手 | 全6アクセス手段の往路/復路・ゲート別接続検証とE2Eを整備 | tests/unit、tests/e2e、validation、docs/34・35 | car/dropoff/taxi/bus/rail/walkの外部〜施設〜入口〜全ゲート、到着全ゲート〜出口〜外部が条件どおり |
-| T8 | 未着手 | 運航アクセスの集約人数とPaxGroup実移動の二重計上を解消 | access/runtime、analytics | 発生・到着・利用人数の保存則が成立し、容量使用率の二重計上0 |
-| T9 | 未着手 | アクセスの集約人数・Portal移動人数・PaxGroupを統合し、二重計上を防止 | access/runtime、passengers、analytics | 手段別乗降人数、Portal通過人数、ターミナル入口/出口人数が一致し、旅客・容量を二重計上しない |
-| T10 | 未着手 | 旧セーブ・ゴールデン・性能を確認 | project/serialize、SIM model、tests | 旧経路差分を説明・承認、決定性・保存復元継続・性能閾値に合格 |
+| T8 | 未着手 | 外部交通の利用人数・Portal移動・PaxGroupを統合し、二重計上を防止 | access/runtime、passengers、analytics | 手段別乗降人数、Portal通過人数、ターミナル入口/出口人数が一致し、旅客・容量を二重計上しない |
+| T9 | 未着手 | 旧セーブ・ゴールデン・性能を確認 | project/serialize、SIM model、tests | 旧経路差分を説明・承認、決定性・保存復元継続・性能閾値に合格 |
 
 ## 5. 互換性・リスク
 
