@@ -17,12 +17,12 @@
 
 | フェーズ | 実装状況 | 詳細計画書の配置 | 状況 |
 |---|---|---|---|
-| Phase 1 | completed | completed | docs/42 §2・§5.1に完了根拠 |
-| Phase 2 | completed | active（移管未反映） | docs/42 §3.1は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
-| Phase 2.5 | planned | planned | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
-| Phase 3 | completed | planned（移管未反映） | docs/42 §3.2は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
-| Phase 4 | 実装完了・一部受入計測未検証 | planned（監査継続） | docs/42 §3.3。4-03/4-10等の未検証条件を解消するまでcompletedへ移さない |
-| Phase 5 | 個別計画ごとに実施中 | active（5-13〜5-17・5-20）／ 計画書未作成（5-18・5-19・5-21〜5-25） | 5-13〜5-25を依存関係に従って個別実施。状態の正本は下の個別計画表 |
+| Phase 1 | completed | completed | [phase1_plan.md](completed/phase1_plan.md)。docs/42 §2・§5.1に完了根拠 |
+| Phase 2 | completed | completed | [phase2_plan.md](completed/phase2_plan.md)。docs/42 §3.1・§5.2の完了記録と実測を参照 |
+| Phase 2.5 | planned | planned | [phase2_5_map_expansion_plan.md](planned/phase2_5_map_expansion_plan.md)。最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
+| Phase 3 | completed | completed | [phase3_plan.md](completed/phase3_plan.md)。docs/42 §3.2の実装・検証記録を参照 |
+| Phase 4 | 実装完了・一部受入計測未検証 | active（受入検証継続） | [phase4_plan.md](active/phase4_plan.md)。4-03/4-10等の未検証条件を解消するまでcompletedへ移さない |
+| Phase 5 | 個別計画ごとに実施中 | active（5-13〜5-17・5-20）／ planned（5-18・5-19・5-21〜5-25） | 計画書が存在する要求はすべて下表にリンク。状態・タスク進捗は各正本を参照 |
 
 docs/42がフェーズの実装状況の正本、各計画書の状態とフォルダ配置は実装計画のライフサイクルを表します。過去の計画書配置が現在の実装状況と一致していない箇所は、受入記録を確認してから移管し、フォルダ名だけで実装済み/未実装を判断しません。
 
@@ -35,16 +35,16 @@ docs/42がフェーズの実装状況の正本、各計画書の状態とフォ�
 | Phase 5 / 5-13 旅客動線の3段階接続判定 | active | [passenger_connectivity_status_plan.md](active/passenger_connectivity_status_plan.md) | 接続グラフ全体を通行可能/建設完了待ち/未接続に分類。5-16と統合。T2・T4 実施済み、T5・T6 は残件 |
 | Phase 5 / 5-14 ターミナル階層・駅/バスターミナル | active | [terminal_building_structure_plan.md](active/terminal_building_structure_plan.md) | B3〜4F、駅/バスターミナル独立・内包。T1〜T5 実施済み、T6・T7 は一部（内包施設の能力接続は 5-16 側の残件） |
 | Phase 5 / 5-15 複雑形状・ターミナル複合体 | active | [terminal_complex_geometry_plan.md](active/terminal_complex_geometry_plan.md) | 凹形ポリゴンと複合体判定。旅客の実経路とは分離。T2・T4 実施済み、T3・T5〜T7 は残件 |
-| Phase 5 / 5-16 対外交通・階層歩行網とPaxGroup統合 | active | [passenger_network_unification_plan.md](active/passenger_network_unification_plan.md) | 車・送迎・タクシー・バス・鉄道・徒歩からPortal/ターミナル/各ゲートまでの双方向経路。T5 実移動まで実施済み、T6・T8 は残件。planned/ に旧版コピーが残存（正本は active） |
+| Phase 5 / 5-16 対外交通・階層歩行網とPaxGroup統合 | active | [passenger_network_unification_plan.md](active/passenger_network_unification_plan.md) | T1〜T3完了、T5は単一Portal区間の`accessWalk`を実装。T4・T7・T9は一部、T6・T8は未着手。複合グラフ全体の旅客経路進行・能力予約・Step-free・二重計上防止は残件 |
 | Phase 5 / 5-17 誘導路実幅・高速離脱 | active | [taxiway_realism_plan.md](active/taxiway_realism_plan.md) | FAA TDG/EASA OMGWSのprofileを混同しない。T1・T3 基盤実施済み、T2・T4〜T7 は残件 |
-| Phase 5 / 5-18 ターミナル専用設計Workspace | 計画書未作成 | （計画書未作成） | フロア・内部設備・メッシュ能力、対外交通の接続マトリクス/経路ハイライト |
-| Phase 5 / 5-19 空港全体1日運航・ターミナル単独詳細Simulation | 計画書未作成 | （計画書未作成） | 2モードのclock/state分離、対外交通6手段、全方向の旅客動線/容量検証 |
+| Phase 5 / 5-18 ターミナル専用設計Workspace | planned | [terminal_design_workspace_plan.md](planned/terminal_design_workspace_plan.md) | フロア・内部設備・メッシュ能力、対外交通の接続マトリクス/経路ハイライト |
+| Phase 5 / 5-19 空港全体1日運航・ターミナル単独詳細Simulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 2モードのclock/state分離、対外交通6手段、全方向の旅客動線/容量検証 |
 | Phase 5 / 5-20 空港格の8段階化・成長判定の多軸化 | active | [airport_tier_progression_plan.md](active/airport_tier_progression_plan.md) | 既存格解放・契約提案・旧セーブ互換を含めて段階的に拡張。T2・T3・T5・T7 実施済み、T6・T8 は残件。planned/ に旧版コピーが残存（正本は active） |
-| Phase 5 / 5-21 最混雑時間帯・ターミナル別工程能力 | 計画書未作成 | （計画書未作成） | ローリング60分・工程別の能力/需要/実績。共有アクセス・ランプバスの能力を重複計上しない |
-| Phase 5 / 5-22 共通シナリオ管理・運航モード横断比較 | 計画書未作成 | （計画書未作成） | Phase 8の既存比較を再利用し、Airport Day / Terminal Detailを同じ入力条件から比較 |
-| Phase 5 / 5-23 旅客Door-to-Door KPI | 計画書未作成 | （計画書未作成） | 外部〜ゲート/外部退出・乗継の全所要時間、p50/p95、搭乗締切到達、Step-free |
-| Phase 5 / 5-24 都市上空回避型・方向別夜間運用 | 計画書未作成 | （計画書未作成） | 都市保護区域と到着/出発経路回廊を検証し、適合方向のみ夜間許可 |
-| Phase 5 / 5-25 夜間整備・工事Work Order | 計画書未作成 | （計画書未作成） | 既存機体周期整備と統合し、夜間シフト・資源・資産閉鎖・工事進捗を管理 |
+| Phase 5 / 5-21 最混雑時間帯・ターミナル別工程能力 | planned | [peak_hour_passenger_capacity_plan.md](planned/peak_hour_passenger_capacity_plan.md) | ローリング60分・工程別の能力/需要/実績。共有アクセス・ランプバスの能力を重複計上しない |
+| Phase 5 / 5-22 共通シナリオ管理・運航モード横断比較 | planned | [scenario_comparison_plan.md](planned/scenario_comparison_plan.md) | Phase 8の既存比較を再利用し、Airport Day / Terminal Detailを同じ入力条件から比較 |
+| Phase 5 / 5-23 旅客Door-to-Door KPI | planned | [passenger_door_to_door_kpi_plan.md](planned/passenger_door_to_door_kpi_plan.md) | 外部〜ゲート/外部退出・乗継の全所要時間、p50/p95、搭乗締切到達、Step-free |
+| Phase 5 / 5-24 都市上空回避型・方向別夜間運用 | planned | [urban_night_runway_operations_plan.md](planned/urban_night_runway_operations_plan.md) | 都市保護区域と到着/出発経路回廊を検証し、適合方向のみ夜間許可 |
+| Phase 5 / 5-25 夜間整備・工事Work Order | planned | [nighttime_work_order_plan.md](planned/nighttime_work_order_plan.md) | 既存機体周期整備と統合し、夜間シフト・資源・資産閉鎖・工事進捗を管理 |
 
 
 | Overnight carry-over departure readiness | completed | [overnight_departure_readiness_fix_plan.md](completed/overnight_departure_readiness_fix_plan.md) | skip された地上作業と固定タスク数の不整合。修正・通しテストによる翌朝便の離陸検証まで実施済み |
@@ -56,10 +56,10 @@ docs/42がフェーズの実装状況の正本、各計画書の状態とフォ�
 | ID / 既存要求 | 状態 | 正本の計画書 | 着手条件 |
 |---|---|---|---|
 | A6 / Phase 5 5-12 貨物輸送 | active（PO 指示で着手済み） | [cargo_operations_plan.md](active/cargo_operations_plan.md) | 5-14〜5-16、5-21（基盤ゲートに先行して随時実装中。CARGO-01〜08 の核まで実施、sim 実便化等が残件） |
-| D4 空港ブランド効果 | planned（基盤ゲート待ち） | airport_brand_effects_plan.md（本作業コピーにファイルなし） | 5-04・5-21、指標/効果幅のPO承認 |
-| K1 自動最適化 | planned（基盤ゲート待ち） | automatic_optimization_plan.md（本作業コピーにファイルなし） | 5-19・5-21・5-22 |
-| F3 風向による滑走路方向選択 | planned（基盤ゲート待ち） | wind_runway_direction_plan.md（本作業コピーにファイルなし） | 5-24、予約/占有の設計レビュー |
-| F4 除雪・防除氷 | planned（基盤ゲート待ち） | snow_removal_deicing_plan.md（本作業コピーにファイルなし） | 5-17・5-21・5-25 |
+| D4 空港ブランド効果 | planned（基盤ゲート待ち） | [airport_brand_effects_plan.md](planned/airport_brand_effects_plan.md) | 5-04・5-21、指標/効果幅のPO承認 |
+| K1 自動最適化 | planned（基盤ゲート待ち） | [automatic_optimization_plan.md](planned/automatic_optimization_plan.md) | 5-19・5-21・5-22 |
+| F3 風向による滑走路方向選択 | planned（基盤ゲート待ち） | [wind_runway_direction_plan.md](planned/wind_runway_direction_plan.md) | 5-24、予約/占有の設計レビュー |
+| F4 除雪・防除氷 | planned（基盤ゲート待ち） | [snow_removal_deicing_plan.md](planned/snow_removal_deicing_plan.md) | 5-17・5-21・5-25 |
 
 A6 は既存の5-12を詳細化した計画であり、別要求ではありません。A6（貨物）は 2026-11-18 の PO 指示により基盤ゲートに先行して着手し、計画書は active/ へ移管済みです。その他の項目は、基盤ゲートを満たしただけでは着手せず、HANDOFF更新・計画書のactive移管・POによる実装順序確認を行います。
 

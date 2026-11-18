@@ -235,13 +235,13 @@
 
 | ID | 項目 | 現状 | 計画・着手条件 |
 |---|---|---|---|
-| A6 / 5-12 | 貨物輸送・荷役 | 貨物需要指数はあるが、貨物便・上屋荷役・貨物トラック・貨物収支は未実装。格制度ではTier3〜7の段階解放を計画（未実装） | [貨物計画](implementation/planned/cargo_operations_plan.md)・[空港格計画](implementation/planned/airport_tier_progression_plan.md)。5-14〜5-16、5-20、5-21の基盤受入後に再検討 |
+| A6 / 5-12 | 貨物輸送・荷役 | **部分実装（2026-11-18）**。需要・契約/DayPlan計画・機種容量・上屋/荷役能力・収支計算層・保存互換・格解放連携の核まで実施。sim実便化、貨物専用機、実運航荷役、日報表示、道路区間競合、Tier5〜7の規模拡張は未実装 | [貨物実装計画](implementation/active/cargo_operations_plan.md)・[空港格計画](implementation/active/airport_tier_progression_plan.md)。CARGO-02/04/05/06/08の残件とテスト状況を正本で管理 |
 | D4 | 空港ブランド・性格による航空会社誘致効果 | 既存KPIはあるが、根拠付きのブランド特性・提案への影響は未実装 | [ブランド効果計画](implementation/planned/airport_brand_effects_plan.md)。5-04/5-21の指標基盤と効果幅のPO承認が必要 |
 | K1 | 運営の自動最適化 | 未実装。手動で条件を変えたシナリオ比較のみ | [自動最適化計画](implementation/planned/automatic_optimization_plan.md)。5-19/5-21/5-22の共通実行・能力・比較基盤後 |
 | F3 | 風向・風速による滑走路方向選択 | 天候段階はあるが、風向/風速と自動方向切替は未実装 | [風向運用計画](implementation/planned/wind_runway_direction_plan.md)。5-24との整合・滑走路予約/占有の設計レビュー後 |
 | F4 | 除雪・路面雪氷処理・航空機防除氷 | 雪天候による簡易速度低下はあるが、積雪蓄積・除雪作業・防除氷工程は未実装 | [除雪・防除氷計画](implementation/planned/snow_removal_deicing_plan.md)。5-17/5-21/5-25の実寸・能力・Work Order基盤後 |
 
-- A6 は Phase 5 5-12 の既存要求を詳細化したもの。手荷物・乗継手荷物とは別系統で設計する。貨物はTier3で国内貨物、Tier4で国際貨物、Tier5で貨物契約/取扱規模、Tier6で複数貨物地区・道路物流、Tier7で大規模国際貨物ハブへ段階解放する計画。格解放はまだ未実装であり、現行仕様 docs/44 §1 の格解放表は変更しない。貨物運営は昇格の必須条件にせず、貨物を扱わない旅客中心空港も格7へ到達できる設計とする。
+- A6 は Phase 5 5-12 の既存要求を詳細化したもの。手荷物・乗継手荷物とは別系統で設計する。貨物の格解放基盤（国内Tier3・国際Tier4、Tier5〜7の規模拡張マッピング）は5-20で実装済み部分があるが、貨物側の実運航・取扱規模拡張は未完了。詳細は [貨物計画](implementation/active/cargo_operations_plan.md) と [空港格計画](implementation/active/airport_tier_progression_plan.md) を正本とする。貨物運営は昇格の必須条件にせず、貨物を扱わない旅客中心空港も格7へ到達できる設計とする。
 - D4 はブランド表示と提案への効果を分離し、空港総合評価/格や契約後の満足度へ無断で二重加点しない。
 - K1 はシナリオ比較を再利用し、最適化案を自動適用しない。
 - F3/F4 はゲーム用の簡略モデルであり、現実の航空安全・気象・除雪基準への適合を意味しない。
