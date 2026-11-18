@@ -24,6 +24,7 @@ import { terminalLinkCapacityPerHour } from '../terminal/model';
 import { runwaySystemCapacity } from '../runwayCapacity';
 import { takeLinkUsage } from '../sim/linkUsage';
 import { takeMissBreakdown } from '../sim/missBreakdown';
+import { takePortalUsage } from '../sim/portalUsage';
 import { takeCargoHandled } from '../sim/cargoStats';
 import { cargoActualFinance, planCargoDay } from './cargo';
 import { evaluateDelayPair } from './delayEvaluation';
@@ -774,6 +775,16 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
       }
     }
     if (entries.length > 0) report.linkUsage = entries.sort((a, b) => b.total - a.total);
+  }
+  // Portal 通過人数（5-16 T8）: 方向別に読み取り、記録を消す
+  const portalUsage = takePortalUsage(state);
+  if (portalUsage) {
+    report.portalUsage = portalUsage.map((e) => ({
+      portalId: e.portalId,
+      facilityId: ctx.layout.portals?.[e.portalId]?.facilityId ?? '',
+      enter: e.enter,
+      exit: e.exit,
+    }));
   }
   // アクセスの時間帯別交通量（5-03）: road/curb は台数、bus/rail は出発旅客の人数
   if (state.access) {

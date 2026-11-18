@@ -58,7 +58,7 @@
 | T3 | 未着手 | 建物作図・編集・形状プレビューUI | editor tools / Toolbox / PropertiesPanel / map renderer | 描画、選択、移動、回転、複製、Undo/Redo後に形状が一致 |
 | T4 | 完了 | 複合体の連結成分導出・キャッシュを実装 | terminal complex model / terminal/model.ts | 辺接触・高層連絡橋・planned・工事中・角接触・高さ違い・ループで決定的 |
 | T5 | 未着手 | gate / terminal assignment / passenger ownership / capacityをcomplex IDと物理IDに分ける | terminal/model.ts、gates.ts、passengers.ts、validation | 接触したビル同士の同一complex化、ゲートの複合体割当て、物理建物ID維持 |
-| T6 | 未着手 | 旅客の建物間経路を明示リンクに基づき構築 | terminal graph、5-16との接続 | 同一complexでも通路なしは到達不可、operational linkのみ通行可、区域越境は既存ルール |
+| T6 | 完了（検証） | 旅客の建物間経路を明示リンクに基づき構築 | terminal graph、5-16との接続 | 同一complexでも通路なしは到達不可、operational linkのみ通行可、区域越境は既存ルール。検証（2026-11-18）: エリア隣接リンクは同一ターミナル内だけで構築されるため、建物間の移動はもともと明示リンク必須だった。これを complexRoute515 3 件で固定（辺接触で同一複合体でも到達不可、L字建物でも同じ、operational リンクでのみ通行可・建設中は将来モデルのみ・planned は不可） |
 | T7 | 一部完了 | 2D/3D描画、保存互換、性能とE2E | renderer / io / tests / docs | 旧矩形セーブの往復一致、500建物相当の合成テストで上限・計測値を記録 |
 
 ## 5. 互換性・リスク

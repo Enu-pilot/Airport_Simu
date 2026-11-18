@@ -18,6 +18,7 @@ export type MissBottleneck =
   | 'access' // 空港へのアクセス中（鉄道・バス・道路・ポータル歩行）
   | 'transferLate' // 乗継時間の不足（手続き列の外で締切を迎えた乗継客、締切後の発生）
   | 'unreachable' // 到達不能
+  | 'routePending' // 連絡通路の完成待ち（将来モデルでは到達できる。5-13 T5）
   | 'noGate' // ゲートなし
   | 'facilityClosed' // 施設閉鎖で待機
   | 'other'; // その他（手続き前の待機など）
@@ -54,6 +55,26 @@ export function recordMissBreakdown(state: SimState, category: MissBottleneck, s
   const entry = record.get(key) ?? { category, spotId, count: 0 };
   entry.count += count;
   record.set(key, entry);
+}
+
+/**
+ * 「建設中リンクが完成すれば到達できた」グループの記録（5-13 T5）。
+ * 移動結果・理由（MissReason）は変えず、乗り遅れ内訳の分類だけを差し替えるための
+ * サイドストア。内訳と同じく SimState の外に置き、保存・フィンガープリントに触れない。
+ */
+const pendingStore = new WeakMap<SimState, Set<string>>();
+
+export function markRoutePending(state: SimState, groupId: string): void {
+  let set = pendingStore.get(state);
+  if (!set) {
+    set = new Set();
+    pendingStore.set(state, set);
+  }
+  set.add(groupId);
+}
+
+export function isRoutePending(state: SimState, groupId: string): boolean {
+  return pendingStore.get(state)?.has(groupId) ?? false;
 }
 
 /** 運航中の表示用: 現在の集計期間分を消さずに読む */

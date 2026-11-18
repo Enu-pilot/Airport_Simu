@@ -171,6 +171,16 @@ export function cargoDailyFinance(c: CompanyState, day: number, handlingCapacity
 }
 
 /**
+ * その日の計画ベースの貨物トラック台数（台/日、5-12 CARGO-05）。
+ * 道路競合の背景交通として使う推定値で、当日計画の運搬量から集約換算する。
+ * 実績の台数は cargoActualFinance / cargoDailyFinance 側が正で、こちらは表示には使わない。
+ */
+export function cargoPlannedTruckTripsPerDay(c: CompanyState, day: number): number {
+  const plan = planCargoDay(c, day);
+  return plan.carriedM3 > 0 ? Math.ceil(plan.carriedM3 / BALANCE.cargo.truckCapacityM3) : 0;
+}
+
+/**
  * 実績ベースの貨物収支（5-12 の sim 実便化）。計画値ではなく、その日に貨物タスクが
  * 実際に完了して積み下ろしした量 (m3) から収入・荷役費・トラック台数を出す。
  * 積み残しは「その日の路線需要 − 実績の運搬量」。日次締めが日報と台帳への計上に使う。
