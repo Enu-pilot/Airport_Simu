@@ -14,6 +14,10 @@ for (const size of [
     await page.setViewportSize(size);
     await page.goto('/');
     await expect(page.getByTestId('toolbox')).toBeVisible();
+    // 折りたたみで隠れている分類も含め、全ツールを展開して従来のスクロール到達性を検査する。
+    await page.locator('[data-testid=toolbox] details.tool-group').evaluateAll((groups) => {
+      groups.forEach((group) => { (group as HTMLDetailsElement).open = true; });
+    });
     await page.mouse.move(100, 400);
     for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 300);
     await page.waitForTimeout(300);
@@ -25,3 +29,32 @@ for (const size of [
     expect(unreachable, '画面の下に隠れたままのボタン').toEqual([]);
   });
 }
+
+
+test('建設ツールの分類をアコーディオンで開閉できる', async ({ page }) => {
+  await page.goto('/');
+  const toolbox = page.getByTestId('toolbox');
+  const group = toolbox.locator('details.tool-group').filter({
+    has: page.getByText('滑走路・誘導路', { exact: true }),
+  });
+  const summary = group.locator('summary');
+
+  await expect(summary).toBeVisible();
+  if (await group.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await summary.click();
+  }
+  await expect(page.getByTestId('tool-runway')).toBeHidden();
+
+  await summary.click();
+  await expect(page.getByTestId('tool-runway')).toBeVisible();
+  await summary.click();
+  await expect(page.getByTestId('tool-runway')).toBeHidden();
+
+  // 配置オプションは分類の開閉に関係なく利用できる。
+  await expect(page.getByTestId('map-level')).toBeVisible();
+
+  // summaryは標準のdetails要素なので、キーボードからも再展開できる。
+  await summary.focus();
+  await summary.press('Enter');
+  await expect(page.getByTestId('tool-runway')).toBeVisible();
+});
