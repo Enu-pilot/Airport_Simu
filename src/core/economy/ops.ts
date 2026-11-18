@@ -25,6 +25,10 @@ import { runwaySystemCapacity } from '../runwayCapacity';
 import { takeLinkUsage } from '../sim/linkUsage';
 import { takeMissBreakdown } from '../sim/missBreakdown';
 import { takePortalUsage } from '../sim/portalUsage';
+import { PROCESS_STEPS, takeProcessStats } from '../sim/processStats';
+import { takeJourneyStats } from '../sim/journeyStats';
+import { peakWindowPerHour } from './peakDemand';
+import { areaProcessingPerHour } from '../terminal/capacity';
 import { takeCargoHandled } from '../sim/cargoStats';
 import { cargoActualFinance, planCargoDay } from './cargo';
 import { evaluateDelayPair } from './delayEvaluation';
@@ -48,7 +52,7 @@ import { layoutValue, scaleFactor } from './construction';
 import { advanceProjects } from './expansion';
 import { analyzeAccess, type AccessAnalysis, type AccessFeedback } from '../access/model';
 import { takeAccessStats } from '../access/runtime';
-import { isPeak, analyzeDayPlan, planDayWithDemand } from './planning';
+import { CHECKIN_SHARE, isPeak, analyzeDayPlan, planDayWithDemand, PAX_PROCESS_LEAD_SEC } from './planning';
 import { airlineScorecard } from './airlineScore';
 import { stepAirlineEval } from './airlineEval';
 import { evaluateGoals } from './goals';
@@ -776,6 +780,53 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
     }
     if (entries.length > 0) report.linkUsage = entries.sort((a, b) => b.total - a.total);
   }
+  // 工程別の最混雑 60 分（5-21）: 理論能力（エリア合計・ターミナル間で重複計上しない）・
+  // 計画需要（60 分窓の最大、出発は 90 分前に出現する前提）・ピーク時間帯の実績を並べる
+  {
+    const fromHour = Math.floor(e.periodStart / 3600);
+    const toHour = Math.floor(state.now / 3600);
+    const stats = takeProcessStats(state, fromHour, toHour);
+    if (stats) {
+      const depEvents: { at: number; pax: number }[] = [];
+      const arrEvents: { at: number; pax: number }[] = [];
+      for (const f of Object.values(state.flights)) {
+        if (f.scheduled < e.periodStart || f.scheduled >= state.now) continue;
+        if (f.direction === 'departure') depEvents.push({ at: f.scheduled - PAX_PROCESS_LEAD_SEC, pax: f.plannedPax ?? 0 });
+        else arrEvents.push({ at: f.estimated, pax: f.plannedPax ?? 0 });
+      }
+      const depPeak = peakWindowPerHour(depEvents);
+      const arrPeak = peakWindowPerHour(arrEvents);
+      const demandOf = (step: string): number =>
+        step === 'checkIn' ? Math.round(depPeak * CHECKIN_SHARE)
+        : step === 'immigration' || step === 'customs' ? arrPeak
+        : depPeak;
+      const rows: NonNullable<DailyReport['processPeak']> = [];
+      for (const step of PROCESS_STEPS) {
+        let capacity = 0;
+        for (const a of Object.values(ctx.layout.terminalAreas)) {
+          if (a.kind === step) capacity += areaProcessingPerHour(a.kind, a.props);
+        }
+        const mine = stats.filter((s) => s.step === step);
+        let peak = mine[0];
+        for (const s of mine) if (s.processed > (peak?.processed ?? -1)) peak = s;
+        const peakProcessed = peak?.processed ?? 0;
+        if (capacity <= 0 && peakProcessed <= 0) continue;
+        rows.push({
+          step,
+          capacityPerHour: capacity,
+          demandPerHour: demandOf(step),
+          peakHour: peak ? peak.hour % 24 : 0,
+          peakProcessed,
+          utilization: capacity > 0 ? Math.round((peakProcessed / capacity) * 100) / 100 : null,
+          avgWaitSec: peak && peak.waitPax > 0 ? Math.round(peak.waitSecTotal / peak.waitPax) : 0,
+        });
+      }
+      if (rows.length > 0) report.processPeak = rows.sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1));
+    }
+  }
+  // Door-to-Door KPI（5-23）: 出現→完了の所要時間を分位点で読み取る
+  const journey = takeJourneyStats(state);
+  if (journey) report.doorToDoor = journey;
   // Portal 通過人数（5-16 T8）: 方向別に読み取り、記録を消す
   const portalUsage = takePortalUsage(state);
   if (portalUsage) {

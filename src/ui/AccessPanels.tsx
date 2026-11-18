@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { ACCESS_MODES, analyzeAccess } from '../core/access/model';
+import { connectionMatrix, type ConnectionMatrixRow } from '../core/terminal/connectionMatrix';
 import { BALANCE } from '../core/economy/balance';
 import { cityDemandCeiling } from '../core/economy/city';
 import { constructionCost as constructionCostOf, layoutValue, scaleFactor } from '../core/economy/construction';
@@ -29,12 +30,16 @@ import {
 
 const pct = (v: number) => `${Math.round(v * 1000) / 10}%`;
 
+const connLabel = (s: ConnectionMatrixRow['toEntrance']): string =>
+  s === 'operational' ? '○ 接続済み' : s === 'underConstruction' ? '△ 完成待ち' : s === 'noPortal' ? 'Portalなし（徒歩判定）' : '× 未接続';
+
 export function AccessPanel() {
   const c = useCompany();
   const layout = useLayout();
   useEditor((s) => s.ops?.uiVersion ?? -1);
   const live = editorStore.getState().ops?.sim.state.access ?? null;
   const a = useMemo(() => analyzeAccess(layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day }), [layout, c.fees, c.accessFeedback, c.city, c.day]);
+  const matrix = useMemo(() => connectionMatrix(layout, a), [layout, a]);
   const fb = c.accessFeedback;
   return (
     <div className="issues mgmt" data-testid="access-panel">
@@ -104,6 +109,40 @@ export function AccessPanel() {
               </tr>
             </tbody>
           </table>
+        </section>
+
+        <section>
+          <h4>接続マトリクス（施設 × 方向）</h4>
+          <table className="board" data-testid="connection-matrix">
+            <thead>
+              <tr>
+                <th>施設</th>
+                <th>手段</th>
+                <th>外部への接続</th>
+                <th>入口へ（来港）</th>
+                <th>出口から（帰宅）</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.map((r) => (
+                <tr key={r.facilityId} data-testid={`matrix-${r.facilityId}`}>
+                  <td>{displayName(layout, r.facilityId)}</td>
+                  <td>{r.mode ? ACCESS_MODE_LABEL[r.mode] : '—'}</td>
+                  <td className={r.outside === 'connected' ? '' : 'ng-text'}>
+                    {r.outside === 'connected' ? '○ 接続' : r.outside === 'notOperational' ? '工事中・運休' : `× ${ACCESS_UNAVAILABLE_LABEL[(r.outsideReason ?? 'notConnected') as keyof typeof ACCESS_UNAVAILABLE_LABEL] ?? '未接続'}`}
+                  </td>
+                  <td className={r.toEntrance === 'operational' ? '' : 'ng-text'}>{connLabel(r.toEntrance)}</td>
+                  <td className={r.fromExit === 'operational' ? '' : 'ng-text'}>{connLabel(r.fromExit)}</td>
+                </tr>
+              ))}
+              {matrix.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="muted">交通施設（駅・バスターミナル・バス停・タクシー乗場・駐車場）がありません</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div className="muted small">ターミナル側は Portal の到達性で判定します。Portal がない施設は徒歩距離による従来の判定です。</div>
         </section>
 
         <section>

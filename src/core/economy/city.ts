@@ -60,6 +60,15 @@ export interface CityConfig {
   events?: CityEvent[];
   /** 出発時刻の制限と夜間の運用（フェーズ 2、docs/40）。欠落 = 従来どおり */
   nightOps?: CityNightOps;
+  /** 都市上空の保護区域（5-24）。空港から見た方位の範囲で表す。欠落 = 区域なし */
+  protectionSectors?: CityProtectionSector[];
+}
+
+/** 都市上空の保護区域: 空港を中心とする方位 [fromDeg, toDeg]（真方位・時計回り、跨ぎ可） */
+export interface CityProtectionSector {
+  fromDeg: number;
+  toDeg: number;
+  label?: string;
 }
 
 export interface CityNightOps {

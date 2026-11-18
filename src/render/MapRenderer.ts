@@ -409,6 +409,14 @@ export class MapRenderer {
     const alpha = BUILD_ALPHA[f.buildState];
     const color = FACILITY_COLOR[f.kind];
     const layer = FACILITY_SPECS[f.kind].layer;
+    // 5-15 T7: 非矩形の footprint がある施設は、その多角形で描く（頂点はタイル角の座標）
+    if (f.footprint && f.footprint.length >= 3) {
+      const pts = flat(f.footprint.map((p) => ({ x: p.x, y: p.y })));
+      g.poly(pts).fill({ color, alpha: (layer === 'building' || layer === 'gate' ? 1 : 0.85) * alpha });
+      g.poly(pts).stroke({ width: this.px(1), color: 0x000000, alpha: 0.5 * alpha });
+      this.buildStateOutline(g, pts, f.buildState);
+      return;
+    }
     const inset = layer === 'building' || layer === 'gate' ? 0.08 : 0;
     const x = f.origin.x + inset;
     const y = f.origin.y + inset;

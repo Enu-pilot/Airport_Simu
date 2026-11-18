@@ -74,8 +74,11 @@ const BASELINE: Record<string, string> = {
   // 2026-11-18 再々々々々採取（PR #32 マージ追随）: ホールド理由の拡充でスポット割当が段階化され、
   // 理由の分類が noStand → standTooSmall 等へ変わったため city core のみ変化。他 6 件は不変。
   // stress ゴールデンでも差分は failCauses の hold:noStand 2 → hold:standTooSmall 2 のみ（件数不変）を確認済み。
-  'city core 3 days (no nightOps)': '6ba7cdd1097a81c5d9383e79b71946c0d39426790f97ec451a6c92fbd1dce7de',
-  'sample airport 1 day': 'bd2c859fabd0fcef00cc9db44dbb41e4f2ef3338bb283323742edb8276d9208f',
+  // 2026-11-18 夜 再採取（PO 指示の Phase 6）: 日報へ 5-21 工程別ピーク（processPeak）と
+  // 5-23 Door-to-Door KPI（doorToDoor）を追加したため会社データを含む 2 件のみ変化。
+  // 両フィールドの代入を無効化すると旧基準値と完全一致することを確認済みで、運航は無変更。
+  'city core 3 days (no nightOps)': '03e3ac1f03fcb82d44238dd875406c9951a77264a93e18c6375e66bb6728c439',
+  'sample airport 1 day': 'e7868d4c5d9d1748993771d185bbad6a354dd74c16896d7770288c23ea6d02bc',
 };
 
 describe('legacyFingerprint: taxiMode / nightOps なしの運航は T0 の基準値と一致', () => {
