@@ -1,9 +1,8 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * U-1（docs/39、修正済み 1-06）: 画面の高さが約 955px 未満だと、建設ページ左のツール箱が下にはみ出し、
- * スクロールもできない（.left / .toolbox に overflow 指定がなく body は overflow: hidden。src/ui/styles.css:79,91）。
- * 期待: すべての建設ツールにマウス操作で到達できる（1920x1080 はスクロールなしでも従来どおり全表示される回帰）。修正前: 下の方のボタン（鉄道駅・職員駐車場・ホテル・用地・階層切替）に届かない。
+ * U-1（docs/39、修正済み 1-06）: 建設画面左のツール箱は画面高に応じて内部スクロールできる。
+ * 折りたたみ分類をすべて展開した状態でも、全サイズで各ツールにマウス操作で到達できることを確認する。
  */
 for (const size of [
   { width: 1280, height: 720 },
@@ -35,7 +34,7 @@ test('建設ツールの分類をアコーディオンで開閉できる', async
   await page.goto('/');
   const toolbox = page.getByTestId('toolbox');
   const group = toolbox.locator('details.tool-group').filter({
-    has: page.getByText('滑走路・誘導路', { exact: true }),
+    has: toolbox.getByText('滑走路・誘導路', { exact: true }),
   });
   const summary = group.locator('summary');
 
