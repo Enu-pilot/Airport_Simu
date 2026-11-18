@@ -89,8 +89,15 @@ export function Toolbox() {
   return (
     <div className="toolbox" data-testid="toolbox">
       {GROUPS.map((g) => (
-        <div key={g.title} className="tool-group">
-          <div className="tool-group-title">{g.title}</div>
+        <details
+          key={g.title}
+          className="tool-group"
+          open={g.tools.some((t) => t.id === tool)}
+        >
+          <summary className="tool-group-title">
+            <span>{g.title}</span>
+            <span className="tool-group-count">{g.tools.length}</span>
+          </summary>
           <div className="tool-buttons">
             {g.tools.map((t) => {
               // フェーズ 4 のエリアは、格で解放されるまで選べない（理由を表示）
@@ -112,7 +119,7 @@ export function Toolbox() {
               );
             })}
           </div>
-        </div>
+        </details>
       ))}
 
       <div className="tool-options">
