@@ -194,6 +194,8 @@ export interface DailyReport {
   groundWaits?: { reason: string; sec: number }[];
   /** 乗り遅れの詰まり箇所の内訳（乗り遅れがあった日だけ。人数の多い順。spotId は詰まったエリア/施設） */
   missedBreakdown?: MissBreakdownEntry[];
+  /** Portal 通過人数（5-16 T8。通過があった日だけ。方向別の人数で、手段別人数とは二重計上しない） */
+  portalUsage?: { portalId: string; facilityId: string; enter: number; exit: number }[];
   /** 貨物の実績（5-12。貨物契約がある日だけ）: 実際に積み下ろしした量・積み残し・収支。収入と荷役費は台帳（revenue.cargo / cost.cargoHandling）にも計上済み */
   cargo?: { carriedM3: number; leftoverM3: number; revenue: number; handlingCost: number; truckTrips: number };
   city?: { type: CityType; populationStart: number; populationEnd: number; demandCeiling: number; expectedPax: number; actualPax: number; cityFactor: number; roadQuality: number; railQuality: number; residentsStart?: number; residentsEnd?: number; residentDelta?: number; noiseMovements?: number; nightMovements?: number; noisePoints?: number; events?: CityEvent[]; eventDemandMultiplier?: number; eventTrafficMultiplier?: number };

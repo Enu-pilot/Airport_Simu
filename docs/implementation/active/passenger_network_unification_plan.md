@@ -87,12 +87,12 @@
 | T1 | 完了 | 現行の全グラフ、PaxGroupのルート進行、アクセス容量計上、建設状態を監査 | access / terminal / sim / validation | グラフ間の接点・未接続・二重計上点・呼出し順を図示 |
 | T2 | 完了 | 外部境界/交通施設/Portalデータ・型・配置・検証を設計/実装 | model/types、layout operations、validation、UI | 交通手段種別・外部接続・階・標高・区域が一致するPortalのみ接続。参照切れ/位置離れ/階違いは拒否 |
 | T3 | 完了 | TerminalModelとwalkway RoadGraphの複合グラフを派生構築 | access/verticalWalk、terminal/model | 一方向・階層connector・operational・capacity・travelSecを保持し、決定性担保 |
-| T4 | 一部完了 | 複合グラフに3状態判定を適用し、構造検証・診断へ接続 | 5-13、validation、flowDiagnostics | 運用中迂回路優先、建設中複数辺、未接続、計画のみ、閉鎖を正しく分類 |
+| T4 | 完了（検証接続） | 複合グラフに3状態判定を適用し、構造検証・診断へ接続 | 5-13、validation、flowDiagnostics | 運用中迂回路優先、建設中複数辺、未接続、計画のみ、閉鎖を正しく分類。検証接続（2026-11-18）: verifyPortalAccess を analyzeLayout へ接続し、新規コード PORTAL_CONNECTION_PENDING（情報）/ PORTAL_UNREACHABLE（警告）を方向別の状態つきで出す。portalAccessValidation516 3 件合格。残: flowDiagnostics 側への表示接続 |
 | T5 | 完了（基本形） | PaxGroup routeを複合経路ステップで進行させる | sim/passengers、sim/types、terminal route | 旅客が駅・地下通路・ターミナル内部階・高層通路を正しい順に移動し、実歩行時分を記録 |
 | T6 | 未着手 | 能力予約・待機・stepFree・再探索・ゲート再割当てを統合 | access/runtime、terminal transit、passengers | 各辺能力以下、能力超過は待機、閉鎖後再探索、stepFree経路だけ利用 |
 | T7 | 一部完了 | 全6アクセス手段の往路/復路・ゲート別接続検証とE2Eを整備 | tests/unit、tests/e2e、validation、docs/34・35 | car/dropoff/taxi/bus/rail/walkの外部〜施設〜入口〜全ゲート、到着全ゲート〜出口〜外部が条件どおり |
-| T8 | 未着手 | 外部交通の利用人数・Portal移動・PaxGroupを統合し、二重計上を防止 | access/runtime、passengers、analytics | 手段別乗降人数、Portal通過人数、ターミナル入口/出口人数が一致し、旅客・容量を二重計上しない |
-| T9 | 一部完了 | 旧セーブ・ゴールデン・性能を確認 | project/serialize、SIM model、tests | 旧経路差分を説明・承認、決定性・保存復元継続・性能閾値に合格 |
+| T8 | 完了（計上範囲） | 外部交通の利用人数・Portal移動・PaxGroupを統合し、二重計上を防止 | access/runtime、passengers、analytics | 手段別乗降人数、Portal通過人数、ターミナル入口/出口人数が一致し、旅客・容量を二重計上しない。実装（2026-11-18）: 二重計上の実体は徒歩時間のみ（集約 walkMin と区間実歩行が同じ物理区間を二重課金）と特定。区間開始時に集約徒歩分を walkSec から相殺（appearAt に折込済みの遅れは処理順・乱数消費順を守るため対象外と明記）。Portal 通過人数を新設（sim/portalUsage.ts、WeakMap サイドストア、日報 portalUsage へ記録がある日だけ出力）し、区間を歩いたグループ人数との一致をテストで固定。人数・容量・料金の計上は集約側の1回のまま不変。portalUsage516 2 件＋portalWalk516 回帰、fingerprint 7 件不変。残: 到着 transit 手段（乗り場経由）は区間を歩かない不整合の切り分け、入口/出口のエリア別人数カウンタは未新設（全体の spawned/exited のみ） |
+| T9 | 一部完了 | 旧セーブ・ゴールデン・性能を確認 | project/serialize、SIM model、tests | 旧経路差分を説明・承認、決定性・保存復元継続・性能閾値に合格。性能実測（2026-11-18、perf516）: サンプル空港＋ポータル2件で buildTerminalModel 5.7ms / buildCompositeGraph 3.1ms / verifyPortalAccess 5.7ms / analyzeLayout（全体）120.7ms（この VM の実測）。残: 大規模レイアウト（500建物級）での計測 |
 
 ## 5. 互換性・リスク
 

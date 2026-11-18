@@ -17,7 +17,8 @@ import { BALANCE } from '../economy/balance';
 import { onPaxDeplaned, onPaxMissed, onShopDone, onTransferMissed } from '../economy/ops';
 import { accessArrival, accessDeparture } from '../access/runtime';
 import { recordLinkUsage, unrecordLinkUsage } from './linkUsage';
-import { recordMissBreakdown, type MissBottleneck } from './missBreakdown';
+import { recordPortalPassage } from './portalUsage';
+import { isRoutePending, markRoutePending, recordMissBreakdown, type MissBottleneck } from './missBreakdown';
 import type { Simulation } from './simulation';
 import {
   EVENT_LOG_LIMIT,
@@ -321,10 +322,11 @@ const STEP_BOTTLENECK: Partial<Record<PaxStep, MissBottleneck>> = { ...AREA_KIND
 function classifyMiss(sim: Simulation, g: PaxGroup, reason: MissReason): { category: MissBottleneck; spotId: string | null } {
   if (reason === 'noGate') return { category: 'noGate', spotId: null };
   if (reason === 'noBus') return { category: 'bus', spotId: null };
-  if (reason === 'unreachable') return { category: 'unreachable', spotId: g.area };
+  // 5-13 T5: 理由そのものは 'unreachable' のまま、内訳だけ「完成待ち」に差し替える
+  if (reason === 'unreachable') return { category: isRoutePending(sim.state, g.id) ? 'routePending' : 'unreachable', spotId: g.area };
   if (reason === 'facilityClosed') return { category: 'facilityClosed', spotId: g.area };
   // reason === 'late'（forced の場合に備え、状態由来の理由もここで拾う）
-  if (g.state === 'stranded') return { category: 'unreachable', spotId: g.area };
+  if (g.state === 'stranded') return { category: isRoutePending(sim.state, g.id) ? 'routePending' : 'unreachable', spotId: g.area };
   if (g.state === 'waitingFacility') return { category: 'facilityClosed', spotId: g.area };
   if (g.state === 'waitingBus' || g.state === 'onBus') return { category: 'bus', spotId: null };
   if (g.state === 'toAirport' || g.state === 'accessWalk' || g.state === 'waitingTransport') {
@@ -834,6 +836,26 @@ function portalLegFor(sim: Simulation, areaId: string, phase: 'enter' | 'exit'):
   return null;
 }
 
+/**
+ * ポータル区間の歩行を開始する（5-16 T5/T8）。
+ * 集約アクセスは同じ区間（交通施設→入口）の徒歩分を walkMin として既に walkSec へ
+ * 課金しているため、実歩行する場合はその分を相殺し、二重に数えない。
+ * 出現時刻（appearAt）に折り込み済みの遅れ分は遡って取り消さない（入口選択前に
+ * ポータルの有無が確定せず、処理順を変えると乱数消費順が全シナリオに波及するため）。
+ * あわせて Portal 通過人数を記録する（人数・容量・料金の計上は集約側の1回だけ）。
+ */
+function beginPortalLeg(sim: Simulation, g: PaxGroup, leg: NonNullable<PaxGroup['accessLeg']>): void {
+  const acc = sim.state.access;
+  if (acc && g.accessDone && g.mode) {
+    g.walkSec = Math.max(0, g.walkSec - Math.round((acc.walkMin[g.mode] ?? 0) * 60));
+  }
+  recordPortalPassage(sim.state, leg.portalId, leg.phase, g.count);
+  g.accessLeg = leg;
+  g.legLength = leg.lengthM;
+  g.legProgress = 0;
+  g.state = 'accessWalk';
+}
+
 function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): void {
   const { state } = sim;
   switch (g.state) {
@@ -885,6 +907,11 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
           } else {
             g.state = 'stranded';
             g.reason = 'unreachable';
+            // 5-13 T5: 入口の列挙型クエリは分類時に再現できないため、ここで完成待ちを判定する
+            const future = sim.ctx.terminalFuture;
+            if (future && entrances.some((id) => !!findPaxRoute(future, { from: id, goals, uncleared: uncleared(g), stepFree: g.stepFree }))) {
+              markRoutePending(state, g.id);
+            }
           }
           return;
         }
@@ -893,10 +920,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
         // 5-16 T5: 入口に運用中ポータルがあれば、交通施設から実際に歩いて入る
         const leg = portalLegFor(sim, entrance, 'enter');
         if (leg) {
-          g.accessLeg = leg;
-          g.legLength = leg.lengthM;
-          g.legProgress = 0;
-          g.state = 'accessWalk';
+          beginPortalLeg(sim, g, leg);
           return;
         }
         g.area = entrance;
@@ -979,6 +1003,16 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
 }
 
 /** 現在のステップの目的地を決め、歩き出す（または並ぶ・待つ） */
+/**
+ * 5-13 T5: 現在モデルで構造的に届かない経路が、建設中リンクの完成後（将来モデル）では
+ * 届くかどうか。届く場合は内訳分類用に「完成待ち」を記録するだけで、状態・理由は変えない。
+ */
+function markIfRoutePending(sim: Simulation, g: PaxGroup, from: string, goals: Map<string, number>, q: { uncleared?: boolean; stepFree?: boolean }): void {
+  const future = sim.ctx.terminalFuture;
+  if (!future || goals.size === 0) return;
+  if (findPaxRoute(future, { from, goals, uncleared: q.uncleared, stepFree: q.stepFree })) markRoutePending(sim.state, g.id);
+}
+
 function planStep(sim: Simulation, g: PaxGroup): void {
   const { state, ctx } = sim;
   const model = ctx.terminal;
@@ -1019,7 +1053,11 @@ function planStep(sim: Simulation, g: PaxGroup): void {
   }
   // 閉鎖が原因なら待機、構造的に行けないなら到達不能
   const ignoringClosure = candidates.length > 0 && findPaxRoute(model, { from: g.area, goals: new Map(candidates.map((id) => [id, 0] as const)), uncleared: uncleared(g), stepFree: g.stepFree });
-  setWaiting(state, g, ignoringClosure || candidates.some((id) => closed.has(id) || serversOf(sim, id) === 0) ? 'waitingFacility' : 'stranded');
+  const outcome = ignoringClosure || candidates.some((id) => closed.has(id) || serversOf(sim, id) === 0) ? 'waitingFacility' : 'stranded';
+  if (outcome === 'stranded' && g.area) {
+    markIfRoutePending(sim, g, g.area, new Map(candidates.map((id) => [id, 0] as const)), { uncleared: uncleared(g), stepFree: g.stepFree });
+  }
+  setWaiting(state, g, outcome);
 }
 
 function planGate(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
@@ -1046,6 +1084,7 @@ function planGate(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
       return;
     }
     const structural = !findPaxRoute(model, { from: g.area!, goals: new Map([[boarding, 0]]), stepFree: g.stepFree });
+    if (structural) markIfRoutePending(sim, g, g.area!, new Map([[boarding, 0]]), { stepFree: g.stepFree });
     setWaiting(state, g, structural ? 'stranded' : 'waitingFacility');
     return;
   }
@@ -1274,10 +1313,7 @@ function arrive(sim: Simulation, g: PaxGroup): void {
       if (g.area) {
         const leg = portalLegFor(sim, g.area, 'exit');
         if (leg) {
-          g.accessLeg = leg;
-          g.legLength = leg.lengthM;
-          g.legProgress = 0;
-          g.state = 'accessWalk';
+          beginPortalLeg(sim, g, leg);
           return;
         }
       }

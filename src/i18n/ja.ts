@@ -107,6 +107,19 @@ export const PROP_LABEL: Record<string, string> = {
   rooms: '客室数',
 };
 
+/**
+ * 施設種別ごとに意味が異なるプロパティキーのラベル上書き。
+ * 例: 'level' は鉄道駅では地図階層だが、管制塔では管制塔レベル（1〜3）を指す。
+ * 共通の PROP_LABEL のままだと管制塔にも駅用の「階層」説明が出てしまう（表示バグ）。
+ */
+export const PROP_LABEL_BY_KIND: Partial<Record<string, Record<string, string>>> = {
+  tower: { level: '管制塔レベル（1〜3）' },
+};
+
+export function propLabel(kind: string, key: string): string {
+  return PROP_LABEL_BY_KIND[kind]?.[key] ?? PROP_LABEL[key] ?? key;
+}
+
 /** ゲートの搭乗方式（docs/29） */
 export const BOARDING_MODE_LABEL = {
   contact: '通常（コンタクト）',
@@ -209,6 +222,10 @@ export function displayName(layout: AirportLayout, id: string): string {
   }
 }
 
+/** ポータル接続状態（5-16）の表示名 */
+const portalStatusJa = (s: unknown): string =>
+  s === 'operational' ? '接続済み' : s === 'underConstruction' ? '完成待ち' : '未接続';
+
 const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string> = {
   OUT_OF_BOUNDS: (n) => `${n[0]} が敷地の外にはみ出しています`,
   UNBUILDABLE_TERRAIN: (n, p) => `${n[0]} が建設できない土地（水域・岩場・未取得地）にかかっています（${p.tiles}タイル）`,
@@ -305,12 +322,16 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   GATE_ARRIVAL_NO_EXIT: (n) => `${n[0]} から降りた旅客が出口へ行けません`,
   TERMINAL_DEPARTURE_ROUTE: (n) => `${n[0]} は入口から利用可能なチェックイン・保安検査まで連続して移動できません`,
   GATE_ARRIVAL_NO_BAGGAGE_ROUTE: (n) => `${n[0]} の到着旅客が手荷物受取所を経由して出口へ行けません`,
+  TERMINAL_DEPARTURE_ROUTE_PENDING: (n) => `${n[0]} は建設中の連絡通路が完成すれば、入口からチェックイン・保安検査まで移動できるようになります（現在は未接続）`,
+  GATE_ROUTE_PENDING: (n) => `${n[0]} は建設中の連絡通路が完成すれば旅客が到達できるようになります（現在は未接続）`,
   FACILITY_UNDERGROUND_KIND: (n) => `${n[0]} は地下に置けない種類の施設です（地下に置けるのは駐車場・従業員駐車場・鉄道駅だけです）`,
   INTERIOR_FACILITY_UNLINKED: (n) => `${n[0]} は建物内の設備のため、地上サービス網に接続されず能力に数えられません`,
   FACILITY_INTERIOR_INVALID: (n, p) => `${n[0]} の建物内配置が無効です（階 ${p.floor ?? '不明'} または親建物・階層を確認してください）`,
   FACILITY_INTERIOR_OUTSIDE: (n) => `${n[0]} が親建物 ${n[1]} の範囲外にあります`,
   TERMINAL_LINK_CLEARANCE: (n, p) => `${n[0]} の連絡通路下の航空機クリアランスが不足しています（${p.clearance}m、必要 ${p.required}m）`,
   PORTAL_LEVEL_MISMATCH: (n, p) => `${n[0]} の歩行ポータルの階が接続先と一致しません（ポータル ${p.floorIndex} 階、エリア ${p.areaLevel} 階）`,
+  PORTAL_CONNECTION_PENDING: (n, p) => `${n[0]} は建設中のポータルが完成すればターミナルと接続します（入口方向: ${portalStatusJa(p.toEntrance)}、出口方向: ${portalStatusJa(p.fromExit)}）`,
+  PORTAL_UNREACHABLE: (n, p) => `${n[0]} のポータルからはターミナルの入口/出口へ到達できません（入口方向: ${portalStatusJa(p.toEntrance)}、出口方向: ${portalStatusJa(p.fromExit)}）`,
   NO_RUNWAY: () => '滑走路がありません',
   NO_TOWER: () => '管制塔がありません',
   NO_GSE_BASE: () => 'GSE基地がありません（作業員・車両がいないため折り返し作業ができません）',
@@ -562,6 +583,7 @@ export const MISS_BOTTLENECK_LABEL: Record<MissBottleneck, string> = {
   access: '空港へのアクセス中',
   transferLate: '乗継時間の不足',
   unreachable: '到達不能',
+  routePending: '連絡通路の完成待ち',
   noGate: 'ゲートなし',
   facilityClosed: '施設閉鎖',
   other: 'その他',

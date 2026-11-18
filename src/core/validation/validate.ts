@@ -29,6 +29,7 @@ import { satOverlapConvex } from '../geometry/polygon';
 import { TILE_M } from '../model/catalog';
 import type { NetNode, TerminalAreaKind } from '../model/types';
 import { CONNECTOR_DETOUR, DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
+import { verifyPortalAccess } from '../terminal/networkGraph';
 import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
@@ -128,12 +129,16 @@ export type IssueCode =
   | 'GATE_ARRIVAL_NO_EXIT'
   | 'TERMINAL_DEPARTURE_ROUTE'
   | 'GATE_ARRIVAL_NO_BAGGAGE_ROUTE'
+  | 'TERMINAL_DEPARTURE_ROUTE_PENDING'
+  | 'GATE_ROUTE_PENDING'
   | 'FACILITY_INTERIOR_INVALID'
   | 'FACILITY_INTERIOR_OUTSIDE'
   | 'FACILITY_UNDERGROUND_KIND'
   | 'INTERIOR_FACILITY_UNLINKED'
   | 'TERMINAL_LINK_CLEARANCE'
   | 'PORTAL_LEVEL_MISMATCH'
+  | 'PORTAL_CONNECTION_PENDING'
+  | 'PORTAL_UNREACHABLE'
   // 空港全体
   | 'NO_RUNWAY'
   | 'NO_TOWER'
@@ -218,12 +223,16 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   GATE_ARRIVAL_NO_EXIT: 'warning',
   TERMINAL_DEPARTURE_ROUTE: 'warning',
   GATE_ARRIVAL_NO_BAGGAGE_ROUTE: 'warning',
+  TERMINAL_DEPARTURE_ROUTE_PENDING: 'info',
+  GATE_ROUTE_PENDING: 'info',
   FACILITY_INTERIOR_INVALID: 'error',
   FACILITY_INTERIOR_OUTSIDE: 'error',
   FACILITY_UNDERGROUND_KIND: 'warning',
   INTERIOR_FACILITY_UNLINKED: 'info',
   TERMINAL_LINK_CLEARANCE: 'error',
   PORTAL_LEVEL_MISMATCH: 'warning',
+  PORTAL_CONNECTION_PENDING: 'info',
+  PORTAL_UNREACHABLE: 'warning',
   NO_RUNWAY: 'warning',
   NO_TOWER: 'warning',
   NO_GSE_BASE: 'warning',
@@ -1029,7 +1038,7 @@ function checkAccess(layout: AirportLayout, sink: IssueSink): void {
 
 // ---------------------------------------------------------------- ターミナル内部
 
-function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: IssueSink): void {
+function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: IssueSink, futureModel?: TerminalModel): void {
   // 配置: ターミナルの敷地・階の範囲内、同じ階で重ならない
   const areas = sortedValues(layout.terminalAreas);
   for (const a of areas) {
@@ -1079,13 +1088,15 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     const entrances = ids.filter((id) => model.areas[id]!.kind === 'entrance');
     const checkIns = ids.filter((id) => model.areas[id]!.kind === 'checkIn' && usable(id));
     const securities = ids.filter((id) => model.areas[id]!.kind === 'security' && usable(id));
-    const hasDepartureRoute = entrances.some((entry) => checkIns.some((ci) =>
-      !!findPaxRoute(model, { from: entry, goals: new Map([[ci, 0]]) }) && securities.some((sec) =>
-        !!findPaxRoute(model, { from: ci, goals: new Map([[sec, 0]]), uncleared: true }),
+    const departureRouteIn = (m: TerminalModel) => entrances.some((entry) => checkIns.some((ci) =>
+      !!findPaxRoute(m, { from: entry, goals: new Map([[ci, 0]]) }) && securities.some((sec) =>
+        !!findPaxRoute(m, { from: ci, goals: new Map([[sec, 0]]), uncleared: true }),
       ),
     ));
-    if (entrances.length > 0 && checkIns.length > 0 && securities.length > 0 && !hasDepartureRoute) {
-      sink.add('TERMINAL_DEPARTURE_ROUTE', [t.id], {}, t.origin);
+    if (entrances.length > 0 && checkIns.length > 0 && securities.length > 0 && !departureRouteIn(model)) {
+      // 5-13 T6: 建設中リンクを含めた将来モデルで成立するなら「完成待ち」として区別する
+      if (futureModel && departureRouteIn(futureModel)) sink.add('TERMINAL_DEPARTURE_ROUTE_PENDING', [t.id], {}, t.origin);
+      else sink.add('TERMINAL_DEPARTURE_ROUTE', [t.id], {}, t.origin);
     }
   }
 
@@ -1149,6 +1160,19 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     }
   }
 
+  // 歩行ポータル（5-16 T4）: ポータル施設から入口/出口への接続状態を複合グラフで診断する。
+  // 運用中なら何も出さない。建設中でのみ届く方向は「完成待ち」、完成後も届かない方向は未接続とする
+  for (const st of verifyPortalAccess(layout)) {
+    const facility = layout.facilities[st.facilityId];
+    if (!facility) continue;
+    if (st.toEntrance === 'underConstruction' || st.fromExit === 'underConstruction') {
+      sink.add('PORTAL_CONNECTION_PENDING', [st.facilityId], { toEntrance: st.toEntrance, fromExit: st.fromExit }, facility.origin);
+    }
+    if (st.toEntrance === 'unreachable' || st.fromExit === 'unreachable') {
+      sink.add('PORTAL_UNREACHABLE', [st.facilityId], { toEntrance: st.toEntrance, fromExit: st.fromExit }, facility.origin);
+    }
+  }
+
   // ゲート: 搭乗口・降機口があり、入口から保安検査を経て到達でき、降機口から出口へ出られる
   for (const g of sortedValues(layout.facilities).filter((f) => f.kind === 'gate')) {
     const access = model.gates[g.id];
@@ -1164,27 +1188,37 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
       sink.add('GATE_NO_BOARDING_ACCESS', [g.id], {}, g.origin);
     } else {
       const securities = ofKind('security');
-      const reachable = ofKind('entrance').some((e) =>
+      const reachableIn = (m: TerminalModel) => ofKind('entrance').some((e) =>
         securities.some(
           (sec) =>
-            findPaxRoute(model, { from: e, goals: new Map([[sec, 0]]) }) &&
-            findPaxRoute(model, { from: sec, goals: new Map([[access.boarding!, 0]]) }),
+            findPaxRoute(m, { from: e, goals: new Map([[sec, 0]]) }) &&
+            findPaxRoute(m, { from: sec, goals: new Map([[access.boarding!, 0]]) }),
         ),
       );
-      if (!reachable) sink.add('GATE_UNREACHABLE', [g.id], {}, g.origin);
+      if (!reachableIn(model)) {
+        // 5-13 T6: 将来モデルで到達できるなら「完成待ち」
+        if (futureModel && reachableIn(futureModel)) sink.add('GATE_ROUTE_PENDING', [g.id], {}, g.origin);
+        else sink.add('GATE_UNREACHABLE', [g.id], {}, g.origin);
+      }
     }
 
     if (!access.deplane) {
       sink.add('GATE_NO_ARRIVAL_ACCESS', [g.id], {}, g.origin);
     } else {
       const exits = new Map(ofKind('exit').map((id) => [id, 0] as const));
-      if (!findPaxRoute(model, { from: access.deplane, goals: exits })) sink.add('GATE_ARRIVAL_NO_EXIT', [g.id], {}, g.origin);
+      if (!findPaxRoute(model, { from: access.deplane, goals: exits })) {
+        if (futureModel && findPaxRoute(futureModel, { from: access.deplane, goals: exits })) sink.add('GATE_ROUTE_PENDING', [g.id], {}, g.origin);
+        else sink.add('GATE_ARRIVAL_NO_EXIT', [g.id], {}, g.origin);
+      }
       const claims = ofKind('baggageClaim').filter((id) => Number(layout.terminalAreas[id]!.props.belts ?? 0) > 0);
-      const hasBaggageRoute = claims.some((claim) =>
-        !!findPaxRoute(model, { from: access.deplane!, goals: new Map([[claim, 0]]) }) &&
-        !!findPaxRoute(model, { from: claim, goals: exits }),
+      const baggageRouteIn = (m: TerminalModel) => claims.some((claim) =>
+        !!findPaxRoute(m, { from: access.deplane!, goals: new Map([[claim, 0]]) }) &&
+        !!findPaxRoute(m, { from: claim, goals: exits }),
       );
-      if (claims.length > 0 && !hasBaggageRoute) sink.add('GATE_ARRIVAL_NO_BAGGAGE_ROUTE', [g.id], {}, g.origin);
+      if (claims.length > 0 && !baggageRouteIn(model)) {
+        if (futureModel && baggageRouteIn(futureModel)) sink.add('GATE_ROUTE_PENDING', [g.id], {}, g.origin);
+        else sink.add('GATE_ARRIVAL_NO_BAGGAGE_ROUTE', [g.id], {}, g.origin);
+      }
     }
   }
 
@@ -1319,7 +1353,9 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   checkFacilityHierarchy(layout, sink);
   checkRoads(layout, parts, sink);
   checkAccess(layout, sink);
-  checkTerminals(layout, terminal, sink);
+  // 5-13 T6: 建設中リンクがある場合だけ将来モデルも作り、経路診断で「完成待ち」を区別する
+  const hasPendingLink = Object.values(layout.terminalLinks ?? {}).some((l) => l.buildState === 'underConstruction');
+  checkTerminals(layout, terminal, sink, hasPendingLink ? buildTerminalModel(layout, { includeUnderConstruction: true }) : undefined);
   checkConnectorRunways(layout, parts, terminal, sink);
 
   const issues = sink.issues;

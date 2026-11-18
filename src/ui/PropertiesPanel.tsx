@@ -58,7 +58,7 @@ import {
   FACILITY_LABEL,
   NODE_KIND_LABEL,
   OPERABILITY_LABEL,
-  PROP_LABEL,
+  propLabel,
   PROJECT_KIND_LABEL,
   RAIL_SERVICE_LABEL,
   ROAD_CLASS_LABEL,
@@ -838,7 +838,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         {PROP_SCHEMAS[f.kind]
           .filter((def) => !(f.kind === 'gate' && busGate && (def.key === 'standId' || def.key === 'jetBridge')))
           .map((def) => (
-          <Field key={def.key} label={PROP_LABEL[def.key] ?? def.key}>
+          <Field key={def.key} label={propLabel(f.kind, def.key)}>
             {def.type === 'int' && (
               <NumberInput
                 value={(f.props[def.key] as number | undefined) ?? propDefault(def) as number}

@@ -4,6 +4,8 @@ import { post, type CompanyState } from '../economy/company';
 import type { Simulation } from '../sim/simulation';
 import type { PaxGroup, SimState } from '../sim/types';
 import { ACCESS_MODES, analyzeAccess, type AccessAnalysis, type AccessMode, type AccessSegments, type SegmentPath, type TransitMode } from './model';
+import { cargoPlannedTruckTripsPerDay } from '../economy/cargo';
+import { featureOn } from '../economy/unlocks';
 
 /**
  * 運航中の空港アクセス（docs/15_access_rules.md §4）。
@@ -27,6 +29,8 @@ export interface AccessRuntime {
   parkingSpaces: number;
   taxiBerths: number;
   busesPerHour: number;
+  /** 貨物トラックの背景交通（台/時、1日の計画台数を24時間へ均等配分。CARGO-05。旧セーブでは欠落しうるため任意） */
+  cargoTrucksPerHour?: number;
   trainsPerHour: number;
   factor: number;
   /** 駐車中の車の出庫時刻（昇順） */
@@ -81,6 +85,11 @@ export function emptyAccessStats(): AccessStats {
   };
 }
 
+/** 貨物トラックの背景交通（台/時）。貨物が有効で当日計画の運搬がある場合だけ発生する（CARGO-05） */
+function cargoTrucksPerHourFor(c: CompanyState): number {
+  return featureOn(c, 'cargo') ? cargoPlannedTruckTripsPerDay(c, c.day) / 24 : 0;
+}
+
 export function createAccessRuntime(sim: Simulation, c: CompanyState): AccessRuntime | null {
   if (!sim.ctx.paxTerminal) return null;
   const a: AccessAnalysis = analyzeAccess(sim.ctx.layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day });
@@ -100,6 +109,8 @@ export function createAccessRuntime(sim: Simulation, c: CompanyState): AccessRun
     parkingSpaces: a.parkingSpaces,
     taxiBerths: a.taxiBerths,
     busesPerHour: a.busesPerHour,
+    // 貨物 OFF ではフィールド自体を持たない（フィンガープリントの不変条件。CARGO-05）
+    ...(cargoTrucksPerHourFor(c) > 0 ? { cargoTrucksPerHour: cargoTrucksPerHourFor(c) } : {}),
     trainsPerHour: a.trainsPerHour,
     factor: a.factor,
     // 前日から駐車している車（駐車場が減っていれば、収まる分だけ）
@@ -120,6 +131,8 @@ export function refreshAccess(sim: Simulation, c: CompanyState): number {
   if (acc) {
     for (const m of ACCESS_MODES) acc.shares[m] = a.modes[m].share;
     acc.factor = a.factor;
+    const trucks = cargoTrucksPerHourFor(c);
+    acc.cargoTrucksPerHour = trucks > 0 ? trucks : undefined;
     acc.segments = a.segments;
     acc.railCapPerHour = a.segments && a.railWalkCapacityPerHour !== null ? Math.min(a.trainsPerHour * M.trainSeats, a.railWalkCapacityPerHour) : undefined;
   }
@@ -253,7 +266,7 @@ export function accessDeparture(sim: Simulation, g: PaxGroup): number {
     }
   }
   if (mode === 'car' || mode === 'dropoff' || mode === 'taxi') {
-    // 道路: 自家用車 1台、送迎・タクシー 2台（往復）。バスは毎時の便数 × 2 を常に含む
+    // 道路: 自家用車 1台、送迎・タクシー 2台（往復）。バスの定期便と貨物トラックを背景交通として常に含む
     const vehicles = mode === 'car' ? 1 : 2;
     if (acc.segments) {
       // 区間モデル（フェーズ 4 §6.3）: 出入口の経路ごとに台数を数え、辺ごとの BPR 遅れを合計する
@@ -263,7 +276,9 @@ export function accessDeparture(sim: Simulation, g: PaxGroup): number {
       acc.stats.roadDelayN++;
       delayMin += d;
     } else {
-      const v = add(acc, `road:${hour}`, vehicles) + acc.busesPerHour * 2;
+      // 背景交通: バスの定期便と貨物トラック（どちらも往復 ×2）。容量の消費はこの式だけにし、
+      // アクセス係数側では差し引かない（二重計上にしない。CARGO-05）
+      const v = add(acc, `road:${hour}`, vehicles) + acc.busesPerHour * 2 + (acc.cargoTrucksPerHour ?? 0) * 2;
       const d = congestionDelayMin(M.externalMin[mode], v, acc.roadCapacity);
       acc.stats.roadDelaySum += d;
       acc.stats.roadDelayN++;
