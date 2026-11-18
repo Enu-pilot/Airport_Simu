@@ -13,6 +13,19 @@ export const INTERIOR_MIN_FLOOR = -5;
 /** ターミナル内エリアの最下階: 地下 3 階（-3）まで。地上は親（ターミナル）の階数 − 1 まで */
 export const TERMINAL_AREA_MIN_LEVEL = -3;
 
+/**
+ * 地下（mapLevel < 0）に単独で置ける施設の種類（5-09 / docs/39 W-7 で確定）。
+ * 地下駐車場・従業員駐車場・地下駅だけを許し、管制塔・消防・格納庫など地上で機能する施設は地下に置けない。
+ * 建物の中の内部設備（parentFacilityId あり）はこの制限の対象外（親の階として扱う）。
+ */
+export const UNDERGROUND_FACILITY_KINDS: readonly string[] = ['parking', 'staffParking', 'railStation'];
+
+/** 単独施設をその階に置けない理由（地下の種類制限）。置けるなら null */
+export function undergroundFacilityProblem(kind: string, mapLevel: number | undefined, hasParent: boolean): 'undergroundKind' | null {
+  if (hasParent || mapLevel === undefined || mapLevel >= 0) return null;
+  return UNDERGROUND_FACILITY_KINDS.includes(kind) ? null : 'undergroundKind';
+}
+
 export type PlacementProblem = 'floorOutOfRange' | 'outsideParent';
 
 const levelsOf = (layout: AirportLayout, facilityId: string): number => Number(layout.facilities[facilityId]?.props.levels ?? 1);

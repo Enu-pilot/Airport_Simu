@@ -678,7 +678,13 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     }));
   };
   const flightRt = arrival.routeType === 'international' ? 'international' : 'domestic';
-  const candidates = Object.values(ctx.stands)
+  // 専用スポット（5-08）: 自契約の専用スポットを優先し、他契約の専用スポットは代替がないときだけ使う
+  const myContract = arrival.contractId ? sim.company?.contracts[arrival.contractId] : undefined;
+  const dedicatedMine = myContract?.dedicatedStandId;
+  const dedicatedOthers = new Set(
+    Object.values(sim.company?.contracts ?? {}).filter((k) => k.status === 'active' && k.dedicatedStandId && k.id !== arrival.contractId).map((k) => k.dedicatedStandId!),
+  );
+  const baseCandidates = Object.values(ctx.stands)
     .filter(
       (s) =>
         s.entry &&
@@ -686,11 +692,14 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
         !state.closures.stands.includes(s.id) &&
         checkStand(type, ctx.layout.stands[s.id]!).status === 'ok' &&
         gateRouteCompatible(sim, s.id, flightRt),
-    )
+    );
+  const nonDedicated = baseCandidates.filter((s) => !dedicatedOthers.has(s.id));
+  const candidates = (nonDedicated.length > 0 ? nonDedicated : baseCandidates)
     .sort(
       (a, b) =>
         // 運航者が reassignStand で指定したスポットは、ホームスポット等より先に評価する（1-14 / E-3）
         Number(b.id === ac.requestedStandId) - Number(a.id === ac.requestedStandId) ||
+        Number(b.id === dedicatedMine) - Number(a.id === dedicatedMine) ||
         Number(gateClosed(sim, a.id)) - Number(gateClosed(sim, b.id)) ||
         Number(!homeSet.has(a.id)) - Number(!homeSet.has(b.id)) ||
         Number(!!homeOwners.get(a.id)?.some((owner) => owner !== airlineId)) - Number(!!homeOwners.get(b.id)?.some((owner) => owner !== airlineId)) ||

@@ -47,7 +47,7 @@ import {
   type NetKind,
 } from './network';
 import { headingVector, runwayAxis, runwayEnd, runwayMidpoint } from './runway';
-import { TERMINAL_AREA_MIN_LEVEL } from './levelRules';
+import { TERMINAL_AREA_MIN_LEVEL, undergroundFacilityProblem } from './levelRules';
 import { facilityLevel, roadEdgeLevelValid } from '../model/levels';
 import { DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, DEFAULT_TERMINAL_LINK_WIDTH_M } from '../terminal/model';
 import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
@@ -158,6 +158,7 @@ export function placeFacility(
   const h = spec.resizable ? (opts.h ?? spec.defaultH) : spec.defaultH;
   if (w < spec.minW || h < spec.minH) return fail('INVALID_VALUE');
   if (opts.mapLevel !== undefined && (!Number.isInteger(opts.mapLevel) || opts.mapLevel < -5 || opts.mapLevel > 10)) return fail('INVALID_VALUE');
+  if (undergroundFacilityProblem(kind, opts.mapLevel, !!opts.parentFacilityId)) return fail('INVALID_VALUE');
   const parent = opts.parentFacilityId ? layout.facilities[opts.parentFacilityId] : undefined;
   if (opts.parentFacilityId && (!parent || parent.parentFacilityId || FACILITY_SPECS[parent.kind].layer !== 'building' || parent.kind === 'gate')) return fail('INVALID_VALUE');
   const floorIndex = opts.parentFacilityId ? (opts.floorIndex ?? 0) : undefined;
@@ -1136,6 +1137,7 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
           if (!isBuildState(v)) return fail('INVALID_VALUE');
         } else if (k === 'mapLevel') {
           if (!isInt(v, -5, 10)) return fail('INVALID_VALUE');
+          if (undergroundFacilityProblem(f.kind, v as number, !!f.parentFacilityId)) return fail('INVALID_VALUE');
         } else if (k === 'floorIndex') {
           if (!isInt(v, -5, 10)) return fail('INVALID_VALUE');
         } else if (k === 'parentFacilityId') {

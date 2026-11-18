@@ -163,6 +163,8 @@ export function setUnitBroken(sim: Simulation, unitId: string, broken: boolean, 
 export function createTurnaroundTasks(sim: Simulation, ac: Aircraft, opts: { skip?: readonly string[] } = {}): void {
   const { state } = sim;
   if ((state.aircraftTasks[ac.id] ?? []).length > 0) return;
+  // 省略した作業を機体に記録する（出発準備完了の判定で「要求されていない作業」として扱うため。保存にも残る）
+  if (opts.skip?.length) ac.skippedTasks = [...opts.skip] as TaskKind[];
   const type = resolveType(sim.ctx.types, ac.typeId);
   const defect = withRng(state, (rng) => rng.next() < DEFECT_PROB);
   const totals = unitTotals(sim);
@@ -245,13 +247,27 @@ export function tasksOf(state: SimState, acId: string): GroundTask[] {
 }
 
 export function taskDone(state: SimState, acId: string, kind: TaskKind): boolean {
+  // 省略された作業は「要求されていない作業」なので、依存判定では完了として扱う（夜間滞泊の持ち越し。OD 修正）。
+  // 省略の記録はタスク生成と同時にだけ付くので、未生成の通常便が誤って完了扱いになることはない
+  if (state.aircraft[acId]?.skippedTasks?.includes(kind)) return true;
   return tasksOf(state, acId).some((t) => t.kind === kind && t.state === 'done');
 }
 
-/** 出発準備完了の判定: プッシュバック以外の全作業が完了している */
+/**
+ * 出発準備完了の判定: プッシュバック以外の必須作業がすべて存在し、完了している。
+ * 省略された作業（skippedTasks。夜間滞泊の持ち越しの deplane/unload）は「要求されていない作業」として扱い、
+ * 逆に必須作業の欠落・未着手・進行中・失敗は未完了として扱う（タスク数の一致では判定しない）。
+ */
 export function allTurnaroundDone(state: SimState, acId: string): boolean {
+  const ac = state.aircraft[acId];
+  if (!ac) return false;
+  const skipped = new Set(ac.skippedTasks ?? []);
   const tasks = tasksOf(state, acId).filter((t) => t.kind !== 'pushback');
-  return tasks.length === TURNAROUND_TASKS.length && tasks.every((t) => t.state === 'done');
+  for (const kind of TURNAROUND_TASKS) {
+    if (skipped.has(kind)) continue;
+    if (!tasks.some((t) => t.kind === kind && t.state === 'done')) return false;
+  }
+  return tasks.every((t) => t.state === 'done');
 }
 
 /** 搭乗を始めてよいか（降機・清掃・ケータリング・給油・点検の完了） */

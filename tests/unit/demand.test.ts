@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addContract, createCompany, type CompanyState } from '../../src/core/economy/company';
 import { defaultCity } from '../../src/core/economy/city';
-import { distanceFactor, routeDemand, routeDemandSummary, routeLoadFactors } from '../../src/core/economy/demand';
+import { distanceFactor, monthOf, routeDemand, routeDemandSummary, routeLoadFactors, seasonalWeekdayFactor, weekdayOf } from '../../src/core/economy/demand';
 import { destinationDef } from '../../src/core/economy/registry';
 
 /**
@@ -72,5 +72,47 @@ describe('demand: 路線需要モデル（3-05）', () => {
     const c = createCompany('career', 'demand-nocity');
     expect(routeDemand(c, destinationDef('TYO'), 1)).toBeNull();
     expect(routeLoadFactors(c, 0, 1)).toBeNull();
+  });
+});
+
+describe('demand: 季節・曜日（5-06）', () => {
+  it('曜日は day % 7（0 = 月曜）、月は 365 日の繰り返し', () => {
+    expect(weekdayOf(0)).toBe(0);
+    expect(weekdayOf(6)).toBe(6);
+    expect(weekdayOf(7)).toBe(0);
+    expect(monthOf(0)).toBe(0); // 1月
+    expect(monthOf(31)).toBe(1); // 2月
+    expect(monthOf(212)).toBe(7); // 8月
+    expect(monthOf(364)).toBe(11); // 12月
+    expect(monthOf(365)).toBe(0); // 翌年の1月
+  });
+
+  it('業務寄りの都市は金曜に、観光寄りの都市は週末と 8 月に需要が寄る', () => {
+    const business = { demand: { business: 1, leisure: 0, cargo: 0 } };
+    const leisure = { demand: { business: 0, leisure: 1, cargo: 0 } };
+    // 2026-01 の月曜（day 0）基準: 業務は金曜（day 4）が月曜より高い
+    expect(seasonalWeekdayFactor(business, 4)).toBeGreaterThan(seasonalWeekdayFactor(business, 0));
+    // 観光は土曜（day 5）が月曜より高い
+    expect(seasonalWeekdayFactor(leisure, 5)).toBeGreaterThan(seasonalWeekdayFactor(leisure, 0));
+    // 観光は 8 月（day 212〜）が 2 月（day 31〜）より高い
+    expect(seasonalWeekdayFactor(leisure, 212)).toBeGreaterThan(seasonalWeekdayFactor(leisure, 31));
+    // 業務は 8 月に下がる
+    expect(seasonalWeekdayFactor(business, 212)).toBeLessThan(seasonalWeekdayFactor(business, 31));
+  });
+
+  it('係数の年間平均はほぼ 1（年間需要をほぼ変えない）', () => {
+    for (const dest of [{ demand: { business: 0.8, leisure: 0.4, cargo: 0 } }, { demand: { business: 0.2, leisure: 0.9, cargo: 0 } }]) {
+      let sum = 0;
+      for (let d = 0; d < 365; d++) sum += seasonalWeekdayFactor(dest, d);
+      expect(sum / 365).toBeCloseTo(1, 1);
+    }
+  });
+
+  it('配分後の需要にも効く: 観光都市は 8 月の需要が 2 月より多い', () => {
+    const c = marketCompany();
+    addContract(c, { ...base, airlineId: 'RJ', destinationId: 'KTA', typeId: 'regional70', perDay: 1 });
+    const feb = routeDemandSummary(c, 40, 1)!; // 2月
+    const aug = routeDemandSummary(c, 220, 1)!; // 8月
+    expect(aug.get('KTA')!.demand).toBeGreaterThan(feb.get('KTA')!.demand);
   });
 });

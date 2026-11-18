@@ -21,7 +21,7 @@ import {
 } from '../core/model/types';
 import { distance } from '../core/geometry/vec';
 import { facilityDims, standEntry } from '../core/layout/footprint';
-import { facilityLevel } from '../core/model/levels';
+import { facilityLevel, roadEdgeLevelValid } from '../core/model/levels';
 import { INTERIOR_MIN_FLOOR, TERMINAL_AREA_MIN_LEVEL, levelsInUse } from '../core/layout/levelRules';
 import { edgesOfNode } from '../core/layout/network';
 import {
@@ -52,6 +52,7 @@ import {
   PROJECT_KIND_LABEL,
   RAIL_SERVICE_LABEL,
   ROAD_CLASS_LABEL,
+  CONNECTOR_KIND_LABEL,
   SIZE_LABEL,
   displayName,
   issueText,
@@ -378,6 +379,10 @@ function RoadNodeLayerControl({ layout, nodeId }: { layout: AirportLayout; nodeI
   const kinds: Record<RoadClass, RoadConnectorKind[]> = {
     walkway: ['stairs', 'escalator', 'elevator'], public: ['ramp'], service: ['ramp'], rail: ['railRamp'], fuel: ['pipeRiser'],
   };
+  // 選択中の設備で結べる候補だけを選べるようにする（5-09 / W-9: 勾配・近接の条件を候補の時点で示す）
+  const candidateOk = (candidate: (typeof candidates)[number]): boolean => roadEdgeLevelValid({ id: 'preview', from: nodeId, to: candidate.id, name: '', roadClass, oneWay: false, buildState: 'operational', connectorKind }, node, candidate);
+  const target = candidates.find((c) => c.id === targetId);
+  const targetRunM = target ? Math.round(Math.hypot(target.pos.x - node.pos.x, target.pos.y - node.pos.y) * TILE_M) : 0;
   const setClass = (value: RoadClass) => { setRoadClass(value); setConnectorKind(kinds[value][0]!); };
   return <section className="operability road-layer-connect" data-testid="road-layer-connect">
     <strong>階層接続設備</strong>
@@ -385,13 +390,14 @@ function RoadNodeLayerControl({ layout, nodeId }: { layout: AirportLayout; nodeI
     {candidates.length === 0 ? <div className="muted">別階層に接続候補ノードがありません。</div> : <>
       <label className="prop-field"><span className="prop-label">接続先ノード</span><select value={targetId} onChange={(e) => setTargetId(e.target.value)}>
         <option value="">選択してください</option>
-        {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.id} · 階層 {candidate.level ?? 0} · ({candidate.pos.x}, {candidate.pos.y})</option>)}
+        {candidates.map((candidate) => { const ok = candidateOk(candidate); const distM = Math.round(Math.hypot(candidate.pos.x - node.pos.x, candidate.pos.y - node.pos.y) * TILE_M); return <option key={candidate.id} value={candidate.id} disabled={!ok}>{candidate.id} · 階層 {candidate.level ?? 0} · ({candidate.pos.x}, {candidate.pos.y}) · {distM} m{ok ? '' : '（この設備では結べません）'}</option>; })}
       </select></label>
+      {target && (connectorKind === 'ramp' || connectorKind === 'railRamp') && <p className="muted small" data-testid="connector-run">勾配区間の長さ {targetRunM} m（{connectorKind === 'ramp' ? '道路ランプは高低差の 12 倍以上' : '鉄道ランプは高低差の 20 倍以上'}が必要です）</p>}
       <label className="prop-field"><span className="prop-label">移動種別</span><select value={roadClass} onChange={(e) => setClass(e.target.value as RoadClass)}>
         {(Object.keys(kinds) as RoadClass[]).map((kind) => <option key={kind} value={kind}>{ROAD_CLASS_LABEL[kind]}</option>)}
       </select></label>
       <label className="prop-field"><span className="prop-label">接続設備</span><select value={connectorKind} onChange={(e) => setConnectorKind(e.target.value as RoadConnectorKind)}>
-        {kinds[roadClass].map((kind) => <option key={kind}>{kind}</option>)}
+        {kinds[roadClass].map((kind) => <option key={kind} value={kind}>{CONNECTOR_KIND_LABEL[kind]}</option>)}
       </select></label>
       <label className="prop-field"><span className="prop-label">能力 / 時（0=未算出）</span><input type="number" min="0" value={capacity} onChange={(e) => setCapacity(Math.max(0, Number(e.target.value) || 0))} /></label>
       {['elevator', 'escalator', 'stairs'].includes(connectorKind) && <label className="prop-field"><span className="prop-label">所要時間（秒、0=距離から）</span><input type="number" min="0" value={travelSec} onChange={(e) => setTravelSec(Math.max(0, Number(e.target.value) || 0))} /></label>}

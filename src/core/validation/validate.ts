@@ -17,6 +17,7 @@ import {
 import { buildAirsideNetwork, reachableNodes, type AirsideNetwork } from '../airside/network';
 import { collectFootprints, facilityTiles, standTiles, type FootprintPart } from '../layout/footprint';
 import { edgesOfNode, type AnyEdge } from '../layout/network';
+import { undergroundFacilityProblem } from '../layout/levelRules';
 import { positionOnRunway, runwayAxis, runwayEnd, runwayMaxSize } from '../layout/runway';
 import { designatorsOf } from '../layout/designators';
 import { holdWalkLimitM, walkToClear, type HoldRunway } from '../layout/holdShort';
@@ -129,6 +130,8 @@ export type IssueCode =
   | 'GATE_ARRIVAL_NO_BAGGAGE_ROUTE'
   | 'FACILITY_INTERIOR_INVALID'
   | 'FACILITY_INTERIOR_OUTSIDE'
+  | 'FACILITY_UNDERGROUND_KIND'
+  | 'INTERIOR_FACILITY_UNLINKED'
   | 'TERMINAL_LINK_CLEARANCE'
   // 空港全体
   | 'NO_RUNWAY'
@@ -216,6 +219,8 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   GATE_ARRIVAL_NO_BAGGAGE_ROUTE: 'warning',
   FACILITY_INTERIOR_INVALID: 'error',
   FACILITY_INTERIOR_OUTSIDE: 'error',
+  FACILITY_UNDERGROUND_KIND: 'warning',
+  INTERIOR_FACILITY_UNLINKED: 'info',
   TERMINAL_LINK_CLEARANCE: 'error',
   NO_RUNWAY: 'warning',
   NO_TOWER: 'warning',
@@ -882,7 +887,12 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
   for (const f of facilities) {
     const tiles = facilityTiles(f);
     const spec = FACILITY_SPECS[f.kind];
-    if (spec.needsAirsideAccess && !touches(tiles, airsideAccess)) sink.add('NO_AIRSIDE_ACCESS', [f.id], {}, f.origin);
+    // 建物内の設備は親の接し方で判定する（5-09 / W-3）。内部設備そのものへの接地警告は出さない
+    if (!f.parentFacilityId && spec.needsAirsideAccess && !touches(tiles, airsideAccess)) sink.add('NO_AIRSIDE_ACCESS', [f.id], {}, f.origin);
+    // 地下に置けない種類（5-09 / W-7）。配置は operations で止めるが、既存データ向けに警告も出す
+    if (undergroundFacilityProblem(f.kind, f.mapLevel, !!f.parentFacilityId)) sink.add('FACILITY_UNDERGROUND_KIND', [f.id], {}, f.origin);
+    // 建物内の地上サービス設備は接続モデルがない間は能力に数えない（docs/34）。その旨を知らせる（5-09 / W-3）
+    if (f.parentFacilityId && (f.kind === 'gseBase' || f.kind === 'baggageSort' || f.kind === 'fuelFarm' || f.kind === 'maintenance')) sink.add('INTERIOR_FACILITY_UNLINKED', [f.id], {}, f.origin);
     if (f.kind === 'terminal') {
       if (!touches(tiles, publicRoad)) sink.add('TERMINAL_NO_ROAD', [f.id], {}, f.origin);
       const own = new Set(tiles.map((t) => tileKey(t.x, t.y)));

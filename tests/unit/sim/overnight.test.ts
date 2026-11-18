@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { addContract, createSandboxCompany, type CompanyState } from '../../../src/core/economy/company';
 import { planDay } from '../../../src/core/economy/planning';
 import { createSampleAirport } from '../../../src/core/sample/sampleAirport';
-import { createSimulation, stepSimulation, type Simulation } from '../../../src/core/sim/simulation';
+import { addTurnaround, createSimulation, stepSimulation, type Simulation } from '../../../src/core/sim/simulation';
+import { allTurnaroundDone, tasksOf } from '../../../src/core/sim/ground';
 import { DAY_SEC } from '../../../src/core/sim/rules';
 
 function overnightCompany(seed = 'ovn-1'): CompanyState {
@@ -101,5 +102,67 @@ describe('overnight: 記録と置き直し（4B-2）', () => {
     const dep = Object.values(sim.state.flights).find((f) => f.overnight && f.direction === 'departure');
     expect(dep?.status).toBe('cancelled');
     expect(sim.state.events.some((e) => e.kind === 'cannotOperate' && e.note === 'overnightNoStand')).toBe(true);
+  });
+});
+
+describe('翌朝便の出発準備完了判定（OD 修正）', () => {
+  /** 締めを 1 回通して持ち越し機を置き直した sim を作る */
+  const materializedSim = (): Simulation => {
+    const c = overnightCompany();
+    const sim = createSimulation(createSampleAirport(), { company: c, seed: 'ovn-1' });
+    run(sim, DAY_SEC + 3600 - 6 * 3600);
+    const c2 = structuredClone(c);
+    return createSimulation(createSampleAirport(), { company: c2, seed: 'ovn-1' });
+  };
+
+  it('skip した作業は未完了扱いにならず、残りの必須作業が終われば準備完了になる', { timeout: 300000 }, () => {
+    const sim = materializedSim();
+    const ac = Object.values(sim.state.aircraft).find((a) => a.skippedTasks?.includes('deplane'))!;
+    expect(ac).toBeDefined();
+    expect(ac.skippedTasks).toEqual(['deplane', 'unload']);
+    const tasks = tasksOf(sim.state, ac.id);
+    expect(tasks.map((t) => t.kind).sort()).toEqual(['board', 'cater', 'clean', 'fuel', 'inspect', 'load']);
+    // まだ終わっていないので準備完了ではない
+    expect(allTurnaroundDone(sim.state, ac.id)).toBe(false);
+    // 残りの作業をすべて完了させる
+    for (const t of tasks) t.state = 'done';
+    expect(allTurnaroundDone(sim.state, ac.id)).toBe(true);
+    // 1 つでも進行中に戻れば準備完了ではない
+    tasks[0]!.state = 'inProgress';
+    expect(allTurnaroundDone(sim.state, ac.id)).toBe(false);
+  });
+
+  it('通常便は全作業が必要で、必須作業の欠落は未完了として扱う', { timeout: 300000 }, () => {
+    const sim = createSimulation(createSampleAirport(), { seed: 'od-normal' });
+    const t = sim.state.now + 600;
+    const ac = addTurnaround(sim, 'narrow180', t, { departureAt: t + 5 * 3600, plan: { contractId: 'k', destinationId: 'TYO', arrPax: 10, depPax: 10, standId: null } });
+    // スポットに着いて作業が生成されるまで進める
+    for (let i = 0; i < 7200 && (sim.state.aircraftTasks[ac.id] ?? []).length === 0; i++) stepSimulation(sim);
+    const tasks = tasksOf(sim.state, ac.id);
+    expect(tasks).toHaveLength(8);
+    expect(ac.skippedTasks).toBeUndefined();
+    for (const task of tasks) task.state = 'done';
+    expect(allTurnaroundDone(sim.state, ac.id)).toBe(true);
+    // 必須作業を 1 つ欠落させる（生成漏れの再現）→ 完了扱いにしない
+    const fuel = tasks.find((x) => x.kind === 'fuel')!;
+    sim.state.aircraftTasks[ac.id] = sim.state.aircraftTasks[ac.id]!.filter((id) => id !== fuel.id);
+    delete sim.state.tasks[fuel.id];
+    expect(allTurnaroundDone(sim.state, ac.id)).toBe(false);
+  });
+
+  it('置き直した翌朝便が地上作業と搭乗を経てプッシュバックし、離陸する（複数機＋通常便と干渉しない）', { timeout: 600000 }, () => {
+    const sim = materializedSim();
+    const carryDeps = Object.values(sim.state.flights).filter((f) => f.overnight && f.direction === 'departure' && f.scheduled < DAY_SEC);
+    expect(carryDeps.length).toBeGreaterThanOrEqual(2);
+    // 通常便も 1 機混ぜる（全作業あり）
+    const t = sim.state.now + 600;
+    const normal = addTurnaround(sim, 'narrow180', t, { departureAt: t + 4 * 3600, plan: { contractId: 'k', destinationId: 'TYO', arrPax: 10, depPax: 10, standId: null } });
+    const targets = new Set([...carryDeps.map((f) => f.aircraftId), normal.id]);
+    const end = sim.state.now + 6 * 3600;
+    while (sim.state.now < end) {
+      stepSimulation(sim);
+      if ([...targets].every((id) => sim.state.aircraft[id]?.state === 'departed')) break;
+    }
+    for (const id of targets) expect(sim.state.aircraft[id]?.state, `機体 ${id} が離陸している`).toBe('departed');
   });
 });

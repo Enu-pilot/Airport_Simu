@@ -4,7 +4,7 @@ import { airlineDef } from '../core/economy/registry';
 import type { DayReview, ReviewFlight, ReviewMetric } from '../core/analytics/review';
 import type { ScoreComponent, ScoreKey } from '../core/economy/airlineScore';
 import { COST_CATEGORIES, REVENUE_CATEGORIES } from '../core/economy/company';
-import { GAME_UI, AIRCRAFT_STATE_LABEL, COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL, SCORE_LEVEL_LABEL, TASK_LABEL, formatClock } from '../i18n/ja';
+import { GAME_UI, AIRCRAFT_STATE_LABEL, AREA_KIND_LABEL, COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL, SCORE_LEVEL_LABEL, TASK_LABEL, UNIT_KIND_LABEL, formatClock } from '../i18n/ja';
 import type { DelayCause, HoldReason } from '../core/sim/types';
 import { DAY_SEC } from '../core/sim/rules';
 import { dayFlowActions } from '../editor/dayFlowActions';
@@ -148,6 +148,33 @@ export function ReviewBody({ review }: { review: DayReview }) {
             <Row label="乗継" value={`発生 ${r.hub.spawned} 人・接続成功 ${r.hub.connected} 人・乗り遅れ ${r.hub.missed} 人・現れず ${r.hub.noShow} 人`} />
           </div>
         )}
+        {r.linkUsage && r.linkUsage.length > 0 && (
+          <div data-testid="review-link-usage">
+            <b>連絡設備・上下移動の利用実績</b>
+            {r.linkUsage.map((u) => (
+              <Row key={u.linkId} label={u.kind === 'vertical' && u.areaKind ? `${AREA_KIND_LABEL[u.areaKind as keyof typeof AREA_KIND_LABEL] ?? u.areaKind}（${u.linkId.slice('vertical:'.length)}）` : u.label} value={`合計 ${u.total} 人・ピーク ${u.peakHour} 時台 ${u.peakCount} 人${u.capacityPerHour ? `（能力 ${u.capacityPerHour} 人/時）` : ''}`} />
+            ))}
+          </div>
+        )}
+        {r.groundUtilization && r.groundUtilization.length > 0 && (
+          <div data-testid="review-ground-utilization">
+            <b>地上支援の稼働率</b>
+            {r.groundUtilization.map((u) => (
+              <Row key={u.kind} label={UNIT_KIND_LABEL[u.kind as keyof typeof UNIT_KIND_LABEL] ?? u.kind} value={`${u.units} 台・人 / 稼働率 ${Math.round(u.utilization * 100)}%`} />
+            ))}
+            {r.groundWaits && r.groundWaits.length > 0 && (
+              <Row label="資源待ちの内訳" value={r.groundWaits.map((w) => `${{ noVehicle: '車両不足', noStaff: '作業員不足', noEngineer: '整備士不足' }[w.reason] ?? w.reason} ${Math.round(w.sec / 60)} 分`).join('・')} />
+            )}
+          </div>
+        )}
+        {r.accessUsage && r.accessUsage.length > 0 && (
+          <div data-testid="review-access-usage">
+            <b>アクセスの利用実績</b>
+            {r.accessUsage.map((u) => (
+              <Row key={u.mode} label={{ road: '道路', curb: '降車帯', bus: 'バス', rail: '鉄道' }[u.mode] ?? u.mode} value={`合計 ${u.total} ${u.mode === 'road' || u.mode === 'curb' ? '台' : '人'}・ピーク ${u.peakHour} 時台 ${u.peakCount} ${u.mode === 'road' || u.mode === 'curb' ? '台' : '人'}`} />
+            ))}
+          </div>
+        )}
         <div className="card-sub" data-testid="review-causes">
           <b>{DAY_LOOP.causes}</b>
           {review.delayCauses.length === 0 ? (
@@ -180,6 +207,11 @@ export function ReviewBody({ review }: { review: DayReview }) {
         <Row label={DAY_LOOP.missed} value={`${k.missedPax} 人`} tone={k.missedPax > 0 ? 'warn' : undefined} />
         <Row label={DAY_LOOP.bags} value={`${k.leftBags} 個`} tone={k.leftBags > 0 ? 'warn' : undefined} />
         <Row label={DAY_LOOP.paxSat} value={num(k.paxSatisfaction)} />
+        {k.paxSatisfactionDetail && (
+          <div data-testid="review-pax-satisfaction-detail">
+            <Row label="満足度の内訳" value={`待ち時間 −${k.paxSatisfactionDetail.waitPenalty}（平均 ${k.paxSatisfactionDetail.avgWaitMin} 分）・歩行 −${k.paxSatisfactionDetail.walkPenalty}（平均 ${k.paxSatisfactionDetail.avgWalkMin} 分）・遅延 −${k.paxSatisfactionDetail.delayPenalty}（平均 ${k.paxSatisfactionDetail.avgDelayMin} 分）・乗り遅れ −${k.paxSatisfactionDetail.missedPenalty}（${Math.round(k.paxSatisfactionDetail.missedRate * 1000) / 10}%）・手荷物 −${k.paxSatisfactionDetail.bagsPenalty}（${Math.round(k.paxSatisfactionDetail.leftRate * 1000) / 10}%）`} />
+          </div>
+        )}
         <Row label={DAY_LOOP.airSat} value={num(k.airlineSatisfaction)} />
         <Row label={DAY_LOOP.rating} value={num(k.rating)} />
       </Section>

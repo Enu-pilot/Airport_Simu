@@ -61,8 +61,11 @@ const BASELINE: Record<string, string> = {
   'd1b linear dual entry 4 aircraft': 'bbd1952b427da86d618d49dfe9725f64400f9ede79ae7eb0f4f95d5fa886b04c',
   'stress 30 aircraft 2h': 'eceefdb2828e21d391393d3579dadf83b9f7b3212d26f5487299972fc89c9d4f',
   'crossingAirport 6 aircraft': '1d1ce4ae34d8dfe58eb0d213ec84bb7d1d43fa781cb06d18bdeb7a6b6ced45ef',
-  'city core 3 days (no nightOps)': 'a13f2822322b7466bb515ecda2f2692667386ecb985545ecdb4677ee0ef9be06',
-  'sample airport 1 day': '86ae9ced780366ff7dd402af42a8d5245f606bd756e2fcce14eb2aef50a5e93e',
+  // 2026-11-18 再採取（ユーザー承認済み）: フェーズ 5 の 5-02/5-03/5-04 が日報へ記録項目
+  // （リンク利用実績・資源別稼働率・満足度内訳）を追加したため、会社データを含む 2 件だけが変わった。
+  // 追加項目を除いたハッシュは旧基準値と完全一致することを確認済みで、運航そのものは無変更。
+  'city core 3 days (no nightOps)': '4ca1e5a0aad960812c2582ff56c4c291049d50050971c589f1bebef2f76730b9',
+  'sample airport 1 day': '1957cfab08d0bf684826eb67a4958fd9e97281d33fae1d76b93bd1a7f0abb566',
 };
 
 describe('legacyFingerprint: taxiMode / nightOps なしの運航は T0 の基準値と一致', () => {

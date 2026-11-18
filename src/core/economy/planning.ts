@@ -10,6 +10,8 @@ import { BALANCE } from './balance';
 import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
 import { airlineDef, classifyRoute, destinationDef, HOME_COUNTRY_ID, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
 import { CITY_NIGHT_CURFEW, cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedPassengers } from './city';
+import { airportFireCategory, requiredFireCategory, towerCapacityPerHour, towerLevel } from '../safety';
+import { runwaySystemCapacity } from '../runwayCapacity';
 import { featureOn } from './unlocks';
 import { routeLoadFactors } from './demand';
 import type { TransferKind } from './phase4Types';
@@ -67,6 +69,8 @@ export interface PlannedFlight {
   transferIn?: number;
   /** 乗継の波（バンク）の ID */
   bankId?: string;
+  /** 専用スポット（5-08。契約から写す） */
+  dedicatedStandId?: string;
 }
 
 export interface DayPlan {
@@ -154,6 +158,7 @@ export function overnightFlightFor(
     seats,
     inboundDelaySec,
     overnight: true,
+    ...(k.dedicatedStandId ? { dedicatedStandId: k.dedicatedStandId } : {}),
     ...(classifyRoute(HOME_COUNTRY_ID, destinationDef(k.destinationId)) === 'international' ? { routeType: 'international' as const } : {}),
   };
 }
@@ -235,6 +240,7 @@ export function planDay(
         seats,
         inboundDelaySec,
         ...(bank ? { bankId: bank.id } : {}),
+        ...(k.dedicatedStandId ? { dedicatedStandId: k.dedicatedStandId } : {}),
         ...(classifyRoute(routeCapabilities.originCountryId, destinationDef(k.destinationId)) === 'international' ? { routeType: 'international' as const } : {}),
       });
     }
@@ -319,7 +325,9 @@ export type PlanIssueCode =
   | 'OVERNIGHT_CAPACITY_EXCEEDED' // 滞泊できる機数を超える
   | 'BASED_CONDITIONS_UNMET' // 拠点契約の条件を満たさない
   | 'INTL_GATE_MISSING' // 国際のゲートがない
-  | 'MCT_UNAVAILABLE'; // 乗継の経路がなく MCT が出せない
+  | 'MCT_UNAVAILABLE' // 乗継の経路がなく MCT が出せない
+  | 'FIRE_CATEGORY_LOW' // 消防区分が機体に必要な区分に足りない（5-05、警告）
+  | 'TOWER_CAPACITY_LOW'; // 管制塔レベルの処理能力をピークの発着回数が超える（5-05、警告）
 
 export interface PlanIssue {
   code: PlanIssueCode;
@@ -382,18 +390,34 @@ function groundUnitTotals(ctx: SimContext): Record<string, number> {
 }
 
 /**
+ * 資源ごとの実効同時処理率（5-02 で実測に当て直し。2026-11-18、サンプル空港・narrow180 の同時到着で測定）:
+ * 旧式（ベルト・牽引車 ×1、給油・清掃・ケータリング ×2）では能力 3 だった構成で、同時 3 機から
+ * 1 機あたり約 790 秒の資源待ちが出た（待ちゼロは同時 2 機まで）。手荷物系は 1 折り返しで
+ * 降ろし・積みの 2 作業が同じ車両を取り合うため 2/3、給油・清掃・ケータリングは 1 作業でも
+ * 窓が重なると競合するため 3/2 とし、実測の待ちゼロ同時数（2 機）と一致させた。
+ */
+export const TURNAROUND_DUTY: Record<string, number> = {
+  beltLoader: 2 / 3,
+  baggageTractor: 2 / 3,
+  fuelTruck: 3 / 2,
+  cleaningVan: 3 / 2,
+  cateringTruck: 3 / 2,
+};
+
+/**
  * 地上支援で同時に扱える折り返しの目安。
  * 燃料施設・整備士・トーイングカーのいずれかがなければ 0（運航は給油・点検・プッシュバックで止まり続ける。ground.ts の noFuelFarm・noEngineer・noVehicle）。
- * 給油の制約は 給油車 × 2 ＋ ハイドラントにつながったスポットの数（1 スポット = 給油能力 1）。1 台あたりの処理数は根拠がないので作らず、
+ * 給油の制約は 給油車 × 実効同時処理率 ＋ ハイドラントにつながったスポットの数（1 スポット = 給油能力 1）。
  * トーイングカー・整備士は「有無」として扱う。ランプバスは式に入れない（今後の課題。1-20 / TA-2）。
  */
 export function turnaroundCapacity(ctx: SimContext): number {
   const u = groundUnitTotals(ctx);
   const v = (k: string) => u[k] ?? 0;
   if (!ctx.hasFuelFarm || v('engineer') <= 0 || v('tug') <= 0) return 0;
+  const eff = (k: string) => Math.floor(v(k) * (TURNAROUND_DUTY[k] ?? 1));
   return Math.max(
     0,
-    Math.min(Math.floor(v('staff') / STAFF_PER_TURNAROUND), v('beltLoader'), v('baggageTractor'), v('fuelTruck') * 2 + ctx.hydrantStands.size, v('cleaningVan') * 2, v('cateringTruck') * 2),
+    Math.min(Math.floor(v('staff') / STAFF_PER_TURNAROUND), eff('beltLoader'), eff('baggageTractor'), eff('fuelTruck') + ctx.hydrantStands.size, eff('cleaningVan'), eff('cateringTruck')),
   );
 }
 
@@ -474,6 +498,9 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     }
   }
   const blockersByType = new Map<string, string[]>();
+  // 専用スポット（5-08）: 契約ごとの専用スポットは、その契約の便が優先し、他契約の便は空きがないときだけ使う
+  const dedicatedByStand = new Map<string, string>();
+  for (const f of plan.flights) if (f.dedicatedStandId) dedicatedByStand.set(f.dedicatedStandId, f.contractId);
   const assignments: PlanAnalysis['assignments'] = {};
   for (const f of plan.flights) {
     if (!operable.has(f.typeId)) {
@@ -488,7 +515,10 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     if (!blockers) blockersByType.set(f.typeId, (blockers = groundBlockers(ctx, type)));
     if (blockers.length > 0) add('GROUND_SUPPORT_MISSING', 'error', f.key, blockers.join('・'));
     const intl = f.routeType === 'international';
-    const s = stands.find((x) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt && standRouteOk(x.id, intl, f.arrivalAt));
+    const fits = (x: (typeof stands)[number]) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt && standRouteOk(x.id, intl, f.arrivalAt);
+    const s = (f.dedicatedStandId ? stands.find((x) => x.id === f.dedicatedStandId && fits(x)) : undefined)
+      ?? stands.find((x) => fits(x) && (!dedicatedByStand.has(x.id) || dedicatedByStand.get(x.id) === f.contractId))
+      ?? stands.find(fits);
     if (!s) {
       assignments[f.key] = { standId: null, gateId: null, terminalId: null };
       // 国際便で、空き時間に関係なく置けるスポット自体がない場合はゲート不足として区別する（フェーズ 4 §4.5）
@@ -544,9 +574,9 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     const terminalId = assignments[f.key]?.terminalId ?? (terminalIds.length === 1 ? terminalIds[0] : undefined);
     if (terminalId && hourlyByTerminal[terminalId]) hourlyByTerminal[terminalId]![hourOf(f.departureAt - PAX_PROCESS_LEAD_SEC)]! += f.depPax;
   }
-  const runways = Object.values(ctx.runways).filter((r) => r.operational).length;
   const capacity = {
-    movementsPerHour: runways * RUNWAY_HOURLY_CAPACITY,
+    // 滑走路の能力は構成から算出する（5-01。平行の間隔・交差で変わる）
+    movementsPerHour: runwaySystemCapacity(ctx.layout, (r) => ctx.runways[r.id]?.operational ?? false).perHour,
     securityPerHour: Object.values(terminalCapacity).reduce((sum, c) => sum + c.securityPerHour, 0),
     checkInPerHour: Object.values(terminalCapacity).reduce((sum, c) => sum + c.checkInPerHour, 0),
     turnarounds: turnaroundCapacity(ctx),
@@ -572,6 +602,25 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
       const c = terminalCapacity[terminalId]!;
       if (pax > c.securityPerHour * 0.9) for (const k of inHour) add('SECURITY_OVERLOAD', 'warning', k, detail);
       if (pax * CHECKIN_SHARE > c.checkInPerHour * 0.9) for (const k of inHour) add('CHECKIN_OVERLOAD', 'warning', k, detail);
+    }
+  }
+  // 消防区分・管制塔レベル（5-05）: 助言的な制限として警告だけを出す（運航は止めない）
+  const fireCat = airportFireCategory(ctx.layout);
+  const fireSeen = new Set<string>();
+  for (const f of plan.flights) {
+    const t = resolveType(ctx.types, f.typeId);
+    const req = requiredFireCategory(t.lengthM);
+    if (req > fireCat && !fireSeen.has(f.typeId)) {
+      fireSeen.add(f.typeId);
+      add('FIRE_CATEGORY_LOW', 'warning', f.key, `${t.label}: 必要区分 ${req} / 空港の区分 ${fireCat === 0 ? 'なし' : fireCat}`);
+    }
+  }
+  const towerCap = towerCapacityPerHour(towerLevel(ctx.layout));
+  if (towerCap > 0) {
+    for (let h = 0; h < 24; h++) {
+      if (movements[h]! > towerCap) {
+        for (const k of flightsInHour(h, (f) => hourOf(f.arrivalAt + f.inboundDelaySec) === h || hourOf(f.departureAt) === h)) add('TOWER_CAPACITY_LOW', 'warning', k, `${String(h).padStart(2, '0')}時`);
+      }
     }
   }
   // 同時に折り返す機数のピーク

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { analyzeAccess } from '../core/access/model';
-import { analyzeAirportCapacity, previewContractCapacity, type CapacityMetric, type CapacityPreview, type CapacityStatus } from '../core/economy/capacity';
+import { analyzeAirportCapacity, capacityDelta, previewContractCapacity, type CapacityMetric, type CapacityPreview, type CapacityStatus } from '../core/economy/capacity';
 import { airlineDef, airlinesFor, destinationDef, destinationsFor, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
 import { OVERALL_CAPACITY_NOTE, OVERALL_CAPACITY_TITLE, OVERALL_LIMIT_LABEL, PLAN_ISSUE_LABEL } from '../i18n/ja';
@@ -49,6 +49,14 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
       }
     : undefined;
   const snapshot = analyzeAirportCapacity(company, ctx, closedGates, plan, currentPaxByTerminal, live);
+  // 投資効果のプレビュー（5-04 / B4）: 建設モードに入った時点の敷地と現在の能力の差分
+  const buildBaseline = useEditor((s) => s.buildBaseline);
+  const inBuildMode = useEditor((s) => s.mode) === 'build';
+  const baselineSnapshot = useMemo(
+    () => (buildBaseline && buildBaseline !== layout ? analyzeAirportCapacity(company, createContext(buildBaseline)) : null),
+    [buildBaseline, layout, company],
+  );
+  const deltas = baselineSnapshot ? capacityDelta(baselineSnapshot, snapshot) : [];
   const [filter, setFilter] = useState('すべて');
   const [airlineId, setAirlineId] = useState(airlinesFor(company)[0]?.id ?? '');
   const [destinationId, setDestinationId] = useState(destinationsFor(company)[0]?.id ?? '');
@@ -73,6 +81,14 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
       <div className="capacity-peak">ピーク: {String(snapshot.peakHour.hour).padStart(2, '0')}:00 · {snapshot.peakHour.movements} 運航 / {snapshot.peakHour.departingPax} 出発旅客</div>
     </header>
     <p className="capacity-note">計算できる値は既存の計画・施設モデルを使用します。能力モデルがない工程は「未算出」と表示します。滑走路 30 回/時は計画用の基準値で、実運用保証値ではありません。</p>
+    {inBuildMode && baselineSnapshot && (
+      <section className="capacity-alert" data-testid="capacity-delta">
+        <strong>建設前との比較（投資効果）</strong>
+        {deltas.length === 0 ? <div className="muted small">能力の変わった指標はありません。</div> : (
+          <ul>{deltas.map((d) => <li key={d.name}>{d.name}: {d.before ?? '未算出'} → {d.after ?? '未算出'} {d.unit}{d.delta !== null && d.delta !== 0 ? `（${d.delta > 0 ? '+' : ''}${d.delta}）` : ''}</li>)}</ul>
+        )}
+      </section>
+    )}
     {snapshot.bottlenecks.length > 0 ? <section className="capacity-alert" data-testid="capacity-bottlenecks">
       <h4>先に確認するボトルネック</h4>
       {snapshot.bottlenecks.map((b) => <div className="capacity-bottleneck" key={b.name}>

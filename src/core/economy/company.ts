@@ -89,6 +89,10 @@ export interface Contract {
   offerExpiresDay: number;
   /** 便名の基番号 */
   numberBase: number;
+  /** 専用スポット（5-08）: この契約の便が優先して使うスポット。そのスポットに付くゲートも実質占有される */
+  dedicatedStandId?: string;
+  /** 逆提案を断られた日（5-08。1 日 1 回までの制限に使う） */
+  counterRefusedDay?: number;
 }
 
 export interface AirlineRelation {
@@ -142,6 +146,8 @@ export interface DailyKpi {
   cancelled: number;
   /** 旅客満足度・航空会社満足度（対象なしは null）と、締め後の空港評価 */
   paxSatisfaction: number | null;
+  /** 旅客満足度の内訳（5-04 / D1。満足度がある日だけ）: 各減点と材料の平均値 */
+  paxSatisfactionDetail?: { waitPenalty: number; walkPenalty: number; delayPenalty: number; missedPenalty: number; bagsPenalty: number; avgWaitMin: number; avgWalkMin: number; avgDelayMin: number; missedRate: number; leftRate: number };
   airlineSatisfaction: number | null;
   rating: number;
   /** 空港アクセス（Phase 6）: 手段別の旅客数、満車で停められなかった車、道路・車寄せの平均遅れ、乗り場の平均待ち、アクセス係数 */
@@ -173,6 +179,14 @@ export interface DailyReport {
   maintenance?: { checked: number; overdue: number; faults: number; techCancelled: number };
   /** 乗継の記録（フェーズ 4 §5.6。ハブが有効な日だけ） */
   hub?: { spawned: number; connected: number; missed: number; noShow: number };
+  /** 連絡設備・上下移動設備の利用実績（5-03。利用があったリンクだけ。上下移動の表示名は areaKind から画面側で引く） */
+  linkUsage?: { linkId: string; kind: 'transfer' | 'vertical'; label: string; areaKind?: string; total: number; peakHour: number; peakCount: number; capacityPerHour: number | null; hourly: number[] }[];
+  /** アクセスの時間帯別交通量の集計（5-03。アクセスの記録がある日だけ） */
+  accessUsage?: { mode: string; total: number; peakHour: number; peakCount: number }[];
+  /** 資源別の稼働率（5-02。地上支援の車両・人員の種類ごと、当日の busySec から算出） */
+  groundUtilization?: { kind: string; units: number; utilization: number }[];
+  /** 資源待ちの内訳（5-02。当日の停止理由ごとの累計秒） */
+  groundWaits?: { reason: string; sec: number }[];
   city?: { type: CityType; populationStart: number; populationEnd: number; demandCeiling: number; expectedPax: number; actualPax: number; cityFactor: number; roadQuality: number; railQuality: number; residentsStart?: number; residentsEnd?: number; residentDelta?: number; noiseMovements?: number; nightMovements?: number; noisePoints?: number; events?: CityEvent[]; eventDemandMultiplier?: number; eventTrafficMultiplier?: number };
 }
 
@@ -387,7 +401,7 @@ export function addContract(c: CompanyState, k: Omit<Contract, 'id' | 'numberBas
 
 // ---------------------------------------------------------------- プレイヤーの操作
 
-export type ContractActionResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'NOT_OFFERED' | 'NOT_ACTIVE' | 'UNSUPPORTED' | 'AIRLINE_ROUTE_UNSUPPORTED' | 'INTERNATIONAL_PROCESSING_REQUIRED' | 'CAPACITY_INSUFFICIENT' | 'AIRLINE_REFUSED' | 'MIN_FREQUENCY' | 'LOCKED' };
+export type ContractActionResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'NOT_OFFERED' | 'NOT_ACTIVE' | 'UNSUPPORTED' | 'AIRLINE_ROUTE_UNSUPPORTED' | 'INTERNATIONAL_PROCESSING_REQUIRED' | 'CAPACITY_INSUFFICIENT' | 'AIRLINE_REFUSED' | 'MIN_FREQUENCY' | 'LOCKED' | 'NO_CHANGE' | 'COUNTER_TOO_SOON' };
 
 /** 提案を受け入れる（翌運航日から有効）。supported = 空港で運航可能な機種か */
 export function acceptOffer(
@@ -457,6 +471,51 @@ export function changeFrequency(
     k.perDay -= 1;
     rel.satisfaction = Math.max(0, rel.satisfaction - BALANCE.contracts.decreasePenaltySat);
   }
+  return { ok: true };
+}
+
+/**
+ * 契約の逆提案（5-08 / B2）: 提案中の契約に、時間帯・便数・割引の変更を航空会社へ申し入れる。
+ * 受諾の判定は決定的: 満足度を基礎に、割引を増やす申し入れは通りやすく、便数を増やす申し入れは通りにくい。
+ * 受け入れられれば提案の条件が変わる（契約するかどうかは別途）。断られると満足度が少し下がり、その日は再提案できない。
+ */
+export function counterOffer(
+  c: CompanyState,
+  id: string,
+  changes: { window?: Contract['window']; perDay?: number; feeDiscount?: number },
+): ContractActionResult {
+  const k = c.contracts[id];
+  if (!k) return { ok: false, reason: 'NOT_FOUND' };
+  if (k.status !== 'offered') return { ok: false, reason: 'NOT_OFFERED' };
+  if (k.counterRefusedDay === c.day) return { ok: false, reason: 'COUNTER_TOO_SOON' };
+  const next = {
+    window: changes.window ?? k.window,
+    perDay: changes.perDay !== undefined ? Math.min(12, Math.max(1, Math.round(changes.perDay))) : k.perDay,
+    feeDiscount: changes.feeDiscount !== undefined ? Math.min(0.4, Math.max(0, changes.feeDiscount)) : k.feeDiscount,
+  };
+  if (next.window === k.window && next.perDay === k.perDay && next.feeDiscount === k.feeDiscount) return { ok: false, reason: 'NO_CHANGE' };
+  const rel = c.airlines[k.airlineId]!;
+  const score = rel.satisfaction
+    + (next.feeDiscount - k.feeDiscount) * 200
+    - Math.max(0, next.perDay - k.perDay) * 5
+    - (next.window !== k.window ? 5 : 0);
+  if (score < 55) {
+    rel.satisfaction = Math.max(0, rel.satisfaction - 3);
+    k.counterRefusedDay = c.day;
+    return { ok: false, reason: 'AIRLINE_REFUSED' };
+  }
+  k.window = next.window;
+  k.perDay = next.perDay;
+  k.feeDiscount = next.feeDiscount;
+  return { ok: true };
+}
+
+/** 専用スポットの設定・解除（5-08）。契約が有効な間だけ意味を持つ */
+export function setDedicatedStand(c: CompanyState, id: string, standId: string | null): ContractActionResult {
+  const k = c.contracts[id];
+  if (!k) return { ok: false, reason: 'NOT_FOUND' };
+  if (standId) k.dedicatedStandId = standId;
+  else delete k.dedicatedStandId;
   return { ok: true };
 }
 

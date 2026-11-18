@@ -32,6 +32,38 @@ export function demandIndex(dest: Pick<DestinationDef, 'demand'>): number {
   return 0.55 * dest.demand.business + 0.45 * dest.demand.leisure;
 }
 
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/** day（開始日 = 0）→ 曜日（0 = 月曜〜6 = 日曜） */
+export function weekdayOf(day: number): number {
+  return ((Math.floor(day) % 7) + 7) % 7;
+}
+
+/** day → 月（0 = 1 月。1 年 = 365 日の繰り返し） */
+export function monthOf(day: number): number {
+  let rest = ((Math.floor(day) % 365) + 365) % 365;
+  for (let m = 0; m < 12; m++) {
+    if (rest < MONTH_DAYS[m]!) return m;
+    rest -= MONTH_DAYS[m]!;
+  }
+  return 11;
+}
+
+/**
+ * 季節・曜日係数（5-06）: 相手都市の業務/観光の構成で重み付けし、需要指数で割って平均 1 に保つ。
+ * 業務は平日（特に金曜）と年度末に寄り、観光は週末と 5 月・8 月・年末年始に寄る。
+ */
+export function seasonalWeekdayFactor(dest: Pick<DestinationDef, 'demand'>, day: number): number {
+  const idx = demandIndex(dest);
+  if (idx <= 0) return 1;
+  const M = BALANCE.market;
+  const wd = weekdayOf(day);
+  const mo = monthOf(day);
+  const business = 0.55 * dest.demand.business * M.weekdayBusiness[wd]! * M.monthBusiness[mo]!;
+  const leisure = 0.45 * dest.demand.leisure * M.weekdayLeisure[wd]! * M.monthLeisure[mo]!;
+  return (business + leisure) / idx;
+}
+
 /**
  * 路線の需要 D_r（人/日・両方向、配分前）。city がない会社は null。
  * D_r = K × (P_o/1e6)^α × (P_d/1e6)^β × I_d × g(d) × φ_r × A × F × R
@@ -74,7 +106,8 @@ export function routeDemandSummary(
   const raw = new Map<string, number>();
   let total = 0;
   for (const destId of seatsByDest.keys()) {
-    const d = routeDemand(c, destinationDef(destId), access) ?? 0;
+    const dest = destinationDef(destId);
+    const d = (routeDemand(c, dest, access) ?? 0) * seasonalWeekdayFactor(dest, day);
     raw.set(destId, d);
     total += d;
   }
