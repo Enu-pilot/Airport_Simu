@@ -8,6 +8,7 @@
 ## 調査・参考根拠
 - [research_ground_geometry.md](research_ground_geometry.md): 機種別の脚配置・旋回半径に関する調査。Phase 14 の参考資料。
 - [research_runway_reference.md](research_runway_reference.md): 滑走路寸法の参考値（FAA / EASA 資料）。
+- [haneda_airport_facilities_survey.md](haneda_airport_facilities_survey.md): 羽田空港で確認できる施設・一般的な空港設備候補と、Airport_Simu の施設分類・能力設計の参考。現行仕様ではない。
 
 ## 過去フェーズの設計記録
 - [phase11_design.md](phase11_design.md): Phase 11 幾何基盤の設計・座標フレーム・データモデル方針。
