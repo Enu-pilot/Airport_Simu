@@ -32,7 +32,7 @@ Phase 1〜6 の建設エディタ、運航、旅客、地上支援・手荷物�
 
 **フェーズ 4（2026-11-18）** — 格による機能の解放、夜間滞泊・拠点航空会社・整備の周期、国際線（出入国審査・税関・兼用ゲート）、乗継旅客・乗継手荷物・最小乗継時間・バンク、道路/線路の区間能力モデルを追加した。すべて任意（opt-in）で、使わないセーブの結果は変わらない。仕様は [docs/44](docs/44_hub_and_international.md)。
 ルールは docs/11〜21（下表）。いずれもゲーム用の簡略化モデルで、金額はゲーム内通貨 cr（実在の料金・費用とは無関係）。
-未実装の機能・既知の制限は [docs/10](docs/10_open_issues.md) の K（自動最適化は未実装、3D の専用機体モデルはなし など）。
+未実装の機能・既知の制限は [docs/10](docs/10_open_issues.md) の K・Q（自動最適化、貨物、風向運用、除雪/防除氷など）を参照。基盤完成後に再検討する項目の実装計画は [実装計画一覧](docs/implementation/README.md#基盤完成後に再検討する個別計画) にまとめています。
 
 ## 使い方
 
@@ -59,6 +59,7 @@ npm run build        # 型検査 + 本番ビルド（dist/）
 - [Docs 全体の索引・正本の使い分け](docs/README.md)
 - [標準開発ルール](CLAUDE.md)
 - [実装計画の管理・状態一覧](docs/implementation/README.md)
+- [基盤完成後に再検討する実装計画](docs/implementation/README.md#基盤完成後に再検討する個別計画)
 - [全体ロードマップ・受入条件](docs/42_implementation_roadmap.md)
 - [未決事項・既知の制限](docs/10_open_issues.md)
 - [総合テスト・監査記録](docs/39_comprehensive_test_audit_and_handover.md)
