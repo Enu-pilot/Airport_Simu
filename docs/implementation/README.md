@@ -42,6 +42,8 @@ docs/42がフェーズの実装状況の正本、各計画書の状態とフォ�
 | Phase 5 / 5-20 空港格の8段階化・成長判定の多軸化 | planned | [airport_tier_progression_plan.md](planned/airport_tier_progression_plan.md) | 既存格解放・契約提案・旧セーブ互換を含めて段階的に拡張 |
 
 
+| Overnight carry-over departure readiness | planned | [overnight_departure_readiness_fix_plan.md](planned/overnight_departure_readiness_fix_plan.md) | skip された地上作業と固定タスク数の不整合。修正・翌朝便の離陸検証は未実施 |
+
 ## ディレクトリの意味
 
 - `planned/`: 要求・受入条件・設計が整理され、実装に未着手の計画。
