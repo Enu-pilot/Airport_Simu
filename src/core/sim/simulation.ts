@@ -260,6 +260,9 @@ export function addDelayCause(f: Flight, c: DelayCause): void {
 
 const HOLD_TO_DELAY: Partial<Record<HoldReason, DelayCause>> = {
   noStand: 'noStand',
+  standTooSmall: 'noStand',
+  gateRouteMismatch: 'noStand',
+  noDepartureRoute: 'noRoute',
   separation: 'runwayQueue',
   runwayBusy: 'runwayQueue',
   departurePriority: 'runwayQueue',
@@ -584,6 +587,17 @@ function arrivalPath(sim: Simulation, ac: Aircraft, runwayId: string, standId: s
   return { rw, exit, path };
 }
 
+/** 使用可能な滑走路に、この機種が離陸距離を満たして入れる入口候補が1つでもあるか */
+function hasDepartureEntry(sim: Simulation, ac: Aircraft): boolean {
+  const type = typeOf(sim, ac);
+  for (const id of Object.keys(sim.ctx.runways).sort(compareIds)) {
+    if (!runwayUsable(sim, id, type, 'dep')) continue;
+    const rw = runwayFor(sim, id);
+    if (rw && entryCandidates(sim, rw, type).size > 0) return true;
+  }
+  return false;
+}
+
 export function departurePath(sim: Simulation, ac: Aircraft, avoidTraffic: boolean) {
   const type = typeOf(sim, ac);
   const stand = ac.standId ? sim.ctx.stands[ac.standId] : undefined;
@@ -678,6 +692,14 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     }));
   };
   const flightRt = arrival.routeType === 'international' ? 'international' : 'domestic';
+  // 候補なしの理由を分ける: 空き自体がないのか、区分が合わないのか、ゲートの国内/国際が合わないのか
+  const freeStands = Object.values(ctx.stands).filter(
+    (s) => s.entry && !state.standAssignments[s.id] && !state.closures.stands.includes(s.id),
+  );
+  if (freeStands.length === 0) return 'noStand';
+  const sizeOkStands = freeStands.filter((s) => checkStand(type, ctx.layout.stands[s.id]!).status === 'ok');
+  if (sizeOkStands.length === 0) return 'standTooSmall';
+  if (!sizeOkStands.some((s) => gateRouteCompatible(sim, s.id, flightRt))) return 'gateRouteMismatch';
   // 専用スポット（5-08）: 自契約の専用スポットを優先し、他契約の専用スポットは代替がないときだけ使う
   const myContract = arrival.contractId ? sim.company?.contracts[arrival.contractId] : undefined;
   const dedicatedMine = myContract?.dedicatedStandId;
@@ -774,7 +796,8 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     }
     return null;
   }
-  return anyRoute ? 'noStand' : 'noRoute';
+  // 到着経路はあるのに全候補で出発経路が作れない場合は、スポット不足ではなく出発経路の問題として返す
+  return anyRoute ? 'noDepartureRoute' : 'noRoute';
 }
 
 // ---------------------------------------------------------------- 1ティック
@@ -1486,11 +1509,13 @@ function stepReadyForPushback(sim: Simulation, ac: Aircraft): void {
   const alt = p ? null : departurePath(sim, ac, false);
   // 区間ごとの走行: 逆向きの回廊で通れないときは、対向待ちの公平性（DIR_FAIRNESS_SEC）のために待ちを記録する
   if (sim.ctx.blocks && alt) noteOpposed(sim, ac, makeRoute(sim.ctx, 'pushback', alt.path.nodes, alt.path.edges));
-  const reason: HoldReason = p || alt ? (sim.ctx.blocks ? blkReason ?? 'opposingTraffic' : 'routeBusy') : 'noRoute';
+  const reason: HoldReason = p || alt
+    ? (sim.ctx.blocks ? blkReason ?? 'opposingTraffic' : 'routeBusy')
+    : hasDepartureEntry(sim, ac) ? 'noRoute' : 'noDepartureRoute';
   setHold(state, ac, reason);
-  addDelayCause(dep, reason === 'noRoute' ? 'noRoute' : 'taxiCongestion');
+  addDelayCause(dep, reason === 'noRoute' || reason === 'noDepartureRoute' ? 'noRoute' : 'taxiCongestion');
   ac.retryAt = state.now + RETRY_SEC;
-  if (reason === 'noRoute' && ac.waitSince !== null && state.now - ac.waitSince >= DEPARTURE_GIVE_UP_SEC) {
+  if ((reason === 'noRoute' || reason === 'noDepartureRoute') && ac.waitSince !== null && state.now - ac.waitSince >= DEPARTURE_GIVE_UP_SEC) {
     releaseEverything(sim, ac);
     dep.status = 'cancelled';
     state.stats.cancelled++;

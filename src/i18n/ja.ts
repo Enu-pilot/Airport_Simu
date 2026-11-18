@@ -353,6 +353,9 @@ export const AIRCRAFT_STATE_LABEL: Record<AircraftState, string> = {
 
 export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
   noStand: '空きスポットなし',
+  standTooSmall: 'スポット区分不足',
+  gateRouteMismatch: 'ゲートの国内/国際が不適合',
+  noDepartureRoute: '出発経路なし',
   noRunway: '使用できる滑走路なし',
   noRoute: '経路なし',
   routeBusy: '経路上に他機',
@@ -373,6 +376,9 @@ export const HOLD_REASON_LABEL: Record<HoldReason, string> = {
 
 export const HOLD_REASON_EXPLANATION: Record<HoldReason, string> = {
   noStand: '適合する空きスポットが見つかるまで到着を保留します。',
+  standTooSmall: '空きスポットはありますが、この機体の区分（サイズ）に適合するスポットがありません。大きなスポットを増やすか、工事中のスポットの完成を待ってください。',
+  gateRouteMismatch: '適合する空きスポットはありますが、ゲートの国内線/国際線の区分がこの便と合わないため使えません。ゲートの区分設定を確認してください。',
+  noDepartureRoute: 'スポット自体は確保できますが、折り返し出発のために必要な離陸距離を満たす滑走路入口までの経路が確保できません。誘導路の工事・閉鎖や滑走路の運用方向を確認してください。',
   noRunway: '機体サイズ・運用方向・閉鎖状態を満たす滑走路がありません。',
   noRoute: '現在のネットワークに、割当先まで通行可能な経路がありません。',
   routeBusy: '必要な経路区間またはノードを他の機体が使用中です。',
