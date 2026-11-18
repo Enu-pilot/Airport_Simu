@@ -13,6 +13,12 @@ import { levelOf, roadEdgeLevelValid } from '../model/levels';
  * - 業務用（職員・車両）は一般道路とサービス道路のどちらでもよい。
  * - 鉄道は、敷地の外周に届いている鉄道線（道路種別 rail）につながる駅だけが使える。
  * 道路ノードを共有していても、種別ごとに別のネットワークとして扱う。
+ * - 敷地外への到達は道路・鉄道とも階層を問わない（地下の道路・線路が外周に届けば外部接続。
+ *   トンネル状の出入口を認める。検証側の ROAD_NO_ENTRANCE 判定・鉄道の扱いと一致させる）。
+ *   階層の規律は別の場所で担保する: 階層が変わる区間は接続設備（道路=ランプ、鉄道=鉄道ランプ等）が
+ *   あるものだけを通す（roadEdgeLevelValid）し、施設は自分の階層の道路タイルに接していないと使えない
+ *   （touchesTilesAtLevel）。つまり地下道路だけに接する地上の駐車場は従来どおり未接続で、
+ *   地下で外に出てランプで地上に上がる道路網は、地上区間に接する施設から正しく使える。
  */
 
 /** 徒歩の速さ（m/s）と、交通施設からターミナルまで歩ける最大距離（タイル、チェビシェフ距離） */
@@ -56,7 +62,7 @@ class UnionFind {
 
 /** 指定の種別の道路のうち、外周に届く連結成分のタイル */
 interface ConnectedTiles { all: Set<string>; byLevel: Record<number, Set<string>> }
-function connected(layout: AirportLayout, classes: readonly RoadClass[], entrances?: Tile[], entryRoads?: string[], boundary: 'ground' | 'any' | 'none' = 'ground'): ConnectedTiles {
+function connected(layout: AirportLayout, classes: readonly RoadClass[], entrances?: Tile[], entryRoads?: string[], boundary: 'any' | 'none' = 'any'): ConnectedTiles {
   const edges = sortedValues(layout.roads).filter((e) => classes.includes(e.roadClass) && e.buildState === 'operational' && roadEdgeLevelValid(e, layout.roadNodes[e.from], layout.roadNodes[e.to]));
   const uf = new UnionFind();
   for (const e of edges) uf.union(e.from, e.to);
@@ -65,9 +71,8 @@ function connected(layout: AirportLayout, classes: readonly RoadClass[], entranc
   for (const e of edges) {
     const t = footprintOf(layout, e.id).flatMap((p) => p.tiles);
     tiles.set(e.id, t);
-    const nodeA = layout.roadNodes[e.from];
-    const nodeB = layout.roadNodes[e.to];
-    const edge = t.filter((p) => isSiteEdge(layout.site, p.x, p.y) && (boundary === 'any' || (boundary === 'ground' && (levelOf(nodeA) === 0 || levelOf(nodeB) === 0))));
+    // 敷地外周への到達は階層を問わない（道路・鉄道共通。地下トンネル状の出入口も外部接続）
+    const edge = t.filter((p) => isSiteEdge(layout.site, p.x, p.y));
     if (edge.length > 0) {
       roots.add(uf.find(e.from));
       entrances?.push(...edge);
@@ -96,8 +101,8 @@ function connected(layout: AirportLayout, classes: readonly RoadClass[], entranc
 export function buildLandsideNetwork(layout: AirportLayout): LandsideNetwork {
   const entrances: Tile[] = [];
   const entryRoads: string[] = [];
-  const publicNet = connected(layout, ['public'], entrances, entryRoads, 'ground');
-  const anyRoadNet = connected(layout, ['public', 'service'], undefined, undefined, 'ground');
+  const publicNet = connected(layout, ['public'], entrances, entryRoads, 'any');
+  const anyRoadNet = connected(layout, ['public', 'service'], undefined, undefined, 'any');
   const railNet = connected(layout, ['rail'], undefined, undefined, 'any');
   const walkwayNet = connected(layout, ['walkway'], undefined, undefined, 'none');
   const seen = new Set<string>();
