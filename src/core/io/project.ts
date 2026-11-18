@@ -8,6 +8,7 @@ import { isCityConfig, isCityNightOps } from '../economy/city';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
 import { SIM_MODEL_VERSION, modelsUsed, type Scenario } from '../scenario/scenario';
 import { buildTypeTable } from '../sim/aircraftTypes';
+import { thinSnapshotState } from '../sim/thin';
 import { createContext } from '../sim/context';
 import { checkInvariants, repairCrossingState } from '../sim/invariants';
 import { hydrateClosureReasons } from '../sim/closureState';
@@ -217,6 +218,8 @@ export interface BuildInput {
 
 export function buildProject(i: BuildInput): ProjectFile {
   const sim: SimSnapshot | null = i.sim ? structuredClone({ state: i.sim.state, company: i.sim.company ?? null }) : null;
+  // 保存データの間引き（5-11）: 前日以前に終わった便と付随データを保存側の複製から取り除く（実行中の状態は変えない）
+  if (sim) thinSnapshotState(sim.state);
   // Read paths may hydrate an empty ledger. Keep legacy project bytes stable when there is no closure reason to preserve.
   if (sim && !closureLedgerUsed(sim.state)) delete sim.state.closureReasons;
   const company = structuredClone(sim?.company ?? i.company);
