@@ -151,9 +151,9 @@ export function Toolbox() {
         <label>
           ターミナル内部の階
           <span>
-            {[0, 1, 2].map((l) => (
-              <button key={l} className={interior && level === l ? 'small tool active' : 'small'} onClick={() => actions.setInteriorLevel(l)} data-testid={`level-${l}`}>
-                {l + 1}F
+            {[-3, -2, -1, 0, 1, 2, 3].map((l) => (
+              <button key={l} className={interior && level === l ? 'small tool active' : 'small'} onClick={() => actions.setInteriorLevel(l)} data-testid={`level-${l}`} title={l < 0 ? `地下${-l}階` : `${l + 1}階`}>
+                {l < 0 ? `B${-l}` : `${l + 1}F`}
               </button>
             ))}
           </span>

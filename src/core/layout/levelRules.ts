@@ -10,6 +10,9 @@ import { facilityTiles } from './footprint';
 /** 内部設備の階の範囲: 地下 5 階（-5）から、親の階数 − 1 まで */
 export const INTERIOR_MIN_FLOOR = -5;
 
+/** ターミナル内エリアの最下階: 地下 3 階（-3）まで。地上は親（ターミナル）の階数 − 1 まで */
+export const TERMINAL_AREA_MIN_LEVEL = -3;
+
 export type PlacementProblem = 'floorOutOfRange' | 'outsideParent';
 
 const levelsOf = (layout: AirportLayout, facilityId: string): number => Number(layout.facilities[facilityId]?.props.levels ?? 1);
@@ -23,10 +26,10 @@ export function interiorPlacementProblem(layout: AirportLayout, parentId: string
   return tiles.every((t) => inside.has(tileKey(t.x, t.y))) ? null : 'outsideParent';
 }
 
-/** ターミナルのエリアを、指定の階に置けない理由。置けるなら null（階は 0 から階数 − 1） */
+/** ターミナルのエリアを、指定の階に置けない理由。置けるなら null（階は地下 3 階から階数 − 1） */
 export function terminalAreaLevelProblem(layout: AirportLayout, terminalId: string, level: number): 'floorOutOfRange' | null {
   if (!layout.facilities[terminalId]) return null;
-  return Number.isInteger(level) && level >= 0 && level < levelsOf(layout, terminalId) ? null : 'floorOutOfRange';
+  return Number.isInteger(level) && level >= TERMINAL_AREA_MIN_LEVEL && level < levelsOf(layout, terminalId) ? null : 'floorOutOfRange';
 }
 
 /** 階数を newLevels に減らすと、範囲外になる階に、エリア（terminalAreas）または建物内の設備があるか */

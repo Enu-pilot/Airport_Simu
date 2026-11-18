@@ -9,6 +9,7 @@ import type { OpResult } from '../core/layout/operations';
 import { createEmptyLayout } from '../core/layout/operations';
 import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { createSampleAirport } from '../core/sample/sampleAirport';
+import { createSite, siteSizeById } from '../core/model/site';
 import { analyzeLayout, intlLockedIssues, overnightStandIssues, type LayoutAnalysis } from '../core/validation/validate';
 import { exportLayout, importLayout } from '../core/io/serialize';
 import { OP_FAILURE_LABEL } from '../i18n/ja';
@@ -684,8 +685,13 @@ export const actions = {
     const s = get();
     set({ camera: centerOn(s.camera, p, s.viewSize.w, s.viewSize.h), ...(select ? { selection: select } : {}) });
   },
-  newEmpty(): void {
-    replaceLayout(createEmptyLayout(get().history.present.site), '空の敷地を作成しました（元に戻す で復元できます）');
+  newEmpty(sizeId?: string): void {
+    const current = get().history.present.site;
+    const size = sizeId ? siteSizeById(sizeId) : undefined;
+    const site = size && (size.width !== current.width || size.height !== current.height)
+      ? createSite({ width: size.width, height: size.height, seed: current.seed })
+      : current;
+    replaceLayout(createEmptyLayout(site), '空の敷地を作成しました（元に戻す で復元できます）');
   },
   loadSample(): void {
     replaceLayout(createSampleAirport(), 'サンプル空港を生成しました（元に戻す で復元できます）');

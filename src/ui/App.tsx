@@ -15,6 +15,7 @@ import { onKeyDown, onKeyUp } from '../editor/input';
 import { projectActions } from '../editor/project';
 import { downloadText, ProjectPanel } from './ProjectPanel';
 import { setBuildState } from '../core/layout/operations';
+import { SITE_SIZES } from '../core/model/site';
 import { applyOp } from '../editor/store';
 import { Toolbox } from './Toolbox';
 import { FacilityList } from './FacilityList';
@@ -188,6 +189,7 @@ function TopBar({ page, setPage, onSavedProjects }: { page: MainPage; setPage: (
   const hasReview = useEditor((s) => s.dayFlow.review !== null);
   const skipping = useEditor((s) => s.dayFlow.phase === 'skipping');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [emptySiteSize, setEmptySiteSize] = useState('standard');
 
   // 書き出し・読み込みはプロジェクト単位（レイアウト・会社・機種データ・シナリオ）。旧形式のレイアウトファイルも読める
   const download = () => {
@@ -306,7 +308,12 @@ function TopBar({ page, setPage, onSavedProjects }: { page: MainPage; setPage: (
             <button onClick={() => { if (!window.confirm(mode === 'operate' ? '運航を停止して新しいゲームを始めますか？現在の運航状態は失われます。' : '新しいゲームを始めますか？現在の空港と経営データは置き換わります。')) return; if (mode === 'operate') ops.stop(); newGame('career'); setPage('construction'); setSettingsOpen(false); }} data-testid="new-career">新しいゲーム</button>
             <button onClick={() => { if (!window.confirm(mode === 'operate' ? '運航を停止してサンドボックスを始めますか？現在の運航状態は失われます。' : 'サンドボックスを始めますか？現在の空港と経営データは置き換わります。')) return; if (mode === 'operate') ops.stop(); newGame('sandbox'); setPage('construction'); setSettingsOpen(false); }} data-testid="new-sandbox">サンドボックス</button>
             <button disabled={mode === 'operate'} onClick={() => { if (window.confirm('サンプル空港で現在の配置を置き換えますか？')) { actions.loadSample(); setSettingsOpen(false); } }} data-testid="load-sample">サンプル空港</button>
-            <button disabled={mode === 'operate'} onClick={() => { if (window.confirm('空の敷地で現在の空港を置き換えますか？')) { actions.newEmpty(); setSettingsOpen(false); } }} data-testid="new-empty">空の敷地</button>
+            <label className="small">空の敷地の大きさ
+              <select value={emptySiteSize} onChange={(e) => setEmptySiteSize(e.target.value)} data-testid="new-empty-size">
+                {SITE_SIZES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </label>
+            <button disabled={mode === 'operate'} onClick={() => { if (window.confirm('空の敷地で現在の空港を置き換えますか？')) { actions.newEmpty(emptySiteSize); setSettingsOpen(false); } }} data-testid="new-empty">空の敷地</button>
             <button onClick={() => { gameSetupUi.open('new'); setSettingsOpen(false); }} title={GAME_UI.setupNewTitle} data-testid="new-game-setup">新規ゲーム設定</button>
             <button onClick={() => { gameSetupUi.open('settings'); setSettingsOpen(false); }} title={GAME_UI.setupSettingsTitle} data-testid="tab-settings">難易度・ルール</button>
             <button onClick={download} data-testid="export-project">空港を保存</button>

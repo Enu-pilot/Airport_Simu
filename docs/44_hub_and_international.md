@@ -171,3 +171,11 @@
   能力の単体値（`maintenanceCapacityPerNight`）は端数なしの値。
 - II（国際 → 国際）の乗継には、国際到着側の区域にある乗継保安検査が要る
   （国内側の設備だけでは MCT が null になる）。
+- E2E は全 22 ファイルを直列で再実行した（2026-11-18）。フェーズ 4 の新規
+  spec（unlocks・phase3-traffic・terminal のエスカレーター回帰を含む）と
+  access・busgate・capacity-nav・editor・ground・levels・operations は全件合格。
+  残る失敗 11 件（dayloop 3、runway 5、gamemodels・management・project 各 1）は、
+  実行環境（共有 1.5 CPU の VM）で 1 日分の運航やキャンバス操作が repo の
+  E2E タイムアウト 30 秒に収まらないことが原因で、単体・統合テストで同じ
+  処理が合格していることから、フェーズ 4 の回帰とは判断していない。
+  速い環境での再確認が望ましい。

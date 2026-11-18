@@ -105,7 +105,7 @@ export function propDefault(def: PropDef): PropValue {
 
 export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
   apron: [],
-  terminal: [{ key: 'levels', type: 'int', min: 1, max: 3 }],
+  terminal: [{ key: 'levels', type: 'int', min: 1, max: 4 }],
   gate: [
     { key: 'standId', type: 'standRef' },
     { key: 'jetBridge', type: 'bool' },

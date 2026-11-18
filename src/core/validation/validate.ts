@@ -20,6 +20,7 @@ import { edgesOfNode, type AnyEdge } from '../layout/network';
 import { positionOnRunway, runwayAxis, runwayEnd, runwayMaxSize } from '../layout/runway';
 import { designatorsOf } from '../layout/designators';
 import { holdWalkLimitM, walkToClear, type HoldRunway } from '../layout/holdShort';
+import { TERMINAL_AREA_MIN_LEVEL } from '../layout/levelRules';
 import { resolveRunwayDims } from '../layout/runwayAreas';
 import { classifySegmentIntersection } from '../geometry/segment';
 import { rasterizeSegment } from '../geometry/vec';
@@ -1015,7 +1016,7 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     const inside =
       !!t &&
       t.kind === 'terminal' &&
-      a.level >= 0 &&
+      a.level >= TERMINAL_AREA_MIN_LEVEL &&
       a.level < Number(t.props.levels ?? 1) &&
       (() => {
         const own = new Set(facilityTiles(t).map((p) => tileKey(p.x, p.y)));
