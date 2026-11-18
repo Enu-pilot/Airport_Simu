@@ -182,7 +182,7 @@
 | 5-09 | 階層の未定義事項の決定と実装（内部設備の接続警告、建物の地下階、地下に置ける種類、全レイヤ表示中の配置先）。道路・鉄道ランプの画面からの建設 | docs/39 §10.3・§10.4 |
 | 5-10 | テスト不足の解消: 検証コード 29 種、都市イベント、旧形式の実ファイル、複合障害、保存サイズの上限。カバレッジ計測の導入（未計測を達成扱いにしない） | docs/39 §3 |
 | 5-11 | 保存データの間引き（運航状態が 1 日約 2.2 MB 増える） | docs/39 §3.1 |
-| 5-12 | 貨物（旅客の未完成部分の後） | docs/39 §7 A6 |
+| 5-12 | 貨物輸送・貨物取扱（空港格Tier3〜7で段階解放。格解放の器は5-20と連携） | docs/39 §7 A6、[貨物計画](implementation/planned/cargo_operations_plan.md) |
 | 5-13 | 旅客動線の3段階接続判定: 経路全体を「通行可能／建設完了待ち／未接続」に分類する。運用中経路を優先し、建設中経路は完成後の接続予測にだけ使う。旅客移動・構造検証・建設完了後の再探索へ反映し、内部通路の建設状態表現と連絡設備の工事進捗連携を整える | PO 依頼（2026-11-18）、[実装計画](implementation/planned/passenger_connectivity_status_plan.md) |
 | 5-14 | ターミナル階層・駅/バスターミナルの構造化: B3〜4Fを内部床階として扱い、railStation/busTerminalを独立構造物かつ建物内包可能にする。旧busStop・旧save互換を維持 | PO依頼（2026-11-18）、docs/34・39 §10.3 | [terminal_building_structure_plan.md](implementation/planned/terminal_building_structure_plan.md) |
 | 5-15 | ターミナル形状・複合体: 凹形ポリゴン建物に対応。辺接触または完成済み高層連絡通路で同一ターミナル複合体を判定。ただし同一complexと旅客通行可能は分離 | PO依頼（2026-11-18）、docs/22・35 | [terminal_complex_geometry_plan.md](implementation/planned/terminal_complex_geometry_plan.md) |
@@ -190,7 +190,7 @@
 | 5-17 | 誘導路実幅・機体適合・高速離脱誘導路: 実幅/肩幅/主脚・翼端余裕・曲線フィレットを分離し、RETの角度/半径/占有時間を運航へ反映 | PO依頼（2026-11-18）、FAA AC 150/5300-13B Chg1、EASA ADR-DSN.D.245/.295 | [taxiway_realism_plan.md](implementation/planned/taxiway_realism_plan.md) |
 | 5-18 | ターミナル専用設計画面: 建物選択から専用workspaceを開き、B3〜4Fの平面・接続・設備・能力・メッシュを編集し、対外交通6手段×方向×ゲート/出口の接続状況をマトリクス/経路ハイライトで検証 | PO依頼（2026-11-18）、docs/15・34・35 | [terminal_design_workspace_plan.md](implementation/planned/terminal_design_workspace_plan.md) |
 | 5-19 | 2種類の運航モード: 空港全体を既存clockで1日進行させる運航モード（ターミナルは全館/メッシュ集約）と、独立clockで選択ターミナル/複合体を詳細シミュレーションするモードを実装。両方で車・送迎・タクシー・バス・鉄道・徒歩を含む旅客アクセスと、外部〜入口〜搭乗口/到着出口〜外部の動線を検証 | PO依頼（2026-11-18）、docs/12・15・34・35・44、5-16・5-18 | [terminal_simulation_modes_plan.md](implementation/planned/terminal_simulation_modes_plan.md) |
-| 5-20 | 空港格の8段階化・成長判定の多軸化: 飛行場〜メガハブの8段階、規模・運営品質・施設能力・ネットワーク・経営継続性による昇格、格別の機能解放と旧格3の互換移行 | PO依頼（2026-11-18）、docs/30 §4・docs/44 §1 | [airport_tier_progression_plan.md](implementation/planned/airport_tier_progression_plan.md) |
+| 5-20 | 空港格の8段階化・成長判定の多軸化: 飛行場〜メガハブの8段階、規模・運営品質・施設能力・ネットワーク・経営継続性による昇格、格別の機能解放と旧格3の互換移行。貨物はTier3国内貨物→Tier4国際貨物→Tier5〜7取扱規模・物流網の拡張として段階解放し、昇格の必須条件にはしない | PO依頼（2026-11-18）、docs/30 §4・docs/44 §1、[貨物計画](implementation/planned/cargo_operations_plan.md) | [airport_tier_progression_plan.md](implementation/planned/airport_tier_progression_plan.md) |
 | 5-21 | 最混雑60分の評価・ターミナル別工程能力: アクセス、チェックイン、保安検査、トイレ、ランプバス等について、理論能力・同一60分窓の需要・実績処理人数・使用率・待ちを分けて表示。共有設備の能力をターミナルごとに重複計上しない | PO依頼（2026-11-18）、docs/33・35 | [peak_hour_passenger_capacity_plan.md](implementation/planned/peak_hour_passenger_capacity_plan.md) |
 | 5-22 | 空港全体/ターミナル詳細の共通シナリオ定義と比較: Phase 8の既存比較機能を再利用し、同一需要・便・アクセス供給・seedから両モードを実行。ベースライン/代替案の差分と比較可能なKPIを表示 | PO依頼（2026-11-18）、既存Phase 8、5-19・5-21 | [scenario_comparison_plan.md](implementation/planned/scenario_comparison_plan.md) |
 | 5-23 | 旅客Door-to-Door KPI: 外部交通境界〜搭乗ゲート、到着ゲート〜外部退出、乗継ゲート間の全所要時間・工程別時間p50/p95、搭乗締切前到達/搭乗完了率、Step-free率を計測。人数重み付き分位点と未計測を正しく扱う | PO依頼（2026-11-18）、5-16・5-19・5-21 | [passenger_door_to_door_kpi_plan.md](implementation/planned/passenger_door_to_door_kpi_plan.md) |
@@ -262,7 +262,7 @@
 | F3 | [風向・風速に応じた滑走路運用方向](implementation/planned/wind_runway_direction_plan.md) | 計画作成済み・基盤待ち | 5-24の方向別夜間運用との整合、滑走路予約/占有の設計レビュー |
 | F4 | [除雪・路面雪氷処理・航空機防除氷](implementation/planned/snow_removal_deicing_plan.md) | 計画作成済み・基盤待ち | 5-17の誘導路実幅、5-25のWork Order/整備シフト、5-21の能力計測 |
 
-- A6 は既存の Phase 5 5-12 を詳細化したもので、別の貨物要求を重複作成しない。
+- A6 は既存の Phase 5 5-12 を詳細化したもので、別の貨物要求を重複作成しない。貨物はTier3〜7で段階解放し、貨物運営を格昇格の必須条件にしない。詳細な解放表は空港格計画と貨物計画を正本とする。
 - D4 はブランド特性の表示と航空会社提案への効果を段階分離する。空港格・総合評価の変更はこの計画だけで承認されたものと扱わない。
 - K1 は既存の手動シナリオ比較を基盤にする。候補の自動適用や幾何レイアウトの自動設計は初期範囲に含めない。
 - F3/F4 はいずれもゲーム用の簡略モデルとし、現実の航空安全・気象・除雪基準への適合を主張しない。
