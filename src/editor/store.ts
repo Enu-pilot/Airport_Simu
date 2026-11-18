@@ -18,7 +18,7 @@ import type { CatalogPin } from '../core/io/project';
 import { createCareerCompany, createSandboxCompany, importCompany, post, type CompanyState } from '../core/economy/company';
 import { constructionCost } from '../core/economy/construction';
 import { applyGameState, defaultGame, scaleConstructionCost, startGame, type GameSettings } from '../core/economy/game';
-import type { CityConfig, CityEvent } from '../core/economy/city';
+import { cityEventCost, type CityConfig, type CityEvent } from '../core/economy/city';
 import { applyCompletedProjects, prepareCareerEdit, startClosure, syncProjects } from '../core/economy/expansion';
 import { createStarterAirfield } from '../core/sample/starterAirfield';
 import type { DayReview } from '../core/analytics/review';
@@ -577,24 +577,34 @@ export function setCompanyMarket(enabled: boolean): void {
   showToast(enabled && company.city ? '路線需要モデルを有効にしました' : '路線需要モデルを停止しました');
 }
 
-export function addCityEvent(event: Omit<CityEvent, 'id'>): void {
+export function addCityEvent(event: Omit<CityEvent, 'id' | 'wagered'>): void {
   const s = get();
   if (s.mode === 'operate' || !s.company.city) return;
+  // 5-07: イベントは協力費を払う判断にする。資金が足りなければ予定できない
+  const cost = cityEventCost(event);
+  if (s.company.cash < cost) {
+    showToast(`資金が不足しています（協力費 ${formatCr(cost)}）`);
+    return;
+  }
   const company = structuredClone(s.company);
   const events = company.city!.events ?? [];
   let n = 1;
   while (events.some((existing) => existing.id === `city-event-${n}`)) n++;
-  events.push({ ...event, id: `city-event-${n}` });
+  events.push({ ...event, id: `city-event-${n}`, wagered: true });
   company.city!.events = events.sort((a, b) => a.day - b.day || a.id.localeCompare(b.id));
+  company.cash -= cost;
   set({ company });
-  showToast('都市イベントを予定に追加しました');
+  showToast(`都市イベントを予定に追加しました（協力費 ${formatCr(cost)}）`);
 }
 
 export function removeCityEvent(eventId: string): void {
   const s = get();
   if (s.mode === 'operate' || !s.company.city?.events) return;
   const company = structuredClone(s.company);
+  const target = company.city!.events!.find((event) => event.id === eventId);
   company.city!.events = company.city!.events!.filter((event) => event.id !== eventId);
+  // 開催前なら協力費を全額戻す。始まってからは戻らない
+  if (target?.wagered && target.day > company.day) company.cash += cityEventCost(target);
   set({ company });
   showToast('都市イベントを予定から削除しました');
 }

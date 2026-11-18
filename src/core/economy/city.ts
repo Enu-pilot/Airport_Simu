@@ -18,6 +18,34 @@ export interface CityEvent {
   /** 1 = local, 2 = regional, 3 = large */
   scale: 1 | 2 | 3;
   location: CityEventLocation;
+  /** 5-07: プレイヤーが協力費を払って予定したイベント（費用と混雑リスクの対象）。欠落 = 従来どおり無償・順調 */
+  wagered?: boolean;
+}
+
+/** イベントの協力費（cr）。規模の二乗 × 日数に比例する（5-07: 無料の需要増をやめ、判断にする） */
+export function cityEventCost(e: Pick<CityEvent, 'scale' | 'durationDays'>): number {
+  return e.scale * e.scale * e.durationDays * 40_000;
+}
+
+/** 混雑に転ぶ確率（規模が大きいほど高い） */
+export function cityEventRisk(e: Pick<CityEvent, 'scale'>): number {
+  return 0.15 + 0.05 * e.scale;
+}
+
+/** イベント ID から決定的に [0, 1) を作る（乱数を使わず、保存にも残さない） */
+function hash01(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 10000) / 10000;
+}
+
+/** イベントの結果: 協力費を払ったイベントは ID で決定的に決まる。混雑だと需要の伸びが半分・交通が倍になる */
+export function cityEventOutcome(e: CityEvent): 'smooth' | 'congested' {
+  if (!e.wagered) return 'smooth';
+  return hash01(`event:${e.id}`) < cityEventRisk(e) ? 'congested' : 'smooth';
 }
 
 export interface CityConfig {
@@ -183,7 +211,8 @@ export function isCityEvent(value: unknown): value is CityEvent {
     && Number.isInteger(e.durationDays) && Number(e.durationDays) >= 1 && Number(e.durationDays) <= 30
     && (e.kind === 'festival' || e.kind === 'sports' || e.kind === 'conference')
     && (e.scale === 1 || e.scale === 2 || e.scale === 3)
-    && (e.location === 'cityCenter' || e.location === 'airportDistrict');
+    && (e.location === 'cityCenter' || e.location === 'airportDistrict')
+    && (e.wagered === undefined || typeof e.wagered === 'boolean');
 }
 
 const EVENT_EFFECTS: Record<CityEventKind, { demand: number; traffic: number }> = {
@@ -198,8 +227,9 @@ export function cityEventEffects(city: CityConfig | undefined, day: number): { e
   let trafficMultiplier = 1;
   for (const event of events) {
     const effect = EVENT_EFFECTS[event.kind];
-    demandMultiplier *= 1 + effect.demand * event.scale;
-    trafficMultiplier += effect.traffic * event.scale * (event.location === 'airportDistrict' ? 1.5 : 1);
+    const congested = cityEventOutcome(event) === 'congested';
+    demandMultiplier *= 1 + effect.demand * event.scale * (congested ? 0.5 : 1);
+    trafficMultiplier += effect.traffic * event.scale * (event.location === 'airportDistrict' ? 1.5 : 1) * (congested ? 2 : 1);
   }
   return { events, demandMultiplier: Math.min(1.8, demandMultiplier), trafficMultiplier: Math.min(2.5, trafficMultiplier) };
 }

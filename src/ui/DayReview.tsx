@@ -1,4 +1,5 @@
 import { ops } from '../editor/simRunner';
+import { goalText } from './operate/cards/GoalsCard';
 import { formatCr, useEditor } from '../editor/store';
 import { airlineDef } from '../core/economy/registry';
 import type { DayReview, ReviewFlight, ReviewMetric } from '../core/analytics/review';
@@ -371,7 +372,7 @@ export function ReviewBody({ review }: { review: DayReview }) {
           {review.goals.completed.length === 0 ? (
             <div className="card-sub">{GAME_UI.reviewNoGoals}</div>
           ) : (
-            review.goals.completed.map((g) => <Row key={g.id} label={GAME_UI.goal[g.id]?.title ?? g.id} value={g.cash > 0 ? formatCr(g.cash) : GAME_UI.goal[g.id]?.reward} />)
+            review.goals.completed.map((g) => <Row key={g.id} label={goalText(g).title} value={g.cash > 0 ? formatCr(g.cash) : goalText(g).reward} />)
           )}
           <Row label={GAME_UI.tierLabel(GAME_UI.tier[review.goals.tier]!)} value={review.goals.tierUp ? GAME_UI.tierUp(GAME_UI.tier[review.goals.tier]!) : ''} />
         </Section>

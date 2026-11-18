@@ -283,7 +283,7 @@ export function deriveAlerts(sim: { state: SimState; ctx: SimContext }, company:
   }
   if (company?.goals) {
     for (const g of company.goals.grants) {
-      if (g.day >= company.day - 1) add({ key: `goal:${g.id}`, severity: 'warning', t: state.now, title: GAME_UI.goalCompleted(GAME_UI.goal[g.id]?.title ?? g.id), target: { kind: 'none', id: null }, actions: ['openPanel'], panel: 'goals' });
+      if (g.day >= company.day - 1) add({ key: `goal:${g.id}`, severity: 'warning', t: state.now, title: GAME_UI.goalCompleted(GAME_UI.goal[g.id]?.title ?? `連鎖目標 ${Number(g.id.replace('chain-', '')) + 1}`), target: { kind: 'none', id: null }, actions: ['openPanel'], panel: 'goals' });
     }
   }
 
