@@ -154,6 +154,23 @@ export function ReviewBody({ review }: { review: DayReview }) {
             <Row label="貨物" value={`取扱 ${r.cargo.carriedM3} m³（積み残し ${r.cargo.leftoverM3} m³）・収入 ${formatCr(r.cargo.revenue)}・荷役費 ${formatCr(r.cargo.handlingCost)}・トラック ${r.cargo.truckTrips} 台`} />
           </div>
         )}
+        {r.doorToDoor && (r.doorToDoor.departure || r.doorToDoor.arrival || r.doorToDoor.transfer) && (
+          <div data-testid="review-door-to-door">
+            <b>Door-to-Door 所要時間（中央値 / 95%点）</b>
+            {r.doorToDoor.departure && <Row label="出発（入口→搭乗）" value={`${Math.round(r.doorToDoor.departure.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.departure.p95Sec / 60)} 分（${r.doorToDoor.departure.pax} 人）`} />}
+            {r.doorToDoor.arrival && <Row label="到着（降機→退出）" value={`${Math.round(r.doorToDoor.arrival.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.arrival.p95Sec / 60)} 分（${r.doorToDoor.arrival.pax} 人）`} />}
+            {r.doorToDoor.transfer && <Row label="乗継（ゲート間）" value={`${Math.round(r.doorToDoor.transfer.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.transfer.p95Sec / 60)} 分（${r.doorToDoor.transfer.pax} 人）`} />}
+            {r.doorToDoor.stepFree.rate !== null && <Row label="Step-free 完了率" value={`${Math.round(r.doorToDoor.stepFree.rate * 100)}%（完了 ${r.doorToDoor.stepFree.completed} 人・乗り遅れ ${r.doorToDoor.stepFree.missed} 人）`} />}
+          </div>
+        )}
+        {r.processPeak && r.processPeak.length > 0 && (
+          <div data-testid="review-process-peak">
+            <b>最混雑60分の工程別実績</b>
+            {r.processPeak.map((p) => (
+              <Row key={p.step} label={AREA_KIND_LABEL[p.step as keyof typeof AREA_KIND_LABEL] ?? p.step} value={`能力 ${p.capacityPerHour} 人/時・需要 ${p.demandPerHour} 人/時・ピーク ${p.peakHour} 時台 実績 ${p.peakProcessed} 人${p.utilization !== null ? `・使用率 ${Math.round(p.utilization * 100)}%` : ''}・平均待ち ${Math.round((p.avgWaitSec / 60) * 10) / 10} 分`} />
+            ))}
+          </div>
+        )}
         {r.linkUsage && r.linkUsage.length > 0 && (
           <div data-testid="review-link-usage">
             <b>連絡設備・上下移動の利用実績</b>

@@ -218,8 +218,8 @@
   },
   "plain-seed": {
    "seconds": 21600,
-   "stateSha256": "89f57af0a1cc2c0abf357a258fb321bf630dd4fbc479e6e49f2b6d73d4482730",
-   "stateLength": 6234441,
+   "stateSha256": "3c4ff028fe26ecb0e3e9f92bf17fc739ea8eef35edc01fb608283b4d70332e81",
+   "stateLength": 6234232,
    "stats": {
     "arrivals": 42,
     "departures": 33,

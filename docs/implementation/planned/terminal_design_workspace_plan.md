@@ -107,3 +107,10 @@
 - [Phase 6 総合計画](phase6_airport_facility_expansion_plan.md) の P2 は、本書のフロア・内部設備・接続・保存境界を前提として、施設能力インスペクター、サービス設定、能力オーバーレイを接続する。
 - 旅客工程能力・時系列・ピーク計測は [5-21](peak_hour_passenger_capacity_plan.md)、ターミナル詳細Simulationとの接続は [5-19](terminal_simulation_modes_plan.md) を参照する。
 - 本書のplanned状態・T1〜T7の進捗と受入条件は維持する。Phase 6への登録だけで実装開始・完了扱いにしない。
+
+## 実装進捗（2026-11-18 深夜）
+
+- 接続マトリクスの核を実装: `src/core/terminal/connectionMatrix.ts`（交通施設ごとに外部接続状態を analyzeAccess から、ターミナル側は verifyPortalAccess の3状態（運用中/完成待ち/未接続）を方向別に算出。Portal の無い施設は「徒歩判定」として区別し、自動接続を推測しない）。
+- 表示: アクセスパネルに「接続マトリクス（施設 × 方向）」節を追加（`src/ui/AccessPanels.tsx`、data-testid: connection-matrix）。
+- テスト: `tests/unit/connectionMatrix518.test.ts` 2/2（スターター飛行場 + バスターミナルで noPortal → Portal 追加後に operational、行なしケース）。
+- 残件: 専用 Workspace 画面、経路ハイライト、ゲート別列。

@@ -140,3 +140,9 @@
 - 品質ゲート: Docsのみのためコードテスト未実行
 - 未実行/未検証: N1〜N8
 - 残件: 全タスク
+
+## 実装進捗（2026-11-18 深夜）
+
+- 判定の核を実装: `CityConfig.protectionSectors`（空港からの方位範囲、0° 跨ぎ可、任意ラベル）と `src/core/economy/nightRunway.ts` の `nightEndPermissions`（滑走路端ごとに departure/arrival の回廊方位を求め、保護区域にかからない方向だけ夜間許可）。テスト `tests/unit/nightRunway524.test.ts` 3/3。
+- 既定は従来どおり全面カーフュー（city.nightOps / CITY_NIGHT_CURFEW）。運航計画への適用（planning 配線）は運航結果とゴールデンを変えるため、版・ゴールデンの扱いについて PO 判断を待つ。
+- 残件: 計画への配線、都市設定 UI、地図への区域表示。

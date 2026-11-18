@@ -154,3 +154,9 @@ Work Orderの状態は、少なくともplanned / queued / inProgress / blocked 
 - [Phase 6 総合計画](phase6_airport_facility_expansion_plan.md) の P3 は、本書のWork Order、時間枠、必要資源、閉鎖調整を再利用し、GSE・空港インフラ・ターミナル設備等へ段階拡張する。
 - docs/44 の夜間滞泊は機体をスポットに置く軽量方式を維持する。すべての滞泊をWork Order化しない。また、既存の航空機周期整備をWork Orderで二重に判定・課金しない。
 - 夜間運航との施設閉鎖調整は Phase 5 / 5-24 と連携する。本書のplanned状態・既存受入条件は維持する。
+
+## 設計検討（2026-11-18 深夜）
+
+- 対象は空港資産側の Work Order（滑走路・誘導路・施設の工事/保守）に限定し、機体の周期整備は Phase 4 の仕組みが担う（二重管理しない）。
+- 夜間閉鎖は buildState ではなく sim が参照する一時状態として表す案を検討した。
+- SIM_MODEL_VERSION への影響があるため、実装着手前に PO 確認が必要。

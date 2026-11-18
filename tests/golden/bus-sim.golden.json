@@ -291,8 +291,8 @@
   },
   "plain-seed": {
    "seconds": 43200,
-   "stateSha256": "c248ec93c42a51da9298a11b3dfa1f48ac84fd3913451c5eeee207b377e0fad4",
-   "stateLength": 12721147,
+   "stateSha256": "52aa48370dc7bdaa2125b2d1b4558aceab10b539f2027a5a69418eba163159fb",
+   "stateLength": 12721184,
    "invariantViolations": 0,
    "stats": {
     "arrivals": 86,
@@ -341,8 +341,9 @@
     "departures": 78,
     "cancelled": 25,
     "failCauses": {
-     "hold:noStand": 22,
-     "hold:routeBusy": 3
+     "hold:noStand": 20,
+     "hold:routeBusy": 3,
+     "hold:standTooSmall": 2
     },
     "runways": [
      {

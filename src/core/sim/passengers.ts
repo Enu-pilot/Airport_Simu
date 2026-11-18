@@ -18,6 +18,8 @@ import { onPaxDeplaned, onPaxMissed, onShopDone, onTransferMissed } from '../eco
 import { accessArrival, accessDeparture } from '../access/runtime';
 import { recordLinkUsage, unrecordLinkUsage } from './linkUsage';
 import { recordPortalPassage } from './portalUsage';
+import { isProcessStep, markProcessQueueJoin, recordProcessStart } from './processStats';
+import { recordJourneyFinish, recordJourneyStepFreeMiss } from './journeyStats';
 import { isRoutePending, markRoutePending, recordMissBreakdown, type MissBottleneck } from './missBreakdown';
 import type { Simulation } from './simulation';
 import {
@@ -374,6 +376,7 @@ export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null
     delete g.busTrip;
     if (reason !== 'cancelled') {
       if (miss) recordMissBreakdown(state, miss.category, miss.spotId, g.count);
+      if (g.stepFree) recordJourneyStepFreeMiss(state, g.count);
       p.missed += g.count;
       state.paxStats.missed += g.count;
       missed += g.count;
@@ -459,11 +462,15 @@ function reconcileDepartureGate(sim: Simulation, f: Flight, gateId: string | nul
       delete g.targetTerminalId;
       continue;
     }
+    const prevTarget = g.targetTerminalId;
     g.targetTerminalId = terminalId !== g.terminalId ? terminalId : null;
     if (!g.targetTerminalId) delete g.targetTerminalId;
     if (g.steps[g.stepIndex] !== 'gate') continue;
     if (g.facility?.startsWith('gate:')) leaveFacility(sim.state, g);
     if (g.terminalLinkId && g.route.length > 0 && g.legProgress > 0) {
+      // 連絡設備の区間を歩行中は再計画を完了後に遅らせる。その間は旧い目的地への
+      // target を残す（消すと歩行中の経路が P6 違反になる）
+      if (prevTarget) g.targetTerminalId = prevTarget;
       g.replanAfterTerminalLink = true;
       continue;
     }
@@ -611,7 +618,10 @@ function addTransferGroup(
   // 任意の立ち寄りは専用の乱数で決める（地元の出発と同じ確率・順序）
   if (shopAreas(sim, terminalId).length > 0 && trng.next() < BALANCE.retail.shopVisitProb) steps.splice(steps.length - 1, 0, 'shop');
   if (trng.next() < RESTROOM_PROB) steps.splice(steps.length - 1, 0, 'restroom');
-  const depGateTerminal = dep?.pax.gateId ? ctx.terminal.gates[dep.pax.gateId]?.terminalId ?? null : null;
+  // 出発便のゲートが未確定でも、計画スポットから所属ターミナルは分かる。跨ターミナル乗継では
+  // targetTerminalId がないと経路が割当て先外と判定される（不変条件 P6）ため、計画スポットで補う
+  const depGateId = dep?.pax.gateId ?? (dep?.plannedStandId ? ctx.standGate[dep.plannedStandId] ?? null : null);
+  const depGateTerminal = depGateId ? ctx.terminal.gates[depGateId]?.terminalId ?? null : null;
   const id = nextId(state, 'pg');
   const g: PaxGroup = {
     id,
@@ -1145,6 +1155,11 @@ function setWaiting(state: SimState, g: PaxGroup, s: 'stranded' | 'waitingFacili
 }
 
 function startRoute(sim: Simulation, g: PaxGroup, areas: string[]): void {
+  // 経路が所属ターミナルを出るなら、目的地のターミナルを targetTerminalId にする
+  // （不変条件 P6 は「所属か target のどちらか」のターミナル内の経路だけを許す。
+  //  ゲート変更後の再計画でも、経路と target が常に一致するようにここで一元化する）
+  const destTerminal = areas.length > 1 ? sim.ctx.terminal.areas[areas[areas.length - 1]!]?.terminalId : undefined;
+  if (destTerminal && g.terminalId && destTerminal !== g.terminalId) g.targetTerminalId = destTerminal;
   g.route = areas.slice(1);
   delete g.terminalLinkWaitingId;
   delete g.terminalLinkPaxAccumulated;
@@ -1341,6 +1356,8 @@ function joinQueue(state: SimState, g: PaxGroup, key: string, s: 'queuing' | 'bo
   fac.queue.push(g.id);
   g.facility = key;
   g.state = s;
+  // 5-21: 工程別の待ちを切り出すため、行列に入った時点の累積待ちを記録する
+  if (isProcessStep(g.steps[g.stepIndex])) markProcessQueueJoin(state, g.id, g.waitSec);
   const queued = fac.queue.reduce((sum, id) => sum + (state.paxGroups[id]?.count ?? 0), 0);
   fac.maxQueue = Math.max(fac.maxQueue, queued);
 }
@@ -1360,6 +1377,8 @@ function finish(state: SimState, g: PaxGroup): void {
   state.paxStats.waitTotal += g.waitSec * g.count;
   state.paxStats.walkTotal += g.walkSec * g.count;
   state.paxStats.finished += g.count;
+  // 5-23: Door-to-Door 所要時間の記録（完了した旅客だけ）
+  recordJourneyFinish(state, g);
 }
 
 // ---------------------------------------------------------------- 施設（待ち行列）
@@ -1438,6 +1457,9 @@ function stepFacility(sim: Simulation, key: string): void {
     g.serviceUntil = state.now + serviceSec(sim, key, g);
     fac.served += g.count;
     fac.waitTotal += g.waitSec * g.count;
+    // 5-21: 工程別の処理実績（最混雑 60 分の集計用）
+    const step = g.steps[g.stepIndex];
+    if (isProcessStep(step)) recordProcessStart(state, step, g.id, g.count, g.waitSec, state.now);
   }
 }
 

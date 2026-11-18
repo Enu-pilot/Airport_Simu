@@ -163,3 +163,10 @@
 - [Phase 6 総合計画](phase6_airport_facility_expansion_plan.md) の P0 は、本書の旅客能力算出・時系列計測・共有設備の二重計上防止を基礎にし、建設画面の能力インスペクターと他分野の能力表示へ共通契約を拡張する。
 - 本書で定義するチェックイン・保安検査・トイレ・アクセス・ランプバス等の旅客能力の式・時間窓・未算出ルールをPhase 6側で独自に変更しない。貨物・夜間・インフラは別の単位・時間窓を持つ別領域として追加する。
 - 本書のplanned状態・受入条件は維持する。Phase 6への登録だけで5-21の未着手タスクを完了扱いにしない。
+
+## 実装進捗（2026-11-18 深夜）
+
+- 工程別ピークの核を実装: サイドストア `src/core/sim/processStats.ts`（WeakMap、工程 = checkIn/security/emigration/immigration/customs/transferSecurity。キュー参加時の待ち基準と処理開始時の実績を記録）が日次決済で `DailyReport.processPeak` に集約され、DayReview に工程別の能力/需要/ピーク実績/使用率/平均待ちを表示。
+- 需要は当日の便記録から `peakWindowPerHour` で算出（出発は予定 −90 分、チェックイン需要は出発ピーク × 0.65。planning.ts の定数を再利用）。能力は該当種別エリアの `areaProcessingPerHour` 合計を全空港で一度だけ数える（ターミナル別に二重計上しない）。
+- テスト: `tests/unit/processPeak521.test.ts` 2/2。日報への新フィールド追加で fingerprint の2シナリオ（city core / sample airport）の基準値が変化。帰属を実験で確認（集約を無効化すると旧基準値と一致）したうえで再基準化し、SIM_MODEL_VERSION は変更していない。
+- 残件: ローリング60分窓（現在は時刻時バケット）、アクセス/ランプバス/トイレ工程、ターミナル別内訳。

@@ -1,4 +1,6 @@
 import type { TaxiwayDesignProfile, TaxiwayEdge } from '../model/types';
+import { arcLength, fillet } from '../geometry/arc';
+import { TILE_M } from '../geometry/frames';
 
 /**
  * 誘導路の実寸設計プロファイル（5-17 T1/T3）。
@@ -66,4 +68,107 @@ export function assessTaxiwayWidth(
   const required = requiredPavementWidthM(profile, { designGroup: edge.designGroup, omgwsM });
   if (required === null) return 'unknown';
   return edge.pavementWidthM >= required ? 'sufficient' : 'insufficient';
+}
+
+// ---------------------------------------------------------------------------
+// T4: コーナーのフィレットと曲線部の主脚余裕（純粋な幾何・運動学のみ。
+// 半径やホイールベースは呼び出し側の設計入力で、ここに規格値は持たない）
+// ---------------------------------------------------------------------------
+
+export interface CornerFillet {
+  /** コーナーから各辺の接点までの距離 (m) */
+  tangentDistM: number;
+  /** フィレット円弧の長さ (m) */
+  arcLengthM: number;
+  /** 旋回角（度。直進 0、直角 90） */
+  turnAngleDeg: number;
+}
+
+/**
+ * 2 辺のなす角を半径 radiusM の円弧で丸めたときの接線長と弧長を返す。
+ * 座標はタイル単位で受け、TILE_M でメートルに換算する。
+ * 一直線・折り返し・半径が不正なら null。
+ */
+export function taxiwayCornerFillet(
+  prev: { x: number; y: number },
+  vertex: { x: number; y: number },
+  next: { x: number; y: number },
+  radiusM: number,
+): CornerFillet | null {
+  if (!(radiusM > 0)) return null;
+  const toM = (p: { x: number; y: number }) => ({ x: p.x * TILE_M, y: p.y * TILE_M });
+  const f = fillet(
+    { kind: 'line', p0: toM(prev), p1: toM(vertex) },
+    { kind: 'line', p0: toM(vertex), p1: toM(next) },
+    radiusM,
+  );
+  if (!f) return null;
+  const v = toM(vertex);
+  return {
+    tangentDistM: Math.hypot(f.a.p1.x - v.x, f.a.p1.y - v.y),
+    arcLengthM: arcLength(f.arc),
+    turnAngleDeg: Math.round(((Math.abs(f.arc.sweep) * 180) / Math.PI) * 10) / 10,
+  };
+}
+
+/**
+ * 旋回時の主脚の内側へのずれ（オフトラッキング, m）。
+ * 前脚が半径 R の円弧を辿るとき、主脚は sqrt(R² − L²) の円弧を辿る（L = ホイールベース）。
+ * L ≥ R では旋回できないため null。
+ */
+export function mainGearOffTrackM(nosePathRadiusM: number, wheelbaseM: number): number | null {
+  if (!(nosePathRadiusM > 0) || !(wheelbaseM >= 0)) return null;
+  if (wheelbaseM >= nosePathRadiusM) return null;
+  return nosePathRadiusM - Math.sqrt(nosePathRadiusM ** 2 - wheelbaseM ** 2);
+}
+
+/** 曲線部で必要な舗装幅 (m): 主脚帯が内側にずれる分だけ直線部より広く要る */
+export function curveRequiredWidthM(omgwsM: number, offTrackM: number): number {
+  return omgwsM + 2 * offTrackM;
+}
+
+// ---------------------------------------------------------------------------
+// T5: 高速離脱誘導路（RET）の形状（純粋な幾何と運動学のみ。
+// 角度・半径・間隔・速度・減速度はすべて設計入力で、規格値は埋め込まない）
+// ---------------------------------------------------------------------------
+
+export interface RetPath {
+  /** 滑走路中心線から離脱曲線（円弧）に入り、角度 exitAngleDeg だけ向きを変えるまでの弧長 (m) */
+  arcLengthM: number;
+  /** 円弧の後に平行誘導路へ到達するまでの直線長 (m) */
+  straightLengthM: number;
+  totalLengthM: number;
+  /** 離脱開始点から、平行誘導路の中心線へ到達するまでの滑走路方向の距離 (m) */
+  alongRunwayM: number;
+}
+
+/**
+ * 離脱角 θ・半径 R で滑走路を離れ、横方向に lateralOffsetM 離れた平行誘導路へ抜ける経路。
+ * 円弧だけで横方向の間隔を超えてしまう（R(1−cosθ) > D）場合は成立しないため null。
+ */
+export function retPath(exitAngleDeg: number, radiusM: number, lateralOffsetM: number): RetPath | null {
+  if (!(exitAngleDeg > 0 && exitAngleDeg < 90) || !(radiusM > 0) || !(lateralOffsetM > 0)) return null;
+  const th = (exitAngleDeg * Math.PI) / 180;
+  const arcLateral = radiusM * (1 - Math.cos(th));
+  if (arcLateral > lateralOffsetM) return null;
+  const arcLengthM = radiusM * th;
+  const straightLengthM = (lateralOffsetM - arcLateral) / Math.sin(th);
+  return {
+    arcLengthM,
+    straightLengthM,
+    totalLengthM: arcLengthM + straightLengthM,
+    alongRunwayM: radiusM * Math.sin(th) + straightLengthM * Math.cos(th),
+  };
+}
+
+/** 一定減速度で止まるまでの距離 (m)。v²/(2a) */
+export function stoppingDistanceM(speedMps: number, decelMps2: number): number | null {
+  if (!(speedMps >= 0) || !(decelMps2 > 0)) return null;
+  return (speedMps * speedMps) / (2 * decelMps2);
+}
+
+/** 距離 distanceM で止まるために許容できる進入速度 (m/s)。sqrt(2aD) */
+export function maxEntrySpeedMps(distanceM: number, decelMps2: number): number | null {
+  if (!(distanceM >= 0) || !(decelMps2 > 0)) return null;
+  return Math.sqrt(2 * decelMps2 * distanceM);
 }

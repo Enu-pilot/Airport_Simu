@@ -66,8 +66,8 @@
 | T1 | 完了（基盤範囲） | FAA TDG / EASA OMGWSの適用profile・用語・表を確定 | design profile / docs/design/research_ground_geometry.md | 異なる標準の値を混ぜず、出典・改訂・定義・参考用途を記録 |
 | T2 | 未着手 | aircraft catalogの実寸項目・出典・不明値ルールを整理 | aircraft catalog/types / manufacturer references | 各寸法の定義・測定点が一致。未取得値はunknown |
 | T3 | 完了（基盤・未接続） | 誘導路の実舗装幅・肩幅・Design Group・legacy変換 | TaxiwayEdge / catalog / io / validation | 新旧エッジが読み書きでき、旧結果はlegacy profileで不変 |
-| T4 | 未着手 | 曲線中心線・フィレット・機体旋回/余裕判定 | geometry / footprint / airside network / validation | 直線/曲線/合流/交差で機体の主脚/翼端が条件どおり。範囲外は警告/不可 |
-| T5 | 一部完了 | RETの役割・角度・半径・throat・離脱後停止距離 | runway/taxiway geometry / editor / validation | FAA・EASAのprofileを個別テスト。profile混在0 |
+| T4 | 一部完了 | 曲線中心線・フィレット・機体旋回/余裕判定 | geometry / footprint / airside network / validation | 直線/曲線/合流/交差で機体の主脚/翼端が条件どおり。範囲外は警告/不可。進捗（2026-11-18 夜）: 純粋幾何の核を taxiwayDesign.ts に実装 — taxiwayCornerFillet（既存 geometry.fillet をメートル換算で適用、接線長・弧長・旋回角）、mainGearOffTrackM（前脚半径とホイールベースから主脚の内側ずれ sqrt 式）、curveRequiredWidthM（OMGWS + 2×ずれ）。taxiwayGeometry517 6 件で手計算と一致を確認。残: 検証への接続と翼端余裕、描画 |
+| T5 | 一部完了 | RETの役割・角度・半径・throat・離脱後停止距離 | runway/taxiway geometry / editor / validation | FAA・EASAのprofileを個別テスト。profile混在0。進捗（2026-11-18 夜）: retPath（離脱角・半径・平行誘導路間隔から弧長・直線長・滑走路方向距離を返す純粋幾何。円弧だけで間隔を超える場合は不成立）と stoppingDistanceM / maxEntrySpeedMps（v²/(2a) とその逆関数）を taxiwayDesign.ts に実装し、手計算で検証。角度・半径・速度は設計入力とし、規格値は埋め込んでいない。残: エディタ/検証への接続と throat の扱い |
 | T6 | 未着手 | RETを到着経路・滑走路占有時間へ接続 | airside network / arrival simulation / runway occupancy | RETの有無・速度profileで滑走路占有が期待方向へ変化し、他機侵入/デッドロック0 |
 | T7 | 一部完了 | editor/renderer・保存・回帰テスト・Docs | UI / 2D / 3D / io / tests | 幅・曲線・RETを視認/編集でき、旧レイアウト読み込みとモデル版判断が整合 |
 
