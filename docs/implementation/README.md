@@ -22,7 +22,7 @@
 | Phase 2.5 | planned | planned | 最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
 | Phase 3 | completed | planned（移管未反映） | docs/42 §3.2は2026-11-18完了。計画書のcompleted移管はライフサイクル整合の残件 |
 | Phase 4 | 実装完了・一部受入計測未検証 | planned（監査継続） | docs/42 §3.3。4-03/4-10等の未検証条件を解消するまでcompletedへ移さない |
-| Phase 5 | backlog / 個別計画あり | planned | 5-13〜5-19を依存関係に従って個別実施 |
+| Phase 5 | backlog / 個別計画あり | planned | 5-13〜5-20を依存関係に従って個別実施 |
 
 docs/42がフェーズの実装状況の正本、各計画書の状態とフォルダ配置は実装計画のライフサイクルを表します。過去の計画書配置が現在の実装状況と一致していない箇所は、受入記録を確認してから移管し、フォルダ名だけで実装済み/未実装を判断しません。
 
@@ -39,6 +39,7 @@ docs/42がフェーズの実装状況の正本、各計画書の状態とフォ�
 | Phase 5 / 5-17 誘導路実幅・高速離脱 | planned | [taxiway_realism_plan.md](planned/taxiway_realism_plan.md) | FAA TDG/EASA OMGWSのprofileを混同しない |
 | Phase 5 / 5-18 ターミナル専用設計Workspace | planned | [terminal_design_workspace_plan.md](planned/terminal_design_workspace_plan.md) | フロア・内部設備・メッシュ能力の編集 |
 | Phase 5 / 5-19 集約運航・詳細TerminalSimulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 通常運航の計算軽量化と別詳細モード |
+| Phase 5 / 5-20 空港格の8段階化・成長判定の多軸化 | planned | [airport_tier_progression_plan.md](planned/airport_tier_progression_plan.md) | 既存格解放・契約提案・旧セーブ互換を含めて段階的に拡張 |
 
 
 ## ディレクトリの意味
