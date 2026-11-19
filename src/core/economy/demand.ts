@@ -1,18 +1,20 @@
 import { AIRCRAFT_TYPES, type TypeTable } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
-import { cityDemandCeiling, cityEventEffects, contractTransferShare } from './city';
+import { airMarketPopulationOf } from './city';
 import { activeContractsOn, seatsFor, type CompanyState } from './company';
 import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirport, type DestinationDef, type RouteCapabilities } from './registry';
 
 /**
  * 路線需要モデル（フェーズ 3 §3。docs/42 3-05〜3-08）。
  * market が有効な会社だけが使う。自都市と相手都市の規模・需要構成・距離から路線の需要（人/日、両方向）を出し、
- * 都市の需要上限で配分して、路線の座席で割って契約ごとの搭乗率を決める。新しい乱数は使わない。
+ * 路線の座席で割って契約ごとの搭乗率を決める。新しい乱数は使わない。
+ * docs/46 反映（2026-11-19）: 出発側は航空市場人口、目的地側は利用圏人口・必須需要・
+ * 航空依存度・季節プロファイルを使い、都市総需要上限による路線間の比例縮小はしない。
  */
 
 export interface RouteDemandInfo {
   destinationId: string;
-  /** その日の路線需要（人/日・両方向。都市の需要上限で配分した後） */
+  /** その日の路線需要（人/日・両方向。OD ごとの潜在需要そのもの） */
   demand: number;
   /** 供給座席（両方向） */
   seats: number;
@@ -27,9 +29,14 @@ export function distanceFactor(distanceKm: number): number {
   return Math.min(1, 0.4 + (0.6 * distanceKm) / 600) * Math.exp(-Math.max(0, distanceKm - 1000) / 6000);
 }
 
-/** 需要指数 I_d（業務と観光の加重） */
-export function demandIndex(dest: Pick<DestinationDef, 'demand'>): number {
-  return 0.55 * dest.demand.business + 0.45 * dest.demand.leisure;
+/** 必須需要の互換読み込み（docs/46: essential ?? business ?? 1） */
+export function essentialOf(demand: { essential?: number; business?: number }): number {
+  return demand.essential ?? demand.business ?? 1;
+}
+
+/** 需要指数 I_d（必須需要と観光の加重。docs/46 で business から essential へ移行） */
+export function demandIndex(dest: { demand: { essential?: number; business?: number; leisure: number } }): number {
+  return 0.55 * essentialOf(dest.demand) + 0.45 * dest.demand.leisure;
 }
 
 const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -49,19 +56,36 @@ export function monthOf(day: number): number {
   return 11;
 }
 
+const mean12 = (table: readonly number[]): number => table.reduce((a, v) => a + v, 0) / 12;
+
 /**
- * 季節・曜日係数（5-06）: 相手都市の業務/観光の構成で重み付けし、需要指数で割って平均 1 に保つ。
- * 業務は平日（特に金曜）と年度末に寄り、観光は週末と 5 月・8 月・年末年始に寄る。
+ * 季節・曜日係数: 相手都市の必須/観光の構成で重み付けし、需要指数で割って平均 1 に保つ。
+ *
+ * 月別係数は docs/46 §3.2 の式: 必須需要は essentialMonth、観光需要は目的地の
+ * seasonalityProfile の表を使い、合成して需要指数で割る（年間平均 1）。
+ * プロファイルのない目的地（国際線など）は従来の monthBusiness/monthLeisure を使う。
+ * 曜日係数は従来の weekdayBusiness/weekdayLeisure を必須/観光の重みで合成したものを
+ * そのまま使う（docs/46 は曜日係数の値を指定していないための簡略化）。
  */
-export function seasonalWeekdayFactor(dest: Pick<DestinationDef, 'demand'>, day: number): number {
+export function seasonalWeekdayFactor(dest: { demand: { essential?: number; business?: number; leisure: number }; seasonalityProfile?: DestinationDef['seasonalityProfile'] }, day: number): number {
   const idx = demandIndex(dest);
   if (idx <= 0) return 1;
   const M = BALANCE.market;
   const wd = weekdayOf(day);
   const mo = monthOf(day);
-  const business = 0.55 * dest.demand.business * M.weekdayBusiness[wd]! * M.monthBusiness[mo]!;
-  const leisure = 0.45 * dest.demand.leisure * M.weekdayLeisure[wd]! * M.monthLeisure[mo]!;
-  return (business + leisure) / idx;
+  const essential = essentialOf(dest.demand);
+  const profile = dest.seasonalityProfile ? M.seasonalityProfiles[dest.seasonalityProfile] : undefined;
+  if (!profile) {
+    // プロファイルのない目的地は従来の合成式のまま（business は essential へ読み替える）
+    const business = 0.55 * essential * M.weekdayBusiness[wd]! * M.monthBusiness[mo]!;
+    const leisure = 0.45 * dest.demand.leisure * M.weekdayLeisure[wd]! * M.monthLeisure[mo]!;
+    return (business + leisure) / idx;
+  }
+  const weekday = (0.55 * essential * M.weekdayBusiness[wd]! + 0.45 * dest.demand.leisure * M.weekdayLeisure[wd]!) / idx;
+  const essentialMonth = M.essentialMonth[mo]! / mean12(M.essentialMonth);
+  const leisureMonth = profile[mo]! / mean12(profile);
+  const monthly = (0.55 * essential * essentialMonth + 0.45 * dest.demand.leisure * leisureMonth) / idx;
+  return weekday * monthly;
 }
 
 /**
@@ -76,11 +100,14 @@ export function routeDemand(c: CompanyState, dest: DestinationDef, access = 1): 
   const phi = dest.scope === 'domestic' ? 1 : M.internationalFactor;
   // アクセス係数 A は都市需要上限と同じ正規化（0.7 + 0.3 × 正規化アクセス。計画 §3.6 の計算例）
   const a = 0.7 + 0.3 * Math.min(1, Math.max(0, (access - 0.3) / 0.8));
+  // docs/46: 出発側は航空市場人口（未設定なら都市人口）、目的地側は利用圏人口
+  // （未設定なら従来の population）、航空依存度は目的地側に一度だけ掛ける
   return (
     M.K *
-    Math.pow(c.city.population / 1e6, M.alpha) *
-    Math.pow(dest.population / 1e6, M.beta) *
+    Math.pow(airMarketPopulationOf(c.city) / 1e6, M.alpha) *
+    Math.pow((dest.catchmentPopulation ?? dest.population) / 1e6, M.beta) *
     demandIndex(dest) *
+    dest.aviationDependency *
     distanceFactor(dest.distanceKm) *
     phi *
     a *
@@ -89,7 +116,12 @@ export function routeDemand(c: CompanyState, dest: DestinationDef, access = 1): 
   );
 }
 
-/** その日の路線ごとの需要と供給（都市の需要上限 C で配分した後）。city がなければ null */
+/**
+ * その日の路線ごとの需要と供給。city がなければ null。
+ * docs/46 §7.1-3: 市場モードでは都市総需要上限による路線間の比例縮小をしない。
+ * 各 OD の潜在需要は独立で、他路線の追加・削除で変わらない（受入条件 9）。
+ * cityDemandCeiling は都市成長・レガシー経路の用途に残してある（city.ts）。
+ */
 export function routeDemandSummary(
   c: CompanyState,
   day: number,
@@ -99,31 +131,15 @@ export function routeDemandSummary(
 ): Map<string, RouteDemandInfo> | null {
   if (!c.city) return null;
   const seatsByDest = new Map<string, number>();
-  const xferSeatsByDest = new Map<string, number>();
   for (const k of activeContractsOn(c, day)) {
     if (routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities) !== 'available') continue;
     const seats = k.perDay * seatsFor(c, k.airlineId, k.typeId, types) * 2;
     seatsByDest.set(k.destinationId, (seatsByDest.get(k.destinationId) ?? 0) + seats);
-    const share = contractTransferShare(c, k);
-    if (share > 0) xferSeatsByDest.set(k.destinationId, (xferSeatsByDest.get(k.destinationId) ?? 0) + seats * share);
   }
-  const raw = new Map<string, number>();
-  let localTotal = 0;
-  for (const destId of seatsByDest.keys()) {
-    const dest = destinationDef(destId);
-    const d = (routeDemand(c, dest, access) ?? 0) * seasonalWeekdayFactor(dest, day);
-    raw.set(destId, d);
-    // 上限は地元需要にだけ効かせる（5-20 T8 の PO 判断）。需要は両方向なので、到着側の乗継分だけを地元から外す:
-    // 地元分 = D × (1 − share/2)（share はその路線の座席加重平均の乗継割合）
-    const seats = seatsByDest.get(destId) ?? 0;
-    const share = seats > 0 ? (xferSeatsByDest.get(destId) ?? 0) / seats : 0;
-    localTotal += d * (1 - share / 2);
-  }
-  const ceiling = cityDemandCeiling(c.city, access) * cityEventEffects(c.city, day).demandMultiplier;
-  const scale = localTotal > 0 ? Math.min(1, ceiling / localTotal) : 1;
   const out = new Map<string, RouteDemandInfo>();
   for (const [destId, seats] of seatsByDest) {
-    const demand = (raw.get(destId) ?? 0) * scale;
+    const dest = destinationDef(destId);
+    const demand = (routeDemand(c, dest, access) ?? 0) * seasonalWeekdayFactor(dest, day);
     out.set(destId, { destinationId: destId, demand, seats, baseLf: seats > 0 ? demand / seats : 0 });
   }
   return out;

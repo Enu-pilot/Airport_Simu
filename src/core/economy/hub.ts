@@ -51,6 +51,39 @@ export function onwardAppeal(from: DestinationDef, to: DestinationDef): number {
   return Math.pow(to.population / 1e6, M.beta) * demandIndex(to) * distanceFactor(from.distanceKm + to.distanceKm) * phi;
 }
 
+/** 2 都市間の直行距離 (km)。目的地の座標（緯度経度）から球面距離で求める */
+export function directDistanceKm(from: DestinationDef, to: DestinationDef): number {
+  const a = from.coordinates;
+  const b = to.coordinates;
+  const rad = Math.PI / 180;
+  const dLat = (b.latitude - a.latitude) * rad;
+  const dLon = (b.longitude - a.longitude) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * 直行便の魅力 A_nonstop: onwardAppeal と同じ重力型で、経由距離の代わりに
+ * 2 都市間の直行距離を使う（仮想の直行経路がどれだけ強い競合か）。
+ */
+export function nonstopAppeal(from: DestinationDef, to: DestinationDef): number {
+  const M = BALANCE.market;
+  const phi = to.scope === 'international' ? M.internationalFactor : 1;
+  return Math.pow(to.population / 1e6, M.beta) * demandIndex(to) * distanceFactor(directDistanceKm(from, to)) * phi;
+}
+
+/**
+ * 直行便との競合（F6-17 HubChoiceShare）: その OD のスルー需要のうち、
+ * 自空港での乗継が選ばれる割合。直行距離が経由距離より大幅に短い OD では
+ * 直行に流れ、迂回が小さい OD では乗継が競合できる。
+ */
+export function hubChoiceShare(from: DestinationDef, to: DestinationDef): number {
+  const via = onwardAppeal(from, to);
+  const direct = nonstopAppeal(from, to);
+  if (via <= 0 || direct <= 0) return 1;
+  return via / (via + BALANCE.hub.nonstopPreference * direct);
+}
+
 /** 乗継 OD 集計の 1 行（5A: 表示用データ。能力画面・日報が拾う） */
 export interface TransferOdEntry {
   /** 到着路線の相手都市（destinationId） */
@@ -150,7 +183,8 @@ export function planConnections(plan: DayPlan, c: CompanyState, hub: HubAnalysis
       if (d.airlineId !== a.airlineId && !((kd?.transferShare ?? 0) > 0)) continue;
       const free = d.seats - d.depPax - (d.transferIn ?? 0);
       if (free <= 0) continue;
-      const appealQuality = onwardAppeal(fromDest, destinationDef(d.destinationId)) * connectionQuality(gap, mct);
+      // F6-17 HubChoiceShare: 直行便という比較経路との競合を魅力へ織り込む
+      const appealQuality = onwardAppeal(fromDest, destinationDef(d.destinationId)) * hubChoiceShare(fromDest, destinationDef(d.destinationId)) * connectionQuality(gap, mct);
       candidates.push({ d, kind, free, appealQuality });
     }
     if (candidates.length === 0) continue;
@@ -166,7 +200,11 @@ export function planConnections(plan: DayPlan, c: CompanyState, hub: HubAnalysis
     // 乗継需要の割合: 終着需要（localAppeal）との競合で決まる飽和型。上限は契約のキャップ
     const share = cap * (net / (net + BALANCE.hub.localAppeal));
     const rng = new Rng(`${c.seed}:xfer:${plan.day}:${a.key}`);
-    const remaining = Math.round(a.arrPax * share * (0.9 + 0.2 * rng.next()));
+    // F6-17 搭乗率への統合: 需要プールは「到着旅客」ではなく「到着便の座席」を基準にする。
+    // 搭乗率が低く空席のある便では、スルー需要が空席を埋めて到着便の搭乗率自体が上がる。
+    // arrPax が座席を超える計画（あり得る入力）では従来どおり arrPax をプールにする。
+    const pool = Math.max(a.arrPax, a.seats);
+    const remaining = Math.round(pool * share * (0.9 + 0.2 * rng.next()));
     if (remaining <= 0) continue;
     // 配分: 重み（魅力 × 品質 × 空席）に比例し、端数は魅力 × 品質の大きい順に 1 人ずつ足す。空席は超えない
     const totalFree = candidates.reduce((s, x) => s + x.free, 0);
@@ -191,6 +229,15 @@ export function planConnections(plan: DayPlan, c: CompanyState, hub: HubAnalysis
       connections.push({ depKey: x.d.key, pax, kind: x.kind });
       x.d.transferIn = (x.d.transferIn ?? 0) + pax;
     });
-    if (connections.length > 0) a.connections = connections;
+    if (connections.length > 0) {
+      a.connections = connections;
+      // F6-17 搭乗率への統合（続き）: 座席基準プールから配分された乗継が元の到着旅客を
+      // 超えた分は、到着便の予約そのものが増えたものとして arrPax を伸ばす（座席が上限）。
+      // DayPlan の arrPax は計画段階の需要推定であり、予約確定後の数値ではないため、
+      // この伸長は「地元需要の推定 vs スルー需要の配分」の再見積もりとして扱う。
+      // 地元終着の人数は arrPax − 乗継合計として従来どおり導出される。
+      const allocated = connections.reduce((s, cn) => s + cn.pax, 0);
+      if (a.seats > a.arrPax) a.arrPax = Math.max(a.arrPax, Math.min(allocated, a.seats));
+    }
   }
 }

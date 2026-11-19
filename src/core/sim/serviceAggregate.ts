@@ -2,6 +2,7 @@ import { BALANCE } from '../economy/balance';
 import { onShopDone } from '../economy/ops';
 import {
   categoryProfile,
+  isLoungeEligible,
   serviceProfileKey,
   type ServiceCategory,
 } from '../terminal/serviceProfile';
@@ -46,10 +47,14 @@ export interface ServiceAggregateRuntime {
   active: Map<string, number>;
   /** `${terminalId}|${category}` → 集約利用実績 */
   usage: Map<string, ServiceCategoryUsage>;
+  /** ラウンジの席占有（人数ベース。`${terminalId}|lounge` → 現在滞在中の人数） */
+  activePax: Map<string, number>;
+  /** ラウンジ滞在の開始記録（グループ ID → カテゴリキーと開始時刻）。詳細・集約の両方式で使う */
+  loungeStay: Map<string, { key: string; startedAt: number }>;
 }
 
 export function createServiceAggregateRuntime(): ServiceAggregateRuntime {
-  return { active: new Map(), usage: new Map() };
+  return { active: new Map(), usage: new Map(), activePax: new Map(), loungeStay: new Map() };
 }
 
 export function serviceRuntimeOf(sim: Simulation): ServiceAggregateRuntime {
@@ -57,7 +62,11 @@ export function serviceRuntimeOf(sim: Simulation): ServiceAggregateRuntime {
   return sim.serviceRuntime;
 }
 
-/** 運営モードの集約利用実績（UI・診断向けの読み取り口。Step 5 引き渡し参照） */
+/**
+ * 運営モードのサービス利用実績（UI・診断向けの読み取り口。Step 5 引き渡し参照）。
+ * 店舗・飲食は集約方式でのみ記録されるが、ラウンジは詳細・集約の両方式で
+ * 同じキー（`${terminalId}|lounge`）へ記録される（運営モード接続、5-19 2A）。
+ */
 export function serviceAggregateUsage(sim: Simulation): ReadonlyMap<string, ServiceCategoryUsage> {
   return serviceRuntimeOf(sim).usage;
 }
@@ -134,11 +143,102 @@ export function planAggregateShopVisit(
   return true;
 }
 
+function usageOf(runtime: ServiceAggregateRuntime, key: string): ServiceCategoryUsage {
+  const u = runtime.usage.get(key) ?? { users: 0, groups: 0, dwellPaxSec: 0, revenue: 0, skipped: 0 };
+  runtime.usage.set(key, u);
+  return u;
+}
+
+/**
+ * ラウンジ滞在の開始を記録する（詳細方式の窓口処理開始時に passengers から呼ぶ）。
+ * 滞在の実績（人数・滞在人秒）は完了時に completeLoungeStay で usage へ積む。
+ * 売上は持たない（ラウンジは購買カテゴリではない）。
+ */
+export function noteLoungeStayStart(sim: Simulation, g: PaxGroup, key: string): void {
+  const runtime = serviceRuntimeOf(sim);
+  runtime.loungeStay.set(g.id, { key, startedAt: sim.state.now });
+  const u = usageOf(runtime, key);
+  u.groups += 1;
+  u.users += g.count;
+}
+
+/** ラウンジ滞在の完了（詳細方式の窓口処理完了時に passengers から呼ぶ） */
+export function completeLoungeStay(sim: Simulation, g: PaxGroup): void {
+  const runtime = serviceRuntimeOf(sim);
+  const stay = runtime.loungeStay.get(g.id);
+  if (!stay) return;
+  runtime.loungeStay.delete(g.id);
+  const u = usageOf(runtime, stay.key);
+  u.dwellPaxSec += Math.max(0, sim.state.now - stay.startedAt) * g.count;
+}
+
+/**
+ * 'lounge' ステップの集約処理（5-19 2A の運営モード接続）。
+ * 店舗と違い購買ではなく「搭乗までの滞留先」として扱う:
+ * - 対象は isLoungeEligible を満たす施設（保安後の出発区域・運用中・席数あり）だけ。
+ *   閉鎖中の施設は席数から差し引く。
+ * - 搭乗開始までの余裕が BALANCE.lounge.minSlackMin 未満なら行かない（詳細モードと同じ）。
+ * - 席が足りなければ待合（従来の gate ステップの滞留）へフォールバックし、skipped に数える。
+ * - 滞在は搭乗開始まで。売上は記録しない。満足度換算は BALANCE.lounge の暫定係数の
+ *   まま表示側の指標に留め、航空会社の満足度式へは接続しない（係数の確定は PO 判断待ち）。
+ */
+export function planAggregateLoungeVisit(
+  sim: Simulation,
+  g: PaxGroup,
+  closed: ReadonlySet<string>,
+  slackSec: number,
+  advance: () => void,
+): boolean {
+  const profiles = sim.ctx.service;
+  const terminalId = g.terminalId ?? sim.ctx.paxTerminal;
+  if (!terminalId) return false;
+  const profile = categoryProfile(profiles, terminalId, 'lounge');
+  if (!profile || profile.status !== 'available') {
+    advance();
+    return true;
+  }
+  const key = serviceProfileKey(terminalId, 'lounge');
+  const runtime = serviceRuntimeOf(sim);
+  const facilityById = new Map(profiles.facilities.map((f) => [f.areaId, f]));
+  let openSeats = 0;
+  for (const id of profile.facilityIds) {
+    const f = facilityById.get(id)!;
+    if (isLoungeEligible(f) && !closed.has(id)) openSeats += f.capacity;
+  }
+  const u = usageOf(runtime, key);
+  if (openSeats <= 0 || slackSec < BALANCE.lounge.minSlackMin * 60) {
+    advance();
+    return true;
+  }
+  const occupied = runtime.activePax.get(key) ?? 0;
+  if (occupied + g.count > openSeats) {
+    // 満席: 待合へフォールバック（詳細モードの turnedAway に相当）
+    u.skipped += g.count;
+    advance();
+    return true;
+  }
+  runtime.activePax.set(key, occupied + g.count);
+  runtime.loungeStay.set(g.id, { key, startedAt: sim.state.now });
+  u.groups += 1;
+  u.users += g.count;
+  g.aggService = { kind: 'lounge', key };
+  g.state = 'inService';
+  g.facility = null;
+  g.serviceUntil = sim.state.now + slackSec;
+  return true;
+}
+
 /** 集約滞在の完了処理（stepGroup の inService 完了時に passengers から呼ぶ） */
 export function completeAggregateService(sim: Simulation, g: PaxGroup): void {
   const agg = g.aggService;
   if (!agg) return;
   delete g.aggService;
+  if (agg.kind === 'lounge') {
+    const runtime = serviceRuntimeOf(sim);
+    runtime.activePax.set(agg.key, Math.max(0, (runtime.activePax.get(agg.key) ?? 0) - g.count));
+    completeLoungeStay(sim, g);
+    return;
+  }
   const runtime = serviceRuntimeOf(sim);
   runtime.active.set(agg.key, Math.max(0, (runtime.active.get(agg.key) ?? 0) - 1));
   // 売上は詳細方式と同一の経路（onShopDone → retail/dining 科目）で記録する

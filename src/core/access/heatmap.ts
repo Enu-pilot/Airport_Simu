@@ -1,6 +1,6 @@
 import { buildLandsideNetwork } from './landside';
 import { analyzeSegments } from './segments';
-import type { AccessRuntime } from './runtime';
+import { cargoTrucksAtHour, type AccessRuntime } from './runtime';
 import type { AirportLayout } from '../model/types';
 import type { DailyReport } from '../economy/company';
 
@@ -87,7 +87,7 @@ export function segmentEdgeLoads(acc: AccessRuntime, hour: number): SegmentEdgeL
   const segs = acc.segments;
   if (!segs) return [];
   // 貨物トラックの背景交通: segmentTraverse と同じく、貨物経路の辺にだけ往復 ×2 を重ねる
-  const truckBg = (acc.cargoTrucksPerHour ?? 0) * 2;
+  const truckBg = cargoTrucksAtHour(acc, hour) * 2;
   const cargoEdges = new Set<string>();
   if (truckBg > 0) for (const p of Object.values(segs.cargoPaths)) for (const e of p.edges) cargoEdges.add(e);
   const out: SegmentEdgeLoad[] = [];

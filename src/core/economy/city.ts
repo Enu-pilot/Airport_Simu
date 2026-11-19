@@ -53,6 +53,13 @@ export interface CityConfig {
   version: 1;
   type: CityType;
   population: number;
+  /**
+   * 出発側の航空市場人口（docs/46）。航空需要式の出発側だけに使い、都市成長・都市格・
+   * 都市需要上限には使わない。未設定（旧セーブ）は population にフォールバックする。
+   * 羽田再現ケースの 37,000,000 のような広域値はシナリオ側が明示的に設定するもので、
+   * 都市タイプから自動設定はしない。
+   */
+  airMarketPopulation?: number;
   distanceKm: number;
   roadQuality: 1 | 2 | 3 | 4 | 5;
   railQuality: 0 | 1 | 2 | 3 | 4 | 5;
@@ -202,12 +209,19 @@ export function defaultCity(type: CityType = 'regional'): CityConfig {
   return { version: 1, ...CITY_PROFILE[type], residents: 70 };
 }
 
+/** 航空需要式の出発側人口（docs/46）。未設定・不正値なら都市人口にフォールバックする */
+export function airMarketPopulationOf(city: CityConfig): number {
+  const v = city.airMarketPopulation;
+  return typeof v === 'number' && Number.isFinite(v) && v >= 1_000 && v <= 50_000_000 ? v : city.population;
+}
+
 export function isCityConfig(value: unknown): value is CityConfig {
   if (!value || typeof value !== 'object') return false;
   const c = value as Record<string, unknown>;
   return c.version === 1
     && CITY_TYPES.includes(c.type as CityType)
     && Number.isFinite(c.population) && Number(c.population) >= 1
+    && (c.airMarketPopulation === undefined || (Number.isFinite(c.airMarketPopulation) && Number(c.airMarketPopulation) >= 1_000 && Number(c.airMarketPopulation) <= 50_000_000))
     && Number.isFinite(c.distanceKm) && Number(c.distanceKm) >= 0 && Number(c.distanceKm) <= 500
     && Number.isInteger(c.roadQuality) && Number(c.roadQuality) >= 1 && Number(c.roadQuality) <= 5
     && Number.isInteger(c.railQuality) && Number(c.railQuality) >= 0 && Number(c.railQuality) <= 5

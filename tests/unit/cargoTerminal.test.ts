@@ -34,7 +34,7 @@ describe('5-12 CARGO-04 貨物上屋', () => {
 
   it('荷役能力で頭打ちにすると超過分が積み残しへ移り、保存式が保たれる', () => {
     const plan: CargoDayPlan = {
-      day: 0, demandM3: 1000, carriedM3: 800, leftoverM3: 200,
+      day: 0, demandM3: 1000, carriedM3: 800, leftoverM3: 200, transshipmentM3: 0,
       contracts: [
         { contractId: 'k1', destinationId: 'TWN', capacityM3: 500, allocatedM3: 500, carriedM3: 500 },
         { contractId: 'k2', destinationId: 'TWN', capacityM3: 300, allocatedM3: 500, carriedM3: 300 },

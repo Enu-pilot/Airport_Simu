@@ -25,7 +25,7 @@ import { runwaySystemCapacity } from '../runwayCapacity';
 import { takeLinkUsage } from '../sim/linkUsage';
 import { takeMissBreakdown } from '../sim/missBreakdown';
 import { takePortalUsage } from '../sim/portalUsage';
-import { PROCESS_STEPS, takeProcessStats } from '../sim/processStats';
+import { PROCESS_STEPS, rollingPeak60, takeProcessStats } from '../sim/processStats';
 import { takeJourneyStats } from '../sim/journeyStats';
 import { peakWindowPerHour } from './peakDemand';
 import { areaProcessingPerHour } from '../terminal/capacity';
@@ -758,6 +758,8 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
       revenue: cargoFinance.revenue,
       handlingCost: cargoFinance.handlingCost,
       truckTrips: cargoFinance.truckTrips,
+      // 積替（格 7）が成立した日だけ付ける（旧日報・格 7 未満の形は変えない）
+      ...(cargoFinance.transshipmentM3 > 0 ? { transshipmentM3: Math.round(cargoFinance.transshipmentM3 * 10) / 10 } : {}),
     };
   }
   // リンク利用実績（5-03）: 連絡設備・上下移動の時間帯別人数を読み取り、記録を消す
@@ -784,22 +786,29 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   // 工程別の最混雑 60 分（5-21）: 理論能力（エリア合計・ターミナル間で重複計上しない）・
   // 計画需要（60 分窓の最大、出発は 90 分前に出現する前提）・ピーク時間帯の実績を並べる
   {
-    const fromHour = Math.floor(e.periodStart / 3600);
-    const toHour = Math.floor(state.now / 3600);
-    const stats = takeProcessStats(state, fromHour, toHour);
+    const fromMinute = Math.floor(e.periodStart / 60);
+    const toMinute = Math.floor(state.now / 60);
+    const stats = takeProcessStats(state, fromMinute, toMinute);
     if (stats) {
       const depEvents: { at: number; pax: number }[] = [];
       const arrEvents: { at: number; pax: number }[] = [];
+      const busDepEvents: { at: number; pax: number }[] = [];
       for (const f of Object.values(state.flights)) {
         if (f.scheduled < e.periodStart || f.scheduled >= state.now) continue;
-        if (f.direction === 'departure') depEvents.push({ at: f.scheduled - PAX_PROCESS_LEAD_SEC, pax: f.plannedPax ?? 0 });
-        else arrEvents.push({ at: f.estimated, pax: f.plannedPax ?? 0 });
+        if (f.direction === 'departure') {
+          depEvents.push({ at: f.scheduled - PAX_PROCESS_LEAD_SEC, pax: f.plannedPax ?? 0 });
+          if (f.pax.bus) busDepEvents.push({ at: f.scheduled - PAX_PROCESS_LEAD_SEC, pax: f.plannedPax ?? 0 });
+        } else arrEvents.push({ at: f.estimated, pax: f.plannedPax ?? 0 });
       }
       const depPeak = peakWindowPerHour(depEvents);
       const arrPeak = peakWindowPerHour(arrEvents);
       const demandOf = (step: string): number =>
         step === 'checkIn' ? Math.round(depPeak * CHECKIN_SHARE)
         : step === 'immigration' || step === 'customs' ? arrPeak
+        // トイレの需要は出発旅客 × 利用率（sim/passengers の RESTROOM_PROB = 0.3）
+        : step === 'restroom' ? Math.round(depPeak * 0.3)
+        // ランプバスの需要はバスゲート便の出発旅客だけを数える
+        : step === 'apronBus' ? peakWindowPerHour(busDepEvents)
         : depPeak;
       const rows: NonNullable<DailyReport['processPeak']> = [];
       for (const step of PROCESS_STEPS) {
@@ -807,34 +816,20 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
         for (const a of Object.values(ctx.layout.terminalAreas)) {
           if (a.kind === step) capacity += areaProcessingPerHour(a.kind, a.props);
         }
-        const mine = stats.filter((s) => s.step === step);
-        // 空港全体のピークは、ターミナル別の記録を同じ時間帯で合算してから選ぶ（5-21 T5）
-        const byHour = new Map<number, { processed: number; waitSecTotal: number; waitPax: number }>();
-        for (const st of mine) {
-          const h = byHour.get(st.hour) ?? { processed: 0, waitSecTotal: 0, waitPax: 0 };
-          h.processed += st.processed;
-          h.waitSecTotal += st.waitSecTotal;
-          h.waitPax += st.waitPax;
-          byHour.set(st.hour, h);
-        }
-        let peakHourIdx = -1;
-        let peakAgg = { processed: 0, waitSecTotal: 0, waitPax: 0 };
-        for (const [hour, agg] of byHour) {
-          if (agg.processed > peakAgg.processed) {
-            peakAgg = agg;
-            peakHourIdx = hour;
-          }
-        }
-        const peakProcessed = peakAgg.processed;
+        // 空港全体のピークは、ターミナル別の記録を合算してからローリング 60 分で選ぶ（5-21 T3/T5）
+        const peak = rollingPeak60(stats.filter((s) => s.step === step));
+        const peakProcessed = peak?.processed ?? 0;
         if (capacity <= 0 && peakProcessed <= 0) continue;
+        const peakStartMin = peak ? peak.startMinute % 1440 : 0;
         rows.push({
           step,
           capacityPerHour: capacity,
           demandPerHour: demandOf(step),
-          peakHour: peakHourIdx >= 0 ? peakHourIdx % 24 : 0,
+          peakHour: Math.floor(peakStartMin / 60),
+          peakStartMin,
           peakProcessed,
           utilization: capacity > 0 ? Math.round((peakProcessed / capacity) * 100) / 100 : null,
-          avgWaitSec: peakAgg.waitPax > 0 ? Math.round(peakAgg.waitSecTotal / peakAgg.waitPax) : 0,
+          avgWaitSec: peak && peak.waitPax > 0 ? Math.round(peak.waitSecTotal / peak.waitPax) : 0,
         });
       }
       if (rows.length > 0) report.processPeak = rows.sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1));
@@ -848,14 +843,15 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
           for (const a of Object.values(ctx.layout.terminalAreas)) {
             if (a.kind === step && ctx.terminal.areas[a.id]?.terminalId === terminalId) capacity += areaProcessingPerHour(a.kind, a.props);
           }
-          let peak = mine[0]!;
-          for (const x of mine) if (x.processed > peak.processed) peak = x;
-          if (capacity <= 0 && peak.processed <= 0) continue;
+          const peak = rollingPeak60(mine);
+          if (!peak || (capacity <= 0 && peak.processed <= 0)) continue;
+          const peakStartMin = peak.startMinute % 1440;
           termRows.push({
             terminalId,
             step,
             capacityPerHour: capacity,
-            peakHour: peak.hour % 24,
+            peakHour: Math.floor(peakStartMin / 60),
+            peakStartMin,
             peakProcessed: peak.processed,
             utilization: capacity > 0 ? Math.round((peak.processed / capacity) * 100) / 100 : null,
             avgWaitSec: peak.waitPax > 0 ? Math.round(peak.waitSecTotal / peak.waitPax) : 0,

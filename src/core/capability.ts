@@ -1,4 +1,6 @@
 import type { AirportLayout, Facility, FacilityKind } from './model/types';
+import type { SimState } from './sim/types';
+import { closureReasonsFor } from './sim/closureState';
 import { overnightCapacity, overnightRequired, type CapacityMetric, type SizeClass3 } from './economy/capacity';
 import type { CompanyState, DailyReport } from './economy/company';
 import type { SimContext } from './sim/context';
@@ -271,4 +273,83 @@ export function maintenanceReading(layout: AirportLayout): CapabilityReading {
     state: n <= 0 ? 'notInstalled' : 'operational',
     basis: '格納庫 1 棟 = 1 機 + 整備施設ベイ × 0.5（sim/overnight.ts maintenanceCapacityPerNight と同じ式）',
   };
+}
+
+/**
+ * 運航中の状態（F6-04 残件、2026-11-19）: 有効な障害（sim/disruptions）と
+ * 閉鎖理由台帳（sim/closureState）、滑走路モードから closed / failed /
+ * resourceShortage 状態の読み取りを生成する。減額源は既存の正本だけを使い、
+ * 能力値は正本（facilityCapability）がある場合のみ写す（推定で埋めない）。
+ * supplyShortage は F6-13（供給インフラ、保留中）の領域なので生成しない。
+ * 表示への統合は UI 担当の引き継ぎ事項（HANDOFF_PROMPT.md）。
+ */
+export function operationalStateReadings(state: SimState, layout: AirportLayout): CapabilityReading[] {
+  const out: CapabilityReading[] = [];
+  const emitted = new Set<string>();
+  const nameOf = (id: string): string =>
+    layout.runways[id]?.name ?? layout.facilities[id]?.name ?? layout.terminalAreas[id]?.name ?? layout.stands[id]?.name ?? id;
+  const push = (r: CapabilityReading): void => {
+    if (emitted.has(r.subjectId)) return;
+    emitted.add(r.subjectId);
+    out.push(r);
+  };
+  const assetReading = (subjectId: string, domain: string, st: CapabilityState, basis: string): CapabilityReading => {
+    const f = layout.facilities[subjectId];
+    if (f) {
+      const base = facilityCapability(f);
+      return { ...base, state: st, effective: base.theoretical !== null ? 0 : null, basis: `${base.basis}。${basis}` };
+    }
+    return { domain, subjectId, label: nameOf(subjectId), unit: '', theoretical: null, effective: 0, demand: null, actual: null, state: st, basis };
+  };
+
+  for (const d of state.disruptions) {
+    if (d.status !== 'active') continue;
+    switch (d.kind) {
+      case 'runwayClosed':
+        if (d.targetId) push(assetReading(d.targetId, 'airside', 'closed', `障害 ${d.id}（滑走路の一時閉鎖、sim/disruptions）`));
+        break;
+      case 'taxiwayClosed':
+        if (d.targetId) push(assetReading(d.targetId, 'airside', 'closed', `障害 ${d.id}（誘導路の使用不能、sim/disruptions）`));
+        break;
+      case 'standClosed':
+        if (d.targetId) push(assetReading(d.targetId, 'airside', 'closed', `障害 ${d.id}（スポットの使用不能、sim/disruptions）`));
+        break;
+      case 'gateFailure':
+        if (d.targetId) push(assetReading(d.targetId, 'facility', 'failed', `障害 ${d.id}（搭乗ゲートの故障、sim/disruptions）`));
+        break;
+      case 'baggageFailure':
+        if (d.targetId) push({ domain: 'baggage', subjectId: d.targetId, label: nameOf(d.targetId), unit: '', theoretical: null, effective: 0, demand: null, actual: null, state: 'failed', basis: `障害 ${d.id}（手荷物設備の故障、sim/disruptions）` });
+        break;
+      case 'vehicleFailure':
+        if (d.targetId) push({ domain: 'ground', subjectId: d.targetId, label: d.targetId, unit: '', theoretical: null, effective: 0, demand: null, actual: null, state: 'failed', basis: `障害 ${d.id}（地上支援車両の故障、sim/disruptions）` });
+        break;
+      case 'staffAbsence': {
+        const n = d.affected.units.length || Math.round(d.amount ?? 0);
+        push({ domain: 'airport', subjectId: 'staff:absence', label: '作業員の欠勤', unit: 'staff', theoretical: null, effective: null, demand: null, actual: null, state: 'resourceShortage', basis: `障害 ${d.id}（作業員 ${n} 人が使用不可、sim/disruptions の staffAbsence）` });
+        break;
+      }
+      default:
+        break; // 天候・需要急増・到着遅延・整備は資産の状態ではないため対象外
+    }
+  }
+  // 滑走路モード 'closed'（Work Order 実施中・障害）: 障害側で出した分は重ねない
+  for (const r of Object.values(layout.runways)) {
+    if (state.runwayConfig[r.id]?.mode === 'closed') {
+      push(assetReading(r.id, 'airside', 'closed', '滑走路モードが closed（Work Order 実施中または障害、sim/workOrders・sim/disruptions）'));
+    }
+  }
+  // 閉鎖理由台帳（Work Order・手動閉鎖など、障害以外の理由も含む）
+  const kindDomain: Record<'taxiways' | 'stands' | 'gates', string> = { taxiways: 'airside', stands: 'airside', gates: 'facility' };
+  for (const kind of ['taxiways', 'stands', 'gates'] as const) {
+    for (const id of state.closures[kind]) {
+      if (emitted.has(id)) continue;
+      const reasons = closureReasonsFor(state, kind, id);
+      const failed = reasons.some((reason) => {
+        const d = state.disruptions.find((x) => `disruption:${x.id}` === reason);
+        return d?.kind === 'gateFailure';
+      });
+      push(assetReading(id, kindDomain[kind], failed ? 'failed' : 'closed', `閉鎖理由台帳（${reasons.join(', ') || '理由未記録'}、sim/closureState）`));
+    }
+  }
+  return out;
 }

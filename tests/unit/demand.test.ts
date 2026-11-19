@@ -11,6 +11,10 @@ import { destinationDef } from '../../src/core/economy/registry';
  * 2026-11-18 人口引き上げ（PO 判断）で計算例の数値を更新: 地方都市は 30 万 → 60 万になり、路線需要は
  * 人口^0.6 で 2^0.6 = 1.5157 倍（TYO 934 → 1,416、KTA 172 → 260）、需要上限は 978 → 1,955（アクセス 1.0）になった。
  * あわせて、実在会社への置換で SK（SAS）が国内旅客を持たなくなったため、国内線のフルサービス会社は NH に差し替えた。
+ * 2026-11-19 docs/46 反映で計算例を再更新: K 600 → 1,263、目的地側は利用圏人口
+ * （TYO 3,700 万・KTA 50 万）と航空依存度（TYO 0.52・KTA 0.94）を使うため
+ * TYO 1,416 → 4,707、KTA 260 → 448。市場モードの都市需要上限による配分は廃止した
+ * （docs/46 §7.1-3。旧「上限で配分する」テストは「配分しない」検証に置き換えた）。
  */
 function marketCompany(): CompanyState {
   const c = createCompany('career', 'demand-test');
@@ -23,10 +27,10 @@ function marketCompany(): CompanyState {
 const base = { feeDiscount: 0, startDay: 0, endDay: 999, status: 'active' as const, offerExpiresDay: 0, window: 'any' as const };
 
 describe('demand: 路線需要モデル（3-05）', () => {
-  it('計算例: TYO ≈ 1,416 人/日、KTA ≈ 260 人/日（配分前）', () => {
+  it('計算例: TYO ≈ 4,707 人/日、KTA ≈ 448 人/日（docs/46 反映後の潜在需要）', () => {
     const c = marketCompany();
-    expect(routeDemand(c, destinationDef('TYO'), 1)).toBeCloseTo(1416, -1);
-    expect(routeDemand(c, destinationDef('KTA'), 1)).toBeCloseTo(260, -1);
+    expect(routeDemand(c, destinationDef('TYO'), 1)).toBeCloseTo(4707, -1);
+    expect(routeDemand(c, destinationDef('KTA'), 1)).toBeCloseTo(448, -1);
   });
 
   it('距離の減衰 g(d): 450km で 0.85、760km で 1', () => {
@@ -34,18 +38,19 @@ describe('demand: 路線需要モデル（3-05）', () => {
     expect(distanceFactor(760)).toBeCloseTo(1, 10);
   });
 
-  it('都市の需要上限で配分する: TYO ≈ 1,237、KTA ≈ 225、SPK ≈ 494', () => {
+  it('都市の需要上限で配分しない（docs/46 §7.1-3）: 各 OD の需要は潜在需要そのもので、合計は旧上限を超える', () => {
     const c = marketCompany();
     addContract(c, { ...base, airlineId: 'NH', destinationId: 'TYO', typeId: 'B787-9', perDay: 1 });
     addContract(c, { ...base, airlineId: 'RJ', destinationId: 'KTA', typeId: 'regional70', perDay: 1 });
-    // 人口引き上げ後は TYO + KTA（配分前 1,719）だけでは上限 1,955 に届かず配分が起きないため、SPK を加えて配分を起こす
     addContract(c, { ...base, airlineId: 'RJ', destinationId: 'SPK', typeId: 'regional70', perDay: 1 });
     const s = routeDemandSummary(c, 0, 1)!;
-    expect(s.get('TYO')!.demand).toBeCloseTo(1237, -1);
-    expect(s.get('KTA')!.demand).toBeCloseTo(225, -1);
-    expect(s.get('SPK')!.demand).toBeCloseTo(494, -1);
+    // 需要 = routeDemand × 季節係数（day 0）そのもの。路線間の比例縮小はない
+    for (const id of ['TYO', 'KTA', 'SPK']) {
+      const dest = destinationDef(id);
+      expect(s.get(id)!.demand).toBeCloseTo(routeDemand(c, dest, 1)! * seasonalWeekdayFactor(dest, 0), 6);
+    }
     const total = [...s.values()].reduce((sum, x) => sum + x.demand, 0);
-    expect(total).toBeLessThanOrEqual(1956); // 上限 C ≈ 1,955
+    expect(total).toBeGreaterThan(1956); // 旧上限 C ≈ 1,955 を超えても縮小されない
   });
 
   it('搭乗率: KTA 1 便は 1.89 → 0.98 にクランプ、2 便で 0.94（3-04）', () => {
@@ -59,7 +64,8 @@ describe('demand: 路線需要モデル（3-05）', () => {
 
   it('大型化すると搭乗率は下がる（3-05）', () => {
     const c = marketCompany();
-    const k = addContract(c, { ...base, airlineId: 'RJ', destinationId: 'KTA', typeId: 'regional70', perDay: 2 });
+    // docs/46 で需要が増えたため、クランプ（0.98）に張り付かない便数にする
+    const k = addContract(c, { ...base, airlineId: 'RJ', destinationId: 'KTA', typeId: 'regional70', perDay: 4 });
     const small = routeLoadFactors(c, 0, 1)!.get(k.id)!;
     k.typeId = 'E190'; // 70 席 → 95 席
     const big = routeLoadFactors(c, 0, 1)!.get(k.id)!;
@@ -68,8 +74,9 @@ describe('demand: 路線需要モデル（3-05）', () => {
 
   it('同じ路線では運賃の安い会社の搭乗率が高い（q の配分）', () => {
     const c = marketCompany();
-    const lcc = addContract(c, { ...base, airlineId: 'AQ', destinationId: 'TYO', typeId: 'A320-200', perDay: 3 }); // fareLevel 0.7（種別既定）
-    const fs = addContract(c, { ...base, airlineId: 'NH', destinationId: 'TYO', typeId: 'B737-800', perDay: 3 }); // fareLevel 1.0（種別既定）
+    // docs/46 で TYO 需要が増えたため、両社ともクランプに張り付かない便数にする
+    const lcc = addContract(c, { ...base, airlineId: 'AQ', destinationId: 'TYO', typeId: 'A320-200', perDay: 12 }); // fareLevel 0.7（種別既定）
+    const fs = addContract(c, { ...base, airlineId: 'NH', destinationId: 'TYO', typeId: 'B737-800', perDay: 12 }); // fareLevel 1.0（種別既定）
     const lfs = routeLoadFactors(c, 0, 1)!;
     expect(lfs.get(lcc.id)!).toBeGreaterThan(lfs.get(fs.id)!);
   });

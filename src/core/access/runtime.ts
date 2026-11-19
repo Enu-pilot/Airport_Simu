@@ -4,7 +4,8 @@ import { post, type CompanyState } from '../economy/company';
 import type { Simulation } from '../sim/simulation';
 import type { PaxGroup, SimState } from '../sim/types';
 import { ACCESS_MODES, analyzeAccess, type AccessAnalysis, type AccessMode, type AccessSegments, type SegmentPath, type TransitMode } from './model';
-import { cargoPlannedTruckTripsPerDay } from '../economy/cargo';
+import { cargoPlannedTruckTripsByHour, cargoPlannedTruckTripsPerDay } from '../economy/cargo';
+import { recordSimpleProcess } from '../sim/processStats';
 import { featureOn } from '../economy/unlocks';
 
 /**
@@ -31,6 +32,8 @@ export interface AccessRuntime {
   busesPerHour: number;
   /** 貨物トラックの背景交通（台/時、1日の計画台数を24時間へ均等配分。CARGO-05。旧セーブでは欠落しうるため任意） */
   cargoTrucksPerHour?: number;
+  /** 貨物トラックの時間帯配分（台/時 ×24、CARGO-08 格 6）。ある場合は均等配分より優先する */
+  cargoTruckProfile?: number[];
   trainsPerHour: number;
   factor: number;
   /** 駐車中の車の出庫時刻（昇順） */
@@ -90,6 +93,18 @@ function cargoTrucksPerHourFor(c: CompanyState): number {
   return featureOn(c, 'cargo') ? cargoPlannedTruckTripsPerDay(c, c.day) / 24 : 0;
 }
 
+/** 時間帯プロファイル（格 6）。貨物が無効な会社では null */
+function cargoTruckProfileFor(c: CompanyState): number[] | undefined {
+  if (!featureOn(c, 'cargo')) return undefined;
+  return cargoPlannedTruckTripsByHour(c, c.day) ?? undefined;
+}
+
+/** その時間帯の貨物トラック背景交通（台/時）。プロファイルがあればそれを、なければ均等配分を使う */
+export function cargoTrucksAtHour(acc: AccessRuntime, hour: number): number {
+  if (acc.cargoTruckProfile) return acc.cargoTruckProfile[hour] ?? 0;
+  return acc.cargoTrucksPerHour ?? 0;
+}
+
 export function createAccessRuntime(sim: Simulation, c: CompanyState): AccessRuntime | null {
   if (!sim.ctx.paxTerminal) return null;
   const a: AccessAnalysis = analyzeAccess(sim.ctx.layout, { fees: c.fees, feedback: c.accessFeedback, city: c.city, day: c.day });
@@ -111,6 +126,8 @@ export function createAccessRuntime(sim: Simulation, c: CompanyState): AccessRun
     busesPerHour: a.busesPerHour,
     // 貨物 OFF ではフィールド自体を持たない（フィンガープリントの不変条件。CARGO-05）
     ...(cargoTrucksPerHourFor(c) > 0 ? { cargoTrucksPerHour: cargoTrucksPerHourFor(c) } : {}),
+    // 時間帯プロファイルも同じ不変条件で、格 6 以上かつ台数がある場合だけ持つ（CARGO-08 格 6）
+    ...(cargoTruckProfileFor(c) && cargoTrucksPerHourFor(c) > 0 ? { cargoTruckProfile: cargoTruckProfileFor(c) } : {}),
     trainsPerHour: a.trainsPerHour,
     factor: a.factor,
     // 前日から駐車している車（駐車場が減っていれば、収まる分だけ）
@@ -133,6 +150,7 @@ export function refreshAccess(sim: Simulation, c: CompanyState): number {
     acc.factor = a.factor;
     const trucks = cargoTrucksPerHourFor(c);
     acc.cargoTrucksPerHour = trucks > 0 ? trucks : undefined;
+    acc.cargoTruckProfile = trucks > 0 ? cargoTruckProfileFor(c) : undefined;
     acc.segments = a.segments;
     acc.railCapPerHour = a.segments && a.railWalkCapacityPerHour !== null ? Math.min(a.trainsPerHour * M.trainSeats, a.railWalkCapacityPerHour) : undefined;
   }
@@ -176,7 +194,7 @@ function segmentTraverse(acc: AccessRuntime, paths: Record<string, SegmentPath>,
   const segs = acc.segments!;
   // 貨物トラックの背景交通（CARGO-05）: 集約モデルと同じ往復 ×2 を、貨物経路の辺にだけ重ねる。
   // 保存はせず読み取り時に加えるので、旅客側の区間交通量の記録は汚さない。
-  const truckBg = (acc.cargoTrucksPerHour ?? 0) * 2;
+  const truckBg = cargoTrucksAtHour(acc, hour) * 2;
   const cargoEdges = new Set<string>();
   if (truckBg > 0) for (const p of Object.values(segs.cargoPaths)) for (const e of p.edges) cargoEdges.add(e);
   const bg = (e: string): number => (cargoEdges.has(e) ? truckBg : 0);
@@ -233,6 +251,9 @@ function fee(c: CompanyState | null | undefined, m: AccessMode, count: number): 
 export function accessDeparture(sim: Simulation, g: PaxGroup): number {
   const acc = sim.state.access;
   g.accessDone = true;
+  // 5-21: アクセス工程の実績（出発旅客のアクセス処理時点。既存のアクセス統計 stats.pax と
+  // 同じ時点で数える。能力は空港全体の共有値のため算出しない）
+  recordSimpleProcess(sim.state, 'access', g.count, sim.state.now, g.terminalId ?? '');
   if (!acc) return 0;
   const { state } = sim;
   const now = state.now;
@@ -284,7 +305,7 @@ export function accessDeparture(sim: Simulation, g: PaxGroup): number {
     } else {
       // 背景交通: バスの定期便と貨物トラック（どちらも往復 ×2）。容量の消費はこの式だけにし、
       // アクセス係数側では差し引かない（二重計上にしない。CARGO-05）
-      const v = add(acc, `road:${hour}`, vehicles) + acc.busesPerHour * 2 + (acc.cargoTrucksPerHour ?? 0) * 2;
+      const v = add(acc, `road:${hour}`, vehicles) + acc.busesPerHour * 2 + cargoTrucksAtHour(acc, hour) * 2;
       const d = congestionDelayMin(M.externalMin[mode], v, acc.roadCapacity);
       acc.stats.roadDelaySum += d;
       acc.stats.roadDelayN++;

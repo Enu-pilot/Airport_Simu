@@ -10,13 +10,15 @@ import { buildProject, serializeProject, validateProject } from '../../src/core/
 import { createSandboxCompany } from '../../src/core/economy/company';
 
 /**
- * 敷地サイズの選択肢（2026-11-18 追加）: 標準・大・特大の 3 段階。
+ * 敷地サイズの選択肢（2026-11-18 追加）: 標準・中・大・特大の 4 段階。
  * 大きな敷地でも地形生成・保存・読み込みが成り立つことを確認する。
+ * （2026-11-19: プリセットの実態（大 288×208・特大 350×332）に合わせて期待値を訂正。
+ * 以前の期待値 240×180 / 288×208 は実装変更にテストが追随しておらず既定ブランチで失敗していた。）
  */
 describe('敷地サイズ', () => {
-  it('選択肢は標準 160×112・中 200×144・大 240×180・特大 288×208 で、標準が既定の大きさ', () => {
-    expect(SITE_SIZES.map((s) => [s.width, s.height])).toEqual([[160, 112], [200, 144], [240, 180], [288, 208]]);
-    expect(siteSizeById('huge').width).toBe(288);
+  it('選択肢は標準 160×112・中 200×144・大 288×208・特大 350×332 で、標準が既定の大きさ', () => {
+    expect(SITE_SIZES.map((s) => [s.width, s.height])).toEqual([[160, 112], [200, 144], [288, 208], [350, 332]]);
+    expect(siteSizeById('huge').width).toBe(350);
     expect(siteSizeById('unknown').id).toBe('standard');
   });
 
@@ -31,8 +33,8 @@ describe('敷地サイズ', () => {
   it('新規ゲームの空港（サンプル／スターター）も大きい敷地で作れ、検証結果は標準と同じ', () => {
     const std = createSampleAirport();
     const huge = createSampleAirport('skyport', 'huge');
-    expect(huge.site.width).toBe(288);
-    expect(huge.site.height).toBe(208);
+    expect(huge.site.width).toBe(350);
+    expect(huge.site.height).toBe(332);
     expect(Object.keys(huge.stands)).toHaveLength(Object.keys(std.stands).length);
     expect(Object.keys(huge.runways)).toHaveLength(Object.keys(std.runways).length);
     const codes = (l: typeof std) => analyzeLayout(l).issues.map((i) => i.code).sort();
@@ -40,16 +42,16 @@ describe('敷地サイズ', () => {
 
     const starterStd = createStarterAirfield();
     const starterLarge = createStarterAirfield('skyport-starter', 'large');
-    expect(starterLarge.site.width).toBe(240);
-    expect(starterLarge.site.height).toBe(180);
+    expect(starterLarge.site.width).toBe(288);
+    expect(starterLarge.site.height).toBe(208);
     expect(codes(starterLarge)).toEqual(codes(starterStd));
   });
 
   it('ストアの新規ゲームにサイズを渡すと、その敷地で始まる', () => {
     newGame('sandbox', null, null, 'huge');
     const layout = editorStore.getState().history.present;
-    expect(layout.site.width).toBe(288);
-    expect(layout.site.height).toBe(208);
+    expect(layout.site.width).toBe(350);
+    expect(layout.site.height).toBe(332);
     newGame('career', null, null, 'medium');
     const layout2 = editorStore.getState().history.present;
     expect(layout2.site.width).toBe(200);

@@ -42,6 +42,6 @@ describe('5-12 CARGO-05/06 貨物収支・トラック集計', () => {
     const c = createSandboxCompany('cargo-none');
     c.city = defaultCity('regional');
     const fin = cargoDailyFinance(c, 0, 1000);
-    expect(fin).toEqual({ day: 0, carriedM3: 0, leftoverM3: 0, revenue: 0, handlingCost: 0, truckTrips: 0 });
+    expect(fin).toEqual({ day: 0, carriedM3: 0, leftoverM3: 0, revenue: 0, handlingCost: 0, truckTrips: 0, transshipmentM3: 0 });
   });
 });

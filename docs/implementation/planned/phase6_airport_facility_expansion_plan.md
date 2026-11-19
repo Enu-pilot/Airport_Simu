@@ -569,3 +569,8 @@ docs/45 §8 受入チェックリスト #2（10 段階それぞれの適用要�
 | 電力・給排水・通信 | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ | 未実装（P4、PO 判断で保留中） |
 
 横断の未達（docs/45 §8 対照）: 施設種別の格解放表（PO 判断待ち）、有効能力の減衰源の拡充（接続は本追記で第一弾）、供給・営業時間の稼働判定、直列集計の一般形、F6-16 統合 E2E、F6-02 配置プレビュー、F6-03 階層切替、Work Order の資材。
+
+### 2026-11-19 追記（F6-04 状態生成の第二弾）
+
+- **F6-04 閉鎖・故障・資源不足の状態生成**: `capability.ts` に `operationalStateReadings(state, layout)` を追加。有効な障害（sim/disruptions: runwayClosed/taxiwayClosed/standClosed → closed、gateFailure/baggageFailure/vehicleFailure → failed、staffAbsence → resourceShortage）、滑走路モード closed（Work Order 実施中・障害）、閉鎖理由台帳（sim/closureState）から状態を生成する。能力値は facilityCapability の正本がある場合のみ写し、それ以外は推定で埋めない。テスト `capabilityStatesF6.test.ts` 5/5。
+- supplyShortage は F6-13（供給インフラ、PO 指示で保留中）の領域のため生成しない（テストで固定）。表示への統合（CapacityPanel / 要確認リストへの接続）は UI 担当へ引き継ぎ（HANDOFF_PROMPT.md）。

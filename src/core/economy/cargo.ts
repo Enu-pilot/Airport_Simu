@@ -1,6 +1,7 @@
 import { AIRCRAFT_MODELS } from '../aircraft/catalog';
 import { BALANCE } from './balance';
 import { airlineDef, destinationDef, type DestinationDef } from './registry';
+import { effectiveTier } from './unlocks';
 import type { CompanyState } from './company';
 import type { AirportLayout } from '../model/types';
 
@@ -90,6 +91,12 @@ export interface CargoDayPlan {
   carriedM3: number;
   /** 積み残し (m3/日) = 需要 − 運べた量 */
   leftoverM3: number;
+  /**
+   * 積替貨物 (m3/日、CARGO-08 格 7)。到着貨物のうち翌日便へ接続する量。
+   * 格 7 未満・接続先のない単一路線・翌日に運搬のない日は 0。
+   * 運搬量 (carriedM3) の内数であり、需要・積み残しの保存式には影響しない。
+   */
+  transshipmentM3: number;
 }
 
 /**
@@ -99,6 +106,36 @@ export interface CargoDayPlan {
  * 旅客の便計画（planning.ts）とは独立で、旅客便は生成しない。
  */
 export function planCargoDay(c: CompanyState, day: number): CargoDayPlan {
+  const base = planCargoDayBase(c, day);
+  return { ...base, transshipmentM3: transshipmentM3For(c, base, day) };
+}
+
+/**
+ * 積替量 (CARGO-08 格 7)。接続は翌日便のみ:
+ * - 片方向の運搬量は路線別 carried の半分（計画は両方向合算のため）。
+ * - 路線 d から他路線への接続上限は min(片方向_d, 片方向合計 − 片方向_d) の合計
+ *   （同一路線内の折り返しは積替に数えない）。
+ * - 接続率 (BALANCE.cargo.transshipmentShare) を掛け、翌日の片方向運搬量でも頭打ちにする
+ *   （翌日に便がなければ積替は成立しない）。
+ */
+function transshipmentM3For(c: CompanyState, base: CargoDayPlanBase, day: number): number {
+  if (effectiveTier(c) < 7 || base.carriedM3 <= 0) return 0;
+  const oneDirByDest = new Map<string, number>();
+  for (const row of base.contracts) {
+    oneDirByDest.set(row.destinationId, (oneDirByDest.get(row.destinationId) ?? 0) + row.carriedM3 / 2);
+  }
+  if (oneDirByDest.size < 2) return 0;
+  const totalOneDir = [...oneDirByDest.values()].reduce((a, v) => a + v, 0);
+  let connectable = 0;
+  for (const v of oneDirByDest.values()) connectable += Math.min(v, totalOneDir - v);
+  if (connectable <= 0) return 0;
+  const nextDayOneDir = planCargoDayBase(c, day + 1).carriedM3 / 2;
+  return Math.min(BALANCE.cargo.transshipmentShare * connectable, nextDayOneDir);
+}
+
+type CargoDayPlanBase = Omit<CargoDayPlan, 'transshipmentM3'>;
+
+function planCargoDayBase(c: CompanyState, day: number): CargoDayPlanBase {
   const active = Object.values(c.contracts).filter(
     (k) => k.kind === 'cargo' && k.status === 'active' && day >= k.startDay && day <= k.endDay,
   );
@@ -149,7 +186,8 @@ export function limitCargoByHandling(plan: CargoDayPlan, capacityM3PerDay: numbe
   const scale = plan.carriedM3 > 0 ? capacityM3PerDay / plan.carriedM3 : 0;
   const contracts = plan.contracts.map((row) => ({ ...row, carriedM3: row.carriedM3 * scale }));
   const carriedM3 = contracts.reduce((a, r) => a + r.carriedM3, 0);
-  return { ...plan, contracts, carriedM3, leftoverM3: plan.demandM3 - carriedM3 };
+  // 積替も同率で縮む（接続便へ載せられる量自体が減るため）
+  return { ...plan, contracts, carriedM3, leftoverM3: plan.demandM3 - carriedM3, transshipmentM3: plan.transshipmentM3 * scale };
 }
 
 export interface CargoDailyFinance {
@@ -162,8 +200,15 @@ export interface CargoDailyFinance {
   revenue: number;
   /** 荷役費 (cr) = 上屋で処理した量 × handlingCostPerM3 */
   handlingCost: number;
-  /** 貨物トラック搬出入の推定台数 (台/日、集約換算。個別車両は運行しない) */
+  /** 貨物トラック搬出入の推定台数 (台/日、集約換算。個別車両は運行しない。積替分は空港を出ないため除く) */
   truckTrips: number;
+  /** 積替貨物 (m3/日、CARGO-08 格 7。格 7 未満や接続なしでは 0) */
+  transshipmentM3: number;
+}
+
+/** トラック搬出入の対象量 = 運搬量 − 積替量（積替貨物は空港の外へ出ない） */
+function truckedM3(carriedM3: number, transshipmentM3: number): number {
+  return Math.max(0, carriedM3 - transshipmentM3);
 }
 
 /**
@@ -176,13 +221,15 @@ export interface CargoDailyFinance {
 export function cargoDailyFinance(c: CompanyState, day: number, handlingCapacityM3PerDay: number): CargoDailyFinance {
   const plan = limitCargoByHandling(planCargoDay(c, day), handlingCapacityM3PerDay);
   const M = BALANCE.cargo;
+  const transshipmentM3 = plan.transshipmentM3;
   return {
     day,
     carriedM3: plan.carriedM3,
     leftoverM3: plan.leftoverM3,
     revenue: Math.round(plan.carriedM3 * M.revenuePerM3),
     handlingCost: Math.round(plan.carriedM3 * M.handlingCostPerM3),
-    truckTrips: Math.ceil(plan.carriedM3 / M.truckCapacityM3),
+    truckTrips: Math.ceil(truckedM3(plan.carriedM3, transshipmentM3) / M.truckCapacityM3),
+    transshipmentM3,
   };
 }
 
@@ -193,7 +240,23 @@ export function cargoDailyFinance(c: CompanyState, day: number, handlingCapacity
  */
 export function cargoPlannedTruckTripsPerDay(c: CompanyState, day: number): number {
   const plan = planCargoDay(c, day);
-  return plan.carriedM3 > 0 ? Math.ceil(plan.carriedM3 / BALANCE.cargo.truckCapacityM3) : 0;
+  const trucked = truckedM3(plan.carriedM3, plan.transshipmentM3);
+  return trucked > 0 ? Math.ceil(trucked / BALANCE.cargo.truckCapacityM3) : 0;
+}
+
+/**
+ * 貨物トラック搬出入の時間帯配分（CARGO-08 格 6）。格 6 以上でのみ有効で、
+ * 1 日の計画台数を BALANCE.cargo.truckHourlyProfile の重みで 24 時間へ配分する。
+ * 合計は cargoPlannedTruckTripsPerDay と一致する（配分だけが変わる）。
+ * 格 6 未満は null（呼び出し側は従来の 24 時間均等配分を使う）。
+ */
+export function cargoPlannedTruckTripsByHour(c: CompanyState, day: number): number[] | null {
+  if (effectiveTier(c) < 6) return null;
+  const total = cargoPlannedTruckTripsPerDay(c, day);
+  const profile = BALANCE.cargo.truckHourlyProfile;
+  const weightSum = profile.reduce((a, v) => a + v, 0);
+  if (total <= 0 || weightSum <= 0) return profile.map(() => 0);
+  return profile.map((w) => (total * w) / weightSum);
 }
 
 /**
@@ -205,12 +268,15 @@ export function cargoActualFinance(c: CompanyState, day: number, actualCarriedM3
   const plan = planCargoDay(c, day);
   const carriedM3 = Math.max(0, actualCarriedM3);
   const M = BALANCE.cargo;
+  // 積替の実績は計画の接続量を上限とし、実績の運搬量を超えない
+  const transshipmentM3 = Math.min(plan.transshipmentM3, carriedM3);
   return {
     day,
     carriedM3,
     leftoverM3: Math.max(0, plan.demandM3 - carriedM3),
     revenue: Math.round(carriedM3 * M.revenuePerM3),
     handlingCost: Math.round(carriedM3 * M.handlingCostPerM3),
-    truckTrips: Math.ceil(carriedM3 / M.truckCapacityM3),
+    truckTrips: Math.ceil(truckedM3(carriedM3, transshipmentM3) / M.truckCapacityM3),
+    transshipmentM3,
   };
 }

@@ -11,7 +11,7 @@ import { BALANCE } from './balance';
 import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
 import { planCargoDay } from './cargo';
 import { airlineDef, classifyRoute, destinationDef, HOME_COUNTRY_ID, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
-import { CITY_NIGHT_CURFEW, cityDemandCeiling, cityEventEffects, cityOperatingHours, contractTransferShare, expectedLocalPassengers } from './city';
+import { CITY_NIGHT_CURFEW, cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedLocalPassengers } from './city';
 import { airportFireCategory, requiredFireCategory, towerCapacityPerHour, towerLevel } from '../safety';
 import { runwaySystemCapacity } from '../runwayCapacity';
 import { featureOn } from './unlocks';
@@ -319,7 +319,9 @@ export function planDayWithDemand(
 ): DayPlan {
   const planningCompany = c.city ? { ...c, hours: cityOperatingHours(c.hours, c.city) } : c;
   const cutoff = c.city?.nightOps ? { departureCutoffMin: Math.min(c.hours.closeMin, CITY_NIGHT_CURFEW.fromMin, c.city.nightOps.departureCutoffMin) } : {};
-  // 路線需要モデル（フェーズ 3 §3.3）: market 有効時は契約ごとの搭乗率で計画し、都市の需要上限は最終保護で効かせる
+  // 路線需要モデル（フェーズ 3 §3.3）: market 有効時は契約ごとの搭乗率で計画する。
+  // docs/46 §7.1-3: 市場モードでは都市総需要上限による最終スケーリングをしない
+  // （OD 別潜在需要を独立させる）。上限は非市場/レガシー経路と都市成長側に残る。
   if (c.market && c.city) {
     const lfs = routeLoadFactors(c, day, access, types, routeCapabilities);
     if (lfs) {
@@ -329,25 +331,6 @@ export function planDayWithDemand(
         if (lk === undefined) return loadFactor(c, k, u, access);
         return Math.min(1, Math.max(0.05, lk * (1 + noise * (2 * u - 1))));
       });
-      const event = cityEventEffects(c.city, day);
-      const ceiling = cityDemandCeiling(c.city, access) * event.demandMultiplier;
-      // 乗継旅客は地元需要ではないので、上限は地元分（到着の非乗継分＋出発）にだけ効かせる（5-20 T8 の PO 判断）。
-      // 乗継分を残すことで、ハブ交通は地元上限を超えてよい
-      const contractsById = new Map(Object.values(c.contracts).map((k) => [k.id, k] as const));
-      const shareOf = (f: PlannedFlight): number => {
-        const k = contractsById.get(f.contractId);
-        return k ? contractTransferShare(c, k) : 0;
-      };
-      const localTotal = plan.flights.reduce((s, f) => s + f.arrPax * (1 - shareOf(f)) + f.depPax, 0);
-      if (localTotal > ceiling && localTotal > 0) {
-        const scale = ceiling / localTotal;
-        for (const f of plan.flights) {
-          // 乗継分はそのまま残し、地元分だけを切り捨てで縮める（合計の地元分が上限を超えないことを保証する）
-          const xfer = Math.round(f.arrPax * shareOf(f));
-          f.arrPax = xfer + Math.floor((f.arrPax - xfer) * scale);
-          f.depPax = Math.floor(f.depPax * scale);
-        }
-      }
       return { ...plan, ...cutoff };
     }
   }

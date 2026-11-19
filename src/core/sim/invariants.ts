@@ -346,7 +346,8 @@ export function checkPaxInvariants(sim: Simulation, full: boolean): string[] {
   }
   for (const [key, fac] of Object.entries(state.facilities)) {
     const area = ctx.layout.terminalAreas[key];
-    const cap = key.startsWith('gate:') ? 1 : Number(area?.props.counters ?? area?.props.booths ?? area?.props.lanes ?? area?.props.fixtures ?? area?.props.capacity ?? 0);
+    // ラウンジは窓口ではなく席数が処理上限（passengers.serversOf と同じ定義）
+    const cap = key.startsWith('gate:') ? 1 : area?.kind === 'lounge' ? Number(area?.props.seats ?? 0) : Number(area?.props.counters ?? area?.props.booths ?? area?.props.lanes ?? area?.props.fixtures ?? area?.props.capacity ?? 0);
     if (fac.inService.length > cap) out.push(`P3 ${key} の処理中 ${fac.inService.length} > 窓口数 ${cap}`);
     for (const id of fac.queue) if (state.paxGroups[id]?.facility !== key) out.push(`P3 ${id} が ${key} の待ち行列にいるが所属が不一致`);
     for (const id of fac.inService) if (state.paxGroups[id]?.state !== 'inService') out.push(`P3 ${id} が ${key} で処理中だが状態が不一致`);
