@@ -717,6 +717,7 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   const p4 = settlePhase4(sim, e.periodStart);
   for (const ev of p4.events) log(state, ev);
   if (p4.maintenance) report.maintenance = p4.maintenance;
+  if (p4.readiness) report.morningReadiness = p4.readiness;
   const wave = morningWave(sim, e.periodStart, state.now);
   if (wave) report.morningWave = wave;
   // 資源別の稼働率と待ちの内訳（5-02）

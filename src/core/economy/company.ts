@@ -10,7 +10,7 @@ import { checkAirlineEval, type AirlineEvalState } from './airlineEval';
 import { checkMarket, type MarketSettings } from './market';
 import type { BasedAircraft, CarryOverAircraft, HubSettings } from './phase4Types';
 import { effectiveTier, featureForContractKind, featureOn } from './unlocks';
-import { airlineCargoEligible, cargoHoldM3, routeCargoDemandM3 } from './cargo';
+import { airlineCargoEligible, cargoHoldM3, isLargeFreighter, routeCargoDemandM3 } from './cargo';
 import { aircraftIsLow, complaintCount, COMPLAINTS_BLOCK_INCREASE, increaseMinSatRelief, offerBoost, tierBonus } from './evalRules';
 import { checkGoals, LEGACY_TIER_MAP, type GoalState } from './goals';
 import { isCityConfig, type CityConfig, type CityEvent, type CityType } from './city';
@@ -182,6 +182,8 @@ export interface DailyReport {
   morningWave?: { departures: number; firstTakeoff: number | null; lastTakeoff: number | null; intervalsSec: number[] };
   /** 整備の記録（フェーズ 4 §3.6。拠点が有効な日だけ） */
   maintenance?: { checked: number; overdue: number; faults: number; techCancelled: number };
+  /** 翌朝の出発可能機数（F6-11。翌朝 06:00–10:00 に滞泊便の出発予定がある日だけ）: 予定・確定可能・リスクあり */
+  morningReadiness?: { scheduled: number; ready: number; atRisk: number };
   /** 乗継の記録（フェーズ 4 §5.6。ハブが有効な日だけ） */
   hub?: { spawned: number; connected: number; missed: number; noShow: number };
   /** 連絡設備・上下移動設備の利用実績（5-03。利用があったリンクだけ。上下移動の表示名は areaKind から画面側で引く） */
@@ -782,7 +784,10 @@ export function generateCargoOffers(
     if (c.game?.goals && c.goals && a.unlock.minTier !== undefined && c.goals.tier < a.unlock.minTier) continue;
     const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && k.kind === 'cargo' && (k.status === 'active' || k.status === 'offered')).map((k) => k.destinationId));
     // 候補は旅客フリートのうち容積が判明している機種と、貨物専用機（cargoFleet。旅客フリートには入れない）
-    const own = [...new Set([...(c.fleets[a.id] ?? a.fleet).map((e) => e.typeId), ...(a.cargoFleet ?? [])])].filter((t) => operable.includes(t) && cargoHoldM3(t) !== null);
+    // 大型貨物専用機（B777F / B747F 系）を使う契約は格 5「取扱規模拡張」で解放する（CARGO-08、PO 承認 2026-11-19）。
+    // 判定は提案生成だけに掛け、既に締結済みの契約は格が下がっても運航を続ける（既得権）。
+    const allowLargeFreighter = effectiveTier(c) >= 5;
+    const own = [...new Set([...(c.fleets[a.id] ?? a.fleet).map((e) => e.typeId), ...(a.cargoFleet ?? [])])].filter((t) => operable.includes(t) && cargoHoldM3(t) !== null && (allowLargeFreighter || !isLargeFreighter(t)));
     if (own.length === 0) continue;
     const typeId = own.reduce((best, t) => ((cargoHoldM3(t) ?? 0) > (cargoHoldM3(best) ?? 0) ? t : best), own[0]!);
     const dests = destinationsFor(c).filter((d) => {

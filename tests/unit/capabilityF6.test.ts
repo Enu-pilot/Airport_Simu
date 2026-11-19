@@ -117,6 +117,27 @@ describe('F6-11 夜間滞泊能力の共通契約', () => {
   });
 });
 
+describe('F6-04 状態の生成: ポータル未接続の交通施設', () => {
+  it('到達不能なポータル先に接続したバスターミナルは disconnected で有効能力 0、理論能力は保持する', async () => {
+    const { createSampleAirport } = await import('../../src/core/sample/sampleAirport');
+    const { addPortal, placeTerminalArea } = await import('../../src/core/layout/operations');
+    const { must } = await import('./helpers');
+    let l = createSampleAirport();
+    // 孤立した第 2 ターミナル（入口・出口を持たない）へポータルを向けると到達不能になる
+    l = must(placeFacility(l, 'terminal', { x: 120, y: 60 }, { w: 20, h: 8 })).layout;
+    const term2 = Object.values(l.facilities).find((f) => f.kind === 'terminal' && f.origin.x === 120)!;
+    l = must(placeTerminalArea(l, term2.id, 0, 'waiting', { x: 122, y: 62 }, { w: 6, h: 2 })).layout;
+    const wait = Object.values(l.terminalAreas).find((a) => a.terminalId === term2.id && a.kind === 'waiting')!;
+    l = must(placeFacility(l, 'busTerminal', { x: 120, y: 72 })).layout;
+    const bus = Object.values(l.facilities).find((f) => f.kind === 'busTerminal')!;
+    l = must(addPortal(l, { facilityId: bus.id, areaId: wait.id })).layout;
+    const r = layoutCapabilities(l).find((x) => x.subjectId === bus.id)!;
+    expect(r.theoretical).toBeGreaterThan(0);
+    expect(r.state).toBe('disconnected');
+    expect(r.effective).toBe(0);
+  });
+});
+
 describe('F6-11 夜間整備枠の共通契約', () => {
   it('maintenanceCapacityPerNight と同じ値を返す', async () => {
     const { createSampleAirport } = await import('../../src/core/sample/sampleAirport');

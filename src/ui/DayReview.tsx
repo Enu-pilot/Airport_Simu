@@ -144,6 +144,11 @@ export function ReviewBody({ review }: { review: DayReview }) {
             <Row label="所属機の整備" value={`整備 ${r.maintenance.checked} 機・周期超過 ${r.maintenance.overdue} 機・不具合 ${r.maintenance.faults} 件（欠航 ${r.maintenance.techCancelled} 件）`} />
           </div>
         )}
+        {r.morningReadiness && (
+          <div data-testid="review-morning-readiness">
+            <Row label="翌朝の出発可能機数" value={`予定 ${r.morningReadiness.scheduled} 機・確定可能 ${r.morningReadiness.ready} 機・リスクあり ${r.morningReadiness.atRisk} 機（06:00–10:00 の滞泊便）`} />
+          </div>
+        )}
         {r.hub && (
           <div data-testid="review-hub">
             <Row label="乗継" value={`発生 ${r.hub.spawned} 人・接続成功 ${r.hub.connected} 人・乗り遅れ ${r.hub.missed} 人・現れず ${r.hub.noShow} 人`} />
