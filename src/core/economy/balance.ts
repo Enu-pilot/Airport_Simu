@@ -126,7 +126,7 @@ export const BALANCE = {
     /** D_r = K × (P_o/1e6)^alpha × (P_d/1e6)^beta × I × g(d) × φ × A × F × R */
     K: 600,
     alpha: 0.6,
-    beta: 0.4,
+    beta: 0.6,
     /** 契約の搭乗率のクランプ */
     lfMin: 0.1,
     lfMax: 0.98,
