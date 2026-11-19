@@ -416,6 +416,11 @@ export interface PaxGroup {
   transfer?: { fromFlightId: string; kind: 'DD' | 'DI' | 'ID' | 'II' };
   /** 国際の審査の通過印（フェーズ 4） */
   ciq?: { emigration?: true; immigration?: true; customs?: true };
+  /**
+   * 空港運営モードのカテゴリ集約で店舗利用中（5-19 T12）。詳細方式では常に欠落する。
+   * kind は収支記録用（shop=retail科目 / restaurant=dining科目）、key は集約カウンタのキー。
+   */
+  aggService?: { kind: 'shop' | 'restaurant'; key: string };
   count: number;
   bags: number;
   state: PaxState;

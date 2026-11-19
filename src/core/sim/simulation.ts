@@ -77,6 +77,7 @@ import { stepBaggage } from './baggage';
 import { atRiskForNight, lineUpToAirborneSec, nightOpsOf, predictTakeoffAt, standReleaseAt } from './nightOps';
 import { acquireNext, acquireRoute, blockMovementLimit, createTaxiBlockState, detectTaxiStall, noteOpposed, opposedMove, pendingChainDistance, releaseBlocksPassed, routeBlocks } from './blockControl';
 import { createApronBusRuntime, stepApronBuses } from './apronBus';
+import type { ServiceAggregateRuntime, ServiceGranularity } from './serviceAggregate';
 import { materializeCarryOver } from './overnight';
 import { BALANCE } from '../economy/balance';
 import { planConnections } from '../economy/hub';
@@ -107,6 +108,17 @@ export interface Simulation {
   state: SimState;
   /** 空港会社（経営）。あれば契約から運航計画を作り、収支を記録する。運航中はこのオブジェクトを直接更新する */
   company?: CompanyState | null;
+  /**
+   * 店舗・旅客サービス施設のシミュレーション粒度（5-19 T12）。
+   * 'detailed' = 従来方式（店舗エリアへ個別に経路探索し店舗別キューで処理）。
+   * 'aggregate' = 空港運営モードの集約方式（カテゴリ×ターミナルで計算し、店舗単位の探索・キューを作らない）。
+   * 既定は 'detailed' で、指定しない運航の結果は従来と変わらない（集約方式の既定化は PO 確認後）。
+   * 保存対象ではない（Simulation は保存されず、再開時は生成側が指定する）。
+   * 手組みの Simulation（テスト等）では欠落しうるため任意とし、欠落時は 'detailed' として扱う。
+   */
+  serviceGranularity?: ServiceGranularity;
+  /** 集約方式の実行時カウンタ（保存対象ではない派生状態） */
+  serviceRuntime?: ServiceAggregateRuntime;
 }
 
 export interface CreateOptions {
@@ -116,6 +128,8 @@ export interface CreateOptions {
   company?: CompanyState | null;
   /** 機種テーブル（保存時のスナップショットなど。省略時は現在のカタログ） */
   types?: TypeTable;
+  /** 店舗利用の粒度（5-19 T12）。省略時は 'detailed'（従来方式） */
+  serviceGranularity?: ServiceGranularity;
 }
 
 const DEFAULT_SETTINGS: SimSettings = {
@@ -194,7 +208,7 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     closures: { taxiways: [], stands: [], gates: [] },
     analytics: createAnalytics(opts.startTime ?? SIM_START_SEC),
   };
-  const sim: Simulation = { ctx, state, company: opts.company ?? null };
+  const sim: Simulation = { ctx, state, company: opts.company ?? null, serviceGranularity: opts.serviceGranularity ?? 'detailed' };
   if (sim.company) {
     state.economy = createEconomy(ctx, state, sim.company);
     state.access = createAccessRuntime(sim, sim.company);
