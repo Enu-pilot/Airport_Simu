@@ -17,6 +17,8 @@ export const REGION_DATA: RegionDef[] = [
   { id: 'middle-east', name: '中東' },
   { id: 'south-asia', name: '南アジア' },
   { id: 'north-america', name: '北アメリカ' },
+  { id: 'africa', name: 'アフリカ' },
+  { id: 'central-asia', name: '中央アジア' },
 ];
 
 export const COUNTRY_DATA: CountryDef[] = [
@@ -43,4 +45,26 @@ export const COUNTRY_DATA: CountryDef[] = [
   { id: 'AE', name: 'アラブ首長国連邦', regionId: 'middle-east' },
   { id: 'TR', name: 'トルコ', regionId: 'middle-east' },
   { id: 'CA', name: 'カナダ', regionId: 'north-america' },
+  // 海外編（2026-11-19 ユーザー依頼）: 成田・関空を中心に日本へ就航する会社と就航都市のために追加。末尾追加のみ（既存の順序は不変）
+  { id: 'MO', name: 'マカオ', regionId: 'east-asia' },
+  { id: 'QA', name: 'カタール', regionId: 'middle-east' },
+  { id: 'FI', name: 'フィンランド', regionId: 'europe' },
+  { id: 'NL', name: 'オランダ', regionId: 'europe' },
+  { id: 'CH', name: 'スイス', regionId: 'europe' },
+  { id: 'AT', name: 'オーストリア', regionId: 'europe' },
+  { id: 'DK', name: 'デンマーク', regionId: 'europe' },
+  { id: 'IT', name: 'イタリア', regionId: 'europe' },
+  { id: 'PL', name: 'ポーランド', regionId: 'europe' },
+  { id: 'RU', name: 'ロシア', regionId: 'europe' },
+  { id: 'ET', name: 'エチオピア', regionId: 'africa' },
+  { id: 'EG', name: 'エジプト', regionId: 'africa' },
+  { id: 'MN', name: 'モンゴル', regionId: 'east-asia' },
+  { id: 'UZ', name: 'ウズベキスタン', regionId: 'central-asia' },
+  { id: 'NZ', name: 'ニュージーランド', regionId: 'pacific' },
+  { id: 'MX', name: 'メキシコ', regionId: 'north-america' },
+  { id: 'FJ', name: 'フィジー', regionId: 'pacific' },
+  { id: 'PF', name: 'フランス領ポリネシア', regionId: 'pacific' },
+  { id: 'NC', name: 'ニューカレドニア', regionId: 'pacific' },
+  { id: 'PG', name: 'パプアニューギニア', regionId: 'pacific' },
+  { id: 'PW', name: 'パラオ', regionId: 'pacific' },
 ];
