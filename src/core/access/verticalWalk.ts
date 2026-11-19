@@ -2,6 +2,8 @@ import type { AirportLayout, Facility } from '../model/types';
 import { facilityLevel, levelOf, roadEdgeLevelValid } from '../model/levels';
 import { TILE_M } from '../model/catalog';
 import { facilityTiles } from '../layout/footprint';
+import { ACCESS_MAX_WALK_TILES, distanceToTerminal, walkMinutes } from './landside';
+import { adjacentTerminalAreas } from '../terminal/adjacency';
 
 export const WALK_SPEED_MPS = 1.2;
 export interface WalkRoute { minutes: number; capacityPerHour: number | null; edges: string[] }
@@ -76,4 +78,45 @@ export function findPedestrianRoute(layout: AirportLayout, from: Facility, to: F
     return min === null || v === undefined ? null : Math.min(min, v);
   }, Infinity) : null;
   return { minutes: best.cost / 60, capacityPerHour: cap, edges: routeEdges };
+}
+
+export type StationAccessKind = 'walkway' | 'adjacent' | 'legacy';
+
+export interface StationAccess {
+  kind: StationAccessKind;
+  /** 駅からターミナルまでの徒歩（分） */
+  minutes: number;
+  /** kind === 'walkway' のときの歩行経路（連絡通路の能力計算に使う） */
+  route?: WalkRoute;
+  /** kind === 'adjacent' のとき、接しているエリア（連絡の根拠） */
+  areaId?: string;
+}
+
+/**
+ * 鉄道駅からターミナルへ旅客が歩いて届くかを判定する（analyzeAccess と検証で共有）。
+ *
+ * 届く条件は次のいずれかで、所要が最短のものを採用する（同点は walkway → adjacent → legacy の順）:
+ * - walkway: 旅客連絡通路の歩行経路があり、徒歩上限（ACCESS_MAX_WALK_TILES 相当）以内
+ * - adjacent: 同一階層でターミナルエリアに辺接触している（隣接連絡。徒歩は 1 タイル分）
+ * - legacy: 地上の駅で、ターミナルから ACCESS_MAX_WALK_TILES 以内（従来ルール）
+ * 線路への接続（敷地外へ届く鉄道に接しているか）は呼び出し側の責務。
+ */
+export function findStationTerminalAccess(layout: AirportLayout, station: Facility, terminals: readonly Facility[]): StationAccess | null {
+  let best: StationAccess | null = null;
+  const consider = (a: StationAccess): void => {
+    if (!best || a.minutes < best.minutes) best = a;
+  };
+  const route = terminals
+    .map((t) => findPedestrianRoute(layout, station, t))
+    .filter((r): r is WalkRoute => r !== null)
+    .sort((a, b) => a.minutes - b.minutes)[0];
+  if (route && route.minutes <= walkMinutes(ACCESS_MAX_WALK_TILES)) consider({ kind: 'walkway', minutes: route.minutes, route });
+  const terminalIds = new Set(terminals.map((t) => t.id));
+  const adj = adjacentTerminalAreas(layout, station).filter((a) => terminalIds.has(a.terminalId));
+  if (adj.length > 0) consider({ kind: 'adjacent', minutes: walkMinutes(1), areaId: adj[0]!.areaId });
+  if (facilityLevel(station) === 0) {
+    const d = distanceToTerminal(layout, station);
+    if (d <= ACCESS_MAX_WALK_TILES) consider({ kind: 'legacy', minutes: walkMinutes(Math.min(d, ACCESS_MAX_WALK_TILES)) });
+  }
+  return best;
 }
