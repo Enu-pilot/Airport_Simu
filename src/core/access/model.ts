@@ -16,7 +16,7 @@ import {
   type LandsideNetwork,
 } from './landside';
 import { facilityLevel } from '../model/levels';
-import { findPedestrianRoute, type WalkRoute } from './verticalWalk';
+import { findStationTerminalAccess, type StationAccess } from './verticalWalk';
 import { analyzeSegments, type AccessSegments } from './segments';
 
 export type { AccessSegments, SegmentPath } from './segments';
@@ -185,24 +185,17 @@ export function analyzeAccess(
   const bus = usable(['busStop', 'busTerminal'], net.publicTilesByLevel, ACCESS_MAX_WALK_TILES);
   const railNetwork = usable('railStation', net.railTilesByLevel, Number.MAX_SAFE_INTEGER);
   const terminalsForAccess = terminals.filter((f) => f.buildState === 'operational');
-  const railRoutes = new Map<string, WalkRoute>();
-  const legacyRailStations = new Set<string>();
+  // 駅からターミナルへの到達は検証側と共有する判定（連絡通路／同一階層の隣接／従来ルール）
+  const railAccessByStation = new Map<string, StationAccess>();
   const railReachable = railNetwork.facilities.filter((station) => {
-    const route = terminalsForAccess.map((terminal) => findPedestrianRoute(layout, station, terminal)).filter((r): r is WalkRoute => r !== null).sort((a, b) => a.minutes - b.minutes)[0];
-    if (route && route.minutes <= walkMinutes(ACCESS_MAX_WALK_TILES)) {
-      railRoutes.set(station.id, route);
-      return true;
-    }
-    // Keep the legacy ground-level station rule when no explicit walkway route is attached.
-    if (facilityLevel(station) === 0 && distanceToTerminal(layout, station) <= ACCESS_MAX_WALK_TILES) {
-      legacyRailStations.add(station.id);
-      return true;
-    }
-    return false;
+    const access = findStationTerminalAccess(layout, station, terminalsForAccess);
+    if (!access) return false;
+    railAccessByStation.set(station.id, access);
+    return true;
   });
   const railFacilities = railReachable.filter((f) => railServiceAvailable(city, railServiceOf(f.props.railService)));
-  const railWalkMin = Math.min(...railFacilities.map((f) => railRoutes.get(f.id)?.minutes ?? (legacyRailStations.has(f.id) ? walkMinutes(Math.min(distanceToTerminal(layout, f), ACCESS_MAX_WALK_TILES)) : Infinity)));
-  const railRouteEdges = [...new Set(railFacilities.flatMap((f) => railRoutes.get(f.id)?.edges ?? []))];
+  const railWalkMin = Math.min(...railFacilities.map((f) => railAccessByStation.get(f.id)?.minutes ?? Infinity));
+  const railRouteEdges = [...new Set(railFacilities.flatMap((f) => railAccessByStation.get(f.id)?.route?.edges ?? []))];
   const railWalkCapacityPerHour = railFacilities.length && railRouteEdges.length
     ? railRouteEdges.reduce<number | null>((min, edgeId) => {
         const cap = layout.roads[edgeId]?.capacityPerHour;
@@ -226,7 +219,8 @@ export function analyzeAccess(
     ? analyzeSegments(layout, net, { railStationIds: rail.facilities.map((f) => f.id), railDeclaredTrainsPerHour: declaredTrainsPerHour })
     : undefined;
   const trainsPerHour = segments ? segments.railTrainsPerHour : declaredTrainsPerHour;
-  const needsWalkCapacity = railFacilities.some((f) => !legacyRailStations.has(f.id));
+  // 連絡通路経由の駅だけが通路の歩行能力に律速される。隣接・従来ルールの駅はターミナル直結として扱う
+  const needsWalkCapacity = railFacilities.some((f) => railAccessByStation.get(f.id)?.kind === 'walkway');
   const railPaxCapacity = needsWalkCapacity ? (railWalkCapacityPerHour === null ? null : Math.min(trainsPerHour * M.trainSeats, railWalkCapacityPerHour)) : trainsPerHour * M.trainSeats;
   const weightedRail = rail.facilities.reduce((acc, f) => {
     const trains = num(f.props.trainsPerHour);

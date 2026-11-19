@@ -36,7 +36,7 @@ import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
 import { ACCESS_MAX_WALK_TILES, PARKING_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTilesAtLevel } from '../access/landside';
 import { connectorFits, facilityLevel, roadEdgeLevelValid, DEFAULT_LEVEL_HEIGHT_M } from '../model/levels';
-import { findPedestrianRoute } from '../access/verticalWalk';
+import { findStationTerminalAccess } from '../access/verticalWalk';
 import { busGateStatus } from '../terminal/busGateAssignment';
 import { featureOn } from '../economy/unlocks';
 
@@ -1026,10 +1026,11 @@ function checkAccess(layout: AirportLayout, sink: IssueSink): void {
   for (const f of facilities) {
     if (f.kind === 'railStation') {
       if (!touchesTilesAtLevel(f, net.railTilesByLevel, facilityLevel(f))) sink.add('STATION_NO_RAIL', [f.id], {}, f.origin);
-      else if (Object.values(layout.roads).some((e) => e.roadClass === 'walkway' && e.buildState === 'operational')) {
-        const terminals = facilities.filter((x) => x.kind === 'terminal' && x.buildState === 'operational');
-        if (!terminals.some((t) => findPedestrianRoute(layout, f, t))) sink.add('ACCESS_ROUTE_UNREACHABLE', [f.id], { mode: 'rail' }, f.origin);
-      } else if (facilityLevel(f) !== 0) sink.add('ACCESS_ROUTE_UNREACHABLE', [f.id], { mode: 'rail' }, f.origin);
+      else {
+        // 駅からターミナルへの到達は analyzeAccess と同じ共有判定（連絡通路／同一階層の隣接／従来ルール）
+        const terminals = sortedValues(layout.facilities).filter((x) => x.kind === 'terminal' && x.buildState === 'operational' && !x.parentFacilityId);
+        if (!findStationTerminalAccess(layout, f, terminals)) sink.add('ACCESS_ROUTE_UNREACHABLE', [f.id], { mode: 'rail' }, f.origin);
+      }
     } else if (!touchesTilesAtLevel(f, f.kind === 'staffParking' ? net.anyRoadTilesByLevel : net.publicTilesByLevel, facilityLevel(f))) {
       sink.add('ACCESS_NOT_CONNECTED', [f.id], {}, f.origin);
     }

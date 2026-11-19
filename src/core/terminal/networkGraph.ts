@@ -1,14 +1,18 @@
 import type { AirportLayout } from '../model/types';
 import { sortedValues } from '../model/ids';
 import { facilityLevel } from '../model/levels';
-import { buildTerminalModel, linkCostSec, type TerminalModel } from './model';
+import { TILE_M } from '../model/catalog';
+import { buildTerminalModel, linkCostSec, WALK_SPEED_MPS, type TerminalModel } from './model';
+import { adjacentTerminalAreas } from './adjacency';
 
 /**
  * 5-16 T3/T4: 対外交通施設とターミナル内エリアを横断する複合グラフ（派生データ）。
  *
  * ノードは `area:<エリアID>` / `portal:<ポータルID>` / `facility:<施設ID>` の 3 種。
- * エリア間は TerminalModel のリンクをそのまま使い、交通施設とはポータル経由でのみ接続する
- * （座標や階が近いだけでは接続しない）。車両用の道路・鉄道グラフは歩行グラフへ入れない。
+ * エリア間は TerminalModel のリンクをそのまま使い、交通施設とはポータル経由で接続する。
+ * 加えて、交通施設が同一階層でターミナルエリアに辺接触している場合は、その接触を
+ * 連絡として施設⇔エリアの辺を張る（隣接連絡。adjacency.ts。座標が近いだけ・階層が
+ * 違う・角だけの接触では接続しない）。車両用の道路・鉄道グラフは歩行グラフへ入れない。
  * ポータルと交通施設は、運用中のものだけが現行グラフに入り、建設中は
  * includeUnderConstruction の将来グラフにだけ入る（planned はどちらにも入らない）。
  * 旅客の現在経路に将来グラフの経路を使ってはならない（5-13 と同じ原則）。
@@ -87,6 +91,20 @@ export function buildCompositeGraph(
     links[p]!.push({ to: f, costSec: 0, portalId: portal.id });
     links[p]!.push({ to: a, costSec: 0, portalId: portal.id });
     links[a]!.push({ to: p, costSec: 0, portalId: portal.id });
+  }
+  // 隣接連絡: 同一階層でターミナルエリアに辺接触する交通施設は、ポータルが無くても
+  // そのエリアと連絡しているものとして扱う。辺の費用は境界をまたぐ 1 タイル分の歩行。
+  for (const facility of sortedValues(layout.facilities)) {
+    if (!buildStateIncluded(facility.buildState ?? 'operational', future)) continue;
+    for (const adj of adjacentTerminalAreas(layout, facility)) {
+      if (!model.areas[adj.areaId]) continue;
+      addNode(facilityNodeId(facility.id), 'facility', facility.id);
+      const f = facilityNodeId(facility.id);
+      const a = areaNodeId(adj.areaId);
+      const costSec = TILE_M / WALK_SPEED_MPS;
+      links[f]!.push({ to: a, costSec });
+      links[a]!.push({ to: f, costSec });
+    }
   }
   return { nodes, links };
 }
