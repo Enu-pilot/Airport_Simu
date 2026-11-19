@@ -1,4 +1,4 @@
-# 42. 実装ロードマップとテスト項目（2026-11-16 承認、Phase 6 追記 2026-11-18）
+# 42. 実装ロードマップとテスト項目（2026-11-16 承認、Phase 6 / F6-17 追記 2026-11-19）
 
 - 位置づけ: [docs/39](39_comprehensive_test_audit_and_handover.md)（監査結果）・[docs/40](40_departure_time_limit.md)・[docs/41](41_capacity_expansion_plan.md)（計画）を実装に移すための順序・決定事項・テスト項目。内容は複製せず参照する。
 - 進め方: 計画とテスト項目（本書）→ 実装計画・要件（`docs/implementation/README.md`）→ 実装 → 監査 → 品質ゲート。フェーズごとにコミットする。
