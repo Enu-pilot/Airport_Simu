@@ -151,6 +151,26 @@ describe('プロジェクトの保存形式', () => {
     expect(catalogDiff(r.project!.catalog.models).some((d) => d.id === 'B777-300' && d.field === 'defaultSeats')).toBe(true);
   });
 
+  it('カタログの版が違っても固定した機種の値に差分がなければ、カタログの警告は出ない', () => {
+    const p = baseProject();
+    // 版だけを旧版にする（機種の値は現在のカタログのまま＝差分なし）
+    p.catalog.version = '2025.01.0';
+    expect(catalogDiff(p.catalog.models)).toEqual([]);
+    const r = validateProject(serializeProject(p), opts);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some((w) => w.includes('差分を確認してから適用できます'))).toBe(false);
+    expect(r.warnings.some((w) => w.includes('カタログ版'))).toBe(false);
+  });
+
+  it('カタログの版が現在と同じなら、カタログの警告は出ない', () => {
+    const p = baseProject();
+    expect(p.catalog.version).toBe(CATALOG_VERSION);
+    const r = validateProject(serializeProject(p), opts);
+    expect(r.ok).toBe(true);
+    expect(r.warnings.some((w) => w.includes('差分を確認してから適用できます'))).toBe(false);
+    expect(r.warnings.some((w) => w.includes('カタログ版'))).toBe(false);
+  });
+
   it('旧形式のレイアウトファイルを移行する（会社は現在のもの、汎用機材は汎用のまま）', () => {
     const career = createCareerCompany();
     const r = validateProject(exportLayout(createSampleAirport()), { fallbackCompany: career });

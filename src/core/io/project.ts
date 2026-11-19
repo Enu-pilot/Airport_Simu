@@ -6,7 +6,7 @@ import { checkMarket } from '../economy/market';
 import { checkGameFields } from '../economy/game';
 import { isCityConfig, isCityNightOps } from '../economy/city';
 import { SCHEMA_VERSION, type AirportLayout } from '../model/types';
-import { SIM_MODEL_VERSION, modelsUsed, type Scenario } from '../scenario/scenario';
+import { SIM_MODEL_VERSION, catalogDiff, modelsUsed, type Scenario } from '../scenario/scenario';
 import { buildTypeTable } from '../sim/aircraftTypes';
 import { thinSnapshotState } from '../sim/thin';
 import { createContext } from '../sim/context';
@@ -774,7 +774,10 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
   for (const id of projectModelIds(company, sim, scenarios)) {
     if (!models[id]) warnings.push(`不明な機種 ID「${id}」: 保存データにもカタログにもありません。未解決の機種として汎用の値で扱います`);
   }
-  if (pin && pin.version !== CATALOG_VERSION) warnings.push(`保存時の機種データ（カタログ版 ${pin.version}）で開きます。最新カタログ（${CATALOG_VERSION}）は差分を確認してから適用できます`);
+  // 版番号が上がっていても、固定した機種の値が最新カタログと一致していれば適用すべき差分はない。
+  // その場合は警告を出さない（プロジェクト画面の機種データ欄で「差分はありません」と表示される）。
+  // 警告は実際に差分があるときだけ出す（差分の有無はプロジェクト画面のボタン表示と同じ catalogDiff で判定する）。
+  if (pin && pin.version !== CATALOG_VERSION && catalogDiff(pin.models).length > 0) warnings.push(`保存時の機種データ（カタログ版 ${pin.version}）で開きます。最新カタログ（${CATALOG_VERSION}）は差分を確認してから適用できます`);
   const assets = data.assets;
   if (isObj(assets) && isObj(assets.refs)) {
     for (const [mid, aid] of Object.entries(assets.refs)) {
