@@ -5,12 +5,14 @@ import {
   createMovement,
   finishMovement,
   getAtcNetwork,
+  isMovementBlocked,
   nodePosition,
   positionAlongRoute,
   standNodeId,
 } from './movement';
 import {
   activateAssignmentsForAircraft,
+  ensureCrossingRequests,
   generateScheduledAssignments,
   isAssignmentResolved,
 } from './assignments';
@@ -115,6 +117,7 @@ export function createAtcSession(scenario: AtcScenarioDefinition): AtcSessionSta
     requests: {},
     assignments: {},
     standReservations: {},
+    arrivalSequence: [],
     clearances: {},
     events: [],
     score: {
@@ -162,6 +165,8 @@ function spawnDue(
       position:
         entry.kind === 'departure' ? nodePosition(network, standNodeId(entry.standId)) : null,
       movement: null,
+      plannedRoute: null,
+      goAroundCount: 0,
       completedAtSec: null,
       totalWaitSec: 0,
     };
@@ -293,10 +298,14 @@ function stepClearances(
         clearance.kind,
         ATC_STEP_DURATION_SEC[clearance.kind],
       );
+      // 経路変更で保存された経路はこの実行で消費する
+      aircraft.plannedRoute = null;
       if (movement) {
         aircraft.movement = movement;
         const startPos = positionAlongRoute(network, movement, 0);
         if (startPos) aircraft.position = startPos;
+        // §3.4.1: 経路上の滑走路横断要求を GROUND キューへ自動生成する
+        ensureCrossingRequests(state, aircraft, movement);
       } else if (clearance.kind !== 'runwayCrossing') {
         pushEvent(state, {
           kind: 'safetyWarning',
@@ -324,7 +333,21 @@ function stepClearances(
       continue;
     }
     if (clearance.status === 'executing' && clearance.executionStartedAtSec !== undefined) {
-      if (state.clockSec >= clearance.executionStartedAtSec + ATC_STEP_DURATION_SEC[clearance.kind]) {
+      const durationElapsed =
+        state.clockSec >= clearance.executionStartedAtSec + ATC_STEP_DURATION_SEC[clearance.kind];
+      // 完了判定: 移動がある場合は「目的地へ到達したか」で決める。
+      // 停止指示・未承認の横断ゲートで止まっている間は、所要時間を過ぎても
+      // 完了させない（機体はまだ目的地に着いていない）。移動がない
+      // （経路が取れなかった）場合は従来どおり時間のみで完了する。
+      let complete: boolean;
+      if (aircraft.movement) {
+        const done = advanceMovement(network, aircraft, 1);
+        const nearDone = aircraft.movement.totalLengthM - aircraft.movement.traveledM < 1e-6;
+        complete = done || (durationElapsed && nearDone && !isMovementBlocked(aircraft.movement));
+      } else {
+        complete = durationElapsed;
+      }
+      if (complete) {
         finishMovement(network, aircraft);
         clearance.status = 'completed';
         if (aircraft.activeClearanceId === clearance.id) aircraft.activeClearanceId = null;
@@ -350,9 +373,6 @@ function stepClearances(
             message: `${aircraft.callsign}: ${next}`,
           });
         }
-      } else {
-        // 実行中: 物理移動を1秒分前進させる（位置・占有の進行）
-        advanceMovement(network, aircraft, 1);
       }
     }
   }
@@ -364,7 +384,14 @@ function accumulateWait(state: AtcSessionState): void {
     const clearance = aircraft.activeClearanceId
       ? state.clearances[aircraft.activeClearanceId]
       : undefined;
-    if (clearance && clearance.status === 'executing') continue;
+    // 実行中でも、停止指示・横断ゲートで止まっている間は待機として数える
+    if (
+      clearance &&
+      clearance.status === 'executing' &&
+      !(aircraft.movement && isMovementBlocked(aircraft.movement))
+    ) {
+      continue;
+    }
     aircraft.totalWaitSec += 1;
     state.score.totalWaitSec += 1;
   }
@@ -414,7 +441,15 @@ export function atcSessionDigest(state: AtcSessionState): string {
         Math.round((a.position?.x ?? 0) * 100),
         Math.round((a.position?.y ?? 0) * 100),
         a.movement ? Math.round(a.movement.traveledM) : -1,
+        a.movement?.held ? 1 : 0,
+        (a.movement?.crossings ?? []).map((c) => `${c.requestId}:${c.status}`).join(','),
+        a.plannedRoute ? a.plannedRoute.nodeIds.join('>') : '',
+        a.goAroundCount ?? 0,
       ]),
+    arrivalSequence: [...(state.arrivalSequence ?? [])],
+    requests: Object.values(state.requests)
+      .sort((a, b) => (a.id < b.id ? -1 : 1))
+      .map((r) => [r.id, r.kind, r.status]),
     clearances: Object.values(state.clearances)
       .sort((a, b) => a.seq - b.seq)
       .map((c) => [c.id, c.status]),
