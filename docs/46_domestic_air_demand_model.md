@@ -82,7 +82,7 @@
 |---|---|---|
 | `catchmentPopulation` | 人、1,000〜50,000,000 | 目的地空港が主に旅客を集める地域の推定人口。現行 `DestinationInput.population` とは別項目 |
 | `airMarketPopulation` | 人、1,000〜50,000,000 | 出発側の航空市場人口。`CityConfig` に持たせ、都市成長・都市格に使う `CityConfig.population` と分離する。省略時は旧セーブ互換のため `population` を使う |
-| `aviationDependency` | 0.50〜1.00 | 航空依存度。新幹線・鉄道競合・道路移動の代替可能性を織り込んだ需要倍率。高いほど航空を利用する構造 |
+| `aviationDependency` | 0.50〜1.00 | §5.2に置く都市・地域別の初期値。単独で路線需要へ掛ける最終係数ではない |\n| `aviationDependencyOD` | 0.50〜2.00 | 出発空港×到着空港ごとの相対倍率。鉄道・道路等の代替手段と地理条件を統合し、ODの需要式へ一度だけ適用 |
 | `demand.essential` | 0.1〜3.0 | 必須需要指数。従来の `demand.business` を移行元とし、ビジネス・生活上必要な移動を一つにまとめる |
 | `demand.leisure` | 0.1〜3.0 | 観光・レジャー需要指数。既存値を初期値として引き継ぐ |
 | `seasonalityProfile` | 列挙値 | 観光需要に適用する12か月の季節プロファイル |
@@ -373,7 +373,7 @@ K=640で実績へ一致させるために必要となるOD係数（実績/予測
 | 島嶼観光 | 那覇・石垣・宮古・奄美 | 0.98〜0.99 | 観光指数が高く、春・夏・秋に山 |
 | 離島・生活路線 | 八丈島・隠岐・対馬・五島・沖縄離島 | 0.97〜0.99 | 必須需要は年間安定、観光は島ごとのプロファイル |
 
-航空依存度は、例えば0.60なら「航空需要を60%にする」という意味ではなく、基本需要の相対補正である。モデル全体のKと人口弾力性と一緒に調整する。
+§5.2の都市別航空依存度は地域特性の初期値であり、例えば0.60をそのまま全路線へ掛ける意味ではない。需要式で使うOD単位の `aviationDependencyOD` は基準OD=1.0の相対倍率で、鉄道・道路の代替所要時間等から別途求める。
 
 ## 7. 校正方針・実装時の注意・受入条件
 
@@ -397,7 +397,7 @@ K=640で実績へ一致させるために必要となるOD係数（実績/予測
 
 この文書作成時点ではコード変更していない。実装時に最低限確認する対象:
 
-- `src/core/data/types.ts`: `DestinationInput` / `DestinationDef` に `catchmentPopulation`、`aviationDependency`、`demand.essential` を追加。旧 `business` 読み込みを残す。
+- `src/core/data/types.ts`: `DestinationInput` / `DestinationDef` に `catchmentPopulation`、都市別の初期 `aviationDependency`、`demand.essential` を追加。`aviationDependencyOD` は路線ODデータ/導出関数側で扱い、旧 `business` 読み込みを残す。
 - `src/core/data/destinations.ts`: 国内83都市の初期パラメータを登録。既存ID、順序、legacy属性を保持。那覇の `leisure=3.0` を反映。
 - `src/core/economy/city.ts`: `CityConfig.airMarketPopulation`、値域検証、旧セーブの既定/フォールバックを追加。都市人口・成長計算には使わない。
 - `src/core/economy/demand.ts`: K=640（検証用暫定値）、出発側市場人口、目的地利用圏人口、必須需要、OD単位の航空依存度、出発/目的空港間距離、季節プロファイルを反映。市場モードの `cityDemandCeiling` 比例縮小を削除。
@@ -410,9 +410,9 @@ K=640で実績へ一致させるために必要となるOD係数（実績/予測
 1. 国内就航先の登録件数83件とID集合が変更前後で一致する。
 2. 先頭21件のlegacy ID・順序・legacy指定は不変。
 3. 旧 `demand.business` だけを持つカタログも必須需要として読み込める。
-4. `catchmentPopulation` と `aviationDependency` の範囲外値、未定義の `seasonalityProfile` はカタログ検証で検出する。
+4. `catchmentPopulation` と都市別 `aviationDependency` の範囲外値、OD単位 `aviationDependencyOD` の範囲外値、未定義の `seasonalityProfile` は検証で検出する。
 5. 必須需要・観光需要の月別係数は、各プロファイルごとに年間平均が1.0になる。
-6. 必須需要と観光需要を一度だけ合成し、季節係数・航空依存度を二重に掛けない。
+6. 必須需要と観光需要を一度だけ合成し、季節係数・`aviationDependencyOD` を二重に掛けない。都市別の初期航空依存度を別途重ね掛けしない。
 7. 仙台は仙台―新千歳、名古屋圏は中部―新千歳、首都圏は羽田―新千歳を使い、羽田路線の実績を仙台・名古屋へ転用しない。2025年度の複数空港・12路線比較（本書3.5）をテストレポートに記録する。
 8. 市場モードでは、座席数・便数・座席利用率や他路線の需要合計によって潜在需要を一律に縮小しない。座席数は需要算出後の搭乗率・実搭乗可能人数にのみ使う。
 9. 別の目的地への路線を追加・削除しても、既存ODの潜在需要が都市総量キャップによって変化しない。同一ODの複数契約はOD需要を分け合い、OD全体の潜在需要を重複計上しない。
