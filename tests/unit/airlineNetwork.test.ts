@@ -18,9 +18,9 @@ const HOKKAIDO = ['SPK', 'HKD', 'AKJ', 'KUH', 'OBO', 'MMB', 'WKJ', 'SHB', 'MBE',
 const KYUSHU = ['FUK', 'KKJ', 'HSG', 'NGS', 'KMJ', 'OIT', 'KMI', 'KOJ', 'ASJ', 'KUM', 'TNE'];
 
 describe('airlineNetwork: 追加した国内目的地', () => {
-  it('カタログ検証が issue 0 件で、目的地は 107 件（うち実在国内 68 件）', () => {
+  it('カタログ検証が issue 0 件で、目的地は 171 件（うち実在国内 68 件）', () => {
     expect(validateCatalog(CATALOG_RAW)).toEqual([]);
-    expect(CATALOG.destinations.length).toBe(107);
+    expect(CATALOG.destinations.length).toBe(171); // 国内編 107 + 海外編 64（統合時に更新）
     const realDomestic = CATALOG.destinations.filter((d) => d.countryId === 'JP' && !['KTA', 'TWN', 'MSK', 'YKH', 'KRG', 'AOS', 'NSH', 'HSM'].includes(d.id));
     expect(realDomestic.length).toBe(68);
   });
