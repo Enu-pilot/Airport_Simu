@@ -192,4 +192,13 @@ export const DESTINATION_DATA: DestinationInput[] = [
   defineDestination({ id: 'YYC', name: 'カルガリー', countryId: 'CA', distanceKm: 8000, population: 1500000, coordinates: { latitude: 51.13, longitude: -114.01 }, demand: { business: 1.0, leisure: 1.3 }, congestion: 0.5, unlock: { minRating: 80 } }),
   defineDestination({ id: 'MEX', name: 'メキシコシティ', countryId: 'MX', distanceKm: 11300, population: 22000000, coordinates: { latitude: 19.44, longitude: -99.07 }, demand: { business: 1.2, leisure: 1.1 }, congestion: 0.85, unlock: { minRating: 85 } }),
   defineDestination({ id: 'BOM', name: 'ムンバイ', countryId: 'IN', distanceKm: 6200, population: 20000000, coordinates: { latitude: 19.09, longitude: 72.87 }, demand: { business: 1.2, leisure: 1.0 }, congestion: 0.85, unlock: { minRating: 85 } }),
+  // 系列子会社・地域航空の路線網に必要な離島・地方空港（2026-11-19 ユーザー依頼。対馬・壱岐・五島福江は ORC/ANAウイングス、
+  // 奥尻は HAC、粟国は RAC、喜界は JAC、天草は天草エアラインの就航先）
+  defineDestination({ id: 'TSJ', name: '対馬', countryId: 'JP', regionId: 'west', distanceKm: 950, population: 28000, coordinates: { latitude: 34.28, longitude: 129.31 }, demand: { business: 0.3, leisure: 1.5 }, congestion: 0.2 }),
+  defineDestination({ id: 'IKI', name: '壱岐', countryId: 'JP', regionId: 'west', distanceKm: 920, population: 25000, coordinates: { latitude: 33.75, longitude: 129.69 }, demand: { business: 0.3, leisure: 1.4 }, congestion: 0.2 }),
+  defineDestination({ id: 'FUJ', name: '五島福江', countryId: 'JP', regionId: 'west', distanceKm: 1020, population: 35000, coordinates: { latitude: 32.67, longitude: 128.83 }, demand: { business: 0.3, leisure: 1.6 }, congestion: 0.2 }),
+  defineDestination({ id: 'OKK', name: '奥尻', countryId: 'JP', regionId: 'north', distanceKm: 980, population: 2300, coordinates: { latitude: 42.07, longitude: 139.43 }, demand: { business: 0.3, leisure: 1.6 }, congestion: 0.2 }),
+  defineDestination({ id: 'AGJ', name: '粟国', countryId: 'JP', regionId: 'south', distanceKm: 1580, population: 1000, coordinates: { latitude: 26.59, longitude: 127.24 }, demand: { business: 0.3, leisure: 1.4 }, congestion: 0.2 }),
+  defineDestination({ id: 'KXJ', name: '喜界', countryId: 'JP', regionId: 'south', distanceKm: 1280, population: 7000, coordinates: { latitude: 28.32, longitude: 129.93 }, demand: { business: 0.3, leisure: 1.4 }, congestion: 0.2 }),
+  defineDestination({ id: 'AXJ', name: '天草', countryId: 'JP', regionId: 'west', distanceKm: 980, population: 70000, coordinates: { latitude: 32.48, longitude: 130.16 }, demand: { business: 0.4, leisure: 1.2 }, congestion: 0.2 }),
 ];
