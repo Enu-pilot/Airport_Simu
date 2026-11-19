@@ -103,8 +103,8 @@ describe('プロジェクトの保存形式', () => {
     const p = baseProject({ scenarios: [createScenario({ id: 'sc_1', name: '基準', createdAt: NOW, layout: createSampleAirport(), company: createSandboxCompany(), seed: 's', durationHours: 2 })] });
     expect(p.versions).toEqual({ format: PROJECT_FORMAT_VERSION, layoutSchema: SCHEMA_VERSION, catalog: CATALOG_VERSION, assets: expect.any(String), simModel: SIM_MODEL_VERSION });
     // 使っている機種だけを保存時の値で持つ
-    expect(Object.keys(p.catalog.models)).toContain('B777-300ER');
-    expect(p.assets.refs['B777-300ER']).toBe('proc-wide-777');
+    expect(Object.keys(p.catalog.models)).toContain('B777-300');
+    expect(p.assets.refs['B777-300']).toBe('proc-wide-777');
     const r = validateProject(serializeProject(p), opts);
     expect(r.errors).toEqual([]);
     expect(r.ok).toBe(true);
@@ -139,16 +139,16 @@ describe('プロジェクトの保存形式', () => {
 
   it('保存時の機種データで動き、カタログが変わっても黙って変わらない。最新カタログとの差分を出せる', () => {
     const p = baseProject();
-    p.catalog.models['B777-300ER']!.defaultSeats = 290;
+    p.catalog.models['B777-300']!.defaultSeats = 290;
     p.catalog.version = '2025.01.0';
     const r = validateProject(serializeProject(p), opts);
     expect(r.ok).toBe(true);
     expect(r.project!.catalog.version).toBe('2025.01.0');
     expect(r.warnings.some((w) => w.includes('2025.01.0'))).toBe(true);
     const types = buildTypeTable(effectiveModels(r.project!.catalog));
-    expect(types['B777-300ER']!.seats).toBe(290);
-    expect(CATALOG['B777-300ER']!.defaultSeats).toBe(370);
-    expect(catalogDiff(r.project!.catalog.models).some((d) => d.id === 'B777-300ER' && d.field === 'defaultSeats')).toBe(true);
+    expect(types['B777-300']!.seats).toBe(290);
+    expect(CATALOG['B777-300']!.defaultSeats).toBe(368);
+    expect(catalogDiff(r.project!.catalog.models).some((d) => d.id === 'B777-300' && d.field === 'defaultSeats')).toBe(true);
   });
 
   it('旧形式のレイアウトファイルを移行する（会社は現在のもの、汎用機材は汎用のまま）', () => {
@@ -211,7 +211,7 @@ describe('壊れたファイル・不正なファイルは読み込まない（�
     }, /端点/],
     ['会社の型が不正', (d) => ({ ...d, company: { ...d.company, cash: 'many' } }), /会社/],
     ['機種データが不正', (d) => {
-      (d.catalog.models['B777-300ER'] as unknown as Record<string, unknown>).lengthM = 'long';
+      (d.catalog.models['B777-300'] as unknown as Record<string, unknown>).lengthM = 'long';
       return d;
     }, /機種データ/],
     ['シナリオの ID 重複', (d) => {

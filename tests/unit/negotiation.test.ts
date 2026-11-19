@@ -42,7 +42,7 @@ describe('スポットの専用化（5-08）', () => {
   it('専用スポットの設定・解除と、計画での優先・回避', () => {
     const c = createCompany('career');
     const mine = addContract(c, { airlineId: 'RJ', destinationId: 'KTA', typeId: 'regional70', perDay: 1, feeDiscount: 0, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0, window: 'daytime' });
-    const other = addContract(c, { airlineId: 'SK', destinationId: 'TYO', typeId: 'narrow180', perDay: 1, feeDiscount: 0, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0, window: 'daytime' });
+    const other = addContract(c, { airlineId: 'HB', destinationId: 'TYO', typeId: 'B737-800', perDay: 1, feeDiscount: 0, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0, window: 'daytime' });
     expect(setDedicatedStand(c, mine.id, 'std_9').ok).toBe(true);
     expect(c.contracts[mine.id]!.dedicatedStandId).toBe('std_9');
 

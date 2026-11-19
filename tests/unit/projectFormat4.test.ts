@@ -77,7 +77,7 @@ describe('フェーズ 2: 保存形式 4 は新しい項目を使うときだけ
     expect(p.formatVersion).toBe(4);
     expect(p.versions.format).toBe(4);
     expect(legacyReaderAccepts(p.formatVersion)).toBe(false);
-    expect(PROJECT_FORMAT_MAX_READABLE).toBe(6); // フェーズ 4 の項目（版 6）まで読める
+    expect(PROJECT_FORMAT_MAX_READABLE).toBe(7); // 保存形式 7（Work Order・動く歩道）の項目まで読める
     const r = validateProject(serializeProject(p), opts);
     expect(r.errors).toEqual([]);
     expect(r.project!.formatVersion).toBe(4);
@@ -90,10 +90,11 @@ describe('フェーズ 2: 保存形式 4 は新しい項目を使うときだけ
     expect(again.company.city).toEqual(p.company.city);
   });
 
-  it('版 7 以上は拒否する。版 1〜3 を名乗るのに版 4 の項目があるファイルも拒否する（日本語のメッセージ）', () => {
+  it('読める最大の版より新しい版は拒否する。版 1〜3 を名乗るのに版 4 の項目があるファイルも拒否する（日本語のメッセージ）', () => {
     const l = must(updateLayoutSettings(createSampleAirport(), { taxiMode: 'block' })).layout;
     const p4 = build(l);
-    const tooNew = validateProject(JSON.stringify({ ...p4, formatVersion: 7 }), opts);
+    // 読める最大の版 + 1 で確かめる（projectFormat2 と同じ流儀。版が上がっても意図は変わらない）
+    const tooNew = validateProject(JSON.stringify({ ...p4, formatVersion: PROJECT_FORMAT_MAX_READABLE + 1 }), opts);
     expect(tooNew.ok).toBe(false);
     expect(tooNew.errors.join('\n')).toMatch(/新しい版/);
     for (const fv of [1, 2, 3]) {
