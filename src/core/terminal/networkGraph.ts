@@ -1,7 +1,7 @@
 import type { AirportLayout } from '../model/types';
 import { sortedValues } from '../model/ids';
 import { facilityLevel } from '../model/levels';
-import { buildTerminalModel, WALK_SPEED_MPS, type TerminalModel } from './model';
+import { buildTerminalModel, linkCostSec, type TerminalModel } from './model';
 
 /**
  * 5-16 T3/T4: 対外交通施設とターミナル内エリアを横断する複合グラフ（派生データ）。
@@ -64,7 +64,7 @@ export function buildCompositeGraph(
     for (const e of edges) {
       links[areaNodeId(from)]!.push({
         to: areaNodeId(e.to),
-        costSec: e.lengthM / WALK_SPEED_MPS + e.travelSec,
+        costSec: linkCostSec(e),
         ...(e.transferLinkId ? { transferLinkId: e.transferLinkId } : {}),
       });
     }

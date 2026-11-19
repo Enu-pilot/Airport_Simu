@@ -1,6 +1,6 @@
 import { Rng, seedFromString } from '../rng';
 import { compareIds } from '../model/ids';
-import { terminalLinkCapacityPerHour, WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
+import { linkWalkLengthM, terminalLinkCapacityPerHour, WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
 import { findPaxRoute, linkBetween } from '../terminal/route';
 import { terminalServiceComplexes } from '../terminal/serviceComplex';
 import { areaServerCount, serviceSecPerPax } from '../terminal/capacity';
@@ -1232,7 +1232,7 @@ function startRoute(sim: Simulation, g: PaxGroup, areas: string[]): void {
 function startLeg(sim: Simulation, g: PaxGroup): void {
   const link = linkBetween(sim.ctx.terminal, g.area!, g.route[0]!);
   g.legProgress = 0;
-  g.legLength = link ? link.lengthM + link.travelSec * WALK_SPEED_MPS : 0;
+  g.legLength = link ? linkWalkLengthM(link) : 0;
   const transferLinkId = link?.transferLinkId;
   const transportId = transferLinkId ?? (link?.verticalTransportId ? `vertical:${link.verticalTransportId}` : undefined);
   if (!transportId) {

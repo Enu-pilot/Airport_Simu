@@ -31,8 +31,12 @@ import {
   type ContractActionResult,
   type FeeSettings,
   type OperatingHours,
+  addWorkOrder,
+  type WorkOrderAssetKind,
+  type WorkOrderKind,
 } from '../core/economy/company';
 import { createContext, operableTypes } from '../core/sim/context';
+import { releaseWorkOrderClosure } from '../core/sim/workOrders';
 import { airlineDef, destinationDef, internationalProcessingFor, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { CONTRACT_ACTION_LABEL, FLEET_RESULT_LABEL, RESPONSE_LABEL } from '../i18n/ja';
 import {
@@ -465,6 +469,35 @@ function mutateCompany(fn: (c: CompanyState) => ContractActionResult | FleetResu
 }
 
 export const companyActions = {
+  createWorkOrder(input: { assetKind: WorkOrderAssetKind; assetId: string; kind: WorkOrderKind; engineers: number; durationMin: number }): void {
+    mutateCompany((c) => { addWorkOrder(c, { ...input, createdDay: c.day }); });
+  },
+  deferWorkOrder(id: string): void {
+    const sim = get().ops?.sim;
+    mutateCompany((c) => {
+      const wo = c.workOrders?.[id];
+      if (wo && (wo.status === 'planned' || wo.status === 'active')) {
+        wo.status = 'deferred';
+        if (sim) releaseWorkOrderClosure(sim, wo);
+      }
+    });
+  },
+  resumeWorkOrder(id: string): void {
+    mutateCompany((c) => {
+      const wo = c.workOrders?.[id];
+      if (wo?.status === 'deferred') wo.status = 'planned';
+    });
+  },
+  deleteWorkOrder(id: string): void {
+    const sim = get().ops?.sim;
+    mutateCompany((c) => {
+      const wo = c.workOrders?.[id];
+      if (wo) {
+        if (sim) releaseWorkOrderClosure(sim, wo);
+        delete c.workOrders![id];
+      }
+    });
+  },
   acceptOffer(id: string): void {
     const s = get();
     const c = s.ops?.sim.company ?? s.company;

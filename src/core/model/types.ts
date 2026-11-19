@@ -264,6 +264,7 @@ export type TerminalAreaKind =
   | 'stairs'
   | 'escalator'
   | 'elevator'
+  | 'movingWalkway'
   | 'shop'
   | 'restaurant'
   | 'emigration'

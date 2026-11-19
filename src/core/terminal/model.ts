@@ -39,6 +39,8 @@ export interface AreaLink {
   lengthM: number;
   /** 上下移動の所要時間（秒）。同じ階の移動は 0 */
   travelSec: number;
+  /** lengthM のうち動く歩道エリア内にある長さ（m）。端点が動く歩道のとき、その中心から境界まで */
+  walkwayLengthM?: number;
   /** 経由点（境界の中点、または上下移動の重なりの中心） */
   via: Vec2;
   /** ターミナル間連絡設備を通る場合、その設備 ID */
@@ -92,6 +94,26 @@ export const CONNECTOR_DETOUR = 1.25;
 /** 1タイル（25m四方）あたりの混雑の目安人数 */
 export const PAX_PER_TILE = 40;
 export const WALK_SPEED_MPS = 1.3;
+/**
+ * 動く歩道（トラベレーター）のベルト速度 m/s。一般的な空港向け動く歩道のベルト速度は
+ * 0.5 m/s 級が標準（歩行者がベルト上で歩く前提）。旅客はベルト上でも歩くものとして扱い、
+ * 実効速度 = 歩行速度 + ベルト速度 = 1.8 m/s とする（立ったままでは 0.5 m/s で通常歩行より
+ * 遅くなるため、速さを求める旅客は歩く側に寄るのが現実の挙動）。
+ */
+export const MOVING_WALKWAY_BELT_MPS = 0.5;
+export const MOVING_WALKWAY_SPEED_MPS = WALK_SPEED_MPS + MOVING_WALKWAY_BELT_MPS;
+
+/** リンクの移動時間（秒）: 動く歩道で覆われた区間だけ実効速度で進む */
+export function linkCostSec(link: AreaLink): number {
+  const walkway = link.walkwayLengthM ?? 0;
+  return (link.lengthM - walkway) / WALK_SPEED_MPS + walkway / MOVING_WALKWAY_SPEED_MPS + link.travelSec;
+}
+
+/** 歩行シミュレーション用の「歩行換算距離」: legProgress が WALK_SPEED_MPS/秒で進む前提で、所要時間が linkCostSec と一致する長さ */
+export function linkWalkLengthM(link: AreaLink): number {
+  const walkway = link.walkwayLengthM ?? 0;
+  return link.lengthM - walkway + walkway * (WALK_SPEED_MPS / MOVING_WALKWAY_SPEED_MPS) + link.travelSec * WALK_SPEED_MPS;
+}
 export const DEFAULT_TERMINAL_LINK_WIDTH_M = 6;
 export const DEFAULT_TERMINAL_LINK_ELEVATION_M = 36;
 export const DEFAULT_TERMINAL_LINK_CLEARANCE_M = 33;
@@ -342,8 +364,12 @@ function addLink(
 ): void {
   const d = (p: Vec2, q: Vec2) => Math.hypot(p.x - q.x, p.y - q.y) * TILE_M;
   const lengthM = d(a.center, via) + d(via, b.center);
-  links[a.id]!.push({ to: b.id, lengthM, travelSec, via, ...transport });
-  links[b.id]!.push({ to: a.id, lengthM, travelSec, via, ...transport });
+  // 動く歩道: 端点エリアが動く歩道なら、その中心〜境界（via）の区間がベルトで覆われる
+  const walkwayLengthM =
+    (a.kind === 'movingWalkway' ? d(a.center, via) : 0) + (b.kind === 'movingWalkway' ? d(via, b.center) : 0);
+  const extra = walkwayLengthM > 0 ? { walkwayLengthM } : {};
+  links[a.id]!.push({ to: b.id, lengthM, travelSec, via, ...transport, ...extra });
+  links[b.id]!.push({ to: a.id, lengthM, travelSec, via, ...transport, ...extra });
 }
 
 /** 同じ階の2つの矩形が辺を共有していれば、共有部分の中点 */

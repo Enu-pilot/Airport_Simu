@@ -185,3 +185,29 @@ export function overnightReadings(company: CompanyState, ctx: SimContext, day: n
     basis: '滞泊可能スポット数（economy/capacity.ts。大きいスポットは小さい機にも使えるためサイズ別の最大値で、合算不可）',
   }));
 }
+
+/**
+ * 夜間整備枠（F6-11）: 1 晩あたり整備できる機数。sim/overnight.ts の
+ * maintenanceCapacityPerNight と同じ式（格納庫 1 棟 = 1 機、整備施設はベイ × 0.5 の切り捨て。
+ * 端数の繰り越し maintenanceCredit は含まない条件判定用の値）。
+ */
+export function maintenanceReading(layout: AirportLayout): CapabilityReading {
+  let n = 0;
+  for (const f of Object.values(layout.facilities)) {
+    if (f.buildState !== 'operational') continue;
+    if (f.kind === 'hangar') n += 1;
+    else if (f.kind === 'maintenance') n += Math.floor(Number(f.props.bays ?? 0) * 0.5);
+  }
+  return {
+    domain: 'maintenance',
+    subjectId: 'maintenance:perNight',
+    label: '夜間整備枠（1 晩あたり）',
+    unit: 'aircraft/night',
+    theoretical: n,
+    effective: n,
+    demand: null,
+    actual: null,
+    state: n <= 0 ? 'notInstalled' : 'operational',
+    basis: '格納庫 1 棟 = 1 機 + 整備施設ベイ × 0.5（sim/overnight.ts maintenanceCapacityPerNight と同じ式）',
+  };
+}

@@ -44,7 +44,8 @@ export const PROJECT_FORMAT_VERSION_4 = 4;
 export const PROJECT_FORMAT_VERSION_5 = 5;
 /** フェーズ 4 の項目（features・carryOver・国際のエリアなど）を使うファイルの版。当初計画の 5 はフェーズ 3 の市場設定が使ったため 6 に繰り下げた */
 export const PROJECT_FORMAT_VERSION_6 = 6;
-export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_6;
+export const PROJECT_FORMAT_VERSION_7 = 7;
+export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_7;
 
 const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !== null && k in (o as Record<string, unknown>);
 
@@ -144,7 +145,18 @@ export function simUsesFormat6(state: SimState | null | undefined): boolean {
   return Object.values(state.flights ?? {}).some((f) => hasKey(f, 'overnight') || hasKey(f, 'carryOver') || hasKey(f, 'routeType') || hasKey(f, 'techHoldUntil') || hasKey(f, 'transferPlan'));
 }
 
+/** 会社が保存形式 7 の項目（Work Order）を使っているか */
+export function companyUsesFormat7(c: CompanyState | null | undefined): boolean {
+  return !!c && hasKey(c, 'workOrders');
+}
+
+/** レイアウトが保存形式 7 の項目（動く歩道エリア）を使っているか */
+export function layoutUsesFormat7(l: AirportLayout): boolean {
+  return Object.values(l.terminalAreas ?? {}).some((a) => a.kind === 'movingWalkway');
+}
+
 export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null; journal?: Journal }): number {
+  if (layoutUsesFormat7(p.layout) || companyUsesFormat7(p.company) || p.scenarios.some((sc) => layoutUsesFormat7(sc.layout) || companyUsesFormat7(sc.company)) || (p.sim && companyUsesFormat7(p.sim.company))) return PROJECT_FORMAT_VERSION_7;
   if (layoutUsesFormat6(p.layout) || companyUsesFormat6(p.company) || p.scenarios.some((sc) => layoutUsesFormat6(sc.layout) || companyUsesFormat6(sc.company)) || (p.sim && (simUsesFormat6(p.sim.state) || companyUsesFormat6(p.sim.company)))) return PROJECT_FORMAT_VERSION_6;
   if (companyUsesFormat5(p.company) || p.scenarios.some((s) => companyUsesFormat5(s.company)) || (p.sim && companyUsesFormat5(p.sim.company))) return PROJECT_FORMAT_VERSION_5;
   if (layoutUsesFormat4(p.layout) || companyUsesFormat4(p.company)) return PROJECT_FORMAT_VERSION_4;

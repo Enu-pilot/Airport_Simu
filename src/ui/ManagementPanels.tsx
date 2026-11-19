@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
-import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type DailyKpi, type DailyReport } from '../core/economy/company';
+import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type DailyKpi, type DailyReport, type WorkOrderAssetKind, type WorkOrderKind } from '../core/economy/company';
 import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
 import { airlineDef, airlinesFor, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
@@ -42,6 +42,108 @@ export function useCompany(): CompanyState {
 
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 1000) / 10}%`);
 
+
+const WORK_ORDER_KIND_LABEL: Record<WorkOrderKind, string> = { inspection: '点検', repair: '修理', construction: '工事' };
+const WORK_ORDER_STATUS_LABEL = { planned: '予定', active: '実施中（夜間枠で進行）', done: '完了', deferred: '延期' } as const;
+const WORK_ORDER_ASSET_LABEL: Record<WorkOrderAssetKind, string> = { runway: '滑走路', taxiway: '誘導路', stand: 'スポット', gate: 'ゲート' };
+
+/** 夜間整備・工事 Work Order（5-25）: 作成・進捗・延期・削除。実施は夜間枠 23:00〜05:00 で、実施中は対象資産を一時閉鎖する */
+export function WorkOrdersPanel() {
+  const c = useCompany();
+  const layout = useLayout();
+  const [assetKind, setAssetKind] = useState<WorkOrderAssetKind>('runway');
+  const [assetId, setAssetId] = useState('');
+  const [kind, setKind] = useState<WorkOrderKind>('inspection');
+  const [engineers, setEngineers] = useState(1);
+  const [durationMin, setDurationMin] = useState(120);
+  const assets: { id: string; label: string }[] =
+    assetKind === 'runway'
+      ? Object.values(layout.runways).map((r) => ({ id: r.id, label: r.name || r.id }))
+      : assetKind === 'taxiway'
+        ? Object.values(layout.taxiways).map((t) => ({ id: t.id, label: t.id }))
+        : assetKind === 'stand'
+          ? Object.values(layout.stands).map((st) => ({ id: st.id, label: st.id }))
+          : Object.values(layout.facilities).filter((f) => f.kind === 'gate').map((f) => ({ id: f.id, label: f.name || f.id }));
+  const selected = assetId && assets.some((a) => a.id === assetId) ? assetId : (assets[0]?.id ?? '');
+  const orders = Object.values(c.workOrders ?? {}).sort((a, b) => (a.id < b.id ? -1 : 1));
+  return (
+    <section data-testid="work-orders">
+      <h4>夜間整備・工事（Work Order）</h4>
+      <p className="muted small">夜間枠（23:00〜05:00）に、整備士が足りる間だけ進みます。実施中は対象を一時閉鎖します（閉鎖は理由付きで管理され、終われば自動で解けます）。</p>
+      <div className="work-order-form">
+        <label>
+          対象{' '}
+          <select value={assetKind} onChange={(e) => setAssetKind(e.target.value as WorkOrderAssetKind)} data-testid="wo-asset-kind">
+            {(Object.keys(WORK_ORDER_ASSET_LABEL) as WorkOrderAssetKind[]).map((k) => (
+              <option key={k} value={k}>{WORK_ORDER_ASSET_LABEL[k]}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          資産{' '}
+          <select value={selected} onChange={(e) => setAssetId(e.target.value)} data-testid="wo-asset-id">
+            {assets.map((a) => (
+              <option key={a.id} value={a.id}>{a.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          作業{' '}
+          <select value={kind} onChange={(e) => setKind(e.target.value as WorkOrderKind)} data-testid="wo-kind">
+            {(Object.keys(WORK_ORDER_KIND_LABEL) as WorkOrderKind[]).map((k) => (
+              <option key={k} value={k}>{WORK_ORDER_KIND_LABEL[k]}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          整備士 <input type="number" min={1} max={99} value={engineers} onChange={(e) => setEngineers(Math.max(1, Number(e.target.value) || 1))} data-testid="wo-engineers" />
+        </label>
+        <label>
+          所要（分） <input type="number" min={10} max={6000} step={10} value={durationMin} onChange={(e) => setDurationMin(Math.max(10, Number(e.target.value) || 10))} data-testid="wo-duration" />
+        </label>
+        <button
+          type="button"
+          disabled={!selected}
+          onClick={() => companyActions.createWorkOrder({ assetKind, assetId: selected, kind, engineers, durationMin })}
+          data-testid="wo-create"
+        >
+          作成
+        </button>
+      </div>
+      {orders.length === 0 ? (
+        <p className="muted small">Work Order はありません。</p>
+      ) : (
+        <table className="board" data-testid="wo-list">
+          <thead>
+            <tr><th>対象</th><th>作業</th><th>状態</th><th>進捗</th><th></th></tr>
+          </thead>
+          <tbody>
+            {orders.map((wo) => (
+              <tr key={wo.id}>
+                <td>{WORK_ORDER_ASSET_LABEL[wo.assetKind]} {wo.assetId}</td>
+                <td>{WORK_ORDER_KIND_LABEL[wo.kind]}（整備士 {wo.engineers} 人 / {wo.durationMin} 分）</td>
+                <td>{WORK_ORDER_STATUS_LABEL[wo.status]}</td>
+                <td>{Math.floor(wo.progressMin)} / {wo.durationMin} 分</td>
+                <td>
+                  {wo.status === 'planned' || wo.status === 'active' ? (
+                    <button type="button" onClick={() => companyActions.deferWorkOrder(wo.id)}>延期</button>
+                  ) : null}
+                  {wo.status === 'deferred' ? (
+                    <button type="button" onClick={() => companyActions.resumeWorkOrder(wo.id)}>再開</button>
+                  ) : null}
+                  {wo.status !== 'done' ? (
+                    <button type="button" onClick={() => companyActions.deleteWorkOrder(wo.id)}>削除</button>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
 // ---------------------------------------------------------------- 運航計画
 
 export function PlanPanel() {
@@ -79,6 +181,7 @@ export function PlanPanel() {
       <div className="issues-list mgmt-grid">
         <CityEventPlanner company={c} />
         {c.city && <NightOpsSettings city={c.city} readOnly={mode === 'operate'} onChange={(next) => { const { nightOps: _n, ...rest } = c.city!; void _n; setCompanyCity(next ? { ...rest, nightOps: next } : rest); }} />}
+        <WorkOrdersPanel />
         <section>
           <h4>契約中の路線</h4>
           <table className="board" data-testid="contracts">

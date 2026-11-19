@@ -116,3 +116,18 @@ describe('F6-11 夜間滞泊能力の共通契約', () => {
     }
   });
 });
+
+describe('F6-11 夜間整備枠の共通契約', () => {
+  it('maintenanceCapacityPerNight と同じ値を返す', async () => {
+    const { createSampleAirport } = await import('../../src/core/sample/sampleAirport');
+    const { maintenanceCapacityPerNight } = await import('../../src/core/sim/overnight');
+    const { createSimulation } = await import('../../src/core/sim/simulation');
+    const { maintenanceReading } = await import('../../src/core/capability');
+    const layout = createSampleAirport();
+    const sim = createSimulation(layout, { company: createCareerCompany(), seed: 'cap-maint' });
+    const r = maintenanceReading(layout);
+    expect(r.theoretical).toBe(maintenanceCapacityPerNight(sim));
+    expect(r.theoretical).toBe(2); // 格納庫 1 + 整備ベイ 2 × 0.5
+    expect(r.unit).toBe('aircraft/night');
+  });
+});

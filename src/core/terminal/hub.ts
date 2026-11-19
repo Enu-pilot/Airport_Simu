@@ -1,5 +1,5 @@
 import type { AirportLayout } from '../model/types';
-import { canMove, WALK_SPEED_MPS, type TerminalModel } from './model';
+import { canMove, linkCostSec, type TerminalModel } from './model';
 import { areaServerCount, serviceSecPerPax } from './capacity';
 
 export type TransferKind = 'DD' | 'DI' | 'ID' | 'II';
@@ -118,7 +118,7 @@ function dijkstra(model: TerminalModel, layout: AirportLayout, from: string): Ma
       // 乗継客は一般区域へ出ない（フェーズ 4 §5.4 の手順どおり、空側だけで移る）。
       // 一般区域経由の経路や出発保安検査への経路は MCT の対象にしない
       if (next.zone === 'landside' || next.kind === 'security') continue;
-      let nc = c + link.lengthM / WALK_SPEED_MPS + link.travelSec;
+      let nc = c + linkCostSec(link);
       if (BOUNDARY_KINDS.has(next.kind)) {
         const b = boundarySec(layout, next.id);
         if (!Number.isFinite(b)) continue;
