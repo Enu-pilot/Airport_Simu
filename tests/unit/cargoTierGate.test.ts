@@ -108,3 +108,18 @@ describe('CARGO-08 国際貨物の格ゲート（実検証）', () => {
     }
   });
 });
+
+describe('F6-07 貨物の格境界（格 2 以下と格 5〜7）', () => {
+  it('格 2: 貨物提案は国内・国際とも 1 件も出ない（格 3 未満は機能自体が未解放）', () => {
+    const offers = sweepCargoOffers(2);
+    expect(offers).toEqual([]);
+  });
+
+  it('格 5〜7: 国際貨物提案が引き続き出現する（上位格で後退しない）', () => {
+    for (const tier of [5, 6, 7] as Tier[]) {
+      const offers = sweepCargoOffers(tier);
+      expect(offers.length).toBeGreaterThanOrEqual(60);
+      expect(offers.filter(isIntl).length).toBeGreaterThanOrEqual(5);
+    }
+  });
+});

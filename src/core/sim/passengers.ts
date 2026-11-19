@@ -1459,7 +1459,7 @@ function stepFacility(sim: Simulation, key: string): void {
     fac.waitTotal += g.waitSec * g.count;
     // 5-21: 工程別の処理実績（最混雑 60 分の集計用）
     const step = g.steps[g.stepIndex];
-    if (isProcessStep(step)) recordProcessStart(state, step, g.id, g.count, g.waitSec, state.now);
+    if (isProcessStep(step)) recordProcessStart(state, step, g.id, g.count, g.waitSec, state.now, sim.ctx.terminal.areas[key]?.terminalId ?? '');
   }
 }
 

@@ -198,6 +198,8 @@ export interface DailyReport {
   portalUsage?: { portalId: string; facilityId: string; enter: number; exit: number }[];
   /** 工程別の最混雑 60 分（5-21）: 理論能力・計画需要・ピーク時間帯の実績処理・使用率・平均待ち */
   processPeak?: { step: string; capacityPerHour: number; demandPerHour: number; peakHour: number; peakProcessed: number; utilization: number | null; avgWaitSec: number }[];
+  /** 5-21 T5: 工程ピークのターミナル別内訳（能力はそのターミナルのエリア合計。需要は空港全体のみ算出するため含めない） */
+  processPeakByTerminal?: { terminalId: string; step: string; capacityPerHour: number; peakHour: number; peakProcessed: number; utilization: number | null; avgWaitSec: number }[];
   /** 旅客 Door-to-Door KPI（5-23）: 出現→完了の所要時間の人数重みつき分位点と Step-free 完了率 */
   doorToDoor?: {
     departure: { p50Sec: number; p95Sec: number; pax: number } | null;

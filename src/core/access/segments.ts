@@ -31,6 +31,9 @@ export interface SegmentPath {
 export interface AccessSegments {
   curbCapacity: number;
   parkingCapacity: number;
+  /** 貨物地区（貨物上屋）向けの区間能力と経路（CARGO-05 区間モデル） */
+  cargoCapacity: number;
+  cargoPaths: Record<string, SegmentPath>;
   /** すべての経路の中で最も細いボトルネックの辺 */
   bottleneckEdgeId: string | null;
   /** 車寄せ向けの経路（出入口の辺 ID ごと） */
@@ -169,10 +172,20 @@ export function analyzeSegments(
     }
   }
 
+  // 貨物上屋に接するタイル（施設タイル + 周囲 1 タイル。駐車場と同じ定義）
+  const cargoTiles = new Set<string>();
+  for (const f of facilities) {
+    if (f.kind !== 'cargoTerminal') continue;
+    for (const p of facilityTiles(f)) {
+      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] as const) cargoTiles.add(tileKey(p.x + dx, p.y + dy));
+    }
+  }
+
   const publicEdges = sortedValues(layout.roads).filter((e) => e.roadClass === 'public' && e.buildState === 'operational');
   const tilesOf = new Map(publicEdges.map((e) => [e.id, edgeTiles(layout, e.id)]));
   const isCurb = (e: RoadEdge): boolean => (tilesOf.get(e.id) ?? []).some((t) => curbTiles.has(tileKey(t.x, t.y)));
   const isParking = (e: RoadEdge): boolean => (tilesOf.get(e.id) ?? []).some((t) => parkingTiles.has(tileKey(t.x, t.y)));
+  const isCargo = (e: RoadEdge): boolean => (tilesOf.get(e.id) ?? []).some((t) => cargoTiles.has(tileKey(t.x, t.y)));
 
   const edges: Record<string, SegmentEdgeInfo> = {};
   for (const e of publicEdges) edges[e.id] = { capacity: roadEdgeCapacity(e), t0Min: edgeT0Min(layout, e) };
@@ -192,9 +205,10 @@ export function analyzeSegments(
   };
   const curb = build(isCurb);
   const parking = build(isParking);
+  const cargo = build(isCargo);
   let bottleneckEdgeId: string | null = null;
   let bottleneckValue = Infinity;
-  for (const p of [...Object.values(curb.paths), ...Object.values(parking.paths)]) {
+  for (const p of [...Object.values(curb.paths), ...Object.values(parking.paths), ...Object.values(cargo.paths)]) {
     if (p.bottleneck < bottleneckValue) {
       bottleneckValue = p.bottleneck;
       bottleneckEdgeId = p.bottleneckEdgeId;
@@ -225,6 +239,8 @@ export function analyzeSegments(
   return {
     curbCapacity: curb.capacity,
     parkingCapacity: parking.capacity,
+    cargoCapacity: cargo.capacity,
+    cargoPaths: cargo.paths,
     bottleneckEdgeId,
     paths: curb.paths,
     parkingPaths: parking.paths,

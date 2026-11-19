@@ -47,6 +47,8 @@ import { turnaroundCapacityDetail } from '../core/economy/planning';
 import { analyzeAirportCapacity } from '../core/economy/capacity';
 import { peakProcessDemand } from '../core/economy/peakDemand';
 import { cargoHandlingCapacityM3PerHour } from '../core/economy/cargo';
+import { facilityCapability } from '../core/capability';
+import type { Facility } from '../core/model/types';
 import { BALANCE } from '../core/economy/balance';
 import type { UnitKind } from '../core/sim/types';
 import type { TerminalAreaKind } from '../core/model/types';
@@ -76,6 +78,7 @@ import {
   INTERIOR_CHILDREN_LABEL,
   TAXI_UI,
   UNIT_KIND_LABEL,
+  CAPABILITY_STATE_LABEL,
 } from '../i18n/ja';
 
 export function PropertiesPanel() {
@@ -789,6 +792,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
       <>
         <NameField layout={layout} id={id} value={f.name} />
         <Info label="位置">{`(${f.origin.x}, ${f.origin.y})`}</Info>
+        <FacilityCapabilityInfo f={f} />
         {f.parentFacilityId ? (
           <Field label={`建物内配置（${layout.facilities[f.parentFacilityId]?.name || f.parentFacilityId}）`}>
             <select
@@ -1051,6 +1055,27 @@ function EntityLink({ layout, id }: { layout: AirportLayout; id: string }) {
     <button className="link" onClick={() => focusEntity(id)}>
       {displayName(layout, id)}
     </button>
+  );
+}
+
+/** Phase 6 / F6-02: 施設の共通能力インスペクター。値は core/capability の正本から表示する */
+function FacilityCapabilityInfo({ f }: { f: Facility }) {
+  const r = facilityCapability(f);
+  return (
+    <Section title="能力">
+      <div data-testid="facility-capability">
+        <Info label="状態">{CAPABILITY_STATE_LABEL[r.state] ?? r.state}</Info>
+        {r.theoretical !== null ? (
+          <>
+            <Info label="理論能力">{`${r.theoretical} ${r.unit}`}</Info>
+            <Info label="有効能力">{`${r.effective} ${r.unit}`}</Info>
+          </>
+        ) : (
+          <Info label="能力">{`未算出（${r.uncomputedReason ?? '根拠なし'}）`}</Info>
+        )}
+        <Info label="根拠">{r.basis}</Info>
+      </div>
+    </Section>
   );
 }
 

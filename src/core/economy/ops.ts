@@ -807,21 +807,61 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
           if (a.kind === step) capacity += areaProcessingPerHour(a.kind, a.props);
         }
         const mine = stats.filter((s) => s.step === step);
-        let peak = mine[0];
-        for (const s of mine) if (s.processed > (peak?.processed ?? -1)) peak = s;
-        const peakProcessed = peak?.processed ?? 0;
+        // 空港全体のピークは、ターミナル別の記録を同じ時間帯で合算してから選ぶ（5-21 T5）
+        const byHour = new Map<number, { processed: number; waitSecTotal: number; waitPax: number }>();
+        for (const st of mine) {
+          const h = byHour.get(st.hour) ?? { processed: 0, waitSecTotal: 0, waitPax: 0 };
+          h.processed += st.processed;
+          h.waitSecTotal += st.waitSecTotal;
+          h.waitPax += st.waitPax;
+          byHour.set(st.hour, h);
+        }
+        let peakHourIdx = -1;
+        let peakAgg = { processed: 0, waitSecTotal: 0, waitPax: 0 };
+        for (const [hour, agg] of byHour) {
+          if (agg.processed > peakAgg.processed) {
+            peakAgg = agg;
+            peakHourIdx = hour;
+          }
+        }
+        const peakProcessed = peakAgg.processed;
         if (capacity <= 0 && peakProcessed <= 0) continue;
         rows.push({
           step,
           capacityPerHour: capacity,
           demandPerHour: demandOf(step),
-          peakHour: peak ? peak.hour % 24 : 0,
+          peakHour: peakHourIdx >= 0 ? peakHourIdx % 24 : 0,
           peakProcessed,
           utilization: capacity > 0 ? Math.round((peakProcessed / capacity) * 100) / 100 : null,
-          avgWaitSec: peak && peak.waitPax > 0 ? Math.round(peak.waitSecTotal / peak.waitPax) : 0,
+          avgWaitSec: peakAgg.waitPax > 0 ? Math.round(peakAgg.waitSecTotal / peakAgg.waitPax) : 0,
         });
       }
       if (rows.length > 0) report.processPeak = rows.sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1));
+      // ターミナル別内訳（5-21 T5）: 能力はそのターミナルのエリア合計だけを数え、共有施設を二重計上しない
+      const termRows: NonNullable<DailyReport['processPeakByTerminal']> = [];
+      for (const terminalId of [...new Set(stats.map((x) => x.terminalId).filter((t) => t !== ''))]) {
+        for (const step of PROCESS_STEPS) {
+          const mine = stats.filter((x) => x.step === step && x.terminalId === terminalId);
+          if (mine.length === 0) continue;
+          let capacity = 0;
+          for (const a of Object.values(ctx.layout.terminalAreas)) {
+            if (a.kind === step && ctx.terminal.areas[a.id]?.terminalId === terminalId) capacity += areaProcessingPerHour(a.kind, a.props);
+          }
+          let peak = mine[0]!;
+          for (const x of mine) if (x.processed > peak.processed) peak = x;
+          if (capacity <= 0 && peak.processed <= 0) continue;
+          termRows.push({
+            terminalId,
+            step,
+            capacityPerHour: capacity,
+            peakHour: peak.hour % 24,
+            peakProcessed: peak.processed,
+            utilization: capacity > 0 ? Math.round((peak.processed / capacity) * 100) / 100 : null,
+            avgWaitSec: peak.waitPax > 0 ? Math.round(peak.waitSecTotal / peak.waitPax) : 0,
+          });
+        }
+      }
+      if (termRows.length > 0) report.processPeakByTerminal = termRows.sort((a, b) => a.terminalId.localeCompare(b.terminalId) || (b.utilization ?? -1) - (a.utilization ?? -1));
     }
   }
   // Door-to-Door KPI（5-23）: 出現→完了の所要時間を分位点で読み取る

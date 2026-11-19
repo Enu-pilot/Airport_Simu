@@ -223,6 +223,19 @@ export function displayName(layout: AirportLayout, id: string): string {
 }
 
 /** ポータル接続状態（5-16）の表示名 */
+export const CAPABILITY_STATE_LABEL: Record<string, string> = {
+  notInstalled: '未設置',
+  uncomputed: '未算出',
+  zeroCapacity: '能力 0',
+  disconnected: '未接続',
+  underConstruction: '建設中',
+  closed: '閉鎖中',
+  failed: '故障・停止',
+  resourceShortage: '人員・車両不足',
+  supplyShortage: '供給不足',
+  operational: '稼働中',
+};
+
 const portalStatusJa = (s: unknown): string =>
   s === 'operational' ? '接続済み' : s === 'underConstruction' ? '完成待ち' : '未接続';
 
