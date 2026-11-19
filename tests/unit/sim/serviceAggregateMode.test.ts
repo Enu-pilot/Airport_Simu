@@ -8,7 +8,8 @@ import { runUntil } from './helpers';
  * 5-19 T12: 空港運営モードのカテゴリ集約方式。
  * 集約方式では店舗エリアへ個別に移動せず（グループの現在エリアが店舗になることがない）、
  * カテゴリ単位の利用実績が立ち、搭乗結果は詳細方式と同等に成立すること。
- * 既定（detailed）の挙動は従来どおり店舗へ実際に移動すること。
+ * 詳細方式（明示指定）の挙動は従来どおり店舗へ実際に移動すること。
+ * 既定は PO 決定 1B（2026-11-19）で集約方式になった（decisions1B2A5A.test.ts で固定）。
  */
 
 const manual = { autoSchedule: false };
@@ -63,9 +64,10 @@ describe('空港運営モードの店舗粒度（T12）', () => {
     expect(ac.state).toBe('departed');
   });
 
-  it('詳細方式（既定）では従来どおり店舗エリアを使うグループがいる', () => {
+  it('詳細方式（明示指定）では従来どおり店舗エリアを使うグループがいる', () => {
     const { layout, shop, restaurant } = layoutWithShops();
-    const sim = createSimulation(layout, { seed: 'svc-mode-3', settings: manual });
+    // 既定は PO 決定 1B（2026-11-19）で 'aggregate' になったため、詳細方式は明示指定で選ぶ
+    const sim = createSimulation(layout, { seed: 'svc-mode-3', settings: manual, serviceGranularity: 'detailed' });
     expect(sim.serviceGranularity).toBe('detailed');
     const standId = Object.values(layout.facilities).find((f) => f.kind === 'gate')!.props.standId as string;
     const t0 = sim.state.now;

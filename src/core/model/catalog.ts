@@ -338,6 +338,13 @@ export const TERMINAL_AREA_SPECS: Record<TerminalAreaKind, TerminalAreaSpec> = {
     defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: true,
     props: [{ key: 'capacity', type: 'int', min: 1, max: 100 }], defaults: { capacity: 10 },
   },
+  // ラウンジ（5-19 2A）: 購買施設ではなく「搭乗までの滞在の質」の施設。収容は席数ベースで、
+  // 利用資格・滞在モデルは terminal/serviceProfile.ts（isLoungeEligible）と
+  // terminal/serviceDetailSim.ts の lounge ステップが持つ。shop/restaurant の派生ではない。
+  lounge: {
+    defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'departure', zoneEditable: true,
+    props: [{ key: 'seats', type: 'int', min: 0, max: 5000 }], defaults: { seats: 40 },
+  },
   // フェーズ 4: 国際・乗継のエリア
   emigration: {
     defaultW: 4, defaultH: 2, minW: 1, minH: 1, zone: 'departureIntl', zoneEditable: false,

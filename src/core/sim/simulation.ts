@@ -80,7 +80,7 @@ import { createApronBusRuntime, stepApronBuses } from './apronBus';
 import type { ServiceAggregateRuntime, ServiceGranularity } from './serviceAggregate';
 import { materializeCarryOver } from './overnight';
 import { BALANCE } from '../economy/balance';
-import { planConnections } from '../economy/hub';
+import { planConnections, summarizeTransferOd, type TransferOdEntry } from '../economy/hub';
 import { analyzeHub } from '../terminal/hub';
 import { isCityNightMovement, nextCityMovementTime } from '../economy/city';
 import { addExternalDelay } from '../economy/delayEvaluation';
@@ -112,13 +112,21 @@ export interface Simulation {
    * 店舗・旅客サービス施設のシミュレーション粒度（5-19 T12）。
    * 'detailed' = 従来方式（店舗エリアへ個別に経路探索し店舗別キューで処理）。
    * 'aggregate' = 空港運営モードの集約方式（カテゴリ×ターミナルで計算し、店舗単位の探索・キューを作らない）。
-   * 既定は 'detailed' で、指定しない運航の結果は従来と変わらない（集約方式の既定化は PO 確認後）。
+   * 既定は 'aggregate'（PO 決定 1B・2026-11-19: より大きな規模で動かすため集約方式を既定化）。
+   * 'detailed' は生成側の明示指定で従来どおり選べる。
    * 保存対象ではない（Simulation は保存されず、再開時は生成側が指定する）。
-   * 手組みの Simulation（テスト等）では欠落しうるため任意とし、欠落時は 'detailed' として扱う。
+   * 手組みの Simulation（テスト等）では欠落しうるため任意とし、欠落時は従来どおり 'detailed' として扱う
+   * （passengers.ts は 'aggregate' のときだけ集約経路に入る）。
    */
   serviceGranularity?: ServiceGranularity;
   /** 集約方式の実行時カウンタ（保存対象ではない派生状態） */
   serviceRuntime?: ServiceAggregateRuntime;
+  /**
+   * 乗継 OD 集計の計画時スナップショット（5A。保存対象ではない実行時データ）。
+   * generateContractSchedule が計画確定時に会社日単位で差し替え、settleDay が
+   * 日報（DailyReport.hubOd）へ写す。プレビュー経路では設定しない。
+   */
+  transferOdPlan?: { day: number; entries: TransferOdEntry[] };
 }
 
 export interface CreateOptions {
@@ -128,7 +136,7 @@ export interface CreateOptions {
   company?: CompanyState | null;
   /** 機種テーブル（保存時のスナップショットなど。省略時は現在のカタログ） */
   types?: TypeTable;
-  /** 店舗利用の粒度（5-19 T12）。省略時は 'detailed'（従来方式） */
+  /** 店舗利用の粒度（5-19 T12）。省略時は 'aggregate'（PO 決定 1B・2026-11-19）。従来方式は 'detailed' を明示指定 */
   serviceGranularity?: ServiceGranularity;
 }
 
@@ -208,7 +216,7 @@ export function createSimulation(layout: AirportLayout, opts: CreateOptions = {}
     closures: { taxiways: [], stands: [], gates: [] },
     analytics: createAnalytics(opts.startTime ?? SIM_START_SEC),
   };
-  const sim: Simulation = { ctx, state, company: opts.company ?? null, serviceGranularity: opts.serviceGranularity ?? 'detailed' };
+  const sim: Simulation = { ctx, state, company: opts.company ?? null, serviceGranularity: opts.serviceGranularity ?? 'aggregate' };
   if (sim.company) {
     state.economy = createEconomy(ctx, state, sim.company);
     state.access = createAccessRuntime(sim, sim.company);
@@ -445,7 +453,10 @@ function generateContractSchedule(sim: Simulation, day: number): void {
   // 需要にはアクセス係数（前日の混雑を反映）が掛かる。運航計画タブのプレビューも同じ値を使う
   const plan = planDayWithDemand(sim.company!, companyDayOf(sim, day), refreshAccess(sim, sim.company!), ctx.types, routeCapabilitiesForAirport(ctx.layout.countryId, { international: internationalProcessingFor(sim.company, ctx.terminal) }));
   // 乗継の計画（フェーズ 4 §5.3）: ハブ解析の MCT を使って到着便→出発便の人数を決める
-  planConnections(plan, sim.company!, analyzeHub(ctx.layout, ctx.terminal));
+  const hubAnalysis = analyzeHub(ctx.layout, ctx.terminal);
+  planConnections(plan, sim.company!, hubAnalysis);
+  // 乗継 OD 集計（5A）: 確定した計画を OD ごとに集計し、日報が拾えるよう保持する（計算は変えない）
+  sim.transferOdPlan = { day: companyDayOf(sim, day), entries: summarizeTransferOd(plan, hubAnalysis) };
   const analysis = analyzeDayPlan(plan, ctx, state.closures.gates);
   const earliest = state.now + 20 * 60;
   // 拠点契約の滞泊便には所属機を ID 順に割り当てる（フェーズ 4 §3.5）

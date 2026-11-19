@@ -905,6 +905,11 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
     report.hub = { spawned: h.spawned - prev.spawned, connected: h.connected - prev.connected, missed: h.missed - prev.missed, noShow: h.noShow - prev.noShow };
     hubStatsPrev.set(state, { spawned: h.spawned, connected: h.connected, missed: h.missed, noShow: h.noShow });
   }
+  // 乗継 OD 集計（5A）: その日の計画で配分した人数の OD 別内訳（表示用）。
+  // report.hub（当日の実績）とは別フェーズの値で、二重計上ではない
+  if (c.features?.hub && sim.transferOdPlan && sim.transferOdPlan.day === c.day && sim.transferOdPlan.entries.length > 0) {
+    report.hubOd = sim.transferOdPlan.entries;
+  }
   log(state, `${c.day + 1}日目を締めました: 営業利益 ${report.operatingProfit.toLocaleString('ja-JP')} cr`);
   c.day++;
 

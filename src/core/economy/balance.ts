@@ -41,7 +41,7 @@ export const BALANCE = {
     /** 車両の購入費（GSE基地のプロパティの台数分） */
     vehicle: { tug: 150_000, beltLoader: 80_000, baggageTractor: 60_000, fuelTruck: 200_000, cateringTruck: 120_000, cleaningVan: 50_000, apronBus: 250_000 } as Partial<Record<UnitKind, number>>,
     /** ターミナル内のエリア（設備1つあたり、またはタイルあたり） */
-    areaUnit: { checkIn: 20_000, security: 120_000, baggageClaim: 150_000, restroom: 30_000, shop: 80_000, restaurant: 120_000, escalator: 200_000, elevator: 150_000 } as Partial<Record<TerminalAreaKind, number>>,
+    areaUnit: { checkIn: 20_000, security: 120_000, baggageClaim: 150_000, restroom: 30_000, shop: 80_000, restaurant: 120_000, lounge: 100_000, escalator: 200_000, elevator: 150_000 } as Partial<Record<TerminalAreaKind, number>>,
     areaPerTile: 2_000,
     /** 撤去・縮小したときに戻る割合 */
     refundRate: 0.25,
@@ -77,6 +77,16 @@ export const BALANCE = {
   /** 交通事業者から受け取る使用料（旅客1人あたり）と、駐車場・ホテルの収入 */
   accessFees: { taxi: 100, bus: 60, rail: 80, hotelPerRoomNight: 60 },
   retail: { shopPerPax: 15, restaurantPerPax: 22, shopVisitProb: 0.5, shopSec: 8 * 60, restaurantSec: 20 * 60, minSlackSec: 40 * 60 },
+  /**
+   * ラウンジ（5-19 2A）: 購買ではなく「搭乗までの滞在の質」の係数。
+   * visitProb / minSlackMin は詳細モードの立寄り意図の既定値（運航側 planShop の
+   * shopVisitProb / minSlackSec と同じ位置づけのゲームバランス定数）。
+   * satisfactionPerUserHour / satisfactionCapPoints は、詳細モードの結果にだけ現れる
+   * 体験指標（ラウンジ利用者・時間あたりの満足度換算ポイントと上限）の換算係数で、
+   * AirportDay の満足度式には接続していない（接続はゲームバランス変更として別途 PO 判断が要る）。
+   * 実測根拠のない新規定数のため、計画書（terminal_simulation_modes_plan.md）に根拠と未接続の旨を明記する。
+   */
+  lounge: { visitProb: 0.25, minSlackMin: 60, satisfactionPerUserHour: 2, satisfactionCapPoints: 5 },
   /** 駐車料金（1台・1回の駐車あたり）と平均の駐車日数 */
   carPark: { feePerCar: 400, stayDays: 2 },
 

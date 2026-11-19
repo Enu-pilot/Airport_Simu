@@ -17,6 +17,7 @@ import { isCityConfig, type CityConfig, type CityEvent, type CityType } from './
 import type { AirlineRequest, RequestKind } from './airlineEval';
 import type { ScoreComponent, ScoreKey } from './airlineScore';
 import type { MissBreakdownEntry } from '../sim/missBreakdown';
+import type { TransferOdEntry } from './hub';
 
 /**
  * 空港会社（経営）の状態。建設モードと運航モードをまたいで保持し、レイアウトと一緒に保存する。
@@ -186,6 +187,12 @@ export interface DailyReport {
   morningReadiness?: { scheduled: number; ready: number; atRisk: number };
   /** 乗継の記録（フェーズ 4 §5.6。ハブが有効な日だけ） */
   hub?: { spawned: number; connected: number; missed: number; noShow: number };
+  /**
+   * 乗継 OD 集計（5A。ハブが有効で、その日の計画に乗継配分があった日だけ）:
+   * 計画時に OD（到着路線 × 出発路線）ごとに配分した人数と魅力/品質の内訳。
+   * hub（当日の実績）とは別フェーズの値で、二重計上ではない（計画 ≠ 実績）。
+   */
+  hubOd?: TransferOdEntry[];
   /** 連絡設備・上下移動設備の利用実績（5-03。利用があったリンクだけ。上下移動の表示名は areaKind から画面側で引く） */
   linkUsage?: { linkId: string; kind: 'transfer' | 'vertical'; label: string; areaKind?: string; total: number; peakHour: number; peakCount: number; capacityPerHour: number | null; hourly: number[] }[];
   /** アクセスの時間帯別交通量の集計（5-03。アクセスの記録がある日だけ） */

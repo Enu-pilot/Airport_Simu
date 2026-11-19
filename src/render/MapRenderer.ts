@@ -1135,6 +1135,7 @@ const AREA_COLOR: Record<TerminalAreaKind, number> = {
   elevator: 0x8a6a2a,
   shop: 0x9a5a2a,
   restaurant: 0xa0603a,
+  lounge: 0x7a5a8a,
   emigration: 0x2a7a5a,
   immigration: 0x2a5a7a,
   customs: 0x7a2a4a,

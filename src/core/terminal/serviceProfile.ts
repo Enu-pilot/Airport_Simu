@@ -21,8 +21,13 @@ import { PAX_PER_TILE } from './model';
  *   捏造せず常に未算出（null）とする。
  * - 待合（waiting）は購買カテゴリではない。滞留時間は搭乗時刻に依存し固定値の根拠がないため
  *   dwellSec は未算出（null）、売上も未算出（null）。収容能力と区域分布だけを集約する。
- * - ラウンジは現行カタログにエリア種別が存在しないため、カテゴリとしては常に
- *   notConfigured（未設置）になる。施設種別の新設は本タスクの範囲外。
+ * - ラウンジ（5-19 2A でエリア種別 'lounge' を新設）: 購買カテゴリではない。shop/restaurant の
+ *   派生ではなく、席数ベースの収容と「搭乗までの滞在の質」を持つ独立カテゴリとして扱う。
+ *   処理能力は窓口数（areaServerCount）ではなく席数（props.seats）。滞在時間は待合と同じく
+ *   搭乗時刻依存で固定値の根拠がないため dwellSec は未算出（null）、売上も持たない（null）。
+ *   利用資格は isLoungeEligible（区域・所属ターミナルの運用状態・席数）で判定し、実際の
+ *   到達可能性は経路探索（findPaxRoute）が決める。航空会社のクラス/ステータスによる資格は
+ *   既存モデルに旅客属性が存在しないため未対応（新設しない）。
  *
  * キャッシュ: layout オブジェクトは編集操作ごとに新しいオブジェクトになる（layout/operations は
  * 不変更新）ため、WeakMap のキー同一性がそのまま無効化条件になる。レイアウトが変われば新しい
@@ -36,6 +41,7 @@ export const SERVICE_CATEGORIES: readonly ServiceCategory[] = ['retail', 'dining
 const AREA_CATEGORY: Partial<Record<TerminalAreaKind, ServiceCategory>> = {
   shop: 'retail',
   restaurant: 'dining',
+  lounge: 'lounge',
   waiting: 'waiting',
 };
 
@@ -44,12 +50,37 @@ export function serviceCategoryOfAreaKind(kind: TerminalAreaKind): ServiceCatego
   return AREA_CATEGORY[kind] ?? null;
 }
 
-/** カテゴリに対応するエリア種別（lounge は対応種別なし = 常に未設置） */
+/** カテゴリに対応するエリア種別 */
 export function areaKindOfServiceCategory(category: ServiceCategory): TerminalAreaKind | null {
   if (category === 'retail') return 'shop';
   if (category === 'dining') return 'restaurant';
+  if (category === 'lounge') return 'lounge';
   if (category === 'waiting') return 'waiting';
   return null;
+}
+
+/** ラウンジの席数（props.seats）。未設定・不正値は 0 */
+export function loungeSeats(props: Record<string, unknown> | undefined): number {
+  const v = props?.seats;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+
+/**
+ * ラウンジの利用資格（5-19 2A）: 区域・所属ターミナルの運用状態・席数で決まる。
+ * - 区域: 保安検査後の出発区域（departure / departureIntl）にあること。一般区域・到着区域の
+ *   ラウンジは資格なし（配置はできるが利用対象にならない）。
+ * - 所属ターミナルが運用中であること、席数が 1 以上であること。
+ * 実際の到達可能性（経路の有無・区域制約）はここでは判定せず、利用側の経路探索
+ * （詳細モードの findPaxRoute）が運航側と同じ規則で決める。
+ * 航空会社のクラス/ステータスによる資格は、既存モデルに該当する旅客属性がないため未対応。
+ */
+export function isLoungeEligible(facility: ServiceFacilityProfile): boolean {
+  return (
+    facility.category === 'lounge' &&
+    facility.operational &&
+    (facility.zone === 'departure' || facility.zone === 'departureIntl') &&
+    facility.capacity > 0
+  );
 }
 
 /** 個別施設（エリア）単位の profile。詳細モードと集約の共通の元データ表現 */
@@ -60,7 +91,10 @@ export interface ServiceFacilityProfile {
   kind: TerminalAreaKind;
   zone: PaxZone;
   level: number;
-  /** 処理能力（窓口/席数相当）: areaServerCount(area.props)。既存運航の serversOf と同じ根拠 */
+  /**
+   * 処理能力: 通常は areaServerCount(area.props)（既存運航の serversOf と同じ根拠）。
+   * ラウンジだけは窓口処理ではないため席数（props.seats = loungeSeats）を使う。
+   */
   capacity: number;
   /** 収容人数の目安: エリア面積 × PAX_PER_TILE（TerminalModel の AreaNode.capacity と同じ式） */
   areaCapacity: number;
@@ -140,7 +174,7 @@ export function buildServiceProfiles(layout: AirportLayout): ServiceProfiles {
       kind: a.kind,
       zone: a.zone,
       level: a.level,
-      capacity: areaServerCount(a.props),
+      capacity: a.kind === 'lounge' ? loungeSeats(a.props) : areaServerCount(a.props),
       areaCapacity: Math.max(10, a.w * a.h * PAX_PER_TILE),
       dwellSec,
       spendPerPax,
