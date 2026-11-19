@@ -2,7 +2,7 @@ import { Rng, type RngState } from '../rng';
 import { compareIds } from '../model/ids';
 import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
-import { AIRLINES, HOME_COUNTRY_ID, airlineDef, airlinesFor, destinationDef, destinationsFor, resolveAirlineId, resolveDestinationId, routeAvailability, type DestinationDef, type FleetEntry } from './registry';
+import { AIRLINES, HOME_COUNTRY_ID, airlineDef, airlineNetworkAllows, airlinesFor, destinationDef, destinationsFor, findAirline, findDestination, resolveAirlineId, resolveDestinationId, routeAvailability, type DestinationDef, type FleetEntry } from './registry';
 import { routeDemand } from './demand';
 import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
 import { checkGameSettings, otpAddOf, type GameSettings } from './game';
@@ -628,7 +628,7 @@ export function generateOffers(
       const dests = destinationsFor(c).filter((d) => {
         if (served.has(d.id) || c.rating < (d.minimumAirportRating ?? 0)) return false;
         if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
-        return routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
+        return airlineNetworkAllows(a, d) && routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
       });
       if (dests.length === 0) continue;
       // market 有効時（フェーズ 3 §4.3）: 行き先は未充足需要 w = max(0.05, D_r − S_r) の重みで選ぶ（乱数は 1 回だけ使う）
@@ -727,7 +727,7 @@ export function generatePhase4Offers(
     const dests = destinationsFor(c).filter((d) => {
       if (c.rating < (d.minimumAirportRating ?? 0)) return false;
       if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
-      return routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
+      return airlineNetworkAllows(a, d) && routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
     });
     const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId).filter((t) => operable.includes(t));
     if (own.length === 0) continue;
@@ -794,6 +794,7 @@ export function generateCargoOffers(
       if (served.has(d.id)) return false;
       if (c.rating < (d.minimumAirportRating ?? 0)) return false;
       if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
+      if (!airlineNetworkAllows(a, d)) return false;
       if (routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) !== 'available') return false;
       // 国際貨物は格 4（国際空港）が必要（CARGO-08）。国内貨物は貨物解放の格 3 で足りる
       if (d.countryId !== originCountryId && effectiveTier(c) < 4) return false;
@@ -938,6 +939,61 @@ export function createSandboxCompany(seed = 'sandbox'): CompanyState {
   return c;
 }
 
+/** 就航範囲外の既存契約の付け替え結果（1 件分） */
+export interface NetworkReassignment {
+  contractId: string;
+  destinationId: string;
+  fromAirlineId: string;
+  toAirlineId: string;
+}
+
+/**
+ * 就航範囲（networkDestinations）を持つ会社の有効契約のうち、範囲外の目的地のものを、
+ * 路線（目的地・頻度・機種）はそのままに航空会社だけ範囲内の会社へ付け替える（2026-11-19 ユーザー決定）。
+ * - 対象は status 'active' のみ。当日分の運航・計画済みの便には触らない（読み込み後の次の計画から反映される）。
+ * - 候補条件: その目的地が範囲内 / 路線種別・サービス（旅客・貨物）に対応 / 空港評価の要件を満たす /
+ *   契約機種と同じサイズ区分の機材を保有（スポットサイズ互換を壊さない）。
+ * - 決定は決定的（RNG なし）: 契約機種そのものを持つ会社を最優先し、同点は会社 ID 順。
+ * - 候補がなければ元の会社のまま維持する（契約は破棄しない）。
+ * - 冪等: 付け替え後の契約は範囲内になるため、再実行しても何も変わらない。
+ */
+export function reassignOutOfScopeContracts(c: CompanyState): NetworkReassignment[] {
+  const changes: NetworkReassignment[] = [];
+  const pool = airlinesFor(c);
+  const caps = { originCountryId: HOME_COUNTRY_ID, internationalPassengerProcessing: true };
+  for (const k of Object.values(c.contracts)) {
+    if (k.status !== 'active') continue;
+    const current = findAirline(k.airlineId);
+    const dest = findDestination(k.destinationId);
+    if (!current?.networkDestinations || !dest) continue;
+    if (airlineNetworkAllows(current, dest)) continue;
+    const isCargo = k.kind === 'cargo';
+    const wantSize = resolveType(AIRCRAFT_TYPES, k.typeId).size;
+    const fleetTypesOf = (a: (typeof pool)[number]): AircraftTypeId[] =>
+      isCargo
+        ? [...new Set([...(c.fleets[a.id] ?? a.fleet).map((e) => e.typeId), ...(a.cargoFleet ?? [])])].filter((t) => cargoHoldM3(t) !== null)
+        : (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId);
+    const candidates = pool.filter((a) => {
+      if (a.id === current.id) return false;
+      if (!airlineNetworkAllows(a, dest)) return false;
+      if (c.rating < (a.minimumAirportRating ?? 0)) return false;
+      if (isCargo && !airlineCargoEligible(a.id)) return false;
+      if (routeAvailability(a, dest, caps, isCargo ? 'cargo' : 'passenger') !== 'available') return false;
+      return fleetTypesOf(a).some((t) => resolveType(AIRCRAFT_TYPES, t).size === wantSize);
+    });
+    if (candidates.length === 0) continue;
+    candidates.sort((x, y) => {
+      const ex = fleetTypesOf(x).includes(k.typeId) ? 0 : 1;
+      const ey = fleetTypesOf(y).includes(k.typeId) ? 0 : 1;
+      return ex - ey || compareIds(x.id, y.id);
+    });
+    const to = candidates[0]!;
+    changes.push({ contractId: k.id, destinationId: k.destinationId, fromAirlineId: k.airlineId, toAirlineId: to.id });
+    k.airlineId = to.id;
+  }
+  return changes;
+}
+
 /** 保存データの読み込み（形式が合わなければ null） */
 export function importCompany(json: string): CompanyState | null {
   try {
@@ -996,6 +1052,8 @@ export function importCompany(json: string): CompanyState | null {
         if (!f.some((e) => e.typeId === k.typeId)) f.push({ typeId: k.typeId, seats: resolveType(AIRCRAFT_TYPES, k.typeId).seats });
       }
     }
+    // 就航範囲外の既存契約を範囲内の会社へ付け替える（冪等。形式バージョンは上げない）
+    reassignOutOfScopeContracts(c);
     return c;
   } catch {
     return null;

@@ -49,6 +49,17 @@ export function airlineSupportsRoute(airline: AirlineDef, route: RouteType, serv
   return airline.services.includes(route === 'domestic' ? 'domesticPassenger' : 'internationalPassenger');
 }
 
+/**
+ * 就航範囲（路線網）の制限: 会社に networkDestinations があれば、その集合に入る目的地だけが対象。
+ * 国内・国際共通の許可集合で、未指定の会社は無制限。
+ * 使う場所は「新規の提案の生成」と「読み込み時の既存契約の付け替え判定」だけ。
+ * 注意: routeAvailability 本体には入れない — 計画・需要集計が既存契約を unsupportedRoutes に
+ * 落として壊してしまうため（付け替えは importCompany 内の reassignOutOfScopeContracts で行う）。
+ */
+export function airlineNetworkAllows(airline: AirlineDef, destination: Pick<DestinationDef, 'id'>): boolean {
+  return !airline.networkDestinations || airline.networkDestinations.includes(destination.id);
+}
+
 export function routeAvailability(
   airline: AirlineDef,
   destination: DestinationDef,
