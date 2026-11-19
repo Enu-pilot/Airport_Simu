@@ -541,6 +541,7 @@ export const AREA_KIND_LABEL: Record<TerminalAreaKind, string> = {
   waiting: '待合スペース',
   restroom: 'トイレ',
   arrivalCorridor: '到着通路',
+  movingWalkway: '動く歩道',
   baggageClaim: '手荷物受取所',
   hall: '通路・ホール',
   stairs: '階段',

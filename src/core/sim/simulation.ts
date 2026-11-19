@@ -70,6 +70,7 @@ import { createWx, rollWeatherGoAround, disruptionScaleFor, stepWeather } from '
 import { createAnalytics, stepAnalytics } from '../analytics/records';
 import type { CompanyState } from '../economy/company';
 import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
+import { stepWorkOrders } from './workOrders';
 import { analyzeDayPlan, planDayWithDemand } from '../economy/planning';
 import { internationalProcessingFor, routeCapabilitiesForAirport } from '../economy/registry';
 import { stepBaggage } from './baggage';
@@ -822,6 +823,7 @@ export function stepSimulation(sim: Simulation): void {
   if (sim.company) {
     // 0:00 に日次締めを行い、その日の運航計画を作る
     if (stepEconomy(sim, (key) => serversOf(sim, key)) && state.settings.autoSchedule) generateDaySchedule(sim, day);
+    stepWorkOrders(sim);
   } else if (state.settings.autoSchedule && state.now % DAY_SEC >= 23 * 3600) generateDaySchedule(sim, day + 1);
 
   const all = sortedValues(state.aircraft);

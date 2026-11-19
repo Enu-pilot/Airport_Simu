@@ -278,6 +278,45 @@ export interface CompanyState {
   basedIssueDays?: Record<string, number>;
   /** 乗継・波の設定（フェーズ 4） */
   hub?: HubSettings;
+  /** 夜間整備・工事の Work Order（5-25）。欠落 = 機能オフ（旧セーブ互換） */
+  workOrders?: Record<string, WorkOrder>;
+}
+
+/** Work Order の対象資産 */
+export type WorkOrderAssetKind = 'runway' | 'taxiway' | 'stand' | 'gate';
+export type WorkOrderKind = 'inspection' | 'repair' | 'construction';
+export type WorkOrderStatus = 'planned' | 'active' | 'done' | 'deferred';
+
+/**
+ * 夜間整備・工事の作業指示（5-25）。空港資産側の作業だけを扱い、機体の周期整備
+ * （Phase 4 の決済時チェック）とは管理を分ける。夜間枠（23:00〜05:00）で整備士が
+ * 足りる間だけ進捗し、実施中は対象資産を一時閉鎖する（恒常的な状態変更にしない）。
+ */
+export interface WorkOrder {
+  id: string;
+  assetKind: WorkOrderAssetKind;
+  assetId: string;
+  kind: WorkOrderKind;
+  /** 必要な整備士（人） */
+  engineers: number;
+  /** 所要時間（分） */
+  durationMin: number;
+  /** 進捗（分） */
+  progressMin: number;
+  status: WorkOrderStatus;
+  createdDay: number;
+  /** 滑走路を閉鎖したときの元の運用モード（復旧用。閉鎖していない間は持たない） */
+  prevRunwayMode?: string;
+}
+
+/** Work Order を採番して会社に追加する */
+export function addWorkOrder(c: CompanyState, input: Omit<WorkOrder, 'id' | 'progressMin' | 'status' | 'prevRunwayMode'>): WorkOrder {
+  c.workOrders ??= {};
+  let n = Object.keys(c.workOrders).length + 1;
+  while (c.workOrders[`wo_${n}`]) n++;
+  const wo: WorkOrder = { ...input, id: `wo_${n}`, progressMin: 0, status: 'planned' };
+  c.workOrders[wo.id] = wo;
+  return wo;
 }
 
 /** 工事: 新設・改修（移設・拡張）は建設中、一時閉鎖は運用を止めるだけ。残り日数は運航した日で進む */

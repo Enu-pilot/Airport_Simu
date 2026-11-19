@@ -1,4 +1,4 @@
-import { canMove, WALK_SPEED_MPS, type TerminalModel } from './model';
+import { canMove, linkCostSec, type TerminalModel } from './model';
 
 /**
  * 旅客の経路探索（エリアのグラフ上のダイクストラ）。
@@ -51,7 +51,7 @@ export function findPaxRoute(model: TerminalModel, q: PaxRouteQuery): PaxRoute |
         if ((next.zone === 'departure' || next.zone === 'departureIntl') && !((next.kind === 'security' || next.kind === 'transferSecurity') && q.goals.has(next.id))) continue;
         if (!(node.kind === 'security' && next.zone === 'landside') && !canMove(node, next)) continue;
       } else if (!canMove(node, next)) continue;
-      const nc = c + link.lengthM / WALK_SPEED_MPS + link.travelSec;
+      const nc = c + linkCostSec(link);
       if (nc < (dist.get(next.id) ?? Infinity)) {
         dist.set(next.id, nc);
         prev.set(next.id, cur);

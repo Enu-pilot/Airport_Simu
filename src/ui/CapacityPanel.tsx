@@ -4,7 +4,7 @@ import { analyzeAirportCapacity, capacityDelta, previewContractCapacity, type Ca
 import { airlineDef, airlinesFor, destinationDef, destinationsFor, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
 import { CAPABILITY_STATE_LABEL, OVERALL_CAPACITY_NOTE, OVERALL_CAPACITY_TITLE, OVERALL_LIMIT_LABEL, PLAN_ISSUE_LABEL } from '../i18n/ja';
-import { capabilityUtilization, layoutCapabilities, overnightReadings, readingsFromProcessPeak } from '../core/capability';
+import { capabilityUtilization, layoutCapabilities, maintenanceReading, overnightReadings, readingsFromProcessPeak } from '../core/capability';
 import { AREA_KIND_LABEL } from '../i18n/ja';
 import { createContext } from '../core/sim/context';
 import { planDayWithDemand } from '../core/economy/planning';
@@ -145,7 +145,7 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
     <section data-testid="capacity-common">
       <h4>共通能力ビュー（理論 / 有効能力と状態）</h4>
       {(() => {
-        const readings = [...layoutCapabilities(layout), ...overnightReadings(company, ctx, company.day)];
+        const readings = [...layoutCapabilities(layout), ...overnightReadings(company, ctx, company.day), maintenanceReading(layout)];
         const computed = readings.filter((r) => r.theoretical !== null);
         const uncomputedCount = readings.length - computed.length;
         const attention = computed.filter((r) => r.state === 'zeroCapacity' || r.state === 'underConstruction');

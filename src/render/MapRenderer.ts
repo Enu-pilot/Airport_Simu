@@ -1063,6 +1063,7 @@ const AREA_COLOR: Record<TerminalAreaKind, number> = {
   waiting: 0x6b3d5a,
   restroom: 0x3d6b6b,
   arrivalCorridor: 0x2a4a6b,
+  movingWalkway: 0x2a7a8a,
   baggageClaim: 0x2a6b5a,
   hall: 0x4a4f55,
   stairs: 0x8a6a2a,

@@ -256,6 +256,8 @@ export const TERMINAL_AREA_SPECS: Record<TerminalAreaKind, TerminalAreaSpec> = {
     props: [{ key: 'belts', type: 'int', min: 0, max: 20 }], defaults: { belts: 2 },
   },
   hall: { defaultW: 4, defaultH: 4, minW: 1, minH: 1, zone: 'landside', zoneEditable: true, props: [], defaults: {} },
+  // 動く歩道: 通路の拡張。置いた区間だけ歩行が速くなる（速度モデルは terminal/model.ts の MOVING_WALKWAY_BELT_MPS）
+  movingWalkway: { defaultW: 6, defaultH: 1, minW: 1, minH: 1, zone: 'departure', zoneEditable: true, props: [], defaults: {} },
   stairs: {
     defaultW: 2, defaultH: 1, minW: 1, minH: 1, zone: 'landside', zoneEditable: true,
     props: [{ key: 'travelSec', type: 'int', min: 5, max: 300 }, { key: 'capacityPerHour', type: 'int', min: 1, max: 100000 }],
