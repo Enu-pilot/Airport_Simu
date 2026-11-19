@@ -10,6 +10,7 @@
 4. 計画外の変更、受入条件の変更、保存/シミュレーション版の変更はPO判断を得る。
 
 ## 現在の作業
+- 2026-11-19 粒度分離バックエンド（実装完了・未push、作業コピー Airport_Simu_simmodes、ベース既定 HEAD b393dd69b4）: 5-19 T11〜T13。集約profile adapter（terminal/serviceProfile.ts、カテゴリ×ターミナル、根拠なし値は未算出 null、layout同一性でキャッシュ）、運営モード集約接続（sim/serviceAggregate.ts、CreateOptions.serviceGranularity で切替・既定 detailed のためゴールデン/フィンガープリント不変、売上は従来の onShopDone 経由）、詳細モード独立実行（terminal/serviceDetailSim.ts、findPaxRoute+経路キャッシュ、店舗別実績→aggregateServiceRecords で集約整合）。性能実測: 運営 aggregate は同一条件で約31%短縮、詳細は128店舗・約1,450人/hでも tick p95 0.14ms。新規テスト17件・typecheck・lint 通過。引き渡しメモは計画書 terminal_simulation_modes_plan.md 末尾「実装記録」。残: 集約既定化は PO 判断、5-16 T6（複合グラフ容量予約）は未実装のまま、ラウンジはエリア種別自体なし（notConfigured で明示）。push は PO 承認待ち。
 - 状態: Phase 5の個別計画を進行中。正本一覧は docs/implementation/README.md、全体ロードマップは docs/42。
 - 完了: Phase 1〜3。Phase 4は 2026-11-18 夜に §8 の未検証 4 件を全て計測し解消（docs/44 更新済み。区間解析だけこの VM で予算超過、高速機での再確認が望ましい）。
 - Phase 5: 5-13〜5-17、5-20、貨物（5-12）は実装の核まで進行。Phase 6 相当（5-18〜5-25）は 2026-11-18 夜に着手: 5-21・5-23・5-18 の核と 5-24 の判定核を実装、5-19・5-22・5-25 は計画書を作成し planned。貨物はPO指示で基盤ゲートに先行着手。

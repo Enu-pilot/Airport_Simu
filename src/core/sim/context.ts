@@ -3,6 +3,7 @@ import { TILE_M } from '../model/catalog';
 import { compareIds, sortedValues } from '../model/ids';
 import { apronBusesOf, gateMode } from '../model/gates';
 import { buildTerminalModel, type TerminalModel } from '../terminal/model';
+import { serviceProfilesFor, type ServiceProfiles } from '../terminal/serviceProfile';
 import type { AirportLayout, SizeClass } from '../model/types';
 import { AIRCRAFT_TYPES, resolveType, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
 import { canOperate } from '../aircraft/compat';
@@ -78,6 +79,8 @@ export interface SimContext {
   terminal: TerminalModel;
   /** 建設中リンクを含む将来モデル（5-13 T5）。建設中リンクがある場合だけ作る。診断専用で、実旅客は歩かない */
   terminalFuture?: TerminalModel;
+  /** 店舗・旅客サービス施設の集約 profile（5-19 T11）。layout から導出する派生データで、運航中は再生成しない */
+  service: ServiceProfiles;
   /** スポット → 紐付けゲート（バスゲートは含めない） */
   standGate: Record<string, string>;
   /** 運用中でバス搭乗（boardingMode 'bus'）のゲート（ID 順）。1 つもなければ [] で、運航にバスの状態（state.bus）を作らない */
@@ -218,7 +221,7 @@ export function createContext(layout: AirportLayout, opts: { types?: TypeTable }
   const sorters = operational.filter((f) => f.kind === 'baggageSort').map((f) => ({ id: f.id, ...center(f), capacityPerMin: n(f, 'capacityPerMin') }));
   const hasFuelFarm = operational.some((f) => f.kind === 'fuelFarm');
   const hydrantStands = hydrantConnectedStands(layout);
-  const ctx: SimContext = { layout, network, runways, stands, terminal, standGate, busGates, paxTerminal, bases, sorters, hasFuelFarm, hydrantStands, crossings, crossingsByRunway, crossingNodeRunways, freeRunways, types: opts.types ?? AIRCRAFT_TYPES };
+  const ctx: SimContext = { layout, network, runways, stands, terminal, standGate, busGates, paxTerminal, bases, sorters, hasFuelFarm, hydrantStands, crossings, crossingsByRunway, crossingNodeRunways, freeRunways, types: opts.types ?? AIRCRAFT_TYPES, service: serviceProfilesFor(layout) };
   // 5-13 T5: 建設中リンクがある場合だけ将来モデルも作る（検証 T6 と同じ条件）。診断にだけ使う
   if (Object.values(layout.terminalLinks ?? {}).some((l) => l.buildState === 'underConstruction')) {
     ctx.terminalFuture = buildTerminalModel(layout, { includeUnderConstruction: true });

@@ -10,6 +10,7 @@ import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt, reconcileDepart
 import { boardingAllowed } from './ground';
 import { applyBusArrival, applyBusDeparture, pickBusGate, stepBusBoarding } from './apronBus';
 import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './busRules';
+import { completeAggregateService, planAggregateShopVisit } from './serviceAggregate';
 import { gateMode } from '../model/gates';
 import { facilityTiles } from '../layout/footprint';
 import { TILE_M } from '../geometry/frames';
@@ -1014,6 +1015,8 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
       // 手荷物の受け取り（施設キーなし）はここで終える。窓口の処理は stepFacility
       if (!g.facility && g.serviceUntil !== null && state.now >= g.serviceUntil) {
         g.serviceUntil = null;
+        // 5-19 T12: カテゴリ集約の店舗利用の完了（売上記録とカウンタ解放）
+        if (g.aggService) completeAggregateService(sim, g);
         if (g.steps[g.stepIndex] === 'claim') collectBags(sim, g.id);
         g.stepIndex++;
         planStep(sim, g);
@@ -1192,6 +1195,15 @@ function planShop(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
   const { state } = sim;
   const f = state.flights[g.flightId]!;
   const slack = f.estimated - boardingLeadSec(sim, f) - state.now;
+  // 5-19 T12: 空港運営モードの集約方式では、店舗単位の経路探索・キューを作らず
+  // カテゴリ×ターミナルの集約 profile で利用を処理する（sim/serviceAggregate.ts）
+  if (sim.serviceGranularity === 'aggregate') {
+    const handled = planAggregateShopVisit(sim, g, closed, slack, () => {
+      g.stepIndex++;
+      planStep(sim, g);
+    });
+    if (handled) return;
+  }
   const goals = new Map<string, number>();
   if (slack >= BALANCE.retail.minSlackSec) {
     for (const id of shopAreas(sim, g.terminalId)) {

@@ -189,13 +189,16 @@
 |---|---|---|---|---|
 | 2026-11-18 | 初版計画 | 通常運航の集約モデルと独立詳細TerminalSimulationを分ける方針を作成 | Docsのみ | 空港全体1日運航とのUI/clock境界、対外交通・全方向接続検証が未定義 |
 | 2026-11-18 | 要件拡張 | 空港全体1日運航とターミナル単独詳細の2モードを明示。6種の対外交通、外部施設〜入口〜搭乗口/出口〜外部施設の経路、3状態/サービス不足/Step-free監査を追加 | Docsのみ。コードテスト未実行 | T1〜T10、5-16/5-18との統合が未着手 |
+| 2026-11-19 | T11–T13 バックエンド実装 | 集約 profile adapter（serviceProfile.ts）、運営モード集約接続（serviceAggregate.ts、切替式・既定 detailed）、詳細モード独立実行（serviceDetailSim.ts）、段階負荷ベンチを実装。詳細は末尾「実装記録」 | 新規テスト 17 件通過、typecheck/lint 通過。ゴールデン/フィンガープリントは §9 に記録 | 未push（承認待ち）。集約方式の既定化は PO 判断。5-16 T6・ラウンジ種別・詳細結果の profile 反映 UI は未実装 |
 
 ## 9. 完了記録
 
-- 完了日: 未完了
-- 品質ゲート: 未実行
-- 未実行/未検証: すべて未実行
-- 残件: T1〜T10
+- 完了日: 未完了（T1〜T10 は未着手のまま）
+- T11–T13（粒度分離バックエンド）: 2026-11-19 実装完了・**未push（PO 承認待ち）**。詳細は末尾「実装記録（2026-11-19、T11–T13 バックエンド）」。
+- 品質ゲート（T11–T13 分）: typecheck 通過 / lint（変更ファイル）通過 / build 通過。新規テスト 17 件通過（serviceProfile 5・serviceDetailSim 5・serviceAggregateMode 4・serviceModesBench 3）。ゴールデン全 10 ファイル + legacyFingerprint 7/7 通過（既定 detailed 経路の挙動不変を確認、再採取なし）。
+- 既知の失敗（本変更に起因しない）: passengers.test.ts「保安検査のレーンが少ないと…」が 5 秒タイムアウトで失敗するが、未変更のベースツリーでも同一に再現する環境要因（VM 負荷）であり、アサーション失敗ではない。
+- 未実行/未検証: T1〜T10 全般、詳細モードのブラウザ視覚確認（UI 未実装のため対象外）、tiersInvestment520 / tiersReachability520 等の長時間バッチ（本変更と無関係な範囲は未実施）。
+- 残件: T1〜T10、T11–T13 の push（PO 承認待ち）、集約方式の既定化判断（PO）、5-16 T6、ラウンジのエリア種別新設可否（PO）、詳細結果の運営 profile 反映 UI（差分プレビュー + 明示適用の設計のみ）
 
 ## Phase 6との関係
 
@@ -286,8 +289,81 @@
 
 | ID | 状態 | 変更内容 | 主な対象 | テスト・受入条件 |
 |---|---|---|---|---|
-| T11 | 提案（未着手） | 個別施設データからAirportDay用カテゴリ×ターミナル/区域profileを導出するadapterを設計・実装 | facility catalog / terminal profile / airport sim | 同一layoutから店舗個別一覧と集約profileが一意に生成され、集約の二重管理がない。カテゴリ別合計能力/施設数/営業状態の整合 |
-| T12 | 提案（未着手） | TerminalDetailの店舗個別立寄り先選択・滞在・待ち・店舗別実績を接続 | terminal simulation / passenger choice / route / facility usage | 同一カテゴリ内の別店舗を別IDとして選択/計上。閉店/資格外/未接続/満員の店舗を利用しない |
-| T13 | 提案（未着手） | 店舗数×旅客需要の段階負荷ベンチマークと性能ゲートを追加 | benchmarks / QA / performance telemetry | 小/中/大/ストレス負荷の実測記録、決定性・人数/売上保存則を満たし、AirportDay集約とTerminalDetail個別モードの各受入目標を満たす |
+| T11 | 実装済み（2026-11-19・未push） | 個別施設データからAirportDay用カテゴリ×ターミナル/区域profileを導出するadapterを設計・実装 | facility catalog / terminal profile / airport sim | 同一layoutから店舗個別一覧と集約profileが一意に生成され、集約の二重管理がない。カテゴリ別合計能力/施設数/営業状態の整合 |
+| T12 | 実装済み（2026-11-19・未push） | TerminalDetailの店舗個別立寄り先選択・滞在・待ち・店舗別実績を接続 | terminal simulation / passenger choice / route / facility usage | 同一カテゴリ内の別店舗を別IDとして選択/計上。閉店/資格外/未接続/満員の店舗を利用しない |
+| T13 | 実装済み（2026-11-19・未push） | 店舗数×旅客需要の段階負荷ベンチマークと性能ゲートを追加 | benchmarks / QA / performance telemetry | 小/中/大/ストレス負荷の実測記録、決定性・人数/売上保存則を満たし、AirportDay集約とTerminalDetail個別モードの各受入目標を満たす |
 
 本提案の具体的な負荷件数・実行時間/メモリ予算は、対象環境でベースライン測定を行ったうえで実装開始時に定める。未測定の値を性能達成済みとして扱わない。
+
+## 実装記録（2026-11-19、T11–T13 バックエンド）
+
+作業コピー `Airport_Simu_simmodes`（ベース: 既定ブランチ HEAD `b393dd69b4` 相当ツリー）。**未push（承認待ち）**。UI は実装していない（Step 5 は接続点と引き渡しメモまで）。
+
+### 再監査結果（Step 1）
+
+| 対象 | 状態 | 根拠 |
+|---|---|---|
+| 店舗・飲食のデータモデル | 既存 | 施設（Facility）ではなく TerminalArea の種別 `shop` / `restaurant`。能力は props `capacity`（既定 shop 8 / restaurant 10）、区域は departure 既定 |
+| ラウンジ | **未実装** | エリア種別に lounge は存在しない。カタログ追加は施設種別の新設になるため本タスク範囲外とし、集約 profile では `notConfigured` として明示する |
+| 待合 | 既存（別カテゴリ） | `waiting` エリアは搭乗口待合のアンカーであり購買選択の対象ではない。両モードで滞留・収容の別カテゴリとして扱う |
+| PaxGroup の店舗立寄り | 既存（運営側が個別方式） | `planShop` が店舗エリア個別に経路探索し、施設キュー（窓口数 = `areaServerCount`）で処理。滞在 shop 480s / restaurant 1200s、売上は `onShopDone` 経由で retail 15 / dining 22（人あたり）。立寄り条件: 余裕 ≥ `BALANCE.retail.minSlackSec`（40分）、見込み待ち ≤ 10分 |
+| 能力・日報の記録 | 既存 | 5-21 工程ピーク（processStats）・journeyStats が既存の記録経路。店舗別実績の記録は**なかった**（売上は台帳へ直接計上のみ） |
+| 5-16 複合グラフ経路進行 | **未完了（T6 未実装）** | `buildCompositeGraph` / `findCompositeRoute` は存在するが区域制約・Step-free・容量予約を強制しない。詳細モードは本番経路エンジン `findPaxRoute`（区域・Step-free を強制）+ エリアキューで移動を扱い、複合グラフの容量予約で代用・完了扱いにしない |
+| 既存性能テスト | 部分 | holdshort-perf 等の個別ベンチはあるが、店舗数×旅客数の段階負荷はなかった（T13 で新設） |
+
+### T11: 集約 profile adapter（`src/core/terminal/serviceProfile.ts`）
+
+- `buildServiceProfiles(layout)`（純関数）: 個別 TerminalArea を唯一の元データとして、施設別 profile と カテゴリ×ターミナル（×区域内訳）profile を導出する。台帳の二重化なし。
+- カテゴリ: retail（shop）/ dining（restaurant）/ lounge / waiting。施設別: 能力 = `areaServerCount(props)`（運営側キューと同一根拠）、収容 = タイル数 × `PAX_PER_TILE`、滞在・単価は `BALANCE.retail` の既存定数（shop 480s・15 / restaurant 1200s・22）。
+- **根拠のない値は未算出（null）**: 待合の滞在・単価、価格・品質（priceQuality）は既存モデルに算出根拠がないため常に null。ラウンジはエリア種別自体がないため `notConfigured`。
+- 状態: available / notOperational（建設中・閉鎖）/ notConfigured を区別する。
+- キャッシュ: `serviceProfilesFor(layout)` が layout オブジェクト同一性で WeakMap キャッシュする。レイアウトは不変更新されるため、編集・営業状態変更は新オブジェクトになり自動で無効化される。毎 tick の再走査はしない（Simulation 生成時に `SimContext.service` へ1回だけ構築）。
+- 集約 adapter: `aggregateServiceRecords(profiles, records)` が 店舗別実績 → カテゴリ×ターミナル → 空港全体 を集約する。平均待ち・平均滞在は利用者 0 のとき null（未算出）。運営・詳細の両モードが同じ指標定義（users/groups/waitPaxSec/dwellPaxSec/revenue/busyServerSec/turnedAway）を使う。
+
+### T12a: 運営モードの集約接続（`src/core/sim/serviceAggregate.ts`）
+
+- `createSimulation` の `CreateOptions.serviceGranularity?: 'detailed' | 'aggregate'` で切替。**既定は 'detailed'（現行挙動）**であり、既定の切替（集約を標準にするか）は PO 判断事項として残す。ゴールデン/フィンガープリントは既定経路で不変。
+- 集約方式の `planShop` 差し替え: 店舗エリアへの移動・店舗別キュー・個別経路探索を行わず、カテゴリ（retail/dining）×ターミナルの空き能力と見込み待ち（滞在×稼働率の近似、10分超は不成立＝現行 planShop の規則に対応）で判定し、滞在はグループの状態として処理する。売上は現行と同じ `onShopDone`（retail/dining 台帳）へ計上する。
+- 集約方式の利用実績は `serviceAggregateUsage(sim)` でカテゴリ×ターミナル単位に取得できる（ランタイム保持のみ・保存対象外）。
+- 待合は集約方式でも購買対象に含めない（従来どおり待合エリアで滞留）。
+
+### T12b: 詳細モード（`src/core/terminal/serviceDetailSim.ts`）
+
+- `runServiceDetailSim(layout, opts)`: 独立した clock / state / seed（`${seed}:${terminalId}`）を持つ単独実行。AirportDay の state・乱数・収支・保存データには一切触れない（layout は読み取り専用。テストで不変を固定）。
+- 処理: 入口 → チェックイン → 保安 → 店舗立寄り（候補化 → 営業中・到達可能・区域資格・見込み待ち ≤10分・満員でない店舗から 経路コスト+見込み待ち 最小を選択）→ 待合滞留（締切 − ゲート歩行時間まで）→ 搭乗口。移動は `findPaxRoute`（区域制約・Step-free を強制）に経路キャッシュ（始点|目的地|条件）を併用する。
+- 店舗別実績（利用人数・グループ数・待ち・滞在・売上・窓口稼働・締切超過で離脱した人数）をエリア ID 単位で記録し、`aggregateServiceRecords` で運営 profile と同じ定義へ集約できる。
+- 計測用クロックは呼び出し側注入（`opts.nowMs`）。core は実時間へ依存しない。
+- **未完了の依存**: 5-16 T6（複合グラフの容量予約・Step-free 統合）は未実装のままであり、本実装はそれを完了扱いにしない。詳細モードの移動は TerminalModel 上の実経路 + エリア単位キューであり、複合グラフ全体の経路進行ではない。
+
+### T13: 性能実測（`tests/unit/sim/serviceModesBench.test.ts`、本 VM・参考値）
+
+| 比較 | 条件 | 実測 |
+|---|---|---|
+| 運営 detailed（現行） | サンプル+店舗2、180人ターンアラウンド1便 | 1,661 ms |
+| 運営 aggregate | 同一レイアウト・同一 seed | 1,143 ms（約31%短縮。この規模では差は小さく、店舗数・旅客数が増えるほど detailed 側の planShop 経路探索が増える構造） |
+| profile 生成 | 店舗 4 / 16 / 64 / 256 | 0.2 / 0.1 / 0.2 / 0.4 ms（レイアウト変更時のみ発生し運航 tick に混入しない） |
+| 詳細 4店舗・60グループ/h・4h | 773人 | 108 ms、経路キャッシュ 99.3%、tick p95 0.035 ms |
+| 詳細 16店舗・120グループ/h・4h | 1,518人 | 132 ms、キャッシュ 99.6%、tick p95 0.047 ms |
+| 詳細 64店舗・240グループ/h・4h | 2,969人 | 113 ms、キャッシュ 99.8%、tick p95 0.053 ms |
+| 詳細 128店舗・480グループ/h・4h | 5,814人 | 254 ms、キャッシュ 99.9%、tick p95 0.137 ms |
+
+- 詳細モードの実用範囲（本実測の範囲）: 128店舗・約1,450人/h でも tick p95 0.14 ms と十分に軽い。ボトルネックは経路探索回数ではなく同時滞在グループ数の線形走査であり、数千グループ規模までは問題にならない見込み（未計測の外挿は断定しない）。
+- 最適化の実施順（計画 §6-4 の順序どおり）: ①経路キャッシュ（ヒット率 99%超）②候補の区域・営業状態での絞り込み（店舗選択時に非営業・到達不能を除外）まで実施。重み付き batch・イベント駆動は現行実測で不要と判断し未実施。
+- 整合性: 店舗別合計 = カテゴリ集約 = 空港全体（テストで固定）。人数保存（生成 = 搭乗 + 遅刻 + 失敗 + 未完了）をテストで固定。
+
+### 保存形式・版への影響
+
+- 保存形式の変更なし。`serviceGranularity` は実行時オプション（保存対象外）、集約ランタイム・詳細結果も保存対象外。
+- SIM_MODEL_VERSION の変更なし。既定（detailed）経路の挙動は不変で、フィンガープリント・ゴールデンは再採取していない（検証結果は §9 完了記録に記載）。
+
+### UI 側への引き渡しメモ（Step 5・接続点のみ）
+
+| 用途 | 接続点 |
+|---|---|
+| 集約 profile の表示（カテゴリ×ターミナル能力・状態・区域内訳） | `serviceProfilesFor(layout)` / `categoryProfile(profiles, terminalId, category)`（`src/core/terminal/serviceProfile.ts`） |
+| 運営モードの集約利用実績 | `serviceAggregateUsage(sim)`（`src/core/sim/serviceAggregate.ts`）。カテゴリ×ターミナルの users/groups/売上/待ち・滞在（人秒） |
+| 詳細モードの実行と結果 | `runServiceDetailSim(layout, opts)` → `ServiceDetailResult`（店舗別 `records`、集約済み `aggregated`、経路統計、tick 計測）。計測表示には `nowMs: () => performance.now()` を UI 側から渡す |
+| 店舗別実績の集約・比較表示 | `aggregateServiceRecords(profiles, records)`（運営・詳細で同一の指標定義） |
+| 診断導線の識別子 | profile・実績はすべてエリア ID（`facilityIds` / `records` のキー）で引ける。施設クリック → エリア ID → 実績 の対応が取れる |
+| 詳細結果の運営 profile への反映 | **未実装（設計のみ）**: 反映する場合は「差分プレビュー + 明示適用」を必須とする。現時点では詳細結果は表示・比較専用で、AirportDay へ自動反映しない |
+| モード切替 UI | `CreateOptions.serviceGranularity` が受け口。既定 detailed のまま。集約を既定にするかは PO 判断 |
