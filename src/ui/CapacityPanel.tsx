@@ -5,6 +5,7 @@ import { airlineDef, airlinesFor, destinationDef, destinationsFor, routeCapabili
 import { previewLoadFactor } from '../core/economy/traffic';
 import { CAPABILITY_STATE_LABEL, OVERALL_CAPACITY_NOTE, OVERALL_CAPACITY_TITLE, OVERALL_LIMIT_LABEL, PLAN_ISSUE_LABEL } from '../i18n/ja';
 import { capabilityUtilization, layoutCapabilities, maintenanceReading, overnightReadings, readingsFromProcessPeak } from '../core/capability';
+import { FACILITY_SIM_EFFECT } from '../core/model/catalog';
 import { AREA_KIND_LABEL } from '../i18n/ja';
 import { createContext } from '../core/sim/context';
 import { planDayWithDemand } from '../core/economy/planning';
@@ -148,6 +149,18 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
         const readings = [...layoutCapabilities(layout), ...overnightReadings(company, ctx, company.day), maintenanceReading(layout)];
         const computed = readings.filter((r) => r.theoretical !== null);
         const uncomputedCount = readings.length - computed.length;
+        // 未算出の内訳（UI 改善 案3）: 施設の reading は subjectId = 施設 ID。
+        // sim 効果分類（core/model/catalog）で「効果なし / 表示のみ / 能力式なし」に分ける
+        const kindById = new Map(Object.values(layout.facilities).map((f) => [f.id, f.kind]));
+        const uncomputedBreakdown = { none: 0, displayOnly: 0, noFormula: 0 };
+        for (const r of readings) {
+          if (r.theoretical !== null) continue;
+          const kind = kindById.get(r.subjectId);
+          const effect = kind ? FACILITY_SIM_EFFECT[kind] : undefined;
+          if (effect === 'none') uncomputedBreakdown.none += 1;
+          else if (effect === 'displayOnly') uncomputedBreakdown.displayOnly += 1;
+          else uncomputedBreakdown.noFormula += 1;
+        }
         const attention = computed.filter((r) => r.state === 'zeroCapacity' || r.state === 'underConstruction' || r.state === 'disconnected');
         return <>
           {attention.length > 0 && <div className="capacity-alert" data-testid="capacity-common-attention">
@@ -162,7 +175,7 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
               <td className="capacity-explain">{r.basis}</td>
             </tr>)}</tbody>
           </table></div>
-          {uncomputedCount > 0 && <p className="muted small">能力式が定義されていない施設 {uncomputedCount} 件は「未算出」です（0 能力とは区別しています。理由は建設画面で施設を選ぶと表示されます）。</p>}
+          {uncomputedCount > 0 && <p className="muted small" data-testid="capacity-common-uncomputed">未算出の施設 {uncomputedCount} 件（0 能力とは区別しています）: 現在は効果なし {uncomputedBreakdown.none} 件・表示のみ {uncomputedBreakdown.displayOnly} 件・能力式なし {uncomputedBreakdown.noFormula} 件。理由は建設画面で施設を選ぶと表示されます。</p>}
         </>;
       })()}
     </section>

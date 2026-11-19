@@ -1,11 +1,11 @@
-import { FACILITY_SPECS } from '../core/model/catalog';
+import { FACILITY_SIM_EFFECT, FACILITY_SPECS } from '../core/model/catalog';
 import type { BuildState, FacilityKind, RoadClass, SizeClass } from '../core/model/types';
 import { BUILD_STATES } from '../core/model/types';
 import { actions, useEditor, type ToolId } from '../editor/store';
 import { facilityKindOf } from '../editor/tools';
 import { useLayout } from '../editor/store';
 import { RunwayToolOptions } from './RunwayPanels';
-import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL } from '../i18n/ja';
+import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL, SIM_EFFECT_LABEL } from '../i18n/ja';
 import { floorExistsInParent } from '../core/layout/levelRules';
 import { featureForAreaKind, lockLabel } from '../core/economy/unlocks';
 import type { TerminalAreaKind } from '../core/model/types';
@@ -14,13 +14,19 @@ interface ToolDef {
   id: ToolId;
   label: string;
   hint: string;
+  /** sim 効果がない / 表示のみの種別だけ付くバッジ文言（UI 改善 案3） */
+  effectBadge?: string;
 }
 
-const fac = (kind: FacilityKind, hint?: string): ToolDef => ({
-  id: `facility:${kind}`,
-  label: FACILITY_LABEL[kind],
-  hint: hint ?? (FACILITY_SPECS[kind].dragPlace ? 'ドラッグで範囲を指定' : 'クリックで配置（R で回転）'),
-});
+const fac = (kind: FacilityKind, hint?: string): ToolDef => {
+  const effect = FACILITY_SIM_EFFECT[kind];
+  return {
+    id: `facility:${kind}`,
+    label: FACILITY_LABEL[kind],
+    hint: hint ?? (FACILITY_SPECS[kind].dragPlace ? 'ドラッグで範囲を指定' : 'クリックで配置（R で回転）'),
+    ...(effect === 'none' || effect === 'displayOnly' ? { effectBadge: SIM_EFFECT_LABEL[effect] } : {}),
+  };
+};
 
 const GROUPS: { title: string; tools: ToolDef[] }[] = [
   { title: '編集', tools: [{ id: 'select', label: '選択・移動', hint: 'クリックで選択、ドラッグで移動' }] },
@@ -104,6 +110,11 @@ export function Toolbox() {
       >
         {t.label}
         {lock ? `（${lock}）` : ''}
+        {t.effectBadge && (
+          <span className="badge sim-effect-badge" data-testid={`tool-effect-${t.id}`}>
+            {t.effectBadge}
+          </span>
+        )}
       </button>
     );
   };

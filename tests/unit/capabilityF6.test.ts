@@ -9,6 +9,8 @@ import { createContext } from '../../src/core/sim/context';
 import { createStarterAirfield } from '../../src/core/sample/starterAirfield';
 import { placeFacility } from '../../src/core/layout/operations';
 import type { DailyReport } from '../../src/core/economy/company';
+import { FACILITY_KINDS, FACILITY_SIM_EFFECT } from '../../src/core/model/catalog';
+import { SIM_EFFECT_LABEL } from '../../src/i18n/ja';
 
 
 describe('F6-01 共通能力契約', () => {
@@ -135,6 +137,66 @@ describe('F6-04 状態の生成: ポータル未接続の交通施設', () => {
     expect(r.theoretical).toBeGreaterThan(0);
     expect(r.state).toBe('disconnected');
     expect(r.effective).toBe(0);
+  });
+});
+
+describe('UI改善 案3: 施設種別の sim 効果分類', () => {
+  it('分類スナップショット: 全 19 種別が分類され、確定分と一致する', () => {
+    // 根拠を確認した種別だけを載せる設計。今回は全種別ぶん根拠を確認した
+    expect(Object.keys(FACILITY_SIM_EFFECT).sort()).toEqual([...FACILITY_KINDS].sort());
+    expect(FACILITY_SIM_EFFECT.fuelFarm).toBe('displayOnly'); // 表示のみは capacityKL のみ
+    expect(FACILITY_SIM_EFFECT.serviceArea).toBe('none');
+    // staffParking の spaces は access/model の staffSpaces として使われ、不足分は
+    // 通勤対策費になるため 'none' ではない（計画書の前提はコードと異なった）
+    expect(FACILITY_SIM_EFFECT.staffParking).toBe('active');
+    for (const kind of FACILITY_KINDS) {
+      if (kind === 'fuelFarm' || kind === 'serviceArea') continue;
+      expect(FACILITY_SIM_EFFECT[kind], kind).toBe('active');
+    }
+  });
+
+  it('バッジ文言は種別で出し分ける（効果なし / 表示のみ（消費なし））', () => {
+    expect(SIM_EFFECT_LABEL.none).toBe('現在は効果なし');
+    expect(SIM_EFFECT_LABEL.displayOnly).toBe('表示のみ（消費なし）');
+  });
+
+  it('fuelFarm の未算出理由は種別別文言になる', () => {
+    const layout = createStarterAirfield();
+    const farm = Object.values(layout.facilities).find((x) => x.kind === 'fuelFarm')!;
+    const r = facilityCapability(farm);
+    expect(r.state).toBe('uncomputed');
+    expect(r.uncomputedReason).toContain('表示のみ');
+    expect(r.uncomputedReason).toContain('在庫の消費は未実装');
+  });
+
+  it('serviceArea の未算出理由は効果なし文言になる', async () => {
+    const { createSampleAirport } = await import('../../src/core/sample/sampleAirport');
+    const layout = createSampleAirport();
+    const area = Object.values(layout.facilities).find((x) => x.kind === 'serviceArea')!;
+    const r = facilityCapability(area);
+    expect(r.state).toBe('uncomputed');
+    expect(r.uncomputedReason).toContain('sim 上の効果がない');
+  });
+
+  it('到達不能な輸送施設: layoutCapabilities 経由なら disconnected、直接呼び出しではならない（PropertiesPanel 統一修正の根拠）', async () => {
+    const { createSampleAirport } = await import('../../src/core/sample/sampleAirport');
+    const { addPortal, placeTerminalArea } = await import('../../src/core/layout/operations');
+    const { must } = await import('./helpers');
+    let l = createSampleAirport();
+    l = must(placeFacility(l, 'terminal', { x: 120, y: 60 }, { w: 20, h: 8 })).layout;
+    const term2 = Object.values(l.facilities).find((f) => f.kind === 'terminal' && f.origin.x === 120)!;
+    l = must(placeTerminalArea(l, term2.id, 0, 'waiting', { x: 122, y: 62 }, { w: 6, h: 2 })).layout;
+    const wait = Object.values(l.terminalAreas).find((a) => a.terminalId === term2.id && a.kind === 'waiting')!;
+    l = must(placeFacility(l, 'busTerminal', { x: 120, y: 72 })).layout;
+    const bus = Object.values(l.facilities).find((f) => f.kind === 'busTerminal')!;
+    l = must(addPortal(l, { facilityId: bus.id, areaId: wait.id })).layout;
+    // 旧 PropertiesPanel の経路（portalUnreachable なし）では disconnected にならなかった
+    expect(facilityCapability(bus).state).toBe('operational');
+    // 統一後の経路（layoutCapabilities）では disconnected で有効能力 0
+    const r = layoutCapabilities(l).find((x) => x.subjectId === bus.id)!;
+    expect(r.state).toBe('disconnected');
+    expect(r.effective).toBe(0);
+    expect(r.theoretical).toBeGreaterThan(0);
   });
 });
 

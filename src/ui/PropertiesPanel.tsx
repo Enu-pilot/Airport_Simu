@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Field, Info, NumberInput, Section, TextInput } from './fields';
 import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
-import { FACILITY_SPECS, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
+import { FACILITY_SIM_EFFECT, FACILITY_SPECS, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
 import { blockCapacity } from '../core/sim/taxiBlocks';
 import { blockGraphOf } from '../core/layout/blockGraph';
 import { apronBusesOf, connectedTerminal, gateMode } from '../core/model/gates';
@@ -47,7 +47,7 @@ import { turnaroundCapacityDetail } from '../core/economy/planning';
 import { analyzeAirportCapacity } from '../core/economy/capacity';
 import { peakProcessDemand } from '../core/economy/peakDemand';
 import { cargoHandlingCapacityM3PerHour } from '../core/economy/cargo';
-import { facilityCapability } from '../core/capability';
+import { facilityCapability, layoutCapabilities } from '../core/capability';
 import type { Facility } from '../core/model/types';
 import { BALANCE } from '../core/economy/balance';
 import type { UnitKind } from '../core/sim/types';
@@ -79,6 +79,7 @@ import {
   TAXI_UI,
   UNIT_KIND_LABEL,
   CAPABILITY_STATE_LABEL,
+  SIM_EFFECT_LABEL,
 } from '../i18n/ja';
 
 export function PropertiesPanel() {
@@ -791,8 +792,9 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
     return (
       <>
         <NameField layout={layout} id={id} value={f.name} />
+        <SimEffectBadge kind={f.kind} />
         <Info label="位置">{`(${f.origin.x}, ${f.origin.y})`}</Info>
-        <FacilityCapabilityInfo f={f} />
+        <FacilityCapabilityInfo layout={layout} f={f} />
         {f.parentFacilityId ? (
           <Field label={`建物内配置（${layout.facilities[f.parentFacilityId]?.name || f.parentFacilityId}）`}>
             <select
@@ -1058,9 +1060,24 @@ function EntityLink({ layout, id }: { layout: AirportLayout; id: string }) {
   );
 }
 
+/** sim 効果がない / 表示のみの種別のバッジ（UI 改善 案3。分類は core/model/catalog が正本） */
+function SimEffectBadge({ kind }: { kind: Facility['kind'] }) {
+  const effect = FACILITY_SIM_EFFECT[kind];
+  if (effect !== 'none' && effect !== 'displayOnly') return null;
+  return (
+    <p className="sim-effect-badge-row">
+      <span className="badge sim-effect-badge" data-testid={`facility-sim-effect-${kind}`}>
+        {SIM_EFFECT_LABEL[effect]}
+      </span>
+    </p>
+  );
+}
+
 /** Phase 6 / F6-02: 施設の共通能力インスペクター。値は core/capability の正本から表示する */
-function FacilityCapabilityInfo({ f }: { f: Facility }) {
-  const r = facilityCapability(f);
+function FacilityCapabilityInfo({ layout, f }: { layout: AirportLayout; f: Facility }) {
+  // ポータル到達不能の減額（disconnected）まで含めて CapacityPanel と同じ値にするため、
+  // facilityCapability の直接呼び出しではなく layoutCapabilities 経由で取る（UI 改善 案3 の統一修正）
+  const r = layoutCapabilities(layout).find((x) => x.subjectId === f.id) ?? facilityCapability(f);
   return (
     <Section title="能力">
       <div data-testid="facility-capability">

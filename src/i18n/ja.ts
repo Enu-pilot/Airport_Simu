@@ -236,6 +236,28 @@ export const CAPABILITY_STATE_LABEL: Record<string, string> = {
   operational: '稼働中',
 };
 
+/** 要対応リスト（UI 改善 案1）の文言。項目の生成・帯付けの正本は core/attention の buildAttentionItems */
+export const ATTENTION_UI = {
+  title: '運航の要対応（直近日報）',
+  band: { high: '高', mid: '中', low: '低' } as Record<'high' | 'mid' | 'low', string>,
+  noReport: '日報はまだありません（運航して日を締めると、直近の運航実績から要対応が表示されます）',
+  none: '要対応はありません',
+};
+
+/** 施設種別の sim 効果バッジ（UI 改善 案3。分類の正本は core/model/catalog の FACILITY_SIM_EFFECT） */
+export const SIM_EFFECT_LABEL: Record<'none' | 'displayOnly', string> = {
+  none: '現在は効果なし',
+  displayOnly: '表示のみ（消費なし）',
+};
+
+/** 混雑マップ（ヒート）の凡例。帯の定義は core/access/heatmap の heatBand と一致させる */
+export const HEAT_LEGEND = {
+  title: '混雑の凡例（使用率）',
+  low: '40%未満',
+  mid: '40%以上 70%未満',
+  high: '70%以上',
+} as const;
+
 const portalStatusJa = (s: unknown): string =>
   s === 'operational' ? '接続済み' : s === 'underConstruction' ? '完成待ち' : '未接続';
 

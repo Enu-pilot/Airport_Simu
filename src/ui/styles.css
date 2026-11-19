@@ -136,6 +136,10 @@ input[type='number'] { width: 80px; }
 .list-row.selected { background: #1d4652; }
 .row-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { font-size: 10px; padding: 0 4px; border-radius: 3px; border: 1px dashed; }
+.overlay-legend { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.overlay-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
+.sim-effect-badge { color: #ff9f1c; margin-left: 6px; }
+.sim-effect-badge-row { margin: 2px 0; }
 .badge.planned { color: #fff; }
 .badge.underConstruction { color: #ff9f1c; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
@@ -175,7 +179,12 @@ input[type='number'] { width: 80px; }
 .issue.error { border-left-color: var(--error); }
 .issue.warning { border-left-color: var(--warning); }
 .issue.info { border-left-color: var(--info); }
+.issue.high { border-left-color: var(--error); }
+.issue.mid { border-left-color: var(--warning); }
+.issue.low { border-left-color: var(--info); }
 .empty { color: var(--muted); padding: 6px; }
+.attention { display: flex; flex-direction: column; border-top: 1px solid var(--border); max-height: 45%; }
+.attention-list { overflow-y: auto; padding: 4px 6px; }
 
 /* ---------------- 運航モード ---------------- */
 button.primary { background: #1d6b3a; border-color: #2c9a57; font-weight: 600; }
