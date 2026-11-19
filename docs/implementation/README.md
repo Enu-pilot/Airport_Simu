@@ -22,7 +22,7 @@
 | Phase 2.5 | planned | planned | [phase2_5_map_expansion_plan.md](planned/phase2_5_map_expansion_plan.md)。最大320×320タイル。羽田相当レイアウト全体受入前に実装・性能検証 |
 | Phase 3 | completed | completed | [phase3_plan.md](completed/phase3_plan.md)。docs/42 §3.2の実装・検証記録を参照 |
 | Phase 4 | 実装完了・受入計測完了 | active（受入検証継続） | [phase4_plan.md](active/phase4_plan.md)。§8計測（MCT大規模・区間解析・2ターミナル波・朝の波 block）は2026-11-18深夜に完了（docs/44 §6/§8）。区間解析のみ高速機での再確認が望ましい。completed移管は受入記録の確認後 |
-| Phase 5 | 個別計画ごとに実施中 | active（5-13〜5-18・5-20）／ planned（5-19・5-21〜5-25） | 計画書が存在する要求はすべて下表にリンク。状態・タスク進捗は各正本を参照 |
+| Phase 5 | 個別計画ごとに実施中 | active（5-13〜5-18・5-20〜5-21・5-23〜5-24）／ planned（5-19・5-22・5-25） | 計画書が存在する要求はすべて下表にリンク。状態・タスク進捗は各正本を参照 |
 | Phase 6 | active（P0を中心にP1/P2/P3の一部タスクも実施） | planned | [phase6_airport_facility_expansion_plan.md](planned/phase6_airport_facility_expansion_plan.md)。Phase 5の既存基盤・個別計画を再利用し、P0能力基盤→P1貨物→P2ターミナル→P3夜間→P4空港基盤の順に統合拡張。F6-00監査、F6-01能力契約、F6-02/03/04一部、F6-06/07一部、F6-09/11一部、F6-12完了。F6-17（都市間OD/乗継需要モデル）を横断計画として追加・未着手。詳細な状態はPhase 6計画を正本とする |
 
 docs/42がフェーズの実装状況の正本、各計画書の状態とフォルダ配置は実装計画のライフサイクルを表します。過去の計画書配置が現在の実装状況と一致していない箇所は、受入記録を確認してから移管し、フォルダ名だけで実装済み/未実装を判断しません。
@@ -39,13 +39,13 @@ Phase 6 は親計画です。5-18 / 5-19 / 5-20 / 5-21 / 5-25 と A6（Phase 5 5
 |---|---|---|---|
 | Phase 5 / 5-13 旅客動線の3段階接続判定 | active | [passenger_connectivity_status_plan.md](active/passenger_connectivity_status_plan.md) | 接続グラフ全体を通行可能/建設完了待ち/未接続に分類。5-16と統合。T2・T4 実施済み、T5・T6 は残件 |
 | Phase 5 / 5-14 ターミナル階層・駅/バスターミナル | active | [terminal_building_structure_plan.md](active/terminal_building_structure_plan.md) | B3〜4F、駅/バスターミナル独立・内包。T1〜T5 実施済み、T6・T7 は一部（内包施設の能力接続は 5-16 側の残件） |
-| Phase 5 / 5-15 複雑形状・ターミナル複合体 | active | [terminal_complex_geometry_plan.md](active/terminal_complex_geometry_plan.md) | 凹形ポリゴンと複合体判定。旅客の実経路とは分離。T2・T4・T6 実施済み、T7は2D描画まで実施（3D・E2Eは残件）、T3・T5 は残件 |
-| Phase 5 / 5-16 対外交通・階層歩行網とPaxGroup統合 | active | [passenger_network_unification_plan.md](active/passenger_network_unification_plan.md) | T1〜T3・T5・T8完了。T4・T7・T9は一部（T7: Portal往復を全5施設種で検証済み、残はゲート別・E2E。T9: 500施設級の大規模計測済み）。T6（複合グラフ全体の旅客経路進行・能力予約・Step-free）は未着手 |
+| Phase 5 / 5-15 複雑形状・ターミナル複合体 | active | [terminal_complex_geometry_plan.md](active/terminal_complex_geometry_plan.md) | 直交footprint/複合体判定に加え汎用Curve/Arc演算基盤は既存だが、Facility.footprintへの曲線統合は未実装。2D本体描画はポリゴン対応、選択輪郭/3D/E2Eは残件。T3・T5・T8は未完了 |
+| Phase 5 / 5-16 対外交通・階層歩行網とPaxGroup統合 | active | [passenger_network_unification_plan.md](active/passenger_network_unification_plan.md) | TerminalModel/Dijkstra/Portal/Step-free/上下接続と単一Portal区間のaccessWalkは既存。T4は検証接続済みだが診断表示残り、T6の複合経路進行・能力予約/待機・Step-free再探索は未完了。T7は全5施設種の往復検証済みだがゲート別/E2E残り |
 | Phase 5 / 5-17 誘導路実幅・高速離脱 | active | [taxiway_realism_plan.md](active/taxiway_realism_plan.md) | FAA TDG/EASA OMGWSのprofileを混同しない。T1・T3 基盤と T4・T5 の純幾何（フィレット/主脚オフトラック/RET経路/停止距離）を実施済み。T2・検証/UI接続・T6・T7 は残件 |
-| Phase 5 / 5-18 ターミナル専用設計Workspace | active（接続マトリクスの核を実装済み） | [terminal_design_workspace_plan.md](active/terminal_design_workspace_plan.md) | 曲線外形UI、専用Workspace、施設カタログ、動く歩道/AGT、商業/ラウンジ/航空会社専用施設、満足度診断を統合。接続マトリクスの表示核以外は未完了 |
-| Phase 5 / 5-19 空港全体1日運航・ターミナル単独詳細Simulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 2モードのclock/state分離、対外交通6手段、全方向の旅客動線/容量検証。2026-11-18深夜に設計検討を計画書へ追記 |
+| Phase 5 / 5-18 ターミナル専用設計Workspace | active（接続マトリクスの核を実装済み） | [terminal_design_workspace_plan.md](active/terminal_design_workspace_plan.md) | Toolboxの矩形中心TerminalArea配置・PropertiesPanel編集・AccessPanels接続マトリクスは既存。専用Workspace、断面/void、壁/床/door、曲線UI、統合カタログ、AGT/詳細輸送能力、商業/ラウンジ/航空会社専用施設・満足度連携は未完了 |
+| Phase 5 / 5-19 空港全体1日運航・ターミナル単独詳細Simulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 既存PaxGroupによる空港全体旅客Simulationは稼働中。独立TerminalSimulationのclock/state/seed、単独需要設定、詳細施設待ち/AGT/混雑可視化・Before/Afterは未実装 |
 | Phase 5 / 5-20 空港格の8段階化・成長判定の多軸化 | active | [airport_tier_progression_plan.md](active/airport_tier_progression_plan.md) | 既存格解放・契約提案・旧セーブ互換を含めて段階的に拡張。T2・T3・T5・T7 実施済み、T6・T8 は残件。planned/ に旧版コピーが残存（正本は active） |
-| Phase 5 / 5-21 最混雑時間帯・ターミナル別工程能力 | active（核実装済み・計画書はplanned配置のまま） | [peak_hour_passenger_capacity_plan.md](planned/peak_hour_passenger_capacity_plan.md) | 工程別の能力/需要/ピーク実績/使用率/平均待ちを日報とDayReviewに表示する核を実装（2026-11-18深夜）。ローリング60分・アクセス/ランプバス/トイレ工程・ターミナル別内訳は残件 |
+| Phase 5 / 5-21 最混雑時間帯・ターミナル別工程能力 | active（核実装済み・計画書はplanned配置のまま） | [peak_hour_passenger_capacity_plan.md](planned/peak_hour_passenger_capacity_plan.md) | 6工程の時刻バケット集計、processPeak/processPeakByTerminal、DayReviewのターミナル別表示まで実装。ローリング60分、アクセス/ランプバス/トイレ工程、根拠のある需要のターミナル別配分は残件 |
 | Phase 5 / 5-22 共通シナリオ管理・運航モード横断比較 | planned | [scenario_comparison_plan.md](planned/scenario_comparison_plan.md) | Phase 8の既存比較を再利用し、Airport Day / Terminal Detailを同じ入力条件から比較。2026-11-18深夜に設計検討を計画書へ追記（5-19が前提） |
 | Phase 5 / 5-23 旅客Door-to-Door KPI | active（核実装済み・計画書はplanned配置のまま） | [passenger_door_to_door_kpi_plan.md](planned/passenger_door_to_door_kpi_plan.md) | 入口→搭乗/降機→退出/ゲート間の p50/p95 と Step-free 完了率を日報とDayReviewに表示する核を実装（2026-11-18深夜）。工程別内訳・外部境界からの計測は残件 |
 | Phase 5 / 5-24 都市上空回避型・方向別夜間運用 | active（判定の核を実装・計画書はplanned配置のまま） | [urban_night_runway_operations_plan.md](planned/urban_night_runway_operations_plan.md) | 保護区域（方位範囲）と滑走路端ごとの方向別夜間許可の判定を実装（2026-11-18深夜）。全面カーフューが既定で、運航計画への適用はPO判断待ち |
