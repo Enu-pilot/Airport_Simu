@@ -5,7 +5,7 @@ import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
 import { CatalogPanel } from './CatalogPanel';
 import { ScenarioPanel } from './AnalysisPanels';
-import { DAY_LOOP, GAME_UI, MODE_LABEL } from '../i18n/ja';
+import { DAY_LOOP, GAME_UI, HEAT_LEGEND, MODE_LABEL } from '../i18n/ja';
 import { DayReviewOverlay } from './DayReview';
 import { GameSetupDialog, gameSetupUi } from './GameSetup';
 import { HistoryOverlay } from './HistoryPanel';
@@ -33,6 +33,16 @@ import { StatusBar, Toast } from './StatusBar';
 import { ManagementPage, type ManagementSection } from './ManagementPage';
 import { CapacityPanel } from './CapacityPanel';
 import { AtcApp } from './atc/AtcApp';
+
+/** 混雑マップの凡例（heat 3段階）。overlay 切替の近くに1か所だけ出す部品 */
+const HeatLegend = () => (
+  <div className="overlay-legend" data-testid="congestion-legend">
+    <span>{HEAT_LEGEND.title}</span>
+    <span><i style={{ background: '#3ccf6e' }} />{HEAT_LEGEND.low}</span>
+    <span><i style={{ background: '#ffc23d' }} />{HEAT_LEGEND.mid}</span>
+    <span><i style={{ background: '#ff4d4f' }} />{HEAT_LEGEND.high}</span>
+  </div>
+);
 
 const OVERLAY_LABEL: Record<keyof Overlays, string> = {
   grid: 'グリッド',
@@ -278,6 +288,7 @@ function TopBar({ page, setPage, onSavedProjects, onOpenAtc }: { page: MainPage;
                 {OVERLAY_LABEL[k]}
               </label>
             ))}
+            {overlays.congestion && <HeatLegend />}
           </div>
         </details>
       ) : (
@@ -288,6 +299,7 @@ function TopBar({ page, setPage, onSavedProjects, onOpenAtc }: { page: MainPage;
               {OVERLAY_LABEL[k]}
             </label>
           ))}
+          {overlays.congestion && <HeatLegend />}
         </div>
       )}
       <div className="top-group">

@@ -82,6 +82,63 @@ export const FACILITY_SPECS: Record<FacilityKind, FacilitySpec> = {
 
 export const FACILITY_KINDS = Object.keys(FACILITY_SPECS) as FacilityKind[];
 
+/**
+ * 施設種別の sim 効果分類（UI 改善 案3）。表示専用の静的分類で、sim の計算には使わない。
+ * - 'active': sim / economy / access のいずれかが、その施設または props を実際に参照している
+ * - 'displayOnly': 数値 props は表示・入力できるが、その値自体は sim で消費されない
+ * - 'none': sim 上の効果がない
+ * 根拠が確認できない種別はここに載せない（= 分類対象外。バッジも出さない）。
+ * 根拠のない種別を推測で 'none' / 'displayOnly' にしないこと（Phase 6 計画 §4.1 と同じ原則）。
+ */
+export type FacilitySimEffect = 'active' | 'displayOnly' | 'none';
+
+export const FACILITY_SIM_EFFECT: Partial<Record<FacilityKind, FacilitySimEffect>> = {
+  // スタンドはエプロン面上に置くことが前提（validation/validate.ts のスタンド占有判定）
+  apron: 'active',
+  // 内部エリア・光熱費（economy/ops）の土台
+  terminal: 'active',
+  // standId / boardingMode / routeType を旅客搭乗とスポット割当が参照
+  gate: 'active',
+  // 夜間整備枠（1 棟 = 1 機。core/capability maintenanceReading、sim/overnight）
+  hangar: 'active',
+  // 管制能力 towerCapacityPerHour（core/safety）
+  tower: 'active',
+  // bays / engineers を整備・地上支援が参照
+  maintenance: 'active',
+  // 表示のみなのは props.capacityKL（貯蔵量）だけ: 在庫の消費・残量は未実装で、
+  // capacityKL は sim のどこからも読まれない。施設の存在自体は給油の前提
+  // （sim/context の hasFuelFarm、layout/fuelHydrants の配管→給油）なので、
+  // バッジ文言は「貯蔵量」に対するものとして出す
+  fuelFarm: 'displayOnly',
+  // 消防カテゴリ（core/safety）
+  fireStation: 'active',
+  // staff / 車両台数が地上支援ユニットになる（sim/context の bases）
+  gseBase: 'active',
+  // capacityPerMin を手荷物仕分けが参照（sim/context の sorters、sim/baggage）
+  baggageSort: 'active',
+  // sim / economy / access のどこからも参照がない（配置と、重なり検証での
+  // エリア重なりの例外扱いのみ。validation/validate.ts）
+  serviceArea: 'none',
+  // spaces が駐車容量・満車・駐車収入に効く（access/model、economy）
+  parking: 'active',
+  // berths がタクシー能力に効く（access/model）
+  taxiStand: 'active',
+  // busBays / busesPerHour がバス能力に効く（access/model）
+  busStop: 'active',
+  // berths / busesPerHour がバス能力に効く（access/model、core/capability の adapter）
+  busTerminal: 'active',
+  // throughputM3PerHour が貨物荷役に効く（economy/cargo）
+  cargoTerminal: 'active',
+  // trainsPerHour / platforms が鉄道能力に効く（access/model）
+  railStation: 'active',
+  // spaces は使われている: access/model が staffSpaces（道路に接した施設の合計）を出し、
+  // 不足分は economy/ops dailyFixedCosts の通勤対策費（staffCommute、600 円/台/日）になる。
+  // ※ 計画書（ui-improvement-plan-p1-3）の「spaces 未使用」という前提はこのコードと異なるため 'active' とした
+  staffParking: 'active',
+  // rooms が宿泊収入（economy/ops の hotelPerRoomNight）と access の hotelRooms に効く
+  hotel: 'active',
+};
+
 export type PropDef =
   | { key: string; type: 'int'; min: number; max: number }
   | { key: string; type: 'bool' }

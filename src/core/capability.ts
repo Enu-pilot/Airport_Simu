@@ -1,4 +1,4 @@
-import type { AirportLayout, Facility } from './model/types';
+import type { AirportLayout, Facility, FacilityKind } from './model/types';
 import { overnightCapacity, overnightRequired, type CapacityMetric, type SizeClass3 } from './economy/capacity';
 import type { CompanyState, DailyReport } from './economy/company';
 import type { SimContext } from './sim/context';
@@ -82,6 +82,15 @@ export function readingFromCapacityMetric(m: CapacityMetric, subjectId: string, 
 }
 
 /**
+ * 能力式のない種別のうち、未算出の理由が種別固有のもの（UI 改善 案3）。
+ * 分類の正本は core/model/catalog の FACILITY_SIM_EFFECT。
+ */
+const UNCOMPUTED_REASON_BY_KIND: Partial<Record<FacilityKind, string>> = {
+  fuelFarm: '貯蔵量（capacityKL）は表示のみです。在庫の消費は未実装のため、能力としては算出しません（施設の存在自体は給油の前提です）',
+  serviceArea: 'この施設は現在 sim 上の効果がないため、能力は算出しません',
+};
+
+/**
  * 施設 1 件の能力（F6-02 インスペクターの正本）。
  * 能力式が定義されている種別だけ理論能力を返し、それ以外は未算出として理由を返す。
  * 有効能力は稼働状態のみを反映する（接続・人員・供給の減額源が無い種別では理論と同値）。
@@ -138,7 +147,7 @@ export function facilityCapability(f: Facility, opts?: { portalUnreachable?: boo
         theoretical: null,
         effective: null,
         state: 'uncomputed',
-        uncomputedReason: 'この施設種別には能力式が定義されていない',
+        uncomputedReason: UNCOMPUTED_REASON_BY_KIND[f.kind] ?? 'この施設種別には能力式が定義されていない',
         basis: 'Phase 6 計画 §4.1: 根拠のない能力は推定で埋めない',
       };
   }

@@ -28,6 +28,7 @@ import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { linkBetween } from '../core/terminal/route';
 import { AREA_KIND_LABEL } from '../i18n/ja';
 import { airportKpis, type AirportKpis } from '../core/analytics/kpi';
+import { heatBand, processAreaHeat, segmentEdgeLoads, staticBottlenecks } from '../core/access/heatmap';
 import { daylight } from './daylight';
 import { blockGraphOf } from '../core/layout/blockGraph';
 import { blockCapacity } from '../core/sim/taxiBlocks';
@@ -47,6 +48,9 @@ const c = (t: Tile): Vec2 => worldToMap(t);
 const fmtDeg = (d: number): string => (Math.round(d * 10) / 10).toFixed(1);
 
 const BUILD_ALPHA: Record<BuildState, number> = { operational: 1, underConstruction: 0.8, planned: 0.45 };
+
+/** 混雑ヒートの3段階（core/access/heatmap の heatBand と対応: 40%未満 / 40–70% / 70%以上） */
+const HEAT_COLORS = [0x3ccf6e, 0xffc23d, 0xff4d4f] as const;
 
 export class MapRenderer {
   readonly app = new Application();
@@ -138,6 +142,7 @@ export class MapRenderer {
     }
     if (s.overlays.labels) this.drawLabels(layout, analysis, cam);
     if (s.ops && s.overlays.congestion) this.drawCongestion(layout, s.ops, cam, s.overlays.labels);
+    if (!s.ops && s.overlays.congestion) this.drawStaticHeat(layout, s, cam);
     if (s.ops) this.drawOps(s.ops, cam, s.overlays.network);
     for (const [k, t] of this.textPool) t.visible = this.usedTexts.has(k);
   }
@@ -506,7 +511,7 @@ export class MapRenderer {
     }
     const k = this.kpiCache.k;
     const o = this.overlay;
-    const heat = (v: number) => (v < 0.4 ? 0x3ccf6e : v < 0.7 ? 0xffc23d : 0xff4d4f);
+    const heat = (v: number) => HEAT_COLORS[heatBand(v)];
     for (const r of k.runways) {
       const rw = layout.runways[r.id];
       if (!rw) continue;
@@ -532,6 +537,65 @@ export class MapRenderer {
       const a = layout.terminalAreas[f.id];
       if (!a || f.avgWaitMin === null) continue;
       o.rect(a.origin.x, a.origin.y, a.w, a.h).stroke({ width: this.px(3), color: heat(f.avgWaitMin / 15), alpha: 0.9 });
+    }
+    // 案2-2c: 直近日報の工程ピーク使用率でターミナルエリアを塗る（枠線の平均待ち表示と併用できるよう塗りにする）
+    const report = sim.company?.reports[sim.company.reports.length - 1];
+    for (const h of processAreaHeat(report, Object.values(layout.terminalAreas))) {
+      const a = layout.terminalAreas[h.areaId];
+      if (!a) continue;
+      o.rect(a.origin.x, a.origin.y, a.w, a.h).fill({ color: heat(h.utilization), alpha: 0.3 });
+    }
+    // 案2-2b: 区間モデルの道路辺を、その時間帯の volume / capacity で色付けする。
+    // 交通量は access runtime が経路選択のために記録済みの hourly['seg:<辺>:<時>'] を読むだけ（集計の追加なし）
+    const acc = sim.state.access;
+    if (acc?.segments) {
+      const hour = Math.floor(sim.state.now / 3600);
+      for (const load of segmentEdgeLoads(acc, hour)) {
+        const e = layout.roads[load.edgeId];
+        if (!e) continue;
+        const a = layout.roadNodes[e.from];
+        const b = layout.roadNodes[e.to];
+        if (!a || !b) continue;
+        o.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(b.pos).x, c(b.pos).y).stroke({ width: mToTiles(roadDrawWidthM(e)), color: heat(load.ratio), alpha: 0.55, cap: 'round' });
+        if (labels) {
+          const mid = c({ x: (a.pos.x + b.pos.x) / 2, y: (a.pos.y + b.pos.y) / 2 });
+          this.label(`cgseg:${e.id}`, `道路 ${Math.round(load.ratio * 100)}%`, { x: mid.x, y: mid.y - 1 }, cam, { size: 10, color: 0xffffff });
+        }
+      }
+    }
+  }
+
+  /**
+   * 案2（建設モード）: 混雑マップ overlay が ON のとき、運航前でも根拠のあるものだけを描く。
+   * - 2a: 区間モデルの静的ボトルネック辺（最も細い辺は赤、その他の経路ボトルネックは黄）
+   * - 2c: 直近日報の工程ピーク使用率によるターミナルエリアの塗り（運航中と同じ定義）
+   */
+  private drawStaticHeat(layout: AirportLayout, s: EditorState, cam: Camera): void {
+    const o = this.overlay;
+    const heat = (v: number) => HEAT_COLORS[heatBand(v)];
+    const report = s.company.reports[s.company.reports.length - 1];
+    for (const h of processAreaHeat(report, Object.values(layout.terminalAreas))) {
+      const a = layout.terminalAreas[h.areaId];
+      if (!a) continue;
+      o.rect(a.origin.x, a.origin.y, a.w, a.h).fill({ color: heat(h.utilization), alpha: 0.3 });
+    }
+    for (const b of staticBottlenecks(layout)) {
+      const e = layout.roads[b.edgeId];
+      if (!e) continue;
+      const a = layout.roadNodes[e.from];
+      const bb = layout.roadNodes[e.to];
+      if (!a || !bb) continue;
+      if (s.mapLevel !== 'all' && (a.level ?? 0) !== s.mapLevel && (bb.level ?? 0) !== s.mapLevel) continue;
+      o.moveTo(c(a.pos).x, c(a.pos).y).lineTo(c(bb.pos).x, c(bb.pos).y).stroke({
+        width: mToTiles(roadDrawWidthM(e)),
+        color: b.global ? HEAT_COLORS[2] : HEAT_COLORS[1],
+        alpha: b.global ? 0.75 : 0.55,
+        cap: 'round',
+      });
+      if (b.global || s.overlays.labels) {
+        const mid = c({ x: (a.pos.x + bb.pos.x) / 2, y: (a.pos.y + bb.pos.y) / 2 });
+        this.label(`bn:${e.id}`, `ボトルネック ${b.capacityPerHour} 台/時${b.lanes ? `（${b.lanes}車線）` : ''}`, { x: mid.x, y: mid.y - 1 }, cam, { size: 11, color: 0xffffff });
+      }
     }
   }
 
