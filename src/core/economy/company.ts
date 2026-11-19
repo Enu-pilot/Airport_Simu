@@ -206,18 +206,20 @@ export interface DailyReport {
   /** Portal 通過人数（5-16 T8。通過があった日だけ。方向別の人数で、手段別人数とは二重計上しない） */
   portalUsage?: { portalId: string; facilityId: string; enter: number; exit: number }[];
   /** 工程別の最混雑 60 分（5-21）: 理論能力・計画需要・ピーク時間帯の実績処理・使用率・平均待ち */
-  processPeak?: { step: string; capacityPerHour: number; demandPerHour: number; peakHour: number; peakProcessed: number; utilization: number | null; avgWaitSec: number }[];
+  processPeak?: { step: string; capacityPerHour: number; demandPerHour: number; peakHour: number; peakStartMin?: number; peakProcessed: number; utilization: number | null; avgWaitSec: number }[];
   /** 5-21 T5: 工程ピークのターミナル別内訳（能力はそのターミナルのエリア合計。需要は空港全体のみ算出するため含めない） */
-  processPeakByTerminal?: { terminalId: string; step: string; capacityPerHour: number; peakHour: number; peakProcessed: number; utilization: number | null; avgWaitSec: number }[];
+  processPeakByTerminal?: { terminalId: string; step: string; capacityPerHour: number; peakHour: number; peakStartMin?: number; peakProcessed: number; utilization: number | null; avgWaitSec: number }[];
   /** 旅客 Door-to-Door KPI（5-23）: 出現→完了の所要時間の人数重みつき分位点と Step-free 完了率 */
   doorToDoor?: {
     departure: { p50Sec: number; p95Sec: number; pax: number } | null;
     arrival: { p50Sec: number; p95Sec: number; pax: number } | null;
     transfer: { p50Sec: number; p95Sec: number; pax: number } | null;
     stepFree: { completed: number; missed: number; rate: number | null };
+    /** 工程別の待ち時間の分位点（5-23 残件。出発はアクセス移動を含む外部境界から計測） */
+    stepWaits?: Record<string, { p50Sec: number; p95Sec: number; pax: number }>;
   };
   /** 貨物の実績（5-12。貨物契約がある日だけ）: 実際に積み下ろしした量・積み残し・収支。収入と荷役費は台帳（revenue.cargo / cost.cargoHandling）にも計上済み */
-  cargo?: { carriedM3: number; leftoverM3: number; revenue: number; handlingCost: number; truckTrips: number };
+  cargo?: { carriedM3: number; leftoverM3: number; revenue: number; handlingCost: number; truckTrips: number; transshipmentM3?: number };
   city?: { type: CityType; populationStart: number; populationEnd: number; demandCeiling: number; expectedPax: number; actualPax: number; cityFactor: number; roadQuality: number; railQuality: number; residentsStart?: number; residentsEnd?: number; residentDelta?: number; noiseMovements?: number; nightMovements?: number; noisePoints?: number; events?: CityEvent[]; eventDemandMultiplier?: number; eventTrafficMultiplier?: number };
 }
 

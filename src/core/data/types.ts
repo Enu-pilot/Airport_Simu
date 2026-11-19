@@ -41,8 +41,14 @@ export interface DestinationInput {
   regionId?: string;
   /** 表示用。既定なし */
   coordinates?: { latitude: number; longitude: number };
-  /** 各 0.1〜3.0、既定 1.0 */
-  demand?: { business?: number; leisure?: number; cargo?: number };
+  /** 各 0.1〜3.0、既定 1.0。essential は必須需要（docs/46）。未指定なら business を移行元として読む */
+  demand?: { business?: number; essential?: number; leisure?: number; cargo?: number };
+  /** 空港利用圏人口（人、1,000〜50,000,000。docs/46）。未指定なら population を使う */
+  catchmentPopulation?: number;
+  /** 航空依存度 0.50〜1.00（docs/46）。未指定なら 1.0 */
+  aviationDependency?: number;
+  /** 観光需要の季節プロファイル（docs/46）。未指定なら従来の月別表を使う */
+  seasonalityProfile?: SeasonalityProfile;
   /** 相手空港の混雑度 0〜1、既定 0.3（提案の便数上限に効く） */
   congestion?: number;
   unlock?: Unlock;
@@ -94,6 +100,11 @@ export interface AirlineInput {
   retired?: true;
 }
 
+/** 季節プロファイル（docs/46 §4.2）。月別指数の実値は BALANCE.market.seasonalityProfiles が持つ */
+export type SeasonalityProfile = 'URBAN' | 'RAIL' | 'REGIONAL' | 'HOKKAIDO' | 'SNOW' | 'OKINAWA' | 'ISLAND' | 'SUMMER';
+
+export const SEASONALITY_PROFILES: readonly SeasonalityProfile[] = ['URBAN', 'RAIL', 'REGIONAL', 'HOKKAIDO', 'SNOW', 'OKINAWA', 'ISLAND', 'SUMMER'];
+
 export interface DestinationDef {
   id: string;
   name: string;
@@ -109,7 +120,13 @@ export interface DestinationDef {
   /** 新規路線の提示に必要な空港評価（= unlock.minRating） */
   minimumAirportRating?: number;
   population: number;
-  demand: { business: number; leisure: number; cargo: number };
+  /** 空港利用圏人口（docs/46）。未指定の目的地は null（需要式では population にフォールバック） */
+  catchmentPopulation: number | null;
+  /** 航空依存度（docs/46）。未指定は 1.0 */
+  aviationDependency: number;
+  /** 季節プロファイル（docs/46）。未指定は null（従来の月別表にフォールバック） */
+  seasonalityProfile: SeasonalityProfile | null;
+  demand: { business: number; essential: number; leisure: number; cargo: number };
   congestion: number;
   unlock: Unlock;
   scope: 'domestic' | 'international';

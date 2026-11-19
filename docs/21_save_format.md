@@ -2,9 +2,9 @@
 
 実装: `src/core/io/project.ts`（形式・検証・復元）、`src/editor/project.ts`（保存先・操作）、`src/ui/ProjectPanel.tsx`（画面）。
 
-## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜6）
+## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜8）
 
-**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・階層施設／建物内設備・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜6 を読み、7 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`、`PROJECT_FORMAT_VERSION_4 = 4`（フェーズ 2）。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
+**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・階層施設／建物内設備・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜8 を読み（`PROJECT_FORMAT_MAX_READABLE = 8`）、9 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`、`PROJECT_FORMAT_VERSION_4 = 4`（フェーズ 2）、`PROJECT_FORMAT_VERSION_5 = 5`、`PROJECT_FORMAT_VERSION_6 = 6`、`PROJECT_FORMAT_VERSION_7 = 7`、`PROJECT_FORMAT_VERSION_8 = 8`。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
 
 `Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。`FlightRecord` の形式は変更しない。便別レビューの締め時点の原因・実時刻・機体状態・作業・施設名、航空会社評価要素・EMA/満足度前後・不満/要望は `DayReview` に集約し、日ごとの IndexedDB 履歴の `review` に保存する。会社状態やプロジェクトJSONには追加しないため、プロジェクト保存形式・シミュレーションモデルの版は上げない。古い保存済みレビューにない項目は推測せず欠落として表示する。
 
@@ -27,10 +27,10 @@
 
 | 版 | 定数 | 変わるとき |
 |---|---|---|
-| 保存形式 | `PROJECT_FORMAT_VERSION = 1`, `PROJECT_FORMAT_VERSION_2 = 2`, `PROJECT_FORMAT_VERSION_3 = 3`, `PROJECT_FORMAT_VERSION_4 = 4` | 新しい任意データを含むファイルだけ版を上げ、旧アプリが誤読しないようにする |
-| 機種カタログ | `CATALOG_VERSION`（現在 2026.11.0） | 収録機種・値を変えたとき |
+| 保存形式 | `PROJECT_FORMAT_VERSION = 1` 〜 `PROJECT_FORMAT_VERSION_8 = 8`（読込上限 `PROJECT_FORMAT_MAX_READABLE = 8`） | 新しい任意データを含むファイルだけ版を上げ、旧アプリが誤読しないようにする |
+| 機種カタログ | `CATALOG_VERSION`（現在 2026.11.1） | 収録機種・値を変えたとき |
 | 3D アセット | `ASSET_VERSION`（現在 2026.11.0） | 3D の形を変えたとき（表示だけに影響） |
-| シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.6` | 運航の計算を変えたとき |
+| シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.8` | 運航の計算を変えたとき |
 
 ### 版の方針（Phase 11 で明文化。詳細は [22](22_geometry_architecture.md) §7）
 
@@ -44,7 +44,7 @@
   以前に漏れた運航を記録したシナリオの結果は、同じ版の表記のまま再実行すると結果が変わる。
 - `SIM_MODEL_VERSION` は **既存の（現行版のレイアウトで表現できる）レイアウトの運航結果が変わるときだけ** 上げる。上げると保存済みの運航状態は復元されず、建設モードで開く。
   この規則はゴールデンで機械的に守る: 運航ゴールデンは、版を上げずに内容を変える再採取を拒否する（docs/22 §5）。
-- `skyport-sim-10.1` では航空会社別ホーム優先とバスゲート選択を統一し、`skyport-sim-10.2` では通常生成グループの約 5% に決定的な段差なし経路需要を割り当てた。`skyport-sim-10.3` を経て、`skyport-sim-10.4` ではフェーズ 1 の不具合修正（欠航便の手荷物の終端処理など。docs/42 §5.1）を反映した。`skyport-sim-10.5` では 5-16 T5（旅客の実移動: ポータルに接続した交通施設とターミナル入口/出口の間を PaxGroup が実際に歩く `accessWalk`）を反映し、ゴールデンを再取得した。`skyport-sim-10.6` では羽田・成田就航の実在航空会社 20 社のカタログ追加と SK（架空のスカイライン航空）から実在の SAS（スカンジナビア航空）への置換により、market あり会社の提案列と会社データを含む運航フィンガープリント 2 件（city core / sample airport）が変わったため版を上げ、ゴールデンとフィンガープリントを再取得した。**現在の `SIM_MODEL_VERSION` は `skyport-sim-10.6`**。ターミナル間連絡設備・垂直移動設備の時間当たり能力より大きい旅客グループは、複数の時間帯に分けて通路へ入る。10.2 以前の進行中シミュレーションは復元せず建設モードで開く。レイアウト・会社・過去の日報は保持する。同一モデルの保存で `airlineStandHomes` が欠けている場合は空の当日割当に移行する。
+- `skyport-sim-10.1` では航空会社別ホーム優先とバスゲート選択を統一し、`skyport-sim-10.2` では通常生成グループの約 5% に決定的な段差なし経路需要を割り当てた。`skyport-sim-10.3` を経て、`skyport-sim-10.4` ではフェーズ 1 の不具合修正（欠航便の手荷物の終端処理など。docs/42 §5.1）を反映した。`skyport-sim-10.5` では 5-16 T5（旅客の実移動: ポータルに接続した交通施設とターミナル入口/出口の間を PaxGroup が実際に歩く `accessWalk`）を反映し、ゴールデンを再取得した。`skyport-sim-10.6` では羽田・成田就航の実在航空会社 20 社のカタログ追加と SK（架空のスカイライン航空）から実在の SAS（スカンジナビア航空）への置換により、market あり会社の提案列と会社データを含む運航フィンガープリント 2 件（city core / sample airport）が変わったため版を上げ、ゴールデンとフィンガープリントを再取得した。`skyport-sim-10.7` では動く歩道（ターミナル内エリア種別 `movingWalkway`）と 5-25 Work Order を反映した。`skyport-sim-10.8` では 5-19 のシミュレーション粒度の既定を集約方式（`serviceGranularity: 'aggregate'`）へ変更した（店舗のある空港では同一セーブ再開後の結果が変わりうるため版上げ。既定変更の影響は legacyFingerprint で不変を確認済み）。**現在の `SIM_MODEL_VERSION` は `skyport-sim-10.8`**。ターミナル間連絡設備・垂直移動設備の時間当たり能力より大きい旅客グループは、複数の時間帯に分けて通路へ入る。10.2 以前の進行中シミュレーションは復元せず建設モードで開く。レイアウト・会社・過去の日報は保持する。同一モデルの保存で `airlineStandHomes` が欠けている場合は空の当日割当に移行する。
 - レイアウトの版を上げると、`exportLayout` と `serializeProject` の出力（`schemaVersion` を含む）が変わる。ゴールデンには `schemaVersion` を除いた版非依存のハッシュがあり、
   版更新の前後でこれが一致すれば、版番号以外の変化はない。
 
@@ -82,6 +82,21 @@
 
 - 版 6 未満を名乗るファイルに版 6 の項目がある場合は拒否する（フェーズ 4 の項目を含む旨のメッセージ）。
 - `SCHEMA_VERSION`・`SIM_MODEL_VERSION` は上げない（任意項目の追加だけ・新機能は opt-in）。
+
+### 版 7（5-25 Work Order・動く歩道。実装済み）
+
+次のどちらかを含むときだけ `formatVersion 7`（`versions.format` も 7）で書く。**どちらも含まないプロジェクトは従来の版（1〜6）のまま書き、バイト列は変わらない**（`tests/unit/workOrders.test.ts` で境界を確認）。
+
+| 項目 | 場所 | 備考 |
+|---|---|---|
+| エリア種別 `movingWalkway`（動く歩道） | `layout.terminalAreas`（シナリオのレイアウトを含む） | `layoutUsesFormat7` で判定 |
+| 会社の `workOrders`（夜間 Work Order の台帳） | `company`（シナリオ・運航中の会社を含む） | `companyUsesFormat7` で判定。キーを持つだけで版 7 になる |
+
+- 版 7 の導入と同時に `SIM_MODEL_VERSION` を 10.7 へ上げた（動く歩道の歩行速度と Work Order の資産閉鎖が運航結果に影響するため）。
+
+### 版 8（ラウンジ。実装済み、PR #51）
+
+レイアウト（シナリオのレイアウトを含む）にエリア種別 `lounge`（ラウンジ、`layoutUsesFormat8`）を含むときだけ `formatVersion 8`（`versions.format` も 8）で書く。含まないプロジェクトは従来の版（1〜7）のまま書く。ラウンジは席数（`props.seats`）を持つターミナル内エリアで、保存形式以外の版（`SCHEMA_VERSION` 等）は上げない。
 
 ## 機種データの固定（カタログ更新との互換性）
 

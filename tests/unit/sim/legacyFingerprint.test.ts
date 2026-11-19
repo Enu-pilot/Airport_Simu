@@ -80,8 +80,13 @@ const BASELINE: Record<string, string> = {
   // 2026-11-19 再採取（Phase 6 / 5-21 T5）: 日報へ工程ピークのターミナル別内訳
   // （processPeakByTerminal）を追加したため同じ 2 件のみ変化。代入を無効化すると
   // 前基準値と完全一致することを確認済みで、運航は無変更。
-  'city core 3 days (no nightOps)': '9b02c51c90e3b2cb2d60393cf3f5e5f5b177a82e6dc90bfb3343886b6f527bfe',
-  'sample airport 1 day': 'a4f0b3ed1a85d0d5c283ab9d73a888bfe4afaccd2a0c9488372effdd038a4b24',
+  // 2026-11-20 再採取（ユーザー承認済み）: 5-21/5-23 の日報内容変更（processPeak の
+  // ローリング60分化 + peakStartMin + 新工程 restroom/apronBus/access、doorToDoor の
+  // stepWaits + 外部境界計測）により、会社データを含む 2 件のみ変化。JSON 全体差分で
+  // 帰属を再証明済み: city core の差分 102 件・sample の差分 31 件すべてが reports の
+  // processPeak / processPeakByTerminal / doorToDoor 内に限定され、SimState はバイト同一。
+  'city core 3 days (no nightOps)': '2353f4b91c3c6557be55c2d7ca10161b1f3b23b898a188ffd4e26ba19163ca10',
+  'sample airport 1 day': 'c93e2ae8b9393f145254d3364bd506a88210d19b8f4600c34c205259f8a05732',
 };
 
 describe('legacyFingerprint: taxiMode / nightOps なしの運航は T0 の基準値と一致', () => {

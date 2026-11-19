@@ -13,6 +13,7 @@ import {
 } from './busRules';
 import { basePos, sendUnit } from './ground';
 import { finishBusBoarded, groupsOfFlight, missGroups, releaseBusArrival, returnToBusQueue } from './passengers';
+import { recordSimpleProcess } from './processStats';
 import type { Simulation } from './simulation';
 import { EVENT_LOG_LIMIT, PAX_FINAL_STATES, type Aircraft, type ApronBusRuntime, type BusTrip, type Flight, type GroundUnit, type PaxGroup, type SimState } from './types';
 
@@ -385,6 +386,8 @@ function completeTrip(sim: Simulation, t: BusTrip): void {
   const bus = state.bus!;
   bus.stats.trips++;
   bus.stats.pax += t.pax;
+  // 5-21: ランプバス工程の実績（運行完了時点で運んだ人数。能力は算出しない）
+  recordSimpleProcess(state, 'apronBus', t.pax, state.now, sim.ctx.terminal.areas[t.gateId]?.terminalId ?? '');
   onBusTrip(sim);
   t.phase = 'done';
   t.phaseSince = state.now;

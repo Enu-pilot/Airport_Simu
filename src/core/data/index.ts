@@ -24,7 +24,8 @@ export interface Catalog {
 
 function buildDestination(input: DestinationInput, countries: Map<string, CountryDef>): DestinationDef {
   const country = countries.get(input.countryId);
-  const demand = { business: input.demand?.business ?? 1.0, leisure: input.demand?.leisure ?? 1.0, cargo: input.demand?.cargo ?? 1.0 };
+  // docs/46: 必須需要 essential は business を移行元とする（essential ?? business ?? 1 の互換読み込み）
+  const demand = { business: input.demand?.business ?? 1.0, essential: input.demand?.essential ?? input.demand?.business ?? 1.0, leisure: input.demand?.leisure ?? 1.0, cargo: input.demand?.cargo ?? 1.0 };
   const unlock = { ...(input.unlock ?? {}) };
   return {
     id: input.id,
@@ -37,6 +38,9 @@ function buildDestination(input: DestinationInput, countries: Map<string, Countr
     cargoDemand: demand.cargo,
     ...(unlock.minRating !== undefined ? { minimumAirportRating: unlock.minRating } : {}),
     population: input.population,
+    catchmentPopulation: input.catchmentPopulation ?? null,
+    aviationDependency: input.aviationDependency ?? 1.0,
+    seasonalityProfile: input.seasonalityProfile ?? null,
     demand,
     congestion: input.congestion ?? 0.3,
     unlock,

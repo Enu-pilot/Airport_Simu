@@ -402,7 +402,7 @@ export type PaxState =
 
 export const PAX_FINAL_STATES: readonly PaxState[] = ['boarded', 'exited', 'missed', 'cancelled'];
 
-export type PaxStep = 'checkIn' | 'security' | 'shop' | 'restroom' | 'gate' | 'claim' | 'exit' | 'emigration' | 'immigration' | 'customs' | 'transferSecurity';
+export type PaxStep = 'checkIn' | 'security' | 'shop' | 'lounge' | 'restroom' | 'gate' | 'claim' | 'exit' | 'emigration' | 'immigration' | 'customs' | 'transferSecurity';
 export type MissReason = 'late' | 'unreachable' | 'facilityClosed' | 'noGate' | 'noBus' | 'cancelled';
 
 export interface PaxGroup {
@@ -420,7 +420,7 @@ export interface PaxGroup {
    * 空港運営モードのカテゴリ集約で店舗利用中（5-19 T12）。詳細方式では常に欠落する。
    * kind は収支記録用（shop=retail科目 / restaurant=dining科目）、key は集約カウンタのキー。
    */
-  aggService?: { kind: 'shop' | 'restaurant'; key: string };
+  aggService?: { kind: 'shop' | 'restaurant' | 'lounge'; key: string };
   count: number;
   bags: number;
   state: PaxState;

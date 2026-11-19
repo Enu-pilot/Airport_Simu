@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { recordJourneyFinish, recordJourneyStepFreeMiss, takeJourneyStats, weightedPercentile } from '../../src/core/sim/journeyStats';
+import { recordJourneyFinish, recordJourneyStart, recordJourneyStepFreeMiss, recordStepWait, takeJourneyStats, weightedPercentile } from '../../src/core/sim/journeyStats';
 import { createSandboxCompany } from '../../src/core/economy/company';
 import { createStarterAirfield } from '../../src/core/sample/starterAirfield';
 import { createSimulation, stepSimulation } from '../../src/core/sim/simulation';
@@ -27,6 +27,27 @@ describe('5-23 Door-to-Door KPI の集計', () => {
     expect(s!.transfer).toMatchObject({ p50Sec: 500, pax: 10 });
     expect(s!.stepFree).toEqual({ completed: 10, missed: 5, rate: 0.667 });
     expect(takeJourneyStats(state)).toBeNull();
+  });
+
+  it('外部境界（5-23 残件）: 出発の所要は記録した出現時刻から測り、アクセス移動を含む', () => {
+    const state = { now: 10000 } as SimState;
+    // 出現は 8000。その後アクセス遅延で appearAt が 9000 に後ろ倒しされても起点は 8000
+    recordJourneyStart(state, 'g-ext', 8000);
+    const g = { id: 'g-ext', appearAt: 9000, count: 4, direction: 'departure' } as PaxGroup;
+    recordJourneyFinish(state, g);
+    const s = takeJourneyStats(state);
+    expect(s!.departure).toMatchObject({ p50Sec: 2000, pax: 4 });
+  });
+
+  it('工程別パーセンタイル（5-23 残件）: 工程ごとの待ちを分位点で返す', () => {
+    const state = { now: 10000 } as SimState;
+    recordStepWait(state, 'checkIn', 600, 100);
+    recordStepWait(state, 'checkIn', 3600, 10);
+    recordStepWait(state, 'security', 120, 50);
+    recordJourneyFinish(state, { appearAt: 9000, count: 10, direction: 'departure' } as PaxGroup);
+    const s = takeJourneyStats(state);
+    expect(s!.stepWaits!.checkIn).toMatchObject({ p50Sec: 600, p95Sec: 3600, pax: 110 });
+    expect(s!.stepWaits!.security).toMatchObject({ p50Sec: 120, pax: 50 });
   });
 });
 

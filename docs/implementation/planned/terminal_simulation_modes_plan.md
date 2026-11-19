@@ -305,7 +305,7 @@
 | 対象 | 状態 | 根拠 |
 |---|---|---|
 | 店舗・飲食のデータモデル | 既存 | 施設（Facility）ではなく TerminalArea の種別 `shop` / `restaurant`。能力は props `capacity`（既定 shop 8 / restaurant 10）、区域は departure 既定 |
-| ラウンジ | **未実装** | エリア種別に lounge は存在しない。カタログ追加は施設種別の新設になるため本タスク範囲外とし、集約 profile では `notConfigured` として明示する |
+| ラウンジ | **実装済み（PO 決定 2A、PR #51）+ 運営モード接続済み（2026-11-19、未push）** | エリア種別 lounge を新設し（保存形式 8）、運営モード（AirportDay）の滞留先にも接続した: 出発旅客は保安後に確率（BALANCE.lounge.visitProb）と余裕（minSlackMin）でラウンジへ寄り、搭乗開始まで滞留する。詳細方式は実エリアへ移動し席（人数）で収容判定、集約方式はカテゴリ単位で席占有を数え、満席時は待合へフォールバックする。利用実績は両方式とも `${terminalId}|lounge` に記録する（売上なし）。満足度係数（satisfactionPerUserHour / satisfactionCapPoints）は暫定値のままで、航空会社の満足度式への接続と係数の確定は PO 判断待ち。テスト loungeOps 5/5、legacyFingerprint 7/7（ラウンジのない空港では乱数列・結果不変） |
 | 待合 | 既存（別カテゴリ） | `waiting` エリアは搭乗口待合のアンカーであり購買選択の対象ではない。両モードで滞留・収容の別カテゴリとして扱う |
 | PaxGroup の店舗立寄り | 既存（運営側が個別方式） | `planShop` が店舗エリア個別に経路探索し、施設キュー（窓口数 = `areaServerCount`）で処理。滞在 shop 480s / restaurant 1200s、売上は `onShopDone` 経由で retail 15 / dining 22（人あたり）。立寄り条件: 余裕 ≥ `BALANCE.retail.minSlackSec`（40分）、見込み待ち ≤ 10分 |
 | 能力・日報の記録 | 既存 | 5-21 工程ピーク（processStats）・journeyStats が既存の記録経路。店舗別実績の記録は**なかった**（売上は台帳へ直接計上のみ） |

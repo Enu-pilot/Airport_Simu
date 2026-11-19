@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { addContract, createCompany, type CompanyState, type Contract } from '../../src/core/economy/company';
+import { addContract, createCompany, type CompanyState } from '../../src/core/economy/company';
 import { cityDemandCeiling, contractTransferShare, defaultCity, expectedLocalPassengers, expectedPassengers } from '../../src/core/economy/city';
 import { routeDemandSummary } from '../../src/core/economy/demand';
-import { planDayWithDemand, type PlannedFlight } from '../../src/core/economy/planning';
+import { planDayWithDemand } from '../../src/core/economy/planning';
 
 /**
  * 5-20 T8 の PO 判断（2026-11-18）:
  * - 都市の設定人口を引き上げ、需要上限が上位の格の旅客要件に届くようにする
  * - 乗継旅客は地元需要ではないので、都市需要上限の係数は地元分にだけ効かせる
+ *
+ * 2026-11-19 docs/46 §7.1-3 で市場モードの上限配分・最終スケーリングは廃止した。
+ * そのため市場モードの 2 テストは「上限で縮小されない」検証に置き換えた。
+ * 上限そのもの（cityDemandCeiling）と非市場経路の係数（expectedLocalPassengers）は
+ * 従来どおり残っており、このファイルの他のテストが引き続き固定する。
  */
 
 const base = { feeDiscount: 0, startDay: 0, endDay: 999, status: 'active' as const, offerExpiresDay: 0, window: 'any' as const };
@@ -62,7 +67,7 @@ describe('乗継旅客は都市需要上限の対象外（5-20 T8）', () => {
     expect(expectedLocalPassengers(off, 0)).toBeCloseTo(expectedPassengers(off, 0), 6);
   });
 
-  it('routeDemandSummary: 配分の母数は地元需要。乗継があると総需要は上限を超えてよい', () => {
+  it('routeDemandSummary（市場モード）: docs/46 で上限配分は廃止。乗継割合によらず潜在需要そのもの', () => {
     const mk = (share: number): CompanyState => {
       const c = createCompany('career', `xfer-summary-${share}`);
       c.city = defaultCity('regional');
@@ -79,15 +84,13 @@ describe('乗継旅客は都市需要上限の対象外（5-20 T8）', () => {
     const ceiling = cityDemandCeiling(defaultCity('regional'), 1);
     const withShare = routeDemandSummary(mk(0.5), 0, 1)!;
     const totalShare = [...withShare.values()].reduce((s, x) => s + x.demand, 0);
-    const localShare = [...withShare.values()].reduce((s, x) => s + x.demand * (1 - 0.5 / 2), 0);
-    expect(totalShare).toBeGreaterThan(ceiling * 1.1); // ハブ交通は地元上限を超える
-    expect(localShare).toBeLessThanOrEqual(ceiling * 1.001); // 地元分は上限以内
+    expect(totalShare).toBeGreaterThan(ceiling * 1.1); // 上限を超えても縮小されない
+    // 乗継割合は市場モードの需要配分に影響しない（上限の見積もりは非市場経路側だけの話）
     const noShare = routeDemandSummary(mk(0), 0, 1)!;
-    const totalPlain = [...noShare.values()].reduce((s, x) => s + x.demand, 0);
-    expect(totalPlain).toBeLessThanOrEqual(ceiling * 1.001); // 乗継なしは従来どおり総量が上限以内
+    for (const [id, info] of withShare) expect(noShare.get(id)!.demand).toBeCloseTo(info.demand, 6);
   });
 
-  it('planDayWithDemand（市場モデル）: 最終保護は地元分にだけ効き、乗継の源泉は残る', () => {
+  it('planDayWithDemand（市場モデル）: docs/46 で最終スケーリングは廃止。計画旅客は上限で縮まない', () => {
     const mk = (share: number): CompanyState => {
       const c = createCompany('career', `xfer-plan-${share}`);
       c.city = defaultCity('regional');
@@ -102,20 +105,14 @@ describe('乗継旅客は都市需要上限の対象外（5-20 T8）', () => {
       return c;
     };
     const ceiling = cityDemandCeiling(defaultCity('regional'), 1);
-    const shareOf = (c: CompanyState, f: PlannedFlight): number => {
-      const k: Contract | undefined = c.contracts[f.contractId];
-      return k ? contractTransferShare(c, k) : 0;
-    };
     const cShare = mk(0.5);
     const planShare = planDayWithDemand(cShare, 0, 1);
     const totalShare = planShare.flights.reduce((s, f) => s + f.arrPax + f.depPax, 0);
-    const localShare = planShare.flights.reduce((s, f) => s + f.arrPax * (1 - shareOf(cShare, f)) + f.depPax, 0);
-    expect(totalShare).toBeGreaterThan(ceiling * 1.1);
-    expect(localShare).toBeLessThanOrEqual(ceiling * 1.01);
+    expect(totalShare).toBeGreaterThan(ceiling * 1.1); // 旧最終保護があれば地元分は上限以下に縮む
     const cPlain = mk(0);
     const planPlain = planDayWithDemand(cPlain, 0, 1);
     const totalPlain = planPlain.flights.reduce((s, f) => s + f.arrPax + f.depPax, 0);
-    expect(totalPlain).toBeLessThanOrEqual(ceiling + planPlain.flights.length);
+    expect(totalPlain).toBeGreaterThan(ceiling * 1.1); // 乗継なしでも縮小されない
   });
 
   it('planDayWithDemand（市場なし）: 係数の分母が地元分になるため、乗継契約があると計画旅客が増える', () => {

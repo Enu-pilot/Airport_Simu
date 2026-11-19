@@ -10,7 +10,8 @@ import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt, reconcileDepart
 import { boardingAllowed } from './ground';
 import { applyBusArrival, applyBusDeparture, pickBusGate, stepBusBoarding } from './apronBus';
 import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './busRules';
-import { completeAggregateService, planAggregateShopVisit } from './serviceAggregate';
+import { completeAggregateService, completeLoungeStay, noteLoungeStayStart, planAggregateLoungeVisit, planAggregateShopVisit } from './serviceAggregate';
+import { isLoungeEligible, loungeSeats } from '../terminal/serviceProfile';
 import { gateMode } from '../model/gates';
 import { facilityTiles } from '../layout/footprint';
 import { TILE_M } from '../geometry/frames';
@@ -21,7 +22,7 @@ import { accessArrival, accessDeparture } from '../access/runtime';
 import { recordLinkUsage, unrecordLinkUsage } from './linkUsage';
 import { recordPortalPassage } from './portalUsage';
 import { isProcessStep, markProcessQueueJoin, recordProcessStart } from './processStats';
-import { recordJourneyFinish, recordJourneyStepFreeMiss } from './journeyStats';
+import { recordJourneyFinish, recordJourneyStart, recordJourneyStepFreeMiss } from './journeyStats';
 import { isRoutePending, markRoutePending, recordMissBreakdown, type MissBottleneck } from './missBreakdown';
 import type { Simulation } from './simulation';
 import {
@@ -132,6 +133,8 @@ export function serversOf(sim: Simulation, key: string): number {
   if (key.startsWith('gate:')) return sim.state.closures.gates.includes(key.slice('gate:'.length)) ? 0 : 1;
   const a = sim.ctx.layout.terminalAreas[key];
   if (!a || isClosed(sim.state, key)) return 0;
+  // ラウンジは窓口ではなく席が収容の単位（serviceProfile の能力定義と同じ）
+  if (a.kind === 'lounge') return loungeSeats(a.props);
   return areaServerCount(a.props);
 }
 
@@ -285,6 +288,8 @@ function registerGroup(state: SimState, g: PaxGroup): void {
   state.paxGroups[g.id] = g;
   state.activePax.push(g.id);
   (state.flightPax[g.flightId] ??= []).push(g.id);
+  // 5-23: 外部境界の起点（アクセス遅延で appearAt がずれる前の出現時刻）をサイドストアへ
+  recordJourneyStart(state, g.id, g.appearAt);
 }
 
 function groupsOf(state: SimState, flightId: string): PaxGroup[] {
@@ -532,6 +537,9 @@ function addGroup(
   // 店舗・飲食店があるターミナルでは、一部の旅客が出発区域で立ち寄る（時間に余裕があるときだけ）
   if (shopAreas(sim, terminalId).length > 0 && rng.next() < BALANCE.retail.shopVisitProb) steps.push('shop');
   if (rng.next() < RESTROOM_PROB) steps.push('restroom');
+  // ラウンジ（5-19 2A の運営モード接続）: 利用資格のあるラウンジがあるターミナルでのみ
+  // 乱数を消費する（ラウンジのない空港では従来の乱数列・結果を変えない）
+  if (loungeAreas(sim, terminalId).length > 0 && rng.next() < BALANCE.lounge.visitProb) steps.push('lounge');
   steps.push('gate');
   const id = nextId(state, 'pg');
   const g: PaxGroup = {
@@ -1089,6 +1097,10 @@ function planStep(sim: Simulation, g: PaxGroup): void {
     planShop(sim, g, closed);
     return;
   }
+  if (step === 'lounge') {
+    planLounge(sim, g, closed);
+    return;
+  }
   const kind = STEP_KIND[step]!;
   const ownIds = (model.byTerminal[g.terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === kind);
   // 候補は段階的に広げる: 自ターミナル → リンク複合体（サテライト対応）→ 乗継のみ全ターミナル（従来）。
@@ -1219,6 +1231,59 @@ function planShop(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
   }
   g.stepIndex++;
   planStep(sim, g);
+}
+
+/**
+ * 利用資格のあるラウンジのエリア ID（自ターミナル＋サービス複合体）。
+ * 資格の正本は serviceProfile の isLoungeEligible（保安後の出発区域・運用中・席数あり）。
+ */
+function loungeAreas(sim: Simulation, terminalId: string | null): string[] {
+  if (!terminalId) return [];
+  const terminals = new Set(serviceTerminalIds(sim, terminalId));
+  return sim.ctx.service.facilities
+    .filter((f) => terminals.has(f.terminalId) && isLoungeEligible(f))
+    .map((f) => f.areaId);
+}
+
+/**
+ * ラウンジへの滞留（5-19 2A の運営モード接続）。購買ではなく搭乗までの滞留先として扱い、
+ * 滞在は搭乗開始まで。余裕が BALANCE.lounge.minSlackMin 未満、満席、経路なしの場合は
+ * ステップを飛ばして従来どおり待合/ゲートで待つ（詳細モードのフォールバックと同じ）。
+ */
+function planLounge(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
+  const { state } = sim;
+  const f = state.flights[g.flightId]!;
+  const slack = f.estimated - boardingLeadSec(sim, f) - state.now;
+  if (sim.serviceGranularity === 'aggregate') {
+    const handled = planAggregateLoungeVisit(sim, g, closed, slack, () => {
+      g.stepIndex++;
+      planStep(sim, g);
+    });
+    if (handled) return;
+  }
+  const skip = (): void => {
+    g.stepIndex++;
+    planStep(sim, g);
+  };
+  if (slack < BALANCE.lounge.minSlackMin * 60) {
+    skip();
+    return;
+  }
+  const goals = new Map<string, number>();
+  for (const id of loungeAreas(sim, g.terminalId)) {
+    if (closed.has(id)) continue;
+    const a = sim.ctx.layout.terminalAreas[id];
+    if (!a) continue;
+    const load = facilityLoad(state, id);
+    // 席は人数ベースで数える（詳細モードの席占有と同じ）。空きがグループ人数未満なら対象外
+    if (loungeSeats(a.props) - load.inService - load.queued >= g.count) goals.set(id, 0);
+  }
+  const route = goals.size > 0 ? findPaxRoute(sim.ctx.terminal, { from: g.area!, goals, closed, uncleared: uncleared(g), stepFree: g.stepFree }) : null;
+  if (route) {
+    startRoute(sim, g, route.areas);
+    return;
+  }
+  skip();
 }
 
 const uncleared = (g: PaxGroup): boolean => g.direction === 'departure' && !g.securityCleared;
@@ -1387,6 +1452,7 @@ function arrive(sim: Simulation, g: PaxGroup): void {
     case 'checkIn':
     case 'security':
     case 'shop':
+    case 'lounge':
     case 'restroom':
     case 'emigration':
     case 'immigration':
@@ -1500,6 +1566,8 @@ function stepFacility(sim: Simulation, key: string): void {
     if (area?.kind === 'customs') (g.ciq ??= {}).customs = true;
     if (area?.kind === 'checkIn') checkInBags(sim, g, key);
     if (area?.kind === 'shop' || area?.kind === 'restaurant') onShopDone(sim, g, area.kind);
+    // ラウンジ滞在の完了（実績はカテゴリ単位の利用記録へ。売上は持たない）
+    if (area?.kind === 'lounge') completeLoungeStay(sim, g);
     g.stepIndex++;
     planStep(sim, g);
   }
@@ -1539,6 +1607,10 @@ function stepFacility(sim: Simulation, key: string): void {
     // 5-21: 工程別の処理実績（最混雑 60 分の集計用）
     const step = g.steps[g.stepIndex];
     if (isProcessStep(step)) recordProcessStart(state, step, g.id, g.count, g.waitSec, state.now, sim.ctx.terminal.areas[key]?.terminalId ?? '');
+    // ラウンジ滞在の開始（実績記録。カテゴリキーは所属ターミナル単位）
+    if (sim.ctx.terminal.areas[key]?.kind === 'lounge') {
+      noteLoungeStayStart(sim, g, `${sim.ctx.terminal.areas[key]!.terminalId}|lounge`);
+    }
   }
 }
 
@@ -1552,6 +1624,11 @@ function serviceSec(sim: Simulation, key: string, g: PaxGroup): number {
   if (a.kind === 'restroom') return RESTROOM_SEC;
   if (a.kind === 'shop') return BALANCE.retail.shopSec;
   if (a.kind === 'restaurant') return BALANCE.retail.restaurantSec;
+  // ラウンジの滞在は搭乗開始まで（最低 30 秒。搭乗開始を過ぎていれば即完了）
+  if (a.kind === 'lounge') {
+    const f = sim.state.flights[g.flightId]!;
+    return Math.max(30, f.estimated - boardingLeadSec(sim, f) - sim.state.now);
+  }
   return withRng(sim.state, (rng) => Math.max(1, Math.round(g.count * perPaxSec(sim, key) * (0.8 + rng.next() * 0.4))));
 }
 

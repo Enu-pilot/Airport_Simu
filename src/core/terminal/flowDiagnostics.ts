@@ -23,6 +23,7 @@ const STAGE_LABEL: Record<PaxStep, string> = {
   checkIn: 'チェックイン',
   security: '保安検査',
   shop: '店舗',
+  lounge: 'ラウンジ',
   restroom: 'トイレ',
   gate: '搭乗口',
   claim: '手荷物受取',

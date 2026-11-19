@@ -1,6 +1,6 @@
 import { AIRCRAFT_TYPES } from '../sim/aircraftTypes';
 import { CATALOG as AIRCRAFT_CATALOG } from '../aircraft/catalog';
-import type { AirlineInput, CountryDef, DestinationInput, RegionDef } from './types';
+import { SEASONALITY_PROFILES, type AirlineInput, type CountryDef, type DestinationInput, type RegionDef } from './types';
 
 /**
  * 登録データの検証（3-03）。文の形式は固定: `[<種別> <id>] <field>: <理由>（<期待>）`。
@@ -82,9 +82,14 @@ export function validateCatalog(raw: CatalogRaw): CatalogIssue[] {
     range('就航都市', d.id, 'population', d.population, 1_000, 40_000_000);
     if (d.demand) {
       if (d.demand.business !== undefined) range('就航都市', d.id, 'demand.business', d.demand.business, 0.1, 3.0);
+      if (d.demand.essential !== undefined) range('就航都市', d.id, 'demand.essential', d.demand.essential, 0.1, 3.0);
       if (d.demand.leisure !== undefined) range('就航都市', d.id, 'demand.leisure', d.demand.leisure, 0.1, 3.0);
       if (d.demand.cargo !== undefined) range('就航都市', d.id, 'demand.cargo', d.demand.cargo, 0.1, 3.0);
     }
+    // docs/46 の新項目: 範囲外と未定義プロファイルを検出する（受入条件 4）
+    if (d.catchmentPopulation !== undefined) range('就航都市', d.id, 'catchmentPopulation', d.catchmentPopulation, 1_000, 50_000_000);
+    if (d.aviationDependency !== undefined) range('就航都市', d.id, 'aviationDependency', d.aviationDependency, 0.5, 1.0);
+    if (d.seasonalityProfile !== undefined && !SEASONALITY_PROFILES.includes(d.seasonalityProfile)) push('就航都市', d.id, 'seasonalityProfile', `プロファイル "${String(d.seasonalityProfile)}" は未定義です`, SEASONALITY_PROFILES.join(' / '));
     if (d.congestion !== undefined) range('就航都市', d.id, 'congestion', d.congestion, 0, 1);
     if (d.passengerDemand !== undefined) range('就航都市', d.id, 'passengerDemand', d.passengerDemand, 0.3, 2.0);
     if (d.legacy && d.passengerDemand === undefined) push('就航都市', d.id, 'passengerDemand', 'legacy 項目には必須です', '0.3〜2.0');

@@ -9,6 +9,8 @@ export const DEFAULT_SERVICE_SEC_PER_PAX: Partial<Record<TerminalAreaKind, numbe
   immigration: 45,
   customs: 20,
   transferSecurity: 15,
+  // トイレ（5-21）: 施設処理 RESTROOM_SEC/2 = 90 秒/人 → 1 fixture あたり 40 人/時
+  restroom: 90,
 };
 
 export function serviceSecPerPax(kind: TerminalAreaKind, props: Readonly<Record<string, unknown>>): number {
