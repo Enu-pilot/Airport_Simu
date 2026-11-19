@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createCompany, generateCargoOffers, generateOffers, type CompanyState, type Contract } from '../../src/core/economy/company';
+import { addContract, createCompany, generateCargoOffers, generateOffers, type CompanyState, type Contract } from '../../src/core/economy/company';
 import { defaultCity } from '../../src/core/economy/city';
 import { defaultGame } from '../../src/core/economy/game';
 import { initialGoals, type Tier } from '../../src/core/economy/goals';
-import { routeCargoDemandM3 } from '../../src/core/economy/cargo';
-import { airlineDef, destinationDef, routeAvailability } from '../../src/core/economy/registry';
+import { isLargeFreighter, routeCargoDemandM3 } from '../../src/core/economy/cargo';
+import { airlineDef, airlinesFor, destinationDef, destinationsFor, routeAvailability } from '../../src/core/economy/registry';
 import { AIRCRAFT_TYPES } from '../../src/core/sim/aircraftTypes';
 
 const OPERABLE = Object.keys(AIRCRAFT_TYPES);
@@ -106,6 +106,54 @@ describe('CARGO-08 国際貨物の格ゲート（実検証）', () => {
       if (tier === 3) expect(cargoIntl).toBe(0);
       else expect(cargoIntl).toBeGreaterThanOrEqual(3);
     }
+  });
+});
+
+describe('CARGO-08 格 5「取扱規模拡張」: 大型貨物専用機の解放', () => {
+  it('前提: 大型貨物機の判定は B747F / B777F 系だけを指し、B767-300F と旅客機は含まない', () => {
+    expect(isLargeFreighter('B747-400F')).toBe(true);
+    expect(isLargeFreighter('B747-8F')).toBe(true);
+    expect(isLargeFreighter('B777F')).toBe(true);
+    expect(isLargeFreighter('B767-300F')).toBe(false);
+    expect(isLargeFreighter('B777-300ER')).toBe(false);
+  });
+
+  // 大型貨物機を持つ航空会社（NH / KE / CX 等）は market スコープ側にいるため、
+  // この検証は market を有効にした会社で掃引する（legacy だけでは候補が存在しない）
+  const sweepMarket = (tier: Tier): Contract[] => {
+    const all: Contract[] = [];
+    for (let s = 0; s < SEEDS; s++) {
+      const c = cargoCareer(tier, `cargo-large-${tier}-${s}`, 80);
+      c.market = { version: 1, routes: {} };
+      // 提案枠は 1 日 2 件で、カタログ順で先行する貨物適格会社 SK・NP が埋めてしまう。
+      // 次に貨物適格なのは NH（B777F / B767-300F を保有）なので、SK・NP だけに
+      // 全目的地の有効契約を与えて「提案先なし」にし、NH の提案を観測する
+      for (const a of airlinesFor(c)) {
+        if (a.id !== 'SK' && a.id !== 'NP') continue;
+        for (const d of destinationsFor(c)) {
+          addContract(c, { airlineId: a.id, destinationId: d.id, typeId: 'B767-300F', perDay: 1, window: 'any', feeDiscount: 0, startDay: 0, endDay: 9999, status: 'active', kind: 'cargo', offerExpiresDay: 9999 });
+        }
+      }
+      for (let d = 0; d < DAYS; d++) {
+        c.day = d;
+        for (const o of generateCargoOffers(c, OPERABLE, 'JP', true)) {
+          all.push(o);
+          o.status = 'expired';
+        }
+      }
+    }
+    return all;
+  };
+
+  it('格 4: 大型貨物専用機を使う提案は 1 件も出ない（market・評価 80 の掃引）', () => {
+    const offers = sweepMarket(4);
+    expect(offers.length).toBeGreaterThan(0);
+    expect(offers.filter((o) => isLargeFreighter(o.typeId))).toEqual([]);
+  });
+
+  it('格 5: 大型貨物専用機を使う提案が実際に出る', () => {
+    const offers = sweepMarket(5);
+    expect(offers.filter((o) => isLargeFreighter(o.typeId)).length).toBeGreaterThanOrEqual(1);
   });
 });
 

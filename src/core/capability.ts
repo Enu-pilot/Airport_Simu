@@ -4,6 +4,7 @@ import type { CompanyState, DailyReport } from './economy/company';
 import type { SimContext } from './sim/context';
 import { BALANCE } from './economy/balance';
 import { towerCapacityPerHour } from './safety';
+import { verifyPortalAccess } from './terminal/networkGraph';
 
 /**
  * Phase 6 / F6-01: 共通能力データ契約。
@@ -85,12 +86,16 @@ export function readingFromCapacityMetric(m: CapacityMetric, subjectId: string, 
  * 能力式が定義されている種別だけ理論能力を返し、それ以外は未算出として理由を返す。
  * 有効能力は稼働状態のみを反映する（接続・人員・供給の減額源が無い種別では理論と同値）。
  */
-export function facilityCapability(f: Facility): CapabilityReading {
+export function facilityCapability(f: Facility, opts?: { portalUnreachable?: boolean }): CapabilityReading {
   const base = { domain: 'facility', subjectId: f.id, label: f.name, demand: null, actual: null };
   const buildState = STATE_FROM_BUILD[f.buildState] ?? 'operational';
   const finish = (unit: string, theoretical: number | null, basis: string): CapabilityReading => {
     if (theoretical === null) {
       return { ...base, unit, theoretical: null, effective: null, state: 'uncomputed', uncomputedReason: basis, basis };
+    }
+    // 未接続（ポータル経路が到達不能）: 理論能力は保持し、有効能力だけを 0 にする（docs/45 §4.7 の状態区別）
+    if (buildState === 'operational' && opts?.portalUnreachable) {
+      return { ...base, unit, theoretical, effective: 0, state: 'disconnected', basis: `${basis}。ポータル接続が到達不能なため有効能力 0（terminal/networkGraph.ts の verifyPortalAccess）` };
     }
     const effective = buildState === 'operational' ? theoretical : 0;
     return {
@@ -139,9 +144,14 @@ export function facilityCapability(f: Facility): CapabilityReading {
   }
 }
 
-/** レイアウト内の全施設の能力（未算出の施設も状態として含む） */
+/** レイアウト内の全施設の能力（未算出の施設も状態として含む）。ポータル接続の到達性も減額源として反映する */
 export function layoutCapabilities(layout: AirportLayout): CapabilityReading[] {
-  return Object.values(layout.facilities).map((f) => facilityCapability(f));
+  const portal = new Map(verifyPortalAccess(layout).map((s) => [s.facilityId, s]));
+  return Object.values(layout.facilities).map((f) => {
+    const s = portal.get(f.id);
+    const portalUnreachable = s !== undefined && (s.toEntrance === 'unreachable' || s.fromExit === 'unreachable');
+    return facilityCapability(f, { portalUnreachable });
+  });
 }
 
 /**

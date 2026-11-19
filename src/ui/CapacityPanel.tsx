@@ -148,7 +148,7 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
         const readings = [...layoutCapabilities(layout), ...overnightReadings(company, ctx, company.day), maintenanceReading(layout)];
         const computed = readings.filter((r) => r.theoretical !== null);
         const uncomputedCount = readings.length - computed.length;
-        const attention = computed.filter((r) => r.state === 'zeroCapacity' || r.state === 'underConstruction');
+        const attention = computed.filter((r) => r.state === 'zeroCapacity' || r.state === 'underConstruction' || r.state === 'disconnected');
         return <>
           {attention.length > 0 && <div className="capacity-alert" data-testid="capacity-common-attention">
             <strong>要確認の施設</strong>
@@ -186,6 +186,9 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
           })}</tbody>
         </table></div>
         <p className="muted small">実績は 5-21 の工程ピーク（日報）から共通能力の形で表示しています。計画側の能力・需要とは時間窓が異なります。</p>
+        {latest?.morningReadiness && (
+          <p data-testid="capacity-morning-readiness">翌朝の出発可能機数（直近日報）: 予定 {latest.morningReadiness.scheduled} 機・確定可能 {latest.morningReadiness.ready} 機・リスクあり {latest.morningReadiness.atRisk} 機（06:00–10:00 の滞泊便。リスクは整備枠に入らなかった周期整備対象機とスポット閉鎖中の機）</p>
+        )}
       </section>;
     })()}
     <section>

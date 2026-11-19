@@ -44,6 +44,22 @@ export function airlineCargoEligible(airlineId: string): boolean {
 }
 
 /**
+ * 大型貨物専用機の境界（CARGO-08 格 5「取扱規模拡張」、PO 承認 2026-11-19）。
+ * 貨物専用機（座席を持たない機種）のうち、主甲板＋下部貨物室の合計容積が
+ * 600 m³ 以上のものを大型とする。カタログ値では B767-300F が 438 m³、
+ * B747-400F 605 / B777F 653 / B747-8F 855 m³ で、この境界が両群を分ける。
+ * 旅客機のベリー貨物は対象外（専用機だけを数える）。
+ */
+export const LARGE_FREIGHTER_MIN_M3 = 600;
+
+/** その機種が格 5 で解放される大型貨物専用機か（カタログに無い機種は false） */
+export function isLargeFreighter(typeId: string): boolean {
+  const model = AIRCRAFT_MODELS.find((m) => m.id === typeId);
+  if (!model || model.defaultSeats !== 0) return false;
+  return (model.cargoM3.value ?? 0) >= LARGE_FREIGHTER_MIN_M3;
+}
+
+/**
  * 機種の下部貨物室容積 (m3、CARGO-03)。カタログに出典付きの値がある場合だけ返す。
  * 未設定の機種は null（未算出）で、推定はしない（docs/16 のデータ品質ルール）。
  * これは旅客便のベリー容量であり、貨物専用機の主甲板容量は CARGO-02 以降で扱う。

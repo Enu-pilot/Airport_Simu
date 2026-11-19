@@ -202,7 +202,41 @@ export function engineerCount(sim: Simulation): number {
 
 export interface Phase4SettleResult {
   maintenance?: { checked: number; overdue: number; faults: number; techCancelled: number };
+  /** 翌朝の出発可能機数（F6-11、PO 承認 2026-11-19）。朝の窓に出発予定がある日だけ */
+  readiness?: { scheduled: number; ready: number; atRisk: number };
   events: string[];
+}
+
+/** 翌朝の出発窓（決済時点 = 06:00 から 4 時間、朝の始発の波と対応させる） */
+export const MORNING_WINDOW_SEC = 4 * 3600;
+
+/**
+ * 翌朝の出発可能機数（F6-11）。夜間滞泊した機材で翌朝の窓（06:00–10:00）に出発が
+ * 予定されている便を数え、確定可能とリスクありに分ける。
+ * - 確定可能: 周期整備の対象外か、今夜の整備枠で処理できた所属機で、スポットが閉鎖されていない
+ * - リスクあり: 整備枠に入らなかった整備対象機（不具合は確率判定のため、ここでは確率を予測しない）、
+ *   またはスポットが閉鎖されている機
+ * 故障の抽選（settlePhase4 の (3)）より前に数えるため、予定は抽選結果に左右されない。
+ */
+export function morningReadiness(sim: Simulation, uncheckedDueBasedIds: ReadonlySet<string>): { scheduled: number; ready: number; atRisk: number } {
+  const { state } = sim;
+  const from = state.now;
+  const to = from + MORNING_WINDOW_SEC;
+  let scheduled = 0;
+  let ready = 0;
+  let atRisk = 0;
+  for (const ac of Object.values(state.aircraft)) {
+    if (!(PARKED_STATES as readonly string[]).includes(ac.state)) continue;
+    const dep = state.flights[ac.departureFlightId];
+    if (!dep || dep.direction !== 'departure' || dep.overnight !== true || dep.status !== 'scheduled') continue;
+    if (dep.scheduled < from || dep.scheduled >= to) continue;
+    scheduled++;
+    const maintenanceRisk = dep.basedAircraftId !== undefined && uncheckedDueBasedIds.has(dep.basedAircraftId);
+    const standClosed = ac.standId !== null && state.closures.stands.includes(ac.standId);
+    if (maintenanceRisk || standClosed) atRisk++;
+    else ready++;
+  }
+  return { scheduled, ready, atRisk };
 }
 
 /**
@@ -216,6 +250,7 @@ export function settlePhase4(sim: Simulation, periodStart: number): Phase4Settle
   if (!c) return { events };
   const tech: TechResults = new Map();
   let maintenance: Phase4SettleResult['maintenance'];
+  let readiness: Phase4SettleResult['readiness'];
   if (featureOn(c, 'based') && c.basedFleet) {
     // (1) 当日の出発数を所属機へ ID 順に 1 回ずつ配る
     const based = Object.values(c.basedFleet).sort((a, b) => compareIds(a.id, b.id));
@@ -247,6 +282,12 @@ export function settlePhase4(sim: Simulation, periodStart: number): Phase4Settle
       b.lastCheckDay = c.day;
       checked++;
       checkedIds.add(b.id);
+    }
+    // 翌朝の出発可能機数（F6-11）: 不具合の抽選 (3) より前に、整備枠へ入らなかった対象機をリスクとして数える
+    {
+      const uncheckedDue = new Set(due.filter((b) => !checkedIds.has(b.id)).map((b) => b.id));
+      const r = morningReadiness(sim, uncheckedDue);
+      if (r.scheduled > 0) readiness = r;
     }
     // (3) 整備されなかった所属機の不具合を決める（専用の種）
     let faults = 0;
@@ -309,7 +350,12 @@ export function settlePhase4(sim: Simulation, periodStart: number): Phase4Settle
       }
     }
   }
-  return { ...(maintenance ? { maintenance } : {}), events };
+  // 拠点が無効な会社でも、滞泊便の翌朝出発は数える（整備リスクは無い）
+  if (!readiness) {
+    const r = morningReadiness(sim, new Set());
+    if (r.scheduled > 0) readiness = r;
+  }
+  return { ...(maintenance ? { maintenance } : {}), ...(readiness ? { readiness } : {}), events };
 }
 
 /** 拠点契約の条件のうち満たさないもの（§3.5 (a) 滞泊の能力 (b) 整備の能力 (c) 人員） */
