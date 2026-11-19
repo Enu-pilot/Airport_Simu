@@ -30,6 +30,7 @@ import { TILE_M } from '../model/catalog';
 import type { NetNode, TerminalAreaKind } from '../model/types';
 import { CONNECTOR_DETOUR, DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
 import { verifyPortalAccess } from '../terminal/networkGraph';
+import { terminalServiceComplexes } from '../terminal/serviceComplex';
 import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
@@ -895,6 +896,7 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
 
   const gatesByStand = new Map<string, string[]>();
   const facilities = sortedValues(layout.facilities);
+  const roadComplexes = terminalServiceComplexes(layout);
   for (const f of facilities) {
     const tiles = facilityTiles(f);
     const spec = FACILITY_SPECS[f.kind];
@@ -905,7 +907,11 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
     // 建物内の地上サービス設備は接続モデルがない間は能力に数えない（docs/34）。その旨を知らせる（5-09 / W-3）
     if (f.parentFacilityId && (f.kind === 'gseBase' || f.kind === 'baggageSort' || f.kind === 'fuelFarm' || f.kind === 'maintenance')) sink.add('INTERIOR_FACILITY_UNLINKED', [f.id], {}, f.origin);
     if (f.kind === 'terminal') {
-      if (!touches(tiles, publicRoad)) sink.add('TERMINAL_NO_ROAD', [f.id], {}, f.origin);
+      // 道路への接地もリンク複合体で判定する（サテライト対応）: 複合体のどれかが
+      // 一般道路に接していれば、旅客は本体側から出入りできるため警告しない
+      const complexTouchesRoad = (roadComplexes.get(f.id) ?? [f.id])
+        .some((tid) => layout.facilities[tid] && touches(facilityTiles(layout.facilities[tid]!), publicRoad));
+      if (!complexTouchesRoad) sink.add('TERMINAL_NO_ROAD', [f.id], {}, f.origin);
       const own = new Set(tiles.map((t) => tileKey(t.x, t.y)));
       const hasGate = facilities.some(
         (g) => g.kind === 'gate' && (neighborTiles(facilityTiles(g)).some((t) => own.has(tileKey(t.x, t.y))) || connectedTerminal(g, layout) === f.id),
@@ -1074,8 +1080,15 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     ['security', 'TERMINAL_NO_SECURITY'],
     ['baggageClaim', 'TERMINAL_NO_BAGGAGE_CLAIM'],
   ];
+  // 必須設備はリンク複合体（サテライト対応）で判定する: 運用中ターミナルリンクで結ばれた
+  // 本体が設備を持っていれば、衛星棟単体に無くても充足とする（旅客フローの解決と一致）。
+  // 実際に届くかはゲート単位の経路検査（GATE_UNREACHABLE 等）が別に担保する
+  const complexes = terminalServiceComplexes(layout);
+  const futureComplexes = terminalServiceComplexes(layout, { includeUnderConstruction: true });
   for (const t of terminals) {
-    const kinds = new Set((model.byTerminal[t.id] ?? []).map((id) => model.areas[id]!.kind));
+    const kinds = new Set(
+      (complexes.get(t.id) ?? [t.id]).flatMap((tid) => (model.byTerminal[tid] ?? []).map((id) => model.areas[id]!.kind)),
+    );
     for (const [kind, code] of required) if (!kinds.has(kind)) sink.add(code, [t.id], {}, t.origin);
 
     // 施設の個数ではなく、旅客が実際に使えるサービスと経路の連鎖を検査する。
@@ -1182,14 +1195,19 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
       continue;
     }
     if (!access?.terminalId) continue;
-    const ids = model.byTerminal[access.terminalId] ?? [];
-    const ofKind = (k: TerminalAreaKind) => ids.filter((id) => model.areas[id]!.kind === k);
+    // 入口・保安・出口・受取の候補はリンク複合体（サテライト対応）から取る。
+    // 現在モデルは運用中リンクの複合体、将来モデルは建設中リンクも含めた複合体で判定し、
+    // 旅客フロー（passengers.ts のサービス解決）と結論を一致させる。実際の到達可否は
+    // ここでも findPaxRoute（ゾーン・方向・工事状態を反映したグラフ）で確認する
+    const complexNow = complexes.get(access.terminalId) ?? [access.terminalId];
+    const complexFuture = futureComplexes.get(access.terminalId) ?? [access.terminalId];
+    const idsFor = (m: TerminalModel) => (m === futureModel ? complexFuture : complexNow).flatMap((t) => m.byTerminal[t] ?? []);
+    const ofKindIn = (m: TerminalModel, k: TerminalAreaKind) => idsFor(m).filter((id) => m.areas[id]!.kind === k);
     if (!access.boarding) {
       sink.add('GATE_NO_BOARDING_ACCESS', [g.id], {}, g.origin);
     } else {
-      const securities = ofKind('security');
-      const reachableIn = (m: TerminalModel) => ofKind('entrance').some((e) =>
-        securities.some(
+      const reachableIn = (m: TerminalModel) => ofKindIn(m, 'entrance').some((e) =>
+        ofKindIn(m, 'security').some(
           (sec) =>
             findPaxRoute(m, { from: e, goals: new Map([[sec, 0]]) }) &&
             findPaxRoute(m, { from: sec, goals: new Map([[access.boarding!, 0]]) }),
@@ -1205,17 +1223,22 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     if (!access.deplane) {
       sink.add('GATE_NO_ARRIVAL_ACCESS', [g.id], {}, g.origin);
     } else {
-      const exits = new Map(ofKind('exit').map((id) => [id, 0] as const));
+      const exitsOf = (m: TerminalModel) => new Map(ofKindIn(m, 'exit').map((id) => [id, 0] as const));
+      const exits = exitsOf(model);
       if (!findPaxRoute(model, { from: access.deplane, goals: exits })) {
-        if (futureModel && findPaxRoute(futureModel, { from: access.deplane, goals: exits })) sink.add('GATE_ROUTE_PENDING', [g.id], {}, g.origin);
+        if (futureModel && findPaxRoute(futureModel, { from: access.deplane, goals: exitsOf(futureModel) })) sink.add('GATE_ROUTE_PENDING', [g.id], {}, g.origin);
         else sink.add('GATE_ARRIVAL_NO_EXIT', [g.id], {}, g.origin);
       }
-      const claims = ofKind('baggageClaim').filter((id) => Number(layout.terminalAreas[id]!.props.belts ?? 0) > 0);
-      const baggageRouteIn = (m: TerminalModel) => claims.some((claim) =>
-        !!findPaxRoute(m, { from: access.deplane!, goals: new Map([[claim, 0]]) }) &&
-        !!findPaxRoute(m, { from: claim, goals: exits }),
-      );
-      if (claims.length > 0 && !baggageRouteIn(model)) {
+      const baggageRouteIn = (m: TerminalModel) => {
+        const claims = ofKindIn(m, 'baggageClaim').filter((id) => Number(layout.terminalAreas[id]!.props.belts ?? 0) > 0);
+        const mExits = exitsOf(m);
+        return claims.some((claim) =>
+          !!findPaxRoute(m, { from: access.deplane!, goals: new Map([[claim, 0]]) }) &&
+          !!findPaxRoute(m, { from: claim, goals: mExits }),
+        );
+      };
+      const claimsNow = ofKindIn(model, 'baggageClaim').filter((id) => Number(layout.terminalAreas[id]!.props.belts ?? 0) > 0);
+      if (claimsNow.length > 0 && !baggageRouteIn(model)) {
         if (futureModel && baggageRouteIn(futureModel)) sink.add('GATE_ROUTE_PENDING', [g.id], {}, g.origin);
         else sink.add('GATE_ARRIVAL_NO_BAGGAGE_ROUTE', [g.id], {}, g.origin);
       }

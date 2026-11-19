@@ -2,6 +2,7 @@ import { Rng, seedFromString } from '../rng';
 import { compareIds } from '../model/ids';
 import { terminalLinkCapacityPerHour, WALK_SPEED_MPS, type AreaNode } from '../terminal/model';
 import { findPaxRoute, linkBetween } from '../terminal/route';
+import { terminalServiceComplexes } from '../terminal/serviceComplex';
 import { areaServerCount, serviceSecPerPax } from '../terminal/capacity';
 import { resolveType } from './aircraftTypes';
 import { demandFactorAt } from './disruptions';
@@ -18,8 +19,6 @@ import { onPaxDeplaned, onPaxMissed, onShopDone, onTransferMissed } from '../eco
 import { accessArrival, accessDeparture } from '../access/runtime';
 import { recordLinkUsage, unrecordLinkUsage } from './linkUsage';
 import { recordPortalPassage } from './portalUsage';
-import { isProcessStep, markProcessQueueJoin, recordProcessStart } from './processStats';
-import { recordJourneyFinish, recordJourneyStepFreeMiss } from './journeyStats';
 import { isRoutePending, markRoutePending, recordMissBreakdown, type MissBottleneck } from './missBreakdown';
 import type { Simulation } from './simulation';
 import {
@@ -376,7 +375,6 @@ export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null
     delete g.busTrip;
     if (reason !== 'cancelled') {
       if (miss) recordMissBreakdown(state, miss.category, miss.spotId, g.count);
-      if (g.stepFree) recordJourneyStepFreeMiss(state, g.count);
       p.missed += g.count;
       state.paxStats.missed += g.count;
       missed += g.count;
@@ -462,15 +460,11 @@ function reconcileDepartureGate(sim: Simulation, f: Flight, gateId: string | nul
       delete g.targetTerminalId;
       continue;
     }
-    const prevTarget = g.targetTerminalId;
     g.targetTerminalId = terminalId !== g.terminalId ? terminalId : null;
     if (!g.targetTerminalId) delete g.targetTerminalId;
     if (g.steps[g.stepIndex] !== 'gate') continue;
     if (g.facility?.startsWith('gate:')) leaveFacility(sim.state, g);
     if (g.terminalLinkId && g.route.length > 0 && g.legProgress > 0) {
-      // 連絡設備の区間を歩行中は再計画を完了後に遅らせる。その間は旧い目的地への
-      // target を残す（消すと歩行中の経路が P6 違反になる）
-      if (prevTarget) g.targetTerminalId = prevTarget;
       g.replanAfterTerminalLink = true;
       continue;
     }
@@ -618,10 +612,7 @@ function addTransferGroup(
   // 任意の立ち寄りは専用の乱数で決める（地元の出発と同じ確率・順序）
   if (shopAreas(sim, terminalId).length > 0 && trng.next() < BALANCE.retail.shopVisitProb) steps.splice(steps.length - 1, 0, 'shop');
   if (trng.next() < RESTROOM_PROB) steps.splice(steps.length - 1, 0, 'restroom');
-  // 出発便のゲートが未確定でも、計画スポットから所属ターミナルは分かる。跨ターミナル乗継では
-  // targetTerminalId がないと経路が割当て先外と判定される（不変条件 P6）ため、計画スポットで補う
-  const depGateId = dep?.pax.gateId ?? (dep?.plannedStandId ? ctx.standGate[dep.plannedStandId] ?? null : null);
-  const depGateTerminal = depGateId ? ctx.terminal.gates[depGateId]?.terminalId ?? null : null;
+  const depGateTerminal = dep?.pax.gateId ? ctx.terminal.gates[dep.pax.gateId]?.terminalId ?? null : null;
   const id = nextId(state, 'pg');
   const g: PaxGroup = {
     id,
@@ -724,10 +715,17 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
       // 手荷物受取所: 降機口から近い受取所。ベルトが空くまで手荷物は出ない
       const deplaneArea = f.routeType === 'international' ? (access?.deplaneIntl ?? null) : (access?.deplane ?? null);
       if (access && deplaneArea) {
-        const claims = new Map(
-          (ctx.terminal.byTerminal[access.terminalId!] ?? []).filter((id) => ctx.terminal.areas[id]!.kind === 'baggageClaim').map((id) => [id, 0] as const),
+        // 自ターミナル優先。受取所が無い/届かない場合は、リンク複合体（サテライト）の
+        // 受取所も探す。到達可否はエリアグラフの経路で判定する
+        const claimsOf = (terminalIds: readonly string[]) => new Map(
+          terminalIds.flatMap((t) => ctx.terminal.byTerminal[t] ?? [])
+            .filter((id) => ctx.terminal.areas[id]!.kind === 'baggageClaim').map((id) => [id, 0] as const),
         );
-        const r = findPaxRoute(ctx.terminal, { from: deplaneArea, goals: claims });
+        let r = findPaxRoute(ctx.terminal, { from: deplaneArea, goals: claimsOf([access.terminalId!]) });
+        if (!r) {
+          const linked = serviceTerminalIds(sim, access.terminalId).filter((t) => t !== access.terminalId);
+          if (linked.length > 0) r = findPaxRoute(ctx.terminal, { from: deplaneArea, goals: claimsOf(linked) });
+        }
         // 手荷物は荷下ろし作業で受取所へ運ばれ、ベルトに空きがあれば流れる（baggage.ts）
         if (r) p.claimAreaId = r.areas[r.areas.length - 1]!;
       }
@@ -886,32 +884,46 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
             return;
           }
         }
-        const entrances = (sim.ctx.terminal.byTerminal[g.terminalId!] ?? []).filter(
-          (id) => sim.ctx.terminal.areas[id]!.kind === 'entrance' && !isClosed(state, id),
-        );
-        if (entrances.length === 0) {
+        const model = sim.ctx.terminal;
+        const entrancesOf = (terminalIds: readonly string[]) =>
+          terminalIds.flatMap((t) => model.byTerminal[t] ?? []).filter(
+            (id) => model.areas[id]!.kind === 'entrance' && !isClosed(state, id),
+          );
+        const ownEntrances = entrancesOf([g.terminalId!]);
+        // 入口を持たないサテライト等の旅客は、リンク複合体の入口から入る（自ターミナル優先）
+        const linkedTerminalIds = serviceTerminalIds(sim, g.terminalId).filter((t) => t !== g.terminalId);
+        const linkedEntrances = entrancesOf(linkedTerminalIds);
+        if (ownEntrances.length === 0 && linkedEntrances.length === 0) {
           g.state = 'waitingFacility';
           g.retryAt = state.now + PAX_RETRY_SEC;
           return;
         }
         // 複数入口は、次の必須工程まで実際に歩ける入口だけから選ぶ。
         // 入口の並び順や距離だけで選ぶと、孤立した入口に旅客を流すことがある。
-        const model = sim.ctx.terminal;
         const nextStep = g.steps.slice(g.stepIndex).find((step) => step !== 'shop' && step !== 'restroom');
-        const targets = nextStep === 'gate'
+        const targetsOf = (terminalIds: readonly string[]): string[] => nextStep === 'gate'
           ? [f.pax.gateId ? model.gates[f.pax.gateId]?.boarding : null].filter((id): id is string => !!id)
           : nextStep
-            ? (model.byTerminal[g.terminalId!] ?? []).filter((id) => model.areas[id]!.kind === STEP_KIND[nextStep])
+            ? terminalIds.flatMap((t) => model.byTerminal[t] ?? []).filter((id) => model.areas[id]!.kind === STEP_KIND[nextStep])
             : [];
-        const goals = new Map(targets.map((id) => [id, 0] as const));
         const closed = new Set(state.closedAreas);
-        const reachable = goals.size > 0
-          ? entrances.filter((id) => !!findPaxRoute(model, { from: id, goals, closed, uncleared: uncleared(g), stepFree: g.stepFree }))
-          : entrances;
+        const reachableFrom = (entrances: string[], targets: string[]): string[] => {
+          const goals = new Map(targets.map((id) => [id, 0] as const));
+          return goals.size > 0
+            ? entrances.filter((id) => !!findPaxRoute(model, { from: id, goals, closed, uncleared: uncleared(g), stepFree: g.stepFree }))
+            : entrances;
+        };
+        let reachable = reachableFrom(ownEntrances, targetsOf([g.terminalId!]));
+        if (reachable.length === 0 && linkedEntrances.length > 0) {
+          reachable = reachableFrom(linkedEntrances, targetsOf([...linkedTerminalIds, g.terminalId!]));
+        }
         if (reachable.length === 0) {
           // 閉鎖が原因なら再開を待つ。構造的に接続されていない場合はすぐに到達不能として記録する。
-          const structurallyReachable = entrances.some((id) => !!findPaxRoute(model, { from: id, goals, uncleared: uncleared(g), stepFree: g.stepFree }));
-          if (structurallyReachable || targets.some((id) => serversOf(sim, id) === 0)) {
+          const allEntrances = [...ownEntrances, ...linkedEntrances];
+          const allTargets = targetsOf([...linkedTerminalIds, g.terminalId!]);
+          const goals = new Map(allTargets.map((id) => [id, 0] as const));
+          const structurallyReachable = goals.size > 0 && allEntrances.some((id) => !!findPaxRoute(model, { from: id, goals, uncleared: uncleared(g), stepFree: g.stepFree }));
+          if (structurallyReachable || allTargets.some((id) => serversOf(sim, id) === 0)) {
             g.state = 'waitingFacility';
             g.retryAt = state.now + PAX_RETRY_SEC;
           } else {
@@ -919,7 +931,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
             g.reason = 'unreachable';
             // 5-13 T5: 入口の列挙型クエリは分類時に再現できないため、ここで完成待ちを判定する
             const future = sim.ctx.terminalFuture;
-            if (future && entrances.some((id) => !!findPaxRoute(future, { from: id, goals, uncleared: uncleared(g), stepFree: g.stepFree }))) {
+            if (future && allEntrances.some((id) => !!findPaxRoute(future, { from: id, goals, uncleared: uncleared(g), stepFree: g.stepFree }))) {
               markRoutePending(state, g.id);
             }
           }
@@ -927,6 +939,13 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
         }
         const entrance = withRng(state, (rng) => reachable[rng.int(0, reachable.length - 1)]!);
         state.paxStats.spawned += g.count;
+        // リンク先ターミナルの入口から入る場合は、現在地のターミナルへ所属を移し、
+        // 本来の所属（ゲートのターミナル）は target に残す（不変条件 P6 の流儀）
+        const entranceTerminal = model.areas[entrance]!.terminalId;
+        if (entranceTerminal !== g.terminalId) {
+          g.targetTerminalId = g.terminalId!;
+          g.terminalId = entranceTerminal;
+        }
         // 5-16 T5: 入口に運用中ポータルがあれば、交通施設から実際に歩いて入る
         const leg = portalLegFor(sim, entrance, 'enter');
         if (leg) {
@@ -1012,6 +1031,23 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
   }
 }
 
+/**
+ * サービス複合体: 運用中ターミナルリンクで自ターミナルと結ばれたターミナル群（自ターミナルを含む）。
+ * サテライトのように入口・受取・出口を持たない建物の旅客が、本体の設備を使うための候補集合。
+ * 複合体は候補を広げるだけで、実際に通れるかはエリアグラフの経路（findPaxRoute）が決める。
+ * レイアウトはシミュレーション中不変なので ctx ごとに一度だけ導出する。
+ */
+const serviceComplexCache = new WeakMap<object, Map<string, string[]>>();
+function serviceTerminalIds(sim: Simulation, terminalId: string | null): string[] {
+  if (!terminalId) return [];
+  let complexes = serviceComplexCache.get(sim.ctx.layout);
+  if (!complexes) {
+    complexes = terminalServiceComplexes(sim.ctx.layout);
+    serviceComplexCache.set(sim.ctx.layout, complexes);
+  }
+  return complexes.get(terminalId) ?? [terminalId];
+}
+
 /** 現在のステップの目的地を決め、歩き出す（または並ぶ・待つ） */
 /**
  * 5-13 T5: 現在モデルで構造的に届かない経路が、建設中リンクの完成後（将来モデル）では
@@ -1041,19 +1077,31 @@ function planStep(sim: Simulation, g: PaxGroup): void {
     return;
   }
   const kind = STEP_KIND[step]!;
-  let ids = (model.byTerminal[g.terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === kind);
+  const ownIds = (model.byTerminal[g.terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === kind);
+  // 候補は段階的に広げる: 自ターミナル → リンク複合体（サテライト対応）→ 乗継のみ全ターミナル（従来）。
+  // 自ターミナルで経路が成立する限り従来と完全に同じ選択になる。複合体側の候補も、
+  // 実際に歩ける経路がある場合だけが選ばれる（リンクのゾーン・方向・工事状態はモデルが反映済み）
+  const linkedIds = serviceTerminalIds(sim, g.terminalId)
+    .filter((t) => t !== g.terminalId)
+    .flatMap((t) => model.byTerminal[t] ?? [])
+    .filter((id) => model.areas[id]!.kind === kind);
+  const tiers: string[][] = [ownIds];
+  if (linkedIds.length > 0) tiers.push([...ownIds, ...linkedIds]);
   // 乗継グループは到着ターミナルに工程の設備がないとき、出発側のターミナルの設備も候補にする（連絡設備で移動する）
-  if (g.transfer && ids.length === 0) {
-    ids = Object.values(model.byTerminal).flat().filter((id) => model.areas[id]!.kind === kind);
+  if (g.transfer && ownIds.length === 0) {
+    tiers.push(Object.values(model.byTerminal).flat().filter((id) => model.areas[id]!.kind === kind));
   }
   // 受取所は便ごとに決まっている
-  const candidates = step === 'claim' ? ids.filter((id) => id === state.flights[g.flightId]!.pax.claimAreaId) : ids;
-  const usable = candidates.filter((id) => !closed.has(id) && (step === 'exit' || step === 'claim' || serversOf(sim, id) > 0));
-  const goals = new Map(usable.map((id) => [id, step === 'exit' || step === 'claim' ? 0 : expectedWait(sim, id)] as const));
-  const route = goals.size > 0 ? findPaxRoute(model, { from: g.area, goals, closed, uncleared: uncleared(g), stepFree: g.stepFree }) : null;
-  if (route) {
-    startRoute(sim, g, route.areas);
-    return;
+  let candidates: string[] = [];
+  for (const tier of tiers) {
+    candidates = step === 'claim' ? tier.filter((id) => id === state.flights[g.flightId]!.pax.claimAreaId) : tier;
+    const usable = candidates.filter((id) => !closed.has(id) && (step === 'exit' || step === 'claim' || serversOf(sim, id) > 0));
+    const goals = new Map(usable.map((id) => [id, step === 'exit' || step === 'claim' ? 0 : expectedWait(sim, id)] as const));
+    const route = goals.size > 0 ? findPaxRoute(model, { from: g.area, goals, closed, uncleared: uncleared(g), stepFree: g.stepFree }) : null;
+    if (route) {
+      startRoute(sim, g, route.areas);
+      return;
+    }
   }
   if (step === 'restroom') {
     // トイレは任意
@@ -1102,10 +1150,19 @@ function planGate(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
   const cur = model.areas[g.area!]!;
   if (cur.kind !== 'waiting') {
     const waitZone = f.routeType === 'international' ? 'departureIntl' : 'departure';
-    const waits = new Map(
-      (model.byTerminal[g.terminalId ?? ''] ?? []).filter((id) => model.areas[id]!.kind === 'waiting' && model.areas[id]!.zone === waitZone && !closed.has(id)).map((id) => [id, 0] as const),
+    const waitsOf = (terminalIds: readonly string[]) => new Map(
+      terminalIds.flatMap((t) => model.byTerminal[t] ?? [])
+        .filter((id) => model.areas[id]!.kind === 'waiting' && model.areas[id]!.zone === waitZone && !closed.has(id))
+        .map((id) => [id, 0] as const),
     );
-    const route = waits.size > 0 ? findPaxRoute(model, { from: g.area!, goals: waits, closed, stepFree: g.stepFree }) : null;
+    // 自ターミナルの待合を優先し、届かなければリンク複合体の待合も使う（サテライト対応）
+    let route = null as ReturnType<typeof findPaxRoute>;
+    const ownWaits = waitsOf([g.terminalId ?? '']);
+    if (ownWaits.size > 0) route = findPaxRoute(model, { from: g.area!, goals: ownWaits, closed, stepFree: g.stepFree });
+    if (!route) {
+      const linkedWaits = waitsOf(serviceTerminalIds(sim, g.terminalId).filter((t) => t !== g.terminalId));
+      if (linkedWaits.size > 0) route = findPaxRoute(model, { from: g.area!, goals: linkedWaits, closed, stepFree: g.stepFree });
+    }
     if (route && route.areas.length > 1) {
       startRoute(sim, g, route.areas);
       return;
@@ -1157,7 +1214,7 @@ function setWaiting(state: SimState, g: PaxGroup, s: 'stranded' | 'waitingFacili
 function startRoute(sim: Simulation, g: PaxGroup, areas: string[]): void {
   // 経路が所属ターミナルを出るなら、目的地のターミナルを targetTerminalId にする
   // （不変条件 P6 は「所属か target のどちらか」のターミナル内の経路だけを許す。
-  //  ゲート変更後の再計画でも、経路と target が常に一致するようにここで一元化する）
+  //  リンク複合体をまたぐ経路でも、経路と target が常に一致するようにここで一元化する）
   const destTerminal = areas.length > 1 ? sim.ctx.terminal.areas[areas[areas.length - 1]!]?.terminalId : undefined;
   if (destTerminal && g.terminalId && destTerminal !== g.terminalId) g.targetTerminalId = destTerminal;
   g.route = areas.slice(1);
@@ -1356,8 +1413,6 @@ function joinQueue(state: SimState, g: PaxGroup, key: string, s: 'queuing' | 'bo
   fac.queue.push(g.id);
   g.facility = key;
   g.state = s;
-  // 5-21: 工程別の待ちを切り出すため、行列に入った時点の累積待ちを記録する
-  if (isProcessStep(g.steps[g.stepIndex])) markProcessQueueJoin(state, g.id, g.waitSec);
   const queued = fac.queue.reduce((sum, id) => sum + (state.paxGroups[id]?.count ?? 0), 0);
   fac.maxQueue = Math.max(fac.maxQueue, queued);
 }
@@ -1377,8 +1432,6 @@ function finish(state: SimState, g: PaxGroup): void {
   state.paxStats.waitTotal += g.waitSec * g.count;
   state.paxStats.walkTotal += g.walkSec * g.count;
   state.paxStats.finished += g.count;
-  // 5-23: Door-to-Door 所要時間の記録（完了した旅客だけ）
-  recordJourneyFinish(state, g);
 }
 
 // ---------------------------------------------------------------- 施設（待ち行列）
@@ -1457,9 +1510,6 @@ function stepFacility(sim: Simulation, key: string): void {
     g.serviceUntil = state.now + serviceSec(sim, key, g);
     fac.served += g.count;
     fac.waitTotal += g.waitSec * g.count;
-    // 5-21: 工程別の処理実績（最混雑 60 分の集計用）
-    const step = g.steps[g.stepIndex];
-    if (isProcessStep(step)) recordProcessStart(state, step, g.id, g.count, g.waitSec, state.now, sim.ctx.terminal.areas[key]?.terminalId ?? '');
   }
 }
 
