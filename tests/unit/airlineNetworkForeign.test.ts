@@ -15,8 +15,8 @@ import { AIRCRAFT_TYPES } from '../../src/core/sim/aircraftTypes';
 describe('airlineNetworkForeign: 追加した海外データ', () => {
   it('カタログ検証が issue 0 件で、会社 105 社・目的地 171 都市', () => {
     expect(validateCatalog(CATALOG_RAW)).toEqual([]);
-    expect(CATALOG.airlines.length).toBe(105);
-    expect(CATALOG.destinations.length).toBe(171); // 国内編 107 + 海外編 64
+    expect(CATALOG.airlines.length).toBe(115);
+    expect(CATALOG.destinations.length).toBe(178); // 国内編 107 + 海外編 64 + 子会社編 7
   });
 
   it('追加した海外都市が需要モデルで正の需要を持つ', () => {

@@ -8,8 +8,8 @@ import { DEFAULT_LIVERY, liveryOf } from '../../src/core/assets/registry';
  */
 describe('catalogExtension: データの追加（docs/43 の例）', () => {
   it('出荷データ: 航空会社 105 社・就航都市 171 都市・検証 issue 0 件', () => {
-    expect(CATALOG.airlines).toHaveLength(105); // 2026-11-19 海外編で 64 → 105
-    expect(CATALOG.destinations).toHaveLength(171); // 2026-11-19 国内網の網羅追加で 65 → 107、海外編で → 171
+    expect(CATALOG.airlines).toHaveLength(115); // 2026-11-19 海外編で 64 → 105、系列子会社・地域航空 10 社を追加して 115
+    expect(CATALOG.destinations).toHaveLength(178); // 2026-11-19 国内網の網羅追加で 65 → 107、海外編で → 171、系列子会社の路線網に必要な 7 空港を追加して 178
     expect(validateCatalog(CATALOG_RAW)).toEqual([]);
   });
 
@@ -64,7 +64,7 @@ describe('catalogExtension: データの追加（docs/43 の例）', () => {
   it('対象集合: legacy の会社は 8 社・21 都市、market の会社は 105 社・171 都市', () => {
     expect(airlinesFor({}).map((a) => a.id)).toEqual(['SK', 'NP', 'RJ', 'AQ', 'HB', 'AS', 'NW', 'ML']);
     expect(destinationsFor({})).toHaveLength(21);
-    expect(airlinesFor({ market: { version: 1, routes: {} } })).toHaveLength(105);
-    expect(destinationsFor({ market: { version: 1, routes: {} } })).toHaveLength(171);
+    expect(airlinesFor({ market: { version: 1, routes: {} } })).toHaveLength(115);
+    expect(destinationsFor({ market: { version: 1, routes: {} } })).toHaveLength(178);
   });
 });
