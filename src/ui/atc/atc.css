@@ -1,0 +1,394 @@
+/* ATC-08: 管制官モード専用スタイル（経営画面の styles.css とは分離し、atc- 接頭辞で閉じる） */
+
+.atc-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: #0d1522;
+  color: #e2e8f0;
+  font-size: 14px;
+}
+
+.atc-app button {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.atc-app button:hover:not(:disabled) {
+  background: #334155;
+}
+.atc-app button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.atc-app button.primary {
+  background: #0369a1;
+  border-color: #38bdf8;
+}
+.atc-app button.active {
+  background: #0369a1;
+  border-color: #38bdf8;
+}
+.atc-app select {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  padding: 3px 6px;
+  max-width: 180px;
+}
+
+.atc-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: #111c2e;
+  border-bottom: 1px solid #334155;
+}
+.atc-brand {
+  font-weight: 700;
+}
+.atc-clock {
+  font-family: ui-monospace, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: #7dd3fc;
+}
+.atc-finished {
+  background: #7c2d12;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+.atc-time-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.atc-notice {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.atc-notice.ok {
+  background: #14532d;
+}
+.atc-notice.ng {
+  background: #7f1d1d;
+}
+
+.atc-main {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 340px;
+  gap: 10px;
+  padding: 10px;
+  align-items: start;
+}
+.atc-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.atc-panel {
+  background: #16233a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.atc-panel h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.atc-badge {
+  background: #0369a1;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.atc-muted {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.atc-ng {
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+.atc-queue-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  background: #0f1a2e;
+}
+.atc-queue-row.selected {
+  border-color: #38bdf8;
+}
+.atc-row-main {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0;
+}
+.atc-row-actions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.atc-sequence {
+  margin: 0;
+  padding-left: 4px;
+  list-style: none;
+}
+.atc-sequence li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+}
+
+/* レーダーマップ */
+.atc-map {
+  width: 100%;
+  height: auto;
+  max-height: 62vh;
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-radius: 6px;
+}
+.atc-map-bg {
+  fill: #0b1220;
+}
+.atc-edge {
+  stroke: #64748b;
+  stroke-width: 0.45;
+}
+.atc-edge-runway {
+  stroke: #cbd5e1;
+  stroke-width: 1.7;
+}
+.atc-edge-standLink {
+  stroke: #475569;
+  stroke-width: 0.3;
+  stroke-dasharray: 1.2 0.8;
+}
+.atc-edge-closed {
+  stroke: #7f1d1d;
+}
+.atc-stand {
+  fill: #1e293b;
+  stroke: #64748b;
+  stroke-width: 0.25;
+}
+.atc-stand-label {
+  fill: #94a3b8;
+  font-size: 1.6px;
+  text-anchor: middle;
+}
+.atc-runway-label {
+  fill: #e2e8f0;
+  font-size: 2.6px;
+  font-weight: 700;
+}
+.atc-hold-node {
+  fill: #f59e0b;
+}
+.atc-route-active {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 0.7;
+}
+.atc-route-planned {
+  fill: none;
+  stroke: #a78bfa;
+  stroke-width: 0.6;
+  stroke-dasharray: 1.6 1;
+}
+.atc-crossing-gate {
+  fill: none;
+  stroke: #f87171;
+  stroke-width: 0.45;
+}
+.atc-plane {
+  cursor: pointer;
+}
+.atc-plane-dot {
+  stroke: #0b1220;
+  stroke-width: 0.3;
+}
+.atc-plane-arrival {
+  fill: #4ade80;
+}
+.atc-plane-departure {
+  fill: #60a5fa;
+}
+.atc-plane-held {
+  fill: #f87171;
+}
+.atc-plane-airborne {
+  fill: none;
+  stroke: #4ade80;
+  stroke-width: 0.5;
+  stroke-dasharray: 0.8 0.5;
+}
+.atc-plane-selected .atc-plane-dot {
+  stroke: #ffffff;
+  stroke-width: 0.55;
+}
+.atc-plane-label {
+  fill: #e2e8f0;
+  font-size: 2.5px;
+}
+.atc-map-empty {
+  fill: #94a3b8;
+  font-size: 3px;
+  text-anchor: middle;
+}
+
+/* 航空機一覧 */
+.atc-aircraft-list table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.atc-aircraft-list th,
+.atc-aircraft-list td {
+  border-bottom: 1px solid #334155;
+  padding: 3px 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+.atc-aircraft-list tbody tr {
+  cursor: pointer;
+}
+.atc-aircraft-list tbody tr:hover {
+  background: #1e293b;
+}
+.atc-aircraft-list tbody tr.selected {
+  background: #0c4a6e;
+}
+
+.atc-detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.atc-detail-grid dt {
+  color: #94a3b8;
+}
+.atc-detail-grid dd {
+  margin: 0;
+}
+.atc-detail-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-top: 1px solid #334155;
+}
+
+.atc-saves {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.atc-saves li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px solid #334155;
+  font-size: 12.5px;
+}
+
+.atc-comm {
+  border-top: 1px solid #334155;
+  background: #111c2e;
+  padding: 6px 12px 10px;
+}
+.atc-comm h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.atc-comm-list {
+  max-height: 150px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+}
+.atc-comm-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.atc-comm-time {
+  font-family: ui-monospace, monospace;
+  color: #7dd3fc;
+}
+.atc-comm-role {
+  color: #94a3b8;
+  min-width: 52px;
+}
+.atc-comm-row.pilot .atc-comm-role {
+  color: #4ade80;
+}
+.atc-comm-text {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  color: #e2e8f0;
+}
+
+.atc-start {
+  max-width: 860px;
+  margin: 24px auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.atc-start-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* 狭い画面: 1カラムに積み、主要操作（時間操作・キュー・詳細）を縦に辿れるようにする */
+@media (max-width: 980px) {
+  .atc-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .atc-map {
+    max-height: none;
+  }
+  .atc-aircraft-list {
+    overflow-x: auto;
+  }
+}
