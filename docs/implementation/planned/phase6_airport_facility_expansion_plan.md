@@ -40,6 +40,12 @@ Phase 6 は Phase 5 の置き換えではない。Phase 5 が整備している�
 - ゲーム値と現実の施設能力・法定基準・実際の運用基準を混同しない。
 - 新機能は原則 opt-in とし、旧保存・既存の運航結果・乱数列・ゴールデンへの影響を明示する。
 
+### 1.4 施設・構造物の共通ライフサイクル基準
+
+Phase 6で扱う建築物・固定設備・車両・インフラ/ネットワーク・運営機能は、[docs/45 施設・構造物のライフサイクル実装標準](../../45_facility_lifecycle_standard.md)を共通基準とする。各タスクでは、解放、配置/建設、設備構成、接続、稼働準備、能力算出、Simulation接続、実績計測、保守の各段階について、適用/対象外/既存機能再利用/未実装を明記する。
+
+本書はPhase 6全体の優先順位・依存関係・受入条件を管理し、docs/45は施設ライフサイクルの共通ルールを管理する。施設別の具体的な数式・保存モデル・現行挙動は、各領域の既存仕様・コード・テストおよび個別計画を正本とする。docs/45への追記を理由に、既存施設が全段階に対応済みとは扱わない。
+
 ## 2. 既存機能・計画との関係
 
 着手前には各リンク先の最新状態とコード・テストを再確認する。詳細計画: [5-14](../active/terminal_building_structure_plan.md) / [5-15](../active/terminal_complex_geometry_plan.md) / [5-16](../active/passenger_network_unification_plan.md) / [5-18](terminal_design_workspace_plan.md) / [5-19](terminal_simulation_modes_plan.md) / [5-20](../active/airport_tier_progression_plan.md) / [5-21](peak_hour_passenger_capacity_plan.md) / [5-24](urban_night_runway_operations_plan.md) / [5-25](nighttime_work_order_plan.md) / [A6 貨物](../active/cargo_operations_plan.md)。下表の「現状」は 2026-11-18 時点の Docs に記載された状態であり、実装完了を保証するものではない。
@@ -455,6 +461,7 @@ CLAUDE.mdの品質ゲート（typecheck / lint / test / build）を必須とし�
 | 文書 | Phase 6での役割 |
 |---|---|
 | docs/42_implementation_roadmap.md | Phase 6のPO承認済み優先順位・親タスク・受入条件・全体状態 |
+| docs/45_facility_lifecycle_standard.md | 施設・構造物・設備・車両・インフラの共通ライフサイクル、状態分離、能力とSimulation接続の基準 |
 | docs/implementation/README.md | Phase 6親計画と、Phase 5個別計画/貨物A6との参照関係 |
 | docs/33_capacity_dashboard.md | 実装検証済みの能力指標・計算式・表示仕様だけを反映 |
 | docs/34_vertical_transport.md / docs/35_multi_terminal_passenger_flow.md | 内部・複数ターミナル接続、能力予約、共有資源の仕様 |
