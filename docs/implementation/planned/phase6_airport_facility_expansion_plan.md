@@ -42,7 +42,7 @@ Phase 6 は Phase 5 の置き換えではない。Phase 5 が整備している�
 
 ## 2. 既存機能・計画との関係
 
-着手前には各リンク先の最新状態とコード・テストを再確認する。詳細計画: [5-14](../active/terminal_building_structure_plan.md) / [5-15](../active/terminal_complex_geometry_plan.md) / [5-16](../active/passenger_network_unification_plan.md) / [5-18](terminal_design_workspace_plan.md) / [5-19](terminal_simulation_modes_plan.md) / [5-20](../active/airport_tier_progression_plan.md) / [5-21](peak_hour_passenger_capacity_plan.md) / [5-24](urban_night_runway_operations_plan.md) / [5-25](nighttime_work_order_plan.md) / [A6 貨物](../active/cargo_operations_plan.md)。下表の「現状」は 2026-11-18 時点の Docs に記載された状態であり、実装完了を保証するものではない。
+着手前には各リンク先の最新状態とコード・テストを再確認する。詳細計画: [5-14](../active/terminal_building_structure_plan.md) / [5-15](../active/terminal_complex_geometry_plan.md) / [5-16](../active/passenger_network_unification_plan.md) / [5-18](../active/terminal_design_workspace_plan.md) / [5-19](terminal_simulation_modes_plan.md) / [5-20](../active/airport_tier_progression_plan.md) / [5-21](peak_hour_passenger_capacity_plan.md) / [5-24](urban_night_runway_operations_plan.md) / [5-25](nighttime_work_order_plan.md) / [A6 貨物](../active/cargo_operations_plan.md)。下表の「現状」は 2026-11-18 時点の Docs に記載された状態であり、実装完了を保証するものではない。
 
 | 既存機能・計画 | 既存の役割・現在の状態 | Phase 6 での扱い |
 |---|---|---|
@@ -55,7 +55,7 @@ Phase 6 は Phase 5 の置き換えではない。Phase 5 が整備している�
 | docs/35 複数ターミナル旅客フロー | ターミナル間の旅客移動・所属・集計 | ターミナル別需要・共有設備の帰属・二重計上防止を維持 |
 | docs/44 ハブ・国際線・夜間滞泊 | 国際線、CIQ、乗継、MCT、バンク、夜間滞泊、拠点・機体整備 | 既存の夜間滞泊・拠点契約を維持し、夜間Work Orderとは別レイヤーとして連携 |
 | Phase 5 / 5-14〜5-16 | 建物階層、複合体、外部交通・歩行網の統合。個別計画は active | ターミナル内部施設・外部アクセスの接続判定に依存 |
-| Phase 5 / 5-18 | ターミナル専用設計Workspace。planned | ターミナル内部設備の設計UIの正本として再利用 |
+| Phase 5 / 5-18 | ターミナル専用設計Workspace。active（接続マトリクスの核を実装、専用Workspace等は未完了） | 曲線外形UI・内部施設カタログ・動く歩道/AGT・商業/航空会社向け施設・動線/満足度診断の正本として再利用 |
 | Phase 5 / 5-19 | 空港全体運航とターミナル詳細Simulation。planned | ターミナルの詳細処理と全体運航の集約能力を同じ定義へ接続 |
 | Phase 5 / 5-20 | 空港格の8段階化。active、部分実装済み | 格の定義・昇格・解放・旧セーブ移行を再利用。能力軸は算出済みの指標だけ使う |
 | Phase 5 / 5-21 | 最混雑時間帯・ターミナル別工程能力。planned | 旅客能力の基礎を再利用し、他分野へ拡張。5-21 の受入条件を二重管理しない |
@@ -66,7 +66,7 @@ Phase 6 は Phase 5 の置き換えではない。Phase 5 が整備している�
 
 ### 2.1 Phase 6 で重複させないもの
 
-- 新しいターミナルWorkspaceを別系統で作らない。5-18 のUI・編集状態・保存境界を利用する。
+- 新しいターミナルWorkspaceを別系統で作らない。5-18 のUI・編集状態・保存境界を利用する。曲線外形の正規幾何は5-15、能力算出は5-21/Phase 6 P0、旅客移動/利用実績は5-19を再利用する。
 - 新しいターミナル旅客Simulation時計を空港全体運航に混ぜない。5-19 の独立境界を守る。
 - チェックイン・保安検査・最混雑60分の旅客能力を作り直さない。5-21 の能力算出・時系列計測を拡張する。
 - 新しい空港格の数値や解放テーブルを別に持たない。5-20 と unlocks の一元管理を利用する。
