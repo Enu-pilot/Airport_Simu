@@ -23,7 +23,7 @@
 | Phase 3 | completed | completed | [phase3_plan.md](completed/phase3_plan.md)。docs/42 §3.2の実装・検証記録を参照 |
 | Phase 4 | 実装完了・受入計測完了 | active（受入検証継続） | [phase4_plan.md](active/phase4_plan.md)。§8計測（MCT大規模・区間解析・2ターミナル波・朝の波 block）は2026-11-18深夜に完了（docs/44 §6/§8）。区間解析のみ高速機での再確認が望ましい。completed移管は受入記録の確認後 |
 | Phase 5 | 個別計画ごとに実施中 | active（5-13〜5-17・5-20）／ planned（5-18・5-19・5-21〜5-25） | 計画書が存在する要求はすべて下表にリンク。状態・タスク進捗は各正本を参照 |
-| Phase 6 | active（P0を中心にP1/P2/P3の一部タスクも実施） | planned | [phase6_airport_facility_expansion_plan.md](planned/phase6_airport_facility_expansion_plan.md)。Phase 5の既存基盤・個別計画を再利用し、P0能力基盤→P1貨物→P2ターミナル→P3夜間→P4空港基盤の順に統合拡張。F6-00監査、F6-01能力契約、F6-02/03/04一部、F6-06/07一部、F6-09/11一部、F6-12完了。詳細な状態はPhase 6計画を正本とする |
+| Phase 6 | active（P0を中心にP1/P2/P3の一部タスクも実施） | planned | [phase6_airport_facility_expansion_plan.md](planned/phase6_airport_facility_expansion_plan.md)。Phase 5の既存基盤・個別計画を再利用し、P0能力基盤→P1貨物→P2ターミナル→P3夜間→P4空港基盤の順に統合拡張。F6-00監査、F6-01能力契約、F6-02/03/04一部、F6-06/07一部、F6-09/11一部、F6-12完了。F6-17（都市間OD/乗継需要モデル）を横断計画として追加・未着手。詳細な状態はPhase 6計画を正本とする |
 
 docs/42がフェーズの実装状況の正本、各計画書の状態とフォルダ配置は実装計画のライフサイクルを表します。過去の計画書配置が現在の実装状況と一致していない箇所は、受入記録を確認してから移管し、フォルダ名だけで実装済み/未実装を判断しません。
 
