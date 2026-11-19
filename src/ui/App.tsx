@@ -32,6 +32,7 @@ import { effectiveWx } from '../core/sim/weather';
 import { StatusBar, Toast } from './StatusBar';
 import { ManagementPage, type ManagementSection } from './ManagementPage';
 import { CapacityPanel } from './CapacityPanel';
+import { AtcApp } from './atc/AtcApp';
 
 const OVERLAY_LABEL: Record<keyof Overlays, string> = {
   grid: 'グリッド',
@@ -45,10 +46,19 @@ const OVERLAY_LABEL: Record<keyof Overlays, string> = {
 };
 
 export function App() {
+  // ゲームモード選択（経営 / 管制官）。ATC は専用ストア・画面で完結し、
+  // EditorState には混ぜない（計画書 air_traffic_control_mode_plan.md §3.1）
+  const [appMode, setAppMode] = useState<'management' | 'atc'>('management');
+  const appModeRef = useRef(appMode);
+  useEffect(() => {
+    appModeRef.current = appMode;
+  }, [appMode]);
+  const currentLayout = useLayout();
   useEffect(() => {
     const isEditable = (t: EventTarget | null) =>
       t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.tagName === 'SUMMARY');
     const down = (e: KeyboardEvent) => {
+      if (appModeRef.current === 'atc') return; // ATC モード中は経営側のキー処理をしない
       if (isEditable(e.target)) return;
       // 運航モードの大きなオーバーレイは Esc で閉じる（他のキー処理より先）
       if (e.key === 'Escape' && opsUi.get().overlay) {
@@ -58,7 +68,10 @@ export function App() {
       }
       if (onKeyDown({ key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })) e.preventDefault();
     };
-    const up = (e: KeyboardEvent) => onKeyUp({ key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+    const up = (e: KeyboardEvent) => {
+      if (appModeRef.current === 'atc') return;
+      onKeyUp({ key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey });
+    };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     return () => {
@@ -80,9 +93,12 @@ export function App() {
     if (id) actions.select(id);
     setPage('construction');
   };
+  if (appMode === 'atc') {
+    return <AtcApp currentLayout={currentLayout} onExit={() => setAppMode('management')} />;
+  }
   return (
     <div className={`app mode-${mode} page-${page}`}>
-      <TopBar page={page} setPage={setPage} onSavedProjects={() => { setManagementSection('project'); setPage('management'); }} />
+      <TopBar page={page} setPage={setPage} onSavedProjects={() => { setManagementSection('project'); setPage('management'); }} onOpenAtc={() => setAppMode('atc')} />
       {page === 'management' ? <ManagementPage onOpenConstruction={openConstruction} section={managementSection} onSectionChange={setManagementSection} /> : page === 'operations' ? <OperateLayout /> : <BuildLayout readOnly={mode === 'operate'} />}
       <DayReviewOverlay />
       <SkipDayOverlay />
@@ -175,7 +191,7 @@ function BuildBottom() {
   );
 }
 
-function TopBar({ page, setPage, onSavedProjects }: { page: MainPage; setPage: (p: MainPage) => void; onSavedProjects: () => void }) {
+function TopBar({ page, setPage, onSavedProjects, onOpenAtc }: { page: MainPage; setPage: (p: MainPage) => void; onSavedProjects: () => void; onOpenAtc: () => void }) {
   const canUndo = useEditor((s) => s.history.past.length > 0);
   const canRedo = useEditor((s) => s.history.future.length > 0);
   const overlays = useEditor((s) => s.overlays);
@@ -212,6 +228,7 @@ function TopBar({ page, setPage, onSavedProjects }: { page: MainPage; setPage: (
         <button className={page === 'construction' ? 'active' : ''} onClick={() => setPage('construction')} data-testid="page-construction">建設</button>
         <button className={page === 'management' ? 'active' : ''} onClick={() => setPage('management')} data-testid="page-management">経営</button>
         <button className={page === 'operations' ? 'active' : ''} onClick={() => mode === 'build' ? ops.start() : setPage('operations')} data-testid="page-operations">{mode === 'build' ? '運行開始' : '運行'}</button>
+        <button onClick={onOpenAtc} disabled={mode === 'operate'} title={mode === 'operate' ? '運航中は管制官モードへ移れません（モードを同時に進行させないため）。建設モードに戻ってから開いてください' : '管制官モード（ATC）を開きます。経営モードの状態は変更されません'} data-testid="page-atc">管制官</button>
       </nav>
       {mode === 'operate' && <div className="top-group">
             <button onClick={() => ops.restart()} title="今日を締めて（結果を日報に記録して）次の日を 0:00 から始めます。同じ日をやり直すものではありません" data-testid="restart-ops">

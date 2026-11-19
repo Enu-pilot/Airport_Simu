@@ -7,3 +7,6 @@ export * from './movement';
 export * from './commands';
 export * from './engine';
 export * from './persistence';
+export * from './autosave';
+export * from './scoring';
+export * from './communication';

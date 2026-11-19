@@ -1,4 +1,5 @@
 import { buildAirsideNetwork } from '../airside/network';
+import { effectiveArrivalSequence } from './assignments';
 import { diagnoseAtcAirport } from './scenario';
 import type {
   AtcRequestKind,
@@ -86,6 +87,25 @@ export function createSessionSafetyProvider(): AtcSafetyProvider {
               reasons.push('runway-reserved');
               break;
             }
+          }
+        }
+        // 到着順序制約（ATC-07）: 管制官が到着順序を設定している場合だけ効く。
+        // 実効順序で自機より前にいる同滑走路の到着機が、まだ進入前/進入中
+        // （着陸・復行・順序からの除外で解消していない）なら着陸許可を拒否する。
+        // 順序未指定（空）なら従来どおり制約なし（後方互換）。
+        if (kind === 'landing' && (session.arrivalSequence ?? []).length > 0) {
+          const sequence = effectiveArrivalSequence(session);
+          const idx = sequence.indexOf(aircraft.id);
+          if (idx > 0) {
+            const blocked = sequence.slice(0, idx).some((id) => {
+              const ahead = session.aircraft[id];
+              return (
+                ahead !== undefined &&
+                ahead.runwayId === targetRunwayId &&
+                (ahead.phase === 'inbound' || ahead.phase === 'finalApproach')
+              );
+            });
+            if (blocked) reasons.push('arrival-sequence-blocked');
           }
         }
         // 離陸許可時に同滑走路へ向かう到着機がいる場合は警告（拒否はしない）

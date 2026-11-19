@@ -2,9 +2,11 @@ import { sizeAtLeast } from '../model/types';
 import { pushEvent } from './events';
 import { diagnoseAtcAirport } from './scenario';
 import type {
+  AtcAircraft,
   AtcAirportSnapshot,
   AtcAssignmentKind,
   AtcAssignmentRequest,
+  AtcMovement,
   AtcScenarioDefinition,
   AtcSessionState,
 } from './types';
@@ -206,6 +208,81 @@ export function assignRunway(
     });
   }
   return { ok: true, reasons: [] };
+}
+
+/**
+ * §3.4.1 横断要求の自動生成（GROUND）。
+ * 地上走行の経路が確定した時点（移動の生成時・経路変更時）で、経路上の
+ * 未承認の横断ゲートごとに runwayCrossing 要求を GROUND キューへ登録する。
+ * 要求IDは内容から決定的に生成されるため、再評価・保存復元・経路変更の
+ * 再スキャンで重複しない（冪等）。生成だけでは許可・移動は発生しない。
+ * 戻り値は今回新規に生成した要求ID。
+ */
+export function ensureCrossingRequests(
+  state: AtcSessionState,
+  aircraft: AtcAircraft,
+  movement: AtcMovement,
+): string[] {
+  const created: string[] = [];
+  for (const crossing of movement.crossings ?? []) {
+    if (crossing.status !== 'waiting') continue;
+    if (state.requests[crossing.requestId]) continue;
+    state.requests[crossing.requestId] = {
+      id: crossing.requestId,
+      aircraftId: aircraft.id,
+      kind: 'runwayCrossing',
+      createdAtSec: state.clockSec,
+      status: 'open',
+    };
+    created.push(crossing.requestId);
+    pushEvent(state, {
+      kind: 'request',
+      aircraftId: aircraft.id,
+      message: `${aircraft.callsign}: request runwayCrossing ${crossing.runwayId} at ${crossing.holdNodeId} (ground)`,
+    });
+  }
+  return created;
+}
+
+/**
+ * 到着順序の対象になる機体（未完了で進入前/進入中）。
+ * 着陸済み（landingRoll 以降）・完了済みの機体は順序から自動的に外れる
+ * ＝「先行機が着陸で解消する」ことを表現する。
+ */
+function arrivalSequenceCandidates(state: AtcSessionState): AtcAircraft[] {
+  return Object.values(state.aircraft).filter(
+    (a) =>
+      a.kind === 'arrival' &&
+      a.completedAtSec === null &&
+      (a.phase === 'inbound' || a.phase === 'finalApproach'),
+  );
+}
+
+/**
+ * 決定的な推奨到着順序（ATC-07 進入順序管理）。
+ * 予定到着時刻順 ＝ シナリオ出現時刻（spawnedAtSec）順とし、同着は
+ * 航空機ID順で安定させる。管制官が順序を設定する際の初期案であり、
+ * この関数自体は状態を変更しない。
+ */
+export function recommendedArrivalSequence(state: AtcSessionState): string[] {
+  return arrivalSequenceCandidates(state)
+    .sort((a, b) => a.spawnedAtSec - b.spawnedAtSec || (a.id < b.id ? -1 : 1))
+    .map((a) => a.id);
+}
+
+/**
+ * 実効到着順序。管制官の設定（session.arrivalSequence）を正とし、
+ * 対象外になった機体（着陸済み・完了等）は落とし、設定後に出現した
+ * 未掲載の到着機は推奨順序で末尾へ追加する（決定的）。
+ * 設定が空なら推奨順序そのものになるが、安全判定の順序制約は
+ * 「設定がある場合だけ」効く（commands/safety 側の規則）。
+ */
+export function effectiveArrivalSequence(state: AtcSessionState): string[] {
+  const candidates = recommendedArrivalSequence(state);
+  const candidateSet = new Set(candidates);
+  const explicit = (state.arrivalSequence ?? []).filter((id) => candidateSet.has(id));
+  const listed = new Set(explicit);
+  return [...explicit, ...candidates.filter((id) => !listed.has(id))];
 }
 
 /** 担当区分ごとの未処理要求（許可系＋割当系）。UIキューの基礎 */

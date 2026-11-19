@@ -87,6 +87,20 @@ export function parseAtcSessionFile(input: unknown): ParseAtcSessionResult {
     if (!file.session.aircraft[clearance.aircraftId]) errors.push(`unknown-clearance-aircraft:${clearance.id}`);
     if (!file.session.requests[clearance.requestId]) errors.push(`unknown-clearance-request:${clearance.id}`);
   }
+  // 到着順序（ATC-07）: あれば航空機IDの配列であること。不在は未指定として扱う
+  const sequence = (file.session as { arrivalSequence?: unknown }).arrivalSequence;
+  if (
+    sequence !== undefined &&
+    (!Array.isArray(sequence) || sequence.some((id) => typeof id !== 'string'))
+  ) {
+    errors.push('invalid-arrival-sequence');
+  }
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, file: deepClone(file) };
+  const cloned = deepClone(file);
+  // 旧ファイル互換: 追加フィールドが無い場合は既定値で補う（意味は変えない）
+  if (cloned.session.arrivalSequence === undefined) cloned.session.arrivalSequence = [];
+  for (const aircraft of Object.values(cloned.session.aircraft)) {
+    if (aircraft.goAroundCount === undefined) aircraft.goAroundCount = 0;
+  }
+  return { ok: true, file: cloned };
 }

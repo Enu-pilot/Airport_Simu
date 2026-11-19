@@ -142,6 +142,26 @@ export interface AtcAircraftPosition {
 }
 
 /**
+ * 移動経路上の滑走路横断ゲート（ATC-06 横断要求の自動生成）。
+ * 地上走行経路が滑走路の舗装面を横切る区間ごとに1つ作られる。
+ * 機体は holdNodeId（滑走路手前のノード）で停止し、対応する
+ * runwayCrossing 要求が管制官に承認されるまで滑走路へ進入しない。
+ */
+export interface AtcMovementCrossing {
+  /** 決定的IDの横断要求（xng_<機体ID>_<移動種別>_<滑走路ID>_<停止ノードID>） */
+  requestId: string;
+  /** 横断対象の滑走路 */
+  runwayId: string;
+  /** 滑走路手前で停止するノード（横断区間の直前のノード） */
+  holdNodeId: string;
+  /** 経路累積距離（m）。この距離で停止する */
+  stopAtM: number;
+  status: 'waiting' | 'cleared';
+  /** 承認時刻（cleared のとき） */
+  clearedAtSec?: number;
+}
+
+/**
  * 実行中の物理移動（ATC-06/07 の基礎表現）。
  * 経路は airside ネットワーク上のノード列であり、占有はこの経路と
  * 現在位置から導出する。経営側 simulation の Route/予約とは別物。
@@ -156,6 +176,16 @@ export interface AtcMovement {
   traveledM: number;
   /** 移動速度（m/s。実行所要時間と経路長から決定的に決まる） */
   speedMps: number;
+  /** 経路上の滑走路横断ゲート（なければ空配列） */
+  crossings?: AtcMovementCrossing[];
+  /** 管制官の停止指示（hold）中。true の間は位置が進まない */
+  held?: boolean;
+}
+
+/** 走行前に再計画された経路（経路変更コマンドが保存し、実行開始時に使われる） */
+export interface AtcPlannedRoute {
+  kind: AtcRequestKind;
+  nodeIds: string[];
 }
 
 export interface AtcAircraft {
@@ -184,6 +214,10 @@ export interface AtcAircraft {
   position: AtcAircraftPosition | null;
   /** 実行中の物理移動。移動していなければ null */
   movement: AtcMovement | null;
+  /** 経路変更で走行前に差し替えられた経路。実行開始時に消費される */
+  plannedRoute?: AtcPlannedRoute | null;
+  /** 復行した回数（到着機のみ意味を持つ。決定的再進入の監査用） */
+  goAroundCount: number;
   completedAtSec: number | null;
   /** 累積待機秒（スコア用） */
   totalWaitSec: number;
@@ -202,6 +236,11 @@ export type AtcEventKind =
   | 'clearanceExpired'
   | 'requestRejected'
   | 'safetyWarning'
+  | 'holdStarted'
+  | 'holdReleased'
+  | 'rerouted'
+  | 'goAround'
+  | 'sequenceChanged'
   | 'completed';
 
 export interface AtcEvent {
@@ -264,6 +303,12 @@ export interface AtcSessionState {
   assignments: Record<string, AtcAssignmentRequest>;
   /** スポット予約（standId -> aircraftId）。二重割当を防ぐ正本 */
   standReservations: Record<string, string>;
+  /**
+   * 管制官が設定した到着順序（航空機IDの列。先頭が先行）。
+   * 空配列 = 未指定（従来どおり順序制約なし）。実効順序の導出は
+   * assignments.effectiveArrivalSequence を正とする。
+   */
+  arrivalSequence: string[];
   clearances: Record<string, AtcClearance>;
   events: AtcEvent[];
   score: AtcScore;
@@ -279,7 +324,8 @@ export type AtcSafetyReasonCode =
   | 'stand-not-found'
   | 'stand-not-operational'
   | 'stand-not-connected'
-  | 'arrival-inbound-same-runway';
+  | 'arrival-inbound-same-runway'
+  | 'arrival-sequence-blocked';
 
 export interface AtcSafetyVerdict {
   verdict: 'allow' | 'warn' | 'deny';
