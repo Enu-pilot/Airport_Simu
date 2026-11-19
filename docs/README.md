@@ -9,6 +9,7 @@
 | PO 承認済みの実装順序・受入条件・フェーズ全体の状態 | [42. 実装ロードマップ](42_implementation_roadmap.md) | 何を・どの順序で・何を満たせば完了か |
 | コード変更の詳細な実装方法・タスク進捗 | [implementation/](implementation/README.md) | どこを・どう変更し、どこまで検証したか |
 | Phase 6 空港施設・能力・運営機能の総合計画 | [Phase 6 実装計画](implementation/planned/phase6_airport_facility_expansion_plan.md)、[実装計画索引](implementation/README.md) | P0〜P4の優先順位、Phase 5既存計画との関係、F6-17都市間OD/乗継需要モデル。2026-11-19時点でP0を中心に実装中、F6-17は未着手。個別タスクの進捗は計画書を正本とする |
+| Phase 5 / 5-18 ターミナル専用設計Workspace | [5-18 実装計画](implementation/active/terminal_design_workspace_plan.md)、[5-15 複雑形状](implementation/active/terminal_complex_geometry_plan.md) | B3〜4Fの内部設計、曲線外形UI、施設カタログ、動く歩道/AGT、商業/ラウンジ/航空会社向け設備、動線・満足度診断。5-18は接続マトリクスの核を実装済みで、専用Workspace等は未完了 |
 | 施設・構造物の共通実装基準 | [45. 施設・構造物のライフサイクル実装標準](45_facility_lifecycle_standard.md) | 解放→設置→接続→稼働準備→能力算出→Simulation反映→実績評価→保守までの共通基準 |
 | 現在の機能仕様 | [11〜37 の機能別仕様](#機能別仕様) | 現行実装で確認した挙動・判定基準 |
 | 個別の追加要求・受入条件 | [40. 出発時刻制限](40_departure_time_limit.md)、[41. 能力拡張計画](41_capacity_expansion_plan.md) | 要求・設計上の前提・実装記録 |
