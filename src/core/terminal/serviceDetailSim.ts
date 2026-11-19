@@ -6,6 +6,7 @@ import { buildTerminalModel, type TerminalModel } from './model';
 import { findPaxRoute, type PaxRoute } from './route';
 import {
   aggregateServiceRecords,
+  isLoungeEligible,
   serviceProfilesFor,
   type ServiceFacilityRecord,
   type ServiceProfiles,
@@ -34,6 +35,14 @@ import {
  * 待合は購買選択に統合しない: 店舗立寄りの有無にかかわらず、搭乗口へ向かうまでの
  * 滞留先として最寄りの待合エリア（なければ出発ロビー）を使い、滞留実績を分けて記録する。
  *
+ * ラウンジ（5-19 2A）: 購買ではなく滞在の質の施設として、待合の代わりの滞留先になる。
+ * 立寄り意図は「時間予算が十分（締切までの残りが BALANCE.lounge.minSlackMin 以上）かつ
+ * 確率 BALANCE.lounge.visitProb」で決まり、対象は isLoungeEligible を満たす施設だけ。
+ * 収容は席数ベースで、満員（現在滞留人数 + グループ人数 > 席数）なら入れず待合へフォールバックし、
+ * turnedAway と loungeSkipped に記録する。滞留の記録は待合と分けた lounge カテゴリの実績になり、
+ * 結果には体験指標（利用者・時間 → 満足度換算ポイント、BALANCE.lounge の換算係数）を含める。
+ * ラウンジが無いターミナルでは乱数を消費しないため、従来レイアウトの結果は変わらない。
+ *
  * 本エンジンの実行は AirportDay の state・company・保存データに一切触れない（layout は読み取りのみ）。
  * 結果の AirportDay への反映は行わない（差分プレビュー+明示適用は UI 側 Step 5 の接続点を使う）。
  */
@@ -54,12 +63,14 @@ export interface ServiceDetailOptions {
   stepFreeRatio?: number;
   /** 店舗立寄り確率。既定 BALANCE.retail.shopVisitProb */
   visitProb?: number;
+  /** ラウンジ立寄り確率。既定 BALANCE.lounge.visitProb */
+  loungeVisitProb?: number;
   /** 搭乗口へ向かうまでの時間予算（秒）の範囲。既定 45〜100 分 */
   budgetMinSec?: number;
   budgetMaxSec?: number;
 }
 
-type StepKind = 'checkIn' | 'security' | 'shop' | 'waiting' | 'gate';
+type StepKind = 'checkIn' | 'security' | 'shop' | 'lounge' | 'waiting' | 'gate';
 
 interface DetailGroup {
   id: number;
@@ -81,6 +92,10 @@ interface DetailGroup {
   state: 'walking' | 'queue' | 'service' | 'dwelling' | 'done' | 'failed';
   /** 立寄り先として確定した店舗エリア（shop ステップ開始時に選択する） */
   shopAreaId: string | null;
+  /** 滞留先として確定したラウンジエリア（lounge ステップ開始時に選択する） */
+  loungeAreaId: string | null;
+  /** 現在の滞留先の種別（滞留実績と席占有の付け先を分ける） */
+  dwellKind: 'waiting' | 'lounge';
   gateAreaId: string | null;
 }
 
@@ -99,6 +114,19 @@ export interface ServiceDetailResult {
   unfinished: number;
   /** 店舗立寄りを希望したが、候補なし/混雑で利用できなかった人数 */
   shopSkipped: number;
+  /** ラウンジ利用を希望したが、候補なし/満員/時間不足で待合へ回った人数 */
+  loungeSkipped: number;
+  /**
+   * ラウンジ体験指標（5-19 2A）: 利用者・滞留時間と、BALANCE.lounge の換算係数による
+   * 満足度換算ポイント。AirportDay の満足度式には接続していない参考値で、
+   * 完了旅客（搭乗+遅刻搭乗）が 0 のとき estimatedSatisfactionPoints は null（未算出）。
+   */
+  loungeExperience: {
+    users: number;
+    dwellPaxSec: number;
+    userHours: number;
+    estimatedSatisfactionPoints: number | null;
+  };
   /** 店舗別実績（areaId → 実績）。待合エリアの滞留実績もここに含む */
   records: Record<string, ServiceFacilityRecord>;
   /** 待合の滞留実績（areaId → { users, dwellPaxSec }）。records の待合分と同じ値の参照用 */
@@ -133,6 +161,10 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
   const shopFacilities = profiles.facilities.filter(
     (f) => f.terminalId === terminalId && (f.category === 'retail' || f.category === 'dining') && f.operational,
   );
+  const loungeFacilities = profiles.facilities.filter((f) => f.terminalId === terminalId && isLoungeEligible(f));
+  const loungeVisitProb = opts.loungeVisitProb ?? BALANCE.lounge.visitProb;
+  /** ラウンジの現在の滞留人数（席占有）。詳細モードの実行時状態で、保存対象ではない */
+  const loungeOccupancy = new Map<string, number>();
   const waitingAreas = areasOfKind('waiting');
   const lobbyAreas = areasOfKind('departureLobby');
 
@@ -201,6 +233,7 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
     return r;
   };
   const waitingRecords = new Map<string, { users: number; dwellPaxSec: number }>();
+  const loungeRecords = new Map<string, { users: number; dwellPaxSec: number }>();
 
   let now = 0;
   let nextId = 1;
@@ -209,6 +242,7 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
   const result: ServiceDetailResult = {
     terminalId, seed, durationSec: opts.durationSec,
     spawnedGroups: 0, spawnedPax: 0, boarded: 0, boardedLate: 0, failed: 0, unfinished: 0, shopSkipped: 0,
+    loungeSkipped: 0, loungeExperience: { users: 0, dwellPaxSec: 0, userHours: 0, estimatedSatisfactionPoints: null },
     records: {}, waitingRecords: {}, aggregated: aggregateServiceRecords(profiles, new Map()),
     routeStats, tickMs: { p50: 0, p95: 0, max: 0 },
   };
@@ -233,6 +267,29 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
     return best?.id ?? null;
   };
 
+  /**
+   * ラウンジの候補選択: 資格あり・到達可能・席に空きがある施設から経路コスト最小。
+   * 締切までの残りが BALANCE.lounge.minSlackMin 未満なら対象外（時間不足）。
+   */
+  const chooseLounge = (g: DetailGroup): string | null => {
+    if (g.deadline - now < BALANCE.lounge.minSlackMin * 60) return null;
+    let best: { id: string; cost: number } | null = null;
+    for (const f of loungeFacilities) {
+      if ((loungeOccupancy.get(f.areaId) ?? 0) + g.count > f.capacity) continue;
+      const route = routeTo(g, f.areaId);
+      if (!route) continue;
+      if (!best || route.cost < best.cost) best = { id: f.areaId, cost: route.cost };
+    }
+    return best?.id ?? null;
+  };
+
+  /** lounge ステップを waiting ステップへ差し替えて待合へ回す（フォールバック） */
+  const fallbackToWaiting = (g: DetailGroup): void => {
+    result.loungeSkipped += g.count;
+    g.steps[g.stepIdx] = 'waiting';
+    advance(g);
+  };
+
   /** 次のステップの目的地を決めて移動を開始する。到達不能なら failed にする */
   const advance = (g: DetailGroup): void => {
     if (g.stepIdx >= g.steps.length) {
@@ -240,6 +297,21 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
       return;
     }
     const step = g.steps[g.stepIdx]!;
+    if (step === 'lounge') {
+      const chosen = g.loungeAreaId ?? chooseLounge(g);
+      if (!chosen) {
+        fallbackToWaiting(g);
+        return;
+      }
+      g.loungeAreaId = chosen;
+      const route = routeTo(g, chosen);
+      if (!route) {
+        fallbackToWaiting(g);
+        return;
+      }
+      startWalk(g, chosen, route);
+      return;
+    }
     if (step === 'gate' || step === 'waiting') {
       const targets = step === 'gate'
         ? (g.gateAreaId ? [g.gateAreaId] : gateAnchors)
@@ -297,9 +369,13 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
       spawnAcc -= 1;
       if (entrances.length === 0 || gateAnchors.length === 0) break;
       const wantsShop = rng.next() < visitProb;
-      const steps: StepKind[] = wantsShop
-        ? ['checkIn', 'security', 'shop', 'waiting', 'gate']
-        : ['checkIn', 'security', 'waiting', 'gate'];
+      // ラウンジ意図は、対象施設があるターミナルでのみ乱数を消費する（無いレイアウトの結果を変えない）
+      const wantsLounge = loungeFacilities.length > 0 && rng.next() < loungeVisitProb;
+      const steps: StepKind[] = ['checkIn', 'security'];
+      if (wantsShop) steps.push('shop');
+      // ラウンジは待合の代わりの滞留先（入れなければ advance 時に待合へフォールバックする）
+      steps.push(wantsLounge ? 'lounge' : 'waiting');
+      steps.push('gate');
       const g: DetailGroup = {
         id: nextId++,
         count: rng.int(1, 5),
@@ -310,7 +386,7 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
         stepIdx: 0,
         walkUntil: 0, walkDest: '', facility: null, queueSince: 0, serviceUntil: 0, dwellUntil: 0, waitSince: 0,
         deadline: now + rng.int(budgetMin, budgetMax),
-        state: 'walking', shopAreaId: null, gateAreaId: null,
+        state: 'walking', shopAreaId: null, loungeAreaId: null, dwellKind: 'waiting', gateAreaId: null,
       };
       result.spawnedGroups++;
       result.spawnedPax += g.count;
@@ -325,17 +401,30 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
       if (step === 'gate') {
         g.state = 'done';
         if (now <= g.deadline) result.boarded += g.count; else result.boardedLate += g.count;
-      } else if (step === 'waiting') {
+      } else if (step === 'waiting' || step === 'lounge') {
+        if (step === 'lounge') {
+          // 到着時点で席を再確認する（移動中に満員になっていたら待合へフォールバック）
+          const f = loungeFacilities.find((x) => x.areaId === g.area);
+          if (!f || (loungeOccupancy.get(g.area) ?? 0) + g.count > f.capacity) {
+            if (f) recordOf(g.area).turnedAway += g.count;
+            g.loungeAreaId = null;
+            fallbackToWaiting(g);
+            continue;
+          }
+          loungeOccupancy.set(g.area, (loungeOccupancy.get(g.area) ?? 0) + g.count);
+        }
         g.state = 'dwelling';
+        g.dwellKind = step === 'lounge' ? 'lounge' : 'waiting';
         g.waitSince = now;
         // 滞留は「締切 − ゲートまでの歩行時間」まで。締切ちょうどに終えると全員が遅刻になる
         const gateRoute = nearestRoute(g, gateAnchors);
         const walkToGate = gateRoute?.route.cost ?? 0;
         if (gateRoute) g.gateAreaId = gateRoute.dest;
         g.dwellUntil = Math.max(now, g.deadline - walkToGate);
-        const w = waitingRecords.get(g.area) ?? { users: 0, dwellPaxSec: 0 };
+        const dwellMap = step === 'lounge' ? loungeRecords : waitingRecords;
+        const w = dwellMap.get(g.area) ?? { users: 0, dwellPaxSec: 0 };
         w.users += g.count;
-        waitingRecords.set(g.area, w);
+        dwellMap.set(g.area, w);
       } else {
         arriveAtFacility(g);
       }
@@ -393,11 +482,12 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
         }
       }
     }
-    // 待合の滞留終了
+    // 待合・ラウンジの滞留終了
     for (const g of groups) {
       if (g.state !== 'dwelling' || now < g.dwellUntil) continue;
-      const w = waitingRecords.get(g.area);
+      const w = (g.dwellKind === 'lounge' ? loungeRecords : waitingRecords).get(g.area);
       if (w) w.dwellPaxSec += (now - g.waitSince) * g.count;
+      if (g.dwellKind === 'lounge') loungeOccupancy.set(g.area, Math.max(0, (loungeOccupancy.get(g.area) ?? 0) - g.count));
       g.stepIdx++;
       advance(g);
     }
@@ -406,7 +496,7 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
   // 終了時点で滞留中のグループは、経過分を滞留実績へ加算する
   for (const g of groups) {
     if (g.state !== 'dwelling') continue;
-    const w = waitingRecords.get(g.area);
+    const w = (g.dwellKind === 'lounge' ? loungeRecords : waitingRecords).get(g.area);
     if (w) w.dwellPaxSec += (now - g.waitSince) * g.count;
   }
   result.unfinished = groups
@@ -418,6 +508,32 @@ export function runServiceDetailSim(layout: AirportLayout, opts: ServiceDetailOp
     rec.users += w.users;
     rec.groups += 0; // 待合はグループ単位の処理ではないため groups は数えない
     rec.dwellPaxSec += w.dwellPaxSec;
+  }
+  // ラウンジの滞留実績も同じ形で統合する（売上は持たないため revenue は 0 のまま）
+  for (const [areaId, w] of loungeRecords) {
+    const rec = recordOf(areaId);
+    rec.users += w.users;
+    rec.groups += 0; // ラウンジもグループ単位の処理ではないため groups は数えない
+    rec.dwellPaxSec += w.dwellPaxSec;
+  }
+  // ラウンジ体験指標: 利用者・時間を集め、完了旅客あたりの満足度換算ポイントを出す（参考値）
+  {
+    let users = 0;
+    let dwellPaxSec = 0;
+    for (const w of loungeRecords.values()) {
+      users += w.users;
+      dwellPaxSec += w.dwellPaxSec;
+    }
+    const finished = result.boarded + result.boardedLate;
+    const userHours = dwellPaxSec / 3600;
+    result.loungeExperience = {
+      users,
+      dwellPaxSec,
+      userHours,
+      estimatedSatisfactionPoints: finished > 0
+        ? Math.min(BALANCE.lounge.satisfactionCapPoints, (BALANCE.lounge.satisfactionPerUserHour * userHours) / finished)
+        : null,
+    };
   }
   result.records = Object.fromEntries(records);
   result.waitingRecords = Object.fromEntries(waitingRecords);

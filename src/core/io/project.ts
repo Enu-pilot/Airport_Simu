@@ -45,7 +45,9 @@ export const PROJECT_FORMAT_VERSION_5 = 5;
 /** フェーズ 4 の項目（features・carryOver・国際のエリアなど）を使うファイルの版。当初計画の 5 はフェーズ 3 の市場設定が使ったため 6 に繰り下げた */
 export const PROJECT_FORMAT_VERSION_6 = 6;
 export const PROJECT_FORMAT_VERSION_7 = 7;
-export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_7;
+/** ラウンジエリア（terminalArea kind 'lounge'）を使うファイルの版（5-19 2A。形式 7 の動く歩道と同じ扱い） */
+export const PROJECT_FORMAT_VERSION_8 = 8;
+export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_8;
 
 const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !== null && k in (o as Record<string, unknown>);
 
@@ -155,7 +157,13 @@ export function layoutUsesFormat7(l: AirportLayout): boolean {
   return Object.values(l.terminalAreas ?? {}).some((a) => a.kind === 'movingWalkway');
 }
 
+/** レイアウトが保存形式 8 の項目（ラウンジエリア）を使っているか */
+export function layoutUsesFormat8(l: AirportLayout): boolean {
+  return Object.values(l.terminalAreas ?? {}).some((a) => a.kind === 'lounge');
+}
+
 export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null; journal?: Journal }): number {
+  if (layoutUsesFormat8(p.layout) || p.scenarios.some((sc) => layoutUsesFormat8(sc.layout))) return PROJECT_FORMAT_VERSION_8;
   if (layoutUsesFormat7(p.layout) || companyUsesFormat7(p.company) || p.scenarios.some((sc) => layoutUsesFormat7(sc.layout) || companyUsesFormat7(sc.company)) || (p.sim && companyUsesFormat7(p.sim.company))) return PROJECT_FORMAT_VERSION_7;
   if (layoutUsesFormat6(p.layout) || companyUsesFormat6(p.company) || p.scenarios.some((sc) => layoutUsesFormat6(sc.layout) || companyUsesFormat6(sc.company)) || (p.sim && (simUsesFormat6(p.sim.state) || companyUsesFormat6(p.sim.company)))) return PROJECT_FORMAT_VERSION_6;
   if (companyUsesFormat5(p.company) || p.scenarios.some((s) => companyUsesFormat5(s.company)) || (p.sim && companyUsesFormat5(p.sim.company))) return PROJECT_FORMAT_VERSION_5;

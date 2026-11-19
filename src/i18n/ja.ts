@@ -571,6 +571,7 @@ export const AREA_KIND_LABEL: Record<TerminalAreaKind, string> = {
   elevator: 'エレベーター',
   shop: '店舗',
   restaurant: '飲食店',
+  lounge: 'ラウンジ',
   emigration: '出国審査',
   immigration: '入国審査',
   customs: '税関',

@@ -5,6 +5,7 @@ import type { SimContext } from './sim/context';
 import { BALANCE } from './economy/balance';
 import { towerCapacityPerHour } from './safety';
 import { verifyPortalAccess } from './terminal/networkGraph';
+import { SERVICE_CATEGORIES, serviceProfilesFor, type ServiceCategory } from './terminal/serviceProfile';
 
 /**
  * Phase 6 / F6-01: 共通能力データ契約。
@@ -181,6 +182,47 @@ export function readingsFromProcessPeak(report: DailyReport): CapabilityReading[
     state: row.capacityPerHour <= 0 ? 'zeroCapacity' : 'operational',
     basis: '5-21 工程ピーク（能力は terminal/capacity.ts の合計。有効能力の減額源は未実装のため理論と同値）',
   }));
+}
+
+const SERVICE_CATEGORY_LABEL: Record<ServiceCategory, string> = {
+  retail: '店舗',
+  dining: '飲食',
+  lounge: 'ラウンジ',
+  waiting: '待合',
+};
+
+/**
+ * 旅客サービス施設（5-19 T11 の集約 profile）を共通契約へ写す adapter。
+ * 単位はカテゴリで異なる: 店舗・飲食・待合は処理能力（窓口相当）、ラウンジは席数。
+ * 理論 = 設置済み全施設の合計、有効 = 運用中施設の合計。需要・実績は profile の範囲外
+ * （実績は aggregateServiceRecords 側）ため null とし、根拠を basis に明記する。
+ */
+export function readingsFromServiceProfiles(layout: AirportLayout): CapabilityReading[] {
+  const profiles = serviceProfilesFor(layout);
+  const out: CapabilityReading[] = [];
+  for (const terminalId of profiles.terminals) {
+    for (const category of SERVICE_CATEGORIES) {
+      const p = profiles.byTerminalCategory.get(`${terminalId}|${category}`)!;
+      const allSeatsOrServers = profiles.facilities
+        .filter((f) => f.terminalId === terminalId && f.category === category)
+        .reduce((s, f) => s + f.capacity, 0);
+      out.push({
+        domain: 'passenger-service',
+        subjectId: `${terminalId}:${category}`,
+        label: `${SERVICE_CATEGORY_LABEL[category]}（${terminalId}）`,
+        unit: category === 'lounge' ? 'seats' : 'servers',
+        theoretical: p.facilityCount > 0 ? allSeatsOrServers : null,
+        effective: p.facilityCount > 0 ? p.totalCapacity : null,
+        demand: null,
+        actual: null,
+        state: p.status === 'notConfigured' ? 'notInstalled' : p.status === 'notOperational' ? 'closed' : p.totalCapacity <= 0 ? 'zeroCapacity' : 'operational',
+        basis: category === 'lounge'
+          ? '5-19 集約 profile（terminal/serviceProfile.ts）。ラウンジ能力は席数（props.seats）合計。需要・実績は profile の範囲外のため未算出'
+          : '5-19 集約 profile（terminal/serviceProfile.ts）。能力は areaServerCount 合計。需要・実績は profile の範囲外のため未算出',
+      });
+    }
+  }
+  return out;
 }
 
 /**

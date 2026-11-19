@@ -1,11 +1,11 @@
 {
- "bus-sim.golden.json": "skyport-sim-10.7",
- "crossing-sim.golden.json": "skyport-sim-10.7",
- "game-models.golden.json": "skyport-sim-10.7",
- "game-weather.golden.json": "skyport-sim-10.7",
- "legacy-remote-sim.golden.json": "skyport-sim-10.7",
- "project-sim.golden.json": "skyport-sim-10.7",
- "sim-midrun.golden.json": "skyport-sim-10.7",
- "sim.golden.json": "skyport-sim-10.7",
- "stress-sim.golden.json": "skyport-sim-10.7"
+ "bus-sim.golden.json": "skyport-sim-10.8",
+ "crossing-sim.golden.json": "skyport-sim-10.8",
+ "game-models.golden.json": "skyport-sim-10.8",
+ "game-weather.golden.json": "skyport-sim-10.8",
+ "legacy-remote-sim.golden.json": "skyport-sim-10.8",
+ "project-sim.golden.json": "skyport-sim-10.8",
+ "sim-midrun.golden.json": "skyport-sim-10.8",
+ "sim.golden.json": "skyport-sim-10.8",
+ "stress-sim.golden.json": "skyport-sim-10.8"
 }

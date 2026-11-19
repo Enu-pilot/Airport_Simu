@@ -51,6 +51,75 @@ export function onwardAppeal(from: DestinationDef, to: DestinationDef): number {
   return Math.pow(to.population / 1e6, M.beta) * demandIndex(to) * distanceFactor(from.distanceKm + to.distanceKm) * phi;
 }
 
+/** 乗継 OD 集計の 1 行（5A: 表示用データ。能力画面・日報が拾う） */
+export interface TransferOdEntry {
+  /** 到着路線の相手都市（destinationId） */
+  from: string;
+  /** 出発路線の相手都市（destinationId） */
+  to: string;
+  /** 乗継種別（DD / DI / ID / II） */
+  kind: ReturnType<typeof transferKindOf>;
+  /** 計画乗継人数（その日の計画で配分された人数の合計） */
+  pax: number;
+  /** 接続ペア数（到着便 × 出発便の組の数） */
+  pairs: number;
+  /** 魅力 A(from → to)（onwardAppeal。OD で一意なため人数重み平均 = その値） */
+  appeal: number;
+  /** 接続品質 q の人数重み平均（0〜1） */
+  avgQuality: number;
+  /** 乗継時間（分）の人数重み平均 */
+  avgGapMin: number;
+}
+
+/**
+ * 乗継 OD 集計（5A）: planConnections が確定した計画（到着便の connections と
+ * 出発便の transferIn）を、接続ペア（到着路線 × 出発路線 = OD）ごとに集計する純粋関数。
+ *
+ * 需要の計算式・配分・乱数は一切変えない。魅力と品質は、計画時に使ったのと同じ
+ * 決定的関数（onwardAppeal / connectionQuality）を計画データから再計算して内訳として
+ * 添える（乱数は使わない）。合計は Σ connections.pax = Σ transferIn と一致する。
+ *
+ * 既存の hubStats（実績: spawned / connected / missed / noShow）とは別物で二重計上ではない:
+ * こちらは「計画時にどれだけ配分したか」、あちらは「当日実際にどうなったか」。
+ * 計画と実績は一致しないのが通常（乗継失敗・ノーショー等）ため、合計も一致を要求しない。
+ */
+export function summarizeTransferOd(plan: DayPlan, hub: HubAnalysis): TransferOdEntry[] {
+  const byKey = new Map(plan.flights.map((f) => [f.key, f]));
+  const acc = new Map<string, { from: string; to: string; kind: TransferOdEntry['kind']; pax: number; pairs: number; appealW: number; qualityW: number; gapW: number }>();
+  for (const a of plan.flights) {
+    if (!a.connections || a.connections.length === 0) continue;
+    for (const conn of a.connections) {
+      const d = byKey.get(conn.depKey);
+      if (!d) continue;
+      const mct = hub.mct[conn.kind];
+      if (mct === null) continue;
+      const gap = d.departureAt - a.arrivalAt;
+      const appeal = onwardAppeal(destinationDef(a.destinationId), destinationDef(d.destinationId));
+      const quality = connectionQuality(gap, mct);
+      const key = `${a.destinationId}|${d.destinationId}|${conn.kind}`;
+      const row = acc.get(key) ?? { from: a.destinationId, to: d.destinationId, kind: conn.kind, pax: 0, pairs: 0, appealW: 0, qualityW: 0, gapW: 0 };
+      row.pax += conn.pax;
+      row.pairs += 1;
+      row.appealW += appeal * conn.pax;
+      row.qualityW += quality * conn.pax;
+      row.gapW += gap * conn.pax;
+      acc.set(key, row);
+    }
+  }
+  return [...acc.values()]
+    .map((r) => ({
+      from: r.from,
+      to: r.to,
+      kind: r.kind,
+      pax: r.pax,
+      pairs: r.pairs,
+      appeal: r.pax > 0 ? r.appealW / r.pax : 0,
+      avgQuality: r.pax > 0 ? r.qualityW / r.pax : 0,
+      avgGapMin: r.pax > 0 ? r.gapW / r.pax / 60 : 0,
+    }))
+    .sort((x, y) => y.pax - x.pax || compareIds(x.from, y.from) || compareIds(x.to, y.to) || compareIds(x.kind, y.kind));
+}
+
 export function planConnections(plan: DayPlan, c: CompanyState, hub: HubAnalysis): void {
   if (!featureOn(c, 'hub')) return;
   const contracts = new Map<string, Contract>(Object.values(c.contracts).map((k) => [k.id, k]));

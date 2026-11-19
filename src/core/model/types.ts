@@ -267,6 +267,7 @@ export type TerminalAreaKind =
   | 'movingWalkway'
   | 'shop'
   | 'restaurant'
+  | 'lounge'
   | 'emigration'
   | 'immigration'
   | 'customs'

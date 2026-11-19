@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.7",
+ "simModelVersion": "skyport-sim-10.8",
  "runs": {
   "day0-normal": {
    "day": 0,

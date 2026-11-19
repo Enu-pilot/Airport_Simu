@@ -190,6 +190,7 @@
 | 2026-11-18 | 初版計画 | 通常運航の集約モデルと独立詳細TerminalSimulationを分ける方針を作成 | Docsのみ | 空港全体1日運航とのUI/clock境界、対外交通・全方向接続検証が未定義 |
 | 2026-11-18 | 要件拡張 | 空港全体1日運航とターミナル単独詳細の2モードを明示。6種の対外交通、外部施設〜入口〜搭乗口/出口〜外部施設の経路、3状態/サービス不足/Step-free監査を追加 | Docsのみ。コードテスト未実行 | T1〜T10、5-16/5-18との統合が未着手 |
 | 2026-11-19 | T11–T13 バックエンド実装 | 集約 profile adapter（serviceProfile.ts）、運営モード集約接続（serviceAggregate.ts、切替式・既定 detailed）、詳細モード独立実行（serviceDetailSim.ts）、段階負荷ベンチを実装。詳細は末尾「実装記録」 | 新規テスト 17 件通過、typecheck/lint 通過。ゴールデン/フィンガープリントは §9 に記録 | 未push（承認待ち）。集約方式の既定化は PO 判断。5-16 T6・ラウンジ種別・詳細結果の profile 反映 UI は未実装 |
+| 2026-11-19 | PO 決定 1B・2A・3B・4B・5A の実施 | 1B: 集約方式を既定化（SIM_MODEL_VERSION 10.8）。2A: ラウンジエリア種別を新設（保存形式 8）。3B: 詳細結果の運営 profile 反映は「作らない」と決定・記録。4B: 5-16 T6 は UI 更新が落ち着くまで保留し次の基盤課題として残すと決定・記録（5-16 計画書にも記録）。5A: 乗継 OD 集計（summarizeTransferOd + DailyReport.hubOd、計算は不変）。詳細は末尾「PO 決定の実施記録」 | 新規テスト 13 件通過。legacyFingerprint 7/7・全ハッシュ変更前と一致（再採取なし）。ゴールデンの sim 系 10 ファイルは版スタンプ（10.7→10.8）のみの差で失敗し、再採取は PO 承認待ち（帰属証明済み） | 未push（承認待ち）。ゴールデン再採取の承認、UI 実装（別チャット）、5-16 T6（保留） |
 
 ## 9. 完了記録
 
@@ -198,7 +199,7 @@
 - 品質ゲート（T11–T13 分）: typecheck 通過 / lint（変更ファイル）通過 / build 通過。新規テスト 17 件通過（serviceProfile 5・serviceDetailSim 5・serviceAggregateMode 4・serviceModesBench 3）。ゴールデン全 10 ファイル + legacyFingerprint 7/7 通過（既定 detailed 経路の挙動不変を確認、再採取なし）。
 - 既知の失敗（本変更に起因しない）: passengers.test.ts「保安検査のレーンが少ないと…」が 5 秒タイムアウトで失敗するが、未変更のベースツリーでも同一に再現する環境要因（VM 負荷）であり、アサーション失敗ではない。
 - 未実行/未検証: T1〜T10 全般、詳細モードのブラウザ視覚確認（UI 未実装のため対象外）、tiersInvestment520 / tiersReachability520 等の長時間バッチ（本変更と無関係な範囲は未実施）。
-- 残件: T1〜T10、T11–T13 の push（PO 承認待ち）、集約方式の既定化判断（PO）、5-16 T6、ラウンジのエリア種別新設可否（PO）、詳細結果の運営 profile 反映 UI（差分プレビュー + 明示適用の設計のみ）
+- 残件: T1〜T10、T11–T13 の push（PO 承認待ち→PR #48 でマージ済み）、5-16 T6（PO 決定 4B で UI 更新が落ち着くまで保留・次の基盤課題）、詳細結果の運営 profile 反映（PO 決定 3B で「作らない」ため残件から除外）、集約既定化（1B 実施済み）・ラウンジ種別（2A 実施済み）・乗継 OD 集計（5A 実施済み）はいずれも未push（承認待ち）。ゴールデン sim 系 10 ファイルの再採取（版スタンプのみの差）は PO 承認待ち
 
 ## Phase 6との関係
 
@@ -365,5 +366,53 @@
 | 詳細モードの実行と結果 | `runServiceDetailSim(layout, opts)` → `ServiceDetailResult`（店舗別 `records`、集約済み `aggregated`、経路統計、tick 計測）。計測表示には `nowMs: () => performance.now()` を UI 側から渡す |
 | 店舗別実績の集約・比較表示 | `aggregateServiceRecords(profiles, records)`（運営・詳細で同一の指標定義） |
 | 診断導線の識別子 | profile・実績はすべてエリア ID（`facilityIds` / `records` のキー）で引ける。施設クリック → エリア ID → 実績 の対応が取れる |
-| 詳細結果の運営 profile への反映 | **未実装（設計のみ）**: 反映する場合は「差分プレビュー + 明示適用」を必須とする。現時点では詳細結果は表示・比較専用で、AirportDay へ自動反映しない |
-| モード切替 UI | `CreateOptions.serviceGranularity` が受け口。既定 detailed のまま。集約を既定にするかは PO 判断 |
+| 詳細結果の運営 profile への反映 | **作らない（PO 決定 3B・2026-11-19）**: 詳細結果は表示・比較専用で、AirportDay へ自動反映も明示適用も実装しない |
+| モード切替 UI | `CreateOptions.serviceGranularity` が受け口。既定は集約方式になった（PO 決定 1B・2026-11-19）。詳細方式は明示指定で選べる |
+
+## PO 決定の実施記録（2026-11-19、1B・2A・5A 実装 + 3B・4B 記録）
+
+作業コピー `Airport_Simu_decisions`（ベース: 既定ブランチ `claude/sweet-pasteur-4denw0` HEAD `3fa56d1ea00d` = PR #48 マージ済み）。**未push（承認待ち）**。UI の画面描画は別チャットの担当で、本記録はバックエンドと接続点まで。
+
+### 1B: 集約方式（serviceGranularity 'aggregate'）の既定化
+
+- 変更: `createSimulation` の既定を `'detailed'` → `'aggregate'`（`src/core/sim/simulation.ts`）。`'detailed'` は `CreateOptions.serviceGranularity` の明示指定で従来どおり選べる。手組み Simulation で粒度が欠落した場合は従来どおり詳細経路（passengers.ts は 'aggregate' のときだけ集約経路に入る）。
+- 目的（PO 判断）: もっと大きな規模で動かすため。集約方式は店舗単位の経路探索・キューを作らず、規模拡大時の計算量を抑える（T13 実測: 同一条件で約31%短縮、店舗数・旅客数が増えるほど差が開く構造）。
+- 影響計測: legacyFingerprint 全 6 ハッシュが変更前（ベース `3fa56d1ea00d` で採取）と完全一致し 7/7 通過。代表シナリオ（サンプル空港・city core・線形/交差/ストレス）は店舗エリアを持たないため、既定変更の影響範囲外であることを確認した。店舗のあるレイアウトでは、既定運航の店舗利用が集約近似に変わる（新規テストで「省略時 = 明示 aggregate と完全一致」「明示 detailed では集約実績が立たず従来経路」を固定）。
+- SIM_MODEL_VERSION: `'skyport-sim-10.7'` → `'skyport-sim-10.8'` に上げた。根拠: 既定の計算方式が変わり、店舗のある空港では同一セーブの再開後に運航結果が変わりうる。前例（10.5 = ポータル歩行の挙動変更、10.7 = 動く歩道の Work Order）と整合する。効果は従来どおり「版の違う進行中状態は復元せず、空港と会社を保持して建設モードで開く」。
+- ゴールデンへの影響: sim 系ゴールデン 10 ファイル（sim / crossing-sim / project / bus-sim / game-models / game-weather / legacy-remote-sim / stress-sim / project-sim / normalized-hashes）が版スタンプ（simModelVersion 10.7→10.8）のみの差で一致しなくなった。採取テキストと基準値の diff で全て版文字列だけが差分であること、および project / project-sim / normalized-hashes は版文字列を 10.7 へ戻すと基準 sha256 と一致することまで確認し、**運航結果そのものに差がないことを証明した**（normalized-hashes はレイアウト側ハッシュが全て一致し、差は simModel を含む project 側のみ）。再採取（GOLDEN_UPDATE=1）は PO 承認待ちとし、本作業では実施していない。フィンガープリントの再採取は不要（一致）。
+
+### 2A: ラウンジのエリア種別新設（店舗の派生にしない）
+
+- 登録: TerminalArea 種別 `'lounge'` を追加（`model/types.ts`）。カタログ仕様（`model/catalog.ts`）: 既定 4×2、zone 'departure'（変更可）、props は `seats`（int 0–5000、既定 40）。配置は TERMINAL_AREA_SPECS 経由でツールボックスに自動で載る。ラベル `AREA_KIND_LABEL.lounge = 'ラウンジ'`（i18n/ja.ts）、描画色 `AREA_COLOR.lounge`（render/MapRenderer.ts、色の最終判断は UI 側）、建設費 `BALANCE.costs.areaUnit.lounge = 100,000`（飲食店 120,000 と同規模の内装費として置いた暫定値）。
+- 利用資格（`isLoungeEligible`、terminal/serviceProfile.ts）: 区域が保安検査後の出発区域（departure / departureIntl）、所属ターミナルが運用中、席数 > 0。実際の到達可能性は利用側の経路探索（詳細モードの findPaxRoute、区域制約・Step-free を強制）が決める。**航空会社のクラス/ステータスによる資格は未対応**: 既存モデルに該当する旅客属性が存在しないため新設しなかった（全旅客が同じ資格モデル）。
+- 滞在モデル: 購買ではないため売上を持たない（spendPerPax / dwellSec は根拠なしとして null）。収容は席数ベース（profile の capacity は areaServerCount ではなく props.seats）。詳細モードでは待合の代わりの滞留先になり、満員（滞留人数 + グループ人数 > 席数）なら入れず待合へフォールバックし、turnedAway / loungeSkipped に記録する。立寄り意図は「締切までの残り ≥ 60 分（minSlackMin）かつ確率 25%（visitProb）」。
+- 満足度への接続: AirportDay の満足度式（computeKpi）には快適性・アメニティの入力項が存在せず、接続できる既存経路がない。したがって満足度式は変更せず、新規係数を `BALANCE.lounge` に明示したうえで、詳細モードの結果にだけ現れる体験指標（利用者・時間 × satisfactionPerUserHour = 2、上限 satisfactionCapPoints = 5、完了旅客あたり）として出す。**この係数は実測根拠のないゲームバランス定数**であり、AirportDay への接続はバランス変更として別途 PO 判断が要る（未接続であることを明記する）。
+- 集約 profile: 独立カテゴリ 'lounge' のまま（retail/dining/waiting に混ぜない）。能力契約 adapter `readingsFromServiceProfiles`（core/capability.ts）が domain 'passenger-service' でターミナル×カテゴリの読み取りを出し、ラウンジは単位 'seats'。
+- 保存形式: **PROJECT_FORMAT_VERSION_8 を新設**（形式 7 = 動く歩道の前例と同じ扱い）。`layoutUsesFormat8` = ラウンジエリアを含むレイアウト。含まないプロジェクトは従来どおりの版で書かれ、旧セーブの読込互換は維持される（PROJECT_FORMAT_MAX_READABLE = 8）。SIM_MODEL_VERSION は 1B の 10.8 で既に上がっており、ラウンジ自体は既存運航の計算を変えないため追加の版上げはしない。
+- 運営モード（AirportDay）の planShop は従来どおり shop/restaurant のみを対象とし、ラウンジは運営側の滞留先にはまだ接続していない（詳細モードと profile・能力契約までが本実装の範囲。運営側への接続は UI 更新と合わせて別途判断）。
+
+### 5A: 乗継需要モデルの OD 集計（計算は変えない）
+
+- `summarizeTransferOd(plan, hub)`（economy/hub.ts）: planConnections が確定した計画を OD（到着路線 × 出発路線）ごとに集計する純粋関数。需要の計算式・配分・乱数は一切変更していない。魅力（onwardAppeal）と品質（connectionQuality）は計画時と同じ決定的関数を計画データから再計算して内訳として添える（乱数不使用）。合計は Σ connections.pax = Σ transferIn と一致することをテストで固定。
+- 保持と日報: `generateContractSchedule` が計画確定時に `sim.transferOdPlan`（実行時データ・保存対象外）へ会社日単位で保持し、`settleDay` がその日の日報 `DailyReport.hubOd?: TransferOdEntry[]` へ写す。ハブ無効・日ずれ・配分なしの日はフィールド自体が付かない。
+- 既存集計との関係: `report.hub` / hubStats は当日の**実績**（spawned/connected/missed/noShow）、hubOd は**計画**（配分）であり別フェーズの値で二重計上ではない。計画と実績は通常一致しないため合計の一致は要求しない。
+- フィンガープリントへの影響: フィクスチャの会社はハブ機能を持たないため hubOd は付かず、全ハッシュ一致（再採取なし）。
+
+### 3B: 詳細結果の運営 profile への反映は「作らない」（記録のみ）
+
+- PO 決定（2026-11-19）: 詳細モードの結果を AirportDay の運営 profile へ反映する機能（差分プレビュー + 明示適用を含む）は実装しない。詳細結果は表示・比較専用とする。本書の「UI 側への引き渡しメモ」の該当行もこの決定に合わせて更新した。
+
+### 4B: 5-16 T6 は保留し、次の基盤課題として残す（記録のみ）
+
+- PO 決定（2026-11-19）: 5-16 T6（複合グラフへの容量予約・Step-free 統合）は、UI 更新が落ち着くまで保留し、次の基盤課題として残す。実装はしない。5-16 計画書（passenger_network_unification_plan.md）の T6 行・残件にも同じ決定を記録した。詳細モードの移動は引き続き TerminalModel の実経路 + エリア単位キューであり、T6 の代用・完了扱いにしない。
+
+### UI 側への引き渡しメモ（追加分）
+
+| 用途 | 接続点 |
+|---|---|
+| ラウンジの配置 | `TERMINAL_AREA_SPECS.lounge`（model/catalog.ts）でツールボックス配置が可能。ラベルは `AREA_KIND_LABEL.lounge`、色は `AREA_COLOR.lounge`（仮置き。最終色は UI 側で判断） |
+| ラウンジの能力表示 | `readingsFromServiceProfiles(layout)`（core/capability.ts、単位 seats）/ 集約 profile の `categoryProfile(profiles, terminalId, 'lounge')`（状態・席数合計・区域内訳） |
+| ラウンジの資格表示 | `isLoungeEligible(facilityProfile)`（terminal/serviceProfile.ts）。区域外（一般・到着）に置いたラウンジは「利用対象外」と表示できる |
+| ラウンジの体験指標 | `ServiceDetailResult.loungeExperience`（利用者・滞留人秒・利用者時間・満足度換算ポイント）と `loungeSkipped`、店舗別実績の lounge カテゴリ集約 |
+| 乗継 OD 集計の表示 | 日報: `DailyReport.hubOd`（OD 別 pax・ペア数・魅力・平均品質・平均乗継分、人数順）。能力画面のプレビュー: `summarizeTransferOd(plan, hubAnalysis)` を計画プレビュー経路（economy/capacity.ts の planConnections 呼び出しと同じ計画）に対して呼べる |
+| 粒度の既定表示 | 既定は集約方式。詳細方式は `CreateOptions.serviceGranularity: 'detailed'` の明示指定 |
