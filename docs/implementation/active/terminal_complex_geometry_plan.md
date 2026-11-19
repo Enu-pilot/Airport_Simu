@@ -64,6 +64,7 @@
 | T5 | 未着手 | gate / terminal assignment / passenger ownership / capacityをcomplex IDと物理IDに分ける | terminal/model.ts、gates.ts、passengers.ts、validation | 接触したビル同士の同一complex化、ゲートの複合体割当て、物理建物ID維持 |
 | T6 | 完了（検証） | 旅客の建物間経路を明示リンクに基づき構築 | terminal graph、5-16との接続 | 同一complexでも通路なしは到達不可、operational linkのみ通行可、区域越境は既存ルール。検証（2026-11-18）: エリア隣接リンクは同一ターミナル内だけで構築されるため、建物間の移動はもともと明示リンク必須だった。これを complexRoute515 3 件で固定（辺接触で同一複合体でも到達不可、L字建物でも同じ、operational リンクでのみ通行可・建設中は将来モデルのみ・planned は不可） |
 | T7 | 一部完了 | 2D/3D描画、保存互換、性能とE2E | renderer / io / tests / docs | 旧矩形セーブの往復一致、500建物相当の合成テストで上限・計測値を記録。進捗（2026-11-18 夜）: 2D 描画（MapRenderer.drawFacility）が footprint のある施設を多角形で描くようになった（頂点はタイル角座標、そのまま輪郭として描画）。性能は 5-16 T9 の大規模計測（perf516Large、約 500 施設で analyzeLayout 225ms 中央値）を参照。残: 3D 描画の多角形対応、E2E |
+| T8 | 未着手（PO追加要求） | 直線+円弧の複合輪郭データモデル、検証、タイル化/占有、衝突判定、2D/3D描画、保存互換を追加 | geometry / footprint / validation / renderer / io / tests | 円弧輪郭の作成/変換/保存往復が一致。凹形・直線のみ・複数円弧・接線接続・自己交差・ゼロ半径/面積・境界接触・他施設干渉を検証し、旧矩形/直交ポリゴンの結果は不変 |
 
 ## 5. 互換性・リスク
 
