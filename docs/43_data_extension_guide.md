@@ -63,6 +63,7 @@ defineAirline({ id: 'ZZ', name: '試験航空', type: 'regional', services: ['do
 | `priceSensitivity` | | 種別値（0.3 / 0.8 / 0.5） | 0〜1。料金への敏感さ |
 | `minOtp` | | 種別値（0.82 / 0.7 / 0.75） | 0.5〜0.99。求める定時率 |
 | `canBase` | | false | 拠点にできるか（4-04 用。フェーズ 3 では保持と検証のみ） |
+| `networkDestinations` | | 無制限 | 就航範囲の許可集合（目的地 ID の配列、国内・国際共通）。指定すると、その集合の目的地にしか提案が出ない（提案生成の3経路が `airlineNetworkAllows` を参照）。既存の有効契約が範囲外の場合は、セーブ読み込み時（`importCompany` → `reassignOutOfScopeContracts`）に路線を保ったまま範囲内の会社へ付け替える（候補がなければ元の会社のまま維持し、契約は破棄しない）。実在の地域航空・LCC の路線網を表すために使う |
 | `unlock.minRating` / `minTier` | | なし | 都市と同じ |
 | `livery` | | 既定塗装 | `{ body, tail, stripe, engine }`（各 0〜0xffffff）。省略すると既定塗装になる |
 | `legacy` / `retired` | | — | 都市と同じ |

@@ -80,6 +80,13 @@ export interface AirlineInput {
   minOtp?: number;
   /** 拠点にできるか（4-04 用。フェーズ 3 では保持と検証のみ）。既定 false */
   canBase?: boolean;
+  /**
+   * 就航範囲（路線網）の制限: この会社が就航できる目的地 ID の許可集合（国内・国際共通）。
+   * 未指定 = 無制限。実在の地域航空・LCC の路線網を表すために使う（2026-11-19 ユーザー依頼）。
+   * 新規の提案は範囲内だけに生成される。既存の有効契約が範囲外の場合は、セーブ読み込み時に
+   * 路線を保ったまま範囲内の会社へ自動で付け替える（付け替え先がなければ元の会社のまま維持）。
+   */
+  networkDestinations?: string[];
   unlock?: Unlock;
   /** 塗装色 0x000000〜0xffffff。省略時は既定塗装 */
   livery?: { body: number; tail: number; stripe: number; engine: number };
@@ -131,6 +138,8 @@ export interface AirlineDef {
   baseLoadFactor: number;
   fareLevel: number;
   canBase: boolean;
+  /** 就航範囲の許可集合（目的地 ID）。未指定（undefined）= 無制限 */
+  networkDestinations?: string[];
   unlock: Unlock;
   livery?: { body: number; tail: number; stripe: number; engine: number };
   legacy: boolean;

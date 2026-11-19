@@ -63,6 +63,7 @@ function buildAirline(input: AirlineInput): AirlineDef {
     baseLoadFactor: input.baseLoadFactor ?? d.baseLoadFactor,
     fareLevel: input.fareLevel ?? d.fareLevel,
     canBase: input.canBase === true,
+    ...(input.networkDestinations && input.networkDestinations.length > 0 ? { networkDestinations: [...input.networkDestinations] } : {}),
     unlock,
     ...(input.livery ? { livery: { ...input.livery } } : {}),
     legacy: input.legacy === true,

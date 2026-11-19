@@ -136,6 +136,17 @@ export function validateCatalog(raw: CatalogRaw): CatalogIssue[] {
         else if (a.fleet.some((f) => f.typeId === t)) push('航空会社', a.id, `cargoFleet[${j}]`, `機種 "${String(t)}" が旅客フリートにも入っています`, '貨物専用機は旅客フリートと分ける');
       });
     }
+    if (a.networkDestinations !== undefined) {
+      if (!Array.isArray(a.networkDestinations) || a.networkDestinations.length === 0) push('航空会社', a.id, 'networkDestinations', '就航範囲の指定が空です', '目的地 ID を 1 件以上（無制限なら項目ごと省略）');
+      else {
+        const seenNet = new Set<string>();
+        a.networkDestinations.forEach((destId, j) => {
+          if (!seenDest.has(destId)) push('航空会社', a.id, `networkDestinations[${j}]`, `目的地 "${String(destId)}" が DESTINATION_DATA にありません`, '存在する目的地 ID');
+          if (seenNet.has(destId)) push('航空会社', a.id, `networkDestinations[${j}]`, `目的地 "${String(destId)}" が重複しています`, '会社ごとに一意');
+          seenNet.add(destId);
+        });
+      }
+    }
     if (a.baseLoadFactor !== undefined) range('航空会社', a.id, 'baseLoadFactor', a.baseLoadFactor, 0.3, 0.95);
     if (a.fareLevel !== undefined) range('航空会社', a.id, 'fareLevel', a.fareLevel, 0.5, 2.0);
     if (a.priceSensitivity !== undefined) range('航空会社', a.id, 'priceSensitivity', a.priceSensitivity, 0, 1);
