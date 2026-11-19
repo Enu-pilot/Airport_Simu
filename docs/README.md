@@ -8,7 +8,8 @@
 |---|---|---|
 | PO 承認済みの実装順序・受入条件・フェーズ全体の状態 | [42. 実装ロードマップ](42_implementation_roadmap.md) | 何を・どの順序で・何を満たせば完了か |
 | コード変更の詳細な実装方法・タスク進捗 | [implementation/](implementation/README.md) | どこを・どう変更し、どこまで検証したか |
-| Phase 6 空港施設・能力・運営機能の総合計画 | [Phase 6 実装計画](implementation/planned/phase6_airport_facility_expansion_plan.md)、[実装計画索引](implementation/README.md) | P0能力基盤、P1貨物、P2ターミナル、P3夜間拠点、P4空港基盤の優先順位とPhase 5既存計画との関係。実装未着手 |
+| Phase 6 空港施設・能力・運営機能の総合計画 | [Phase 6 実装計画](implementation/planned/phase6_airport_facility_expansion_plan.md)、[実装計画索引](implementation/README.md) | P0〜P4の優先順位とPhase 5既存計画との関係。2026-11-19時点でP0を中心に実装中。個別タスクの進捗は計画書を正本とする |
+| 施設・構造物の共通実装基準 | [45. 施設・構造物のライフサイクル実装標準](45_facility_lifecycle_standard.md) | 解放→設置→接続→稼働準備→能力算出→Simulation反映→実績評価→保守までの共通基準 |
 | 現在の機能仕様 | [11〜37 の機能別仕様](#機能別仕様) | 現行実装で確認した挙動・判定基準 |
 | 個別の追加要求・受入条件 | [40. 出発時刻制限](40_departure_time_limit.md)、[41. 能力拡張計画](41_capacity_expansion_plan.md) | 要求・設計上の前提・実装記録 |
 | 空港格の拡張計画・実装状況 | [Phase 5 / 5-20 実装計画](implementation/active/airport_tier_progression_plan.md)、[42. 実装ロードマップ](42_implementation_roadmap.md) | 8段階化・多軸昇格・機能解放は実装済み部分あり。T6・T8等の残件と受入状況はactive計画を参照。現行挙動はdocs/30・44とコードを正とする |
@@ -48,6 +49,7 @@
 | 40〜41 | 個別要求・受入基準・拡張計画 |
 | 42 | 承認済みの全体実装ロードマップ・フェーズ状態 |
 | 43〜44 | 追加データ・ハブ/国際線等の現行仕様 |
+| 45 | 施設・構造物・設備・車両・インフラの共通ライフサイクル実装基準 |
 
 ## 更新ルール
 
