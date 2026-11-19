@@ -121,6 +121,17 @@ export const BALANCE = {
     /** 兼用ゲートの切替に必要な間隔（秒） */
     swingChangeSec: 600,
   },
+  /** 乗継需要モデル（docs/44 §4.2）。魅力の要素は路線需要モデル（market）と共通の重力型を使う */
+  hub: {
+    /** 接続品質が 1 になる乗継時間 = MCT + この余裕（分） */
+    idealBufferMin: 45,
+    /** MCT ぎりぎりの接続の品質（0〜1。乗り損ね不安で需要が落ちる） */
+    tightQuality: 0.7,
+    /** 理想を超えた待ち時間に対する需要減衰の時定数（分。指数減衰） */
+    decayTauMin: 150,
+    /** 終着需要の魅力（ネットワーク魅力と同じ尺度）。乗継割合 = 上限 × A_net / (A_net + localAppeal) */
+    localAppeal: 1.0,
+  },
   /** 路線需要モデル（フェーズ 3 §3。market 有効時のみ使う） */
   market: {
     /** D_r = K × (P_o/1e6)^alpha × (P_d/1e6)^beta × I × g(d) × φ × A × F × R */

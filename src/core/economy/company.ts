@@ -75,7 +75,7 @@ export interface Contract {
   kind?: ContractKind;
   /** 拠点契約: 常駐機数 */
   basedAircraft?: number;
-  /** 乗継の割合 0〜0.5（フェーズ 4）。欠落 = 0 */
+  /** 乗継の受け入れ上限 0〜0.5（フェーズ 4）。実際に乗り継ぐ人数は需要モデルが上限以下で決める（docs/44 §4.2）。欠落 = 0 */
   transferShare?: number;
   /** 乗継の波（バンク）の ID */
   bankId?: string;

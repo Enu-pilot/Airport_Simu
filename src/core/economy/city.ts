@@ -279,7 +279,11 @@ export function growCity(city: CityConfig, dailyPax: number, demandCeiling: numb
   return events;
 }
 
-/** 契約の乗継割合（到着旅客のうち乗り継ぐ割合）。ハブ機能が有効な会社でのみ効く（planConnections と同じ条件） */
+/**
+ * 契約の乗継の上限（キャップ）。ハブ機能が有効な会社でのみ効く（planConnections と同じ条件）。
+ * 実際に乗り継ぐ割合は需要モデル（docs/44 §4.2）が上限以下で決める。ここでは計画前の
+ * 見積もり（都市需要上限の地元分の割合など）に使うため、上限基準の値を返す。
+ */
 export function contractTransferShare(company: CompanyState, contract: Pick<Contract, 'transferShare'>): number {
   return featureOn(company, 'hub') ? (contract.transferShare ?? 0) : 0;
 }
