@@ -171,6 +171,14 @@ export function ReviewBody({ review }: { review: DayReview }) {
             ))}
           </div>
         )}
+        {r.processPeakByTerminal && new Set(r.processPeakByTerminal.map((p) => p.terminalId)).size >= 2 && (
+          <div data-testid="review-process-peak-by-terminal">
+            <b>工程別実績（ターミナル別）</b>
+            {r.processPeakByTerminal.map((p) => (
+              <Row key={`${p.terminalId}:${p.step}`} label={`${p.terminalId} / ${AREA_KIND_LABEL[p.step as keyof typeof AREA_KIND_LABEL] ?? p.step}`} value={`能力 ${p.capacityPerHour} 人/時・ピーク ${p.peakHour} 時台 実績 ${p.peakProcessed} 人${p.utilization !== null ? `・使用率 ${Math.round(p.utilization * 100)}%` : ''}・平均待ち ${Math.round((p.avgWaitSec / 60) * 10) / 10} 分`} />
+            ))}
+          </div>
+        )}
         {r.linkUsage && r.linkUsage.length > 0 && (
           <div data-testid="review-link-usage">
             <b>連絡設備・上下移動の利用実績</b>

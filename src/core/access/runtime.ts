@@ -174,6 +174,12 @@ const add = (acc: AccessRuntime, key: string, v: number) => (acc.hourly[key] = (
  */
 function segmentTraverse(acc: AccessRuntime, paths: Record<string, SegmentPath>, vehicles: number, hour: number, externalMin: number, countOnly: boolean): number {
   const segs = acc.segments!;
+  // 貨物トラックの背景交通（CARGO-05）: 集約モデルと同じ往復 ×2 を、貨物経路の辺にだけ重ねる。
+  // 保存はせず読み取り時に加えるので、旅客側の区間交通量の記録は汚さない。
+  const truckBg = (acc.cargoTrucksPerHour ?? 0) * 2;
+  const cargoEdges = new Set<string>();
+  if (truckBg > 0) for (const p of Object.values(segs.cargoPaths)) for (const e of p.edges) cargoEdges.add(e);
+  const bg = (e: string): number => (cargoEdges.has(e) ? truckBg : 0);
   let best: SegmentPath | null = null;
   let bestRatio = Infinity;
   for (const key of Object.keys(paths).sort()) {
@@ -182,7 +188,7 @@ function segmentTraverse(acc: AccessRuntime, paths: Record<string, SegmentPath>,
     for (const e of p.edges) {
       const info = segs.edges[e];
       if (!info || info.capacity <= 0) continue;
-      r = Math.max(r, (acc.hourly[`seg:${e}:${hour}`] ?? 0) / info.capacity);
+      r = Math.max(r, ((acc.hourly[`seg:${e}:${hour}`] ?? 0) + bg(e)) / info.capacity);
     }
     if (r < bestRatio) {
       bestRatio = r;
@@ -194,7 +200,7 @@ function segmentTraverse(acc: AccessRuntime, paths: Record<string, SegmentPath>,
   for (const e of best.edges) {
     const info = segs.edges[e];
     if (!info || info.capacity <= 0) continue;
-    const v = add(acc, `seg:${e}:${hour}`, vehicles);
+    const v = add(acc, `seg:${e}:${hour}`, vehicles) + bg(e);
     if (!countOnly) {
       const t0 = info.t0Min + (e === best.edges[0] ? externalMin : 0);
       total += Math.min(M.congestionMaxMin, t0 * 0.15 * (v / info.capacity) ** 4);

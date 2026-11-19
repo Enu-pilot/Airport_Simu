@@ -3,7 +3,9 @@ import { analyzeAccess } from '../core/access/model';
 import { analyzeAirportCapacity, capacityDelta, previewContractCapacity, type CapacityMetric, type CapacityPreview, type CapacityStatus } from '../core/economy/capacity';
 import { airlineDef, airlinesFor, destinationDef, destinationsFor, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
-import { OVERALL_CAPACITY_NOTE, OVERALL_CAPACITY_TITLE, OVERALL_LIMIT_LABEL, PLAN_ISSUE_LABEL } from '../i18n/ja';
+import { CAPABILITY_STATE_LABEL, OVERALL_CAPACITY_NOTE, OVERALL_CAPACITY_TITLE, OVERALL_LIMIT_LABEL, PLAN_ISSUE_LABEL } from '../i18n/ja';
+import { capabilityUtilization, layoutCapabilities, overnightReadings, readingsFromProcessPeak } from '../core/capability';
+import { AREA_KIND_LABEL } from '../i18n/ja';
 import { createContext } from '../core/sim/context';
 import { planDayWithDemand } from '../core/economy/planning';
 import { editorStore, useEditor, useLayout, actions } from '../editor/store';
@@ -140,6 +142,52 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
         </tr>)}</tbody>
       </table></div>
     </section>
+    <section data-testid="capacity-common">
+      <h4>共通能力ビュー（理論 / 有効能力と状態）</h4>
+      {(() => {
+        const readings = [...layoutCapabilities(layout), ...overnightReadings(company, ctx, company.day)];
+        const computed = readings.filter((r) => r.theoretical !== null);
+        const uncomputedCount = readings.length - computed.length;
+        const attention = computed.filter((r) => r.state === 'zeroCapacity' || r.state === 'underConstruction');
+        return <>
+          {attention.length > 0 && <div className="capacity-alert" data-testid="capacity-common-attention">
+            <strong>要確認の施設</strong>
+            <ul>{attention.map((r) => <li key={r.subjectId}>{r.label}: {CAPABILITY_STATE_LABEL[r.state] ?? r.state}（理論 {fmt(r.theoretical)} {r.unit} / 有効 {fmt(r.effective)} {r.unit}）</li>)}</ul>
+          </div>}
+          <div className="capacity-table-scroll"><table className="board">
+            <thead><tr><th>施設</th><th>状態</th><th>理論能力</th><th>有効能力</th><th>根拠</th></tr></thead>
+            <tbody>{computed.map((r) => <tr key={r.subjectId} data-testid={`capacity-common-${r.subjectId}`}>
+              <td>{r.label}</td><td>{CAPABILITY_STATE_LABEL[r.state] ?? r.state}</td>
+              <td>{fmt(r.theoretical)} {r.unit}</td><td>{fmt(r.effective)} {r.unit}</td>
+              <td className="capacity-explain">{r.basis}</td>
+            </tr>)}</tbody>
+          </table></div>
+          {uncomputedCount > 0 && <p className="muted small">能力式が定義されていない施設 {uncomputedCount} 件は「未算出」です（0 能力とは区別しています。理由は建設画面で施設を選ぶと表示されます）。</p>}
+        </>;
+      })()}
+    </section>
+    {(() => {
+      const latest = company.reports[company.reports.length - 1];
+      const actuals = latest ? readingsFromProcessPeak(latest) : [];
+      if (actuals.length === 0) return null;
+      return <section data-testid="capacity-common-actuals">
+        <h4>工程の実績（直近日報・共通能力）</h4>
+        <div className="capacity-table-scroll"><table className="board">
+          <thead><tr><th>工程</th><th>能力</th><th>需要</th><th>ピーク実績</th><th>使用率（需要÷有効能力）</th></tr></thead>
+          <tbody>{actuals.map((r) => {
+            const u = capabilityUtilization(r);
+            return <tr key={r.subjectId} data-testid={`capacity-actual-${r.subjectId}`}>
+              <td>{AREA_KIND_LABEL[r.subjectId as keyof typeof AREA_KIND_LABEL] ?? r.subjectId}</td>
+              <td>{fmt(r.effective)} {r.unit === 'pax/h' ? '人/時' : r.unit}</td>
+              <td>{fmt(r.demand)} {r.unit === 'pax/h' ? '人/時' : r.unit}</td>
+              <td>{fmt(r.actual)} 人</td>
+              <td>{u === null ? '未算出' : `${Math.round(u * 100)}%`}</td>
+            </tr>;
+          })}</tbody>
+        </table></div>
+        <p className="muted small">実績は 5-21 の工程ピーク（日報）から共通能力の形で表示しています。計画側の能力・需要とは時間窓が異なります。</p>
+      </section>;
+    })()}
     <section>
       <h4>時間帯別の需要</h4>
       {peakHours.length ? <table className="board"><thead><tr><th>時間帯</th><th>離着陸回数</th><th>出発旅客</th><th>滑走路能力に対する需要</th></tr></thead><tbody>{peakHours.map((h) => <tr key={h.hour}><td>{String(h.hour).padStart(2, '0')}:00–{String(h.hour + 1).padStart(2, '0')}:00</td><td>{h.movements}</td><td>{h.pax} 人</td><td>{snapshot.analysis.capacity.movementsPerHour > 0 ? `${(h.movements / snapshot.analysis.capacity.movementsPerHour * 100).toFixed(1)}%` : '滑走路能力なし'}</td></tr>)}</tbody></table> : <p className="muted">当日の運航計画がありません。</p>}

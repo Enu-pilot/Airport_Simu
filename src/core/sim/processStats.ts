@@ -19,6 +19,8 @@ export interface ProcessHourStat {
   /** 絶対時間の時間帯インデックス（floor(now / 3600)） */
   hour: number;
   step: ProcessStep;
+  /** 処理エリアの所属ターミナル（5-21 T5: ターミナル別内訳用。不明は ''） */
+  terminalId: string;
   /** その時間帯に処理を開始した人数 */
   processed: number;
   /** その工程の待ち時間の合計（人×秒ではなくグループ代表値の秒×人数換算前の秒。集計側で人数で割る） */
@@ -38,15 +40,15 @@ export function markProcessQueueJoin(state: SimState, groupId: string, waitSec: 
 }
 
 /** 窓口処理の開始を記録する。waitSecNow はグループの累積待ち（秒） */
-export function recordProcessStart(state: SimState, step: ProcessStep, groupId: string, count: number, waitSecNow: number, now: number): void {
+export function recordProcessStart(state: SimState, step: ProcessStep, groupId: string, count: number, waitSecNow: number, now: number, terminalId = ''): void {
   const base = waitBase.get(state)?.get(groupId);
   const stepWait = base === undefined ? 0 : Math.max(0, waitSecNow - base);
   if (base !== undefined) waitBase.get(state)!.delete(groupId);
   const hour = Math.floor(now / 3600);
-  const key = `${step}|${hour}`;
+  const key = `${step}|${terminalId}|${hour}`;
   let m = store.get(state);
   if (!m) store.set(state, (m = new Map()));
-  const cur = m.get(key) ?? { hour, step, processed: 0, waitSecTotal: 0, waitPax: 0 };
+  const cur = m.get(key) ?? { hour, step, terminalId, processed: 0, waitSecTotal: 0, waitPax: 0 };
   cur.processed += count;
   cur.waitSecTotal += stepWait * count;
   cur.waitPax += count;

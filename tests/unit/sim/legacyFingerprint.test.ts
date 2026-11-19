@@ -77,8 +77,11 @@ const BASELINE: Record<string, string> = {
   // 2026-11-18 夜 再採取（PO 指示の Phase 6）: 日報へ 5-21 工程別ピーク（processPeak）と
   // 5-23 Door-to-Door KPI（doorToDoor）を追加したため会社データを含む 2 件のみ変化。
   // 両フィールドの代入を無効化すると旧基準値と完全一致することを確認済みで、運航は無変更。
-  'city core 3 days (no nightOps)': '03e3ac1f03fcb82d44238dd875406c9951a77264a93e18c6375e66bb6728c439',
-  'sample airport 1 day': 'e7868d4c5d9d1748993771d185bbad6a354dd74c16896d7770288c23ea6d02bc',
+  // 2026-11-19 再採取（Phase 6 / 5-21 T5）: 日報へ工程ピークのターミナル別内訳
+  // （processPeakByTerminal）を追加したため同じ 2 件のみ変化。代入を無効化すると
+  // 前基準値と完全一致することを確認済みで、運航は無変更。
+  'city core 3 days (no nightOps)': '9b02c51c90e3b2cb2d60393cf3f5e5f5b177a82e6dc90bfb3343886b6f527bfe',
+  'sample airport 1 day': 'a4f0b3ed1a85d0d5c283ab9d73a888bfe4afaccd2a0c9488372effdd038a4b24',
 };
 
 describe('legacyFingerprint: taxiMode / nightOps なしの運航は T0 の基準値と一致', () => {
