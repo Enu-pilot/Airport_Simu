@@ -144,3 +144,32 @@
 - 品質ゲート: T2〜T5 実施時に型・lint・回帰（fingerprint 不変、T5 では版上げとゴールデン再取得）を確認（§8）
 - 未実行/未検証: T4 は classifyFacilityConnection / verifyPortalAccess が未接続（validate へ接続したのは PORTAL_LEVEL_MISMATCH のみ）。T5 の基本形は入口/出口に付随する単一ポータル区間だけを歩くもので、複合グラフを辿る経路進行・能力予約（T6）・stepFree は対象外。T6（能力予約・stepFree 統合）・T8（二重計上防止・統合集計）は未着手。T7 は verifyPortalAccess の核のみで、6 手段往復の全検証・E2E は未実施。T9 は性能計測が未実施
 - 残件: T4（接続）、T6、T7（仕上げ）、T8、T9（性能）
+
+## コード監査反映（2026-11-19）
+
+本節は既存実装と未実装境界を明確にする補足であり、5-16全体の受入完了を意味しない。
+
+### 既存実装として再利用する基盤
+
+- `src/core/terminal/networkGraph.ts` にTerminalModelの内部グラフ構築、同一階の隣接、階段/エスカレーター/エレベーター等の上下接続、経路探索の基盤がある。`src/core/terminal/route.ts` はDijkstra系の経路探索と区域/旅客条件を扱う。
+- `src/core/terminal/connectionMatrix.ts`、`src/core/terminal/route.ts`、`src/core/terminal/connectionMatrix.ts` 等を通じ、Portal接続状態や旅客経路の既存判定が存在する。5-16計画§8のT2〜T5の進捗記録（PedestrianPortal、複合グラフ、基本形accessWalk）は維持する。
+- 既存のStep-free経路判定、区域制限、ターミナル間明示リンク、Portalの往復検証がある。これらの経路探索/グラフを再構築せず、容量・運行状態のモデルを追加する。
+- movingWalkwayは内部エリア種別として存在し、歩行時間を変える基本効果がある。これは動く歩道の方向・処理能力・待ち・故障/閉鎖を持つ完全な輸送設備モデルではない。
+- `TerminalTransitLink` はターミナル間のwalkway/moving walkway/elevated walkway/escalator/elevator等を表すが、AGTの駅・ホーム・路線・車両・運転間隔を表すシステムではない。
+
+### 不足している機能
+
+- 通路の幅・方向・有効能力・閉鎖状態を、経路上の辺ごとに一貫して評価するモデル。
+- 動く歩道の方向/速度/能力/稼働時間/故障、エスカレーターの運転方向/能力、エレベーターの定員/運転頻度/待ち行列/停止状態。
+- AGTの駅・ホーム・路線・車両編成・運転間隔・停車時間・定員・待ち・故障/運営費。現行TerminalTransitLinkをAGT実装済みとみなさない。
+- 複合グラフ全体をPaxGroupが順に進行する処理、辺ごとの能力予約/待機、閉鎖後の再探索、Step-free制約を含む統合運用。
+- 内包railStation/busTerminalの接続後能力を、5-14の運用能力集計へ反映する連携。
+
+### タスク状態・実装順序への影響
+
+- T2/T3のPortal・複合グラフ、T5の単一Portal区間を歩く基本形、T7/T8/T9の既存進捗は§8の記録を正とする。単一Portal区間のaccessWalkを複合グラフ全体の経路進行と同一視しない。
+- 次は複合グラフの経路ステップ進行と能力予約/待機/Step-freeを接続する。既存のDijkstra/TerminalModelを再利用し、別経路探索器を作らない。
+- その後、通路・上下設備の運行能力と状態を追加し、AGTは駅/ホーム/路線/供給モデルとして独立したタスクに分割する。
+- Workspaceの動線診断（5-18）は、ここで確定するCore診断結果を表示する。UIだけで能力/到達性を独自計算しない。
+
+本監査ではソース確認を行ったが、テスト・アプリ起動は実行していない。
