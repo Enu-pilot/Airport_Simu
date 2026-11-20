@@ -2,13 +2,17 @@ import { useMemo } from 'react';
 import { ACCESS_MODES, analyzeAccess } from '../core/access/model';
 import { connectionMatrix, type ConnectionMatrixRow } from '../core/terminal/connectionMatrix';
 import { BALANCE } from '../core/economy/balance';
+import { cargoPlannedTruckTripsByHour, cargoPlannedTruckTripsPerDay } from '../core/economy/cargo';
+import type { CompanyState } from '../core/economy/company';
+import { featureOn } from '../core/economy/unlocks';
 import { cityDemandCeiling } from '../core/economy/city';
 import { constructionCost as constructionCostOf, layoutValue, scaleFactor } from '../core/economy/construction';
 import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
 import { routeCapabilitiesForAirport } from '../core/economy/registry';
 import { applyCompletedProjects } from '../core/economy/expansion';
 import { sortedValues } from '../core/model/ids';
-import { Terrain } from '../core/model/types';
+import { Terrain, type AirportLayout } from '../core/model/types';
+import { verifyPortalAccess, type FacilityConnectionStatus } from '../core/terminal/networkGraph';
 import { setBuildState } from '../core/layout/operations';
 import { createContext } from '../core/sim/context';
 import { companyActions } from '../editor/simRunner';
@@ -18,8 +22,11 @@ import { useCompany } from './ManagementPanels';
 import {
   ACCESS_MODE_LABEL,
   ACCESS_UNAVAILABLE_LABEL,
+  FOLLOWUP_UI,
   GAME_UI,
+  PHASE7B_UI,
   PLAN_ISSUE_LABEL,
+  PORTAL_UI,
   PROJECT_KIND_LABEL,
   displayName,
 } from '../i18n/ja';
@@ -30,8 +37,94 @@ import {
 
 const pct = (v: number) => `${Math.round(v * 1000) / 10}%`;
 
+const portalDiagStatusText = (s: FacilityConnectionStatus): string =>
+  s === 'operational' ? PORTAL_UI.statusOperational : s === 'underConstruction' ? PORTAL_UI.statusPending : PORTAL_UI.statusUnreachable;
+
+/**
+ * 複合グラフ診断（UIデザイン更新 第7段階b / B8）: ポータルを持つ交通施設ごとに、
+ * 複合グラフ（施設＋ポータル＋エリア）での往路（入口まで）/復路（出口から）の到達分類を示す。
+ * 接続マトリクス（landside 側の判定）とは別系統で、検証・能力の disconnected と同じ判定
+ * （terminal/networkGraph の verifyPortalAccess。配列で {facilityId, toEntrance, fromExit} を返す）。
+ */
+export function PortalDiagnostics({ layout }: { layout: AirportLayout }) {
+  const access = verifyPortalAccess(layout);
+  return (
+    <section>
+      <h4>{PHASE7B_UI.diagSection}</h4>
+      <div className="muted small">{PHASE7B_UI.diagExplain}</div>
+      {access.length === 0 ? (
+        <div className="muted" data-testid="portal-diagnostics-empty">{PHASE7B_UI.diagNone}</div>
+      ) : (
+        <table className="board" data-testid="portal-diagnostics">
+          <thead>
+            <tr>
+              <th>施設</th>
+              <th>{PHASE7B_UI.diagToEntrance}</th>
+              <th>{PHASE7B_UI.diagFromExit}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {access.map((s) => (
+              <tr key={s.facilityId} data-testid={`portal-diag-${s.facilityId}`}>
+                <td>{displayName(layout, s.facilityId)}</td>
+                <td className={s.toEntrance === 'operational' ? '' : 'ng-text'}>{portalDiagStatusText(s.toEntrance)}</td>
+                <td className={s.fromExit === 'operational' ? '' : 'ng-text'}>{portalDiagStatusText(s.fromExit)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
 const connLabel = (s: ConnectionMatrixRow['toEntrance']): string =>
   s === 'operational' ? '○ 接続済み' : s === 'underConstruction' ? '△ 完成待ち' : s === 'noPortal' ? 'Portalなし（徒歩判定）' : '× 未接続';
+
+/** 時間帯配分のバーの高さ（最大の時間帯を 100 とする相対値）を返す純関数 */
+export function truckHourlyBarHeights(byHour: readonly number[]): number[] {
+  const max = byHour.reduce((a, v) => Math.max(a, v), 0);
+  return byHour.map((v) => (max > 0 ? Math.round((v / max) * 100) : 0));
+}
+
+/**
+ * 貨物トラックの時間帯配分（CARGO-08 格 6。バックエンド追随 項目3）。
+ * 効果の出先は道路混雑・背景交通なので、置き場所はアクセスボード。
+ * 値は cargoPlannedTruckTripsByHour の「計画ベースの見込み」で、実績ではない
+ * （perDay の「表示には使わない」コメントは実績として出すなという指定と解釈し、
+ * 見込みと明示して出す。実績台数は日報の貨物行が正）。
+ * 格 6 未満（byHour が null）は分布を出さず、貨物が有効な会社にだけ解放条件の注記を置く。
+ */
+export function CargoTruckHourly({ company }: { company: CompanyState }) {
+  if (!featureOn(company, 'cargo')) return null;
+  const byHour = cargoPlannedTruckTripsByHour(company, company.day);
+  if (byHour === null) {
+    return (
+      <section data-testid="access-cargo-truck-hourly">
+        <h4>{FOLLOWUP_UI.cargoTruckTitle}</h4>
+        <p className="muted small" data-testid="access-cargo-truck-locked">{FOLLOWUP_UI.cargoTruckLocked}</p>
+      </section>
+    );
+  }
+  const total = cargoPlannedTruckTripsPerDay(company, company.day);
+  const heights = truckHourlyBarHeights(byHour);
+  const peakHour = byHour.indexOf(Math.max(...byHour));
+  return (
+    <section data-testid="access-cargo-truck-hourly">
+      <h4>{FOLLOWUP_UI.cargoTruckTitle}</h4>
+      <div className="muted small">{FOLLOWUP_UI.cargoTruckExplain}</div>
+      <div className="cargo-truck-bars" role="img" aria-label="貨物トラック台数の時間帯配分（0時から23時）">
+        {byHour.map((v, h) => (
+          <div key={h} className={`cargo-truck-bar${h === peakHour && total > 0 ? ' peak' : ''}`} title={`${h}時台: 約 ${v.toFixed(1)} 台`} style={{ height: `${Math.max(2, heights[h] ?? 0)}%` }} />
+        ))}
+      </div>
+      <div className="muted small">
+        <span data-testid="access-cargo-truck-total">{FOLLOWUP_UI.cargoTruckTotal(total)}</span>
+        {total > 0 && <> · {FOLLOWUP_UI.cargoTruckPeak(peakHour, byHour[peakHour]!.toFixed(1))}</>}
+      </div>
+    </section>
+  );
+}
 
 export function AccessPanel() {
   const c = useCompany();
@@ -111,6 +204,8 @@ export function AccessPanel() {
           </table>
         </section>
 
+        <CargoTruckHourly company={c} />
+
         <section>
           <h4>接続マトリクス（施設 × 方向）</h4>
           <table className="board" data-testid="connection-matrix">
@@ -144,6 +239,8 @@ export function AccessPanel() {
           </table>
           <div className="muted small">ターミナル側は Portal の到達性で判定します。Portal がない施設は徒歩距離による従来の判定です。</div>
         </section>
+
+        <PortalDiagnostics layout={layout} />
 
         <section>
           <h4>交通の料金（基準に対する倍率）</h4>

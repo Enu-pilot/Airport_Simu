@@ -4,14 +4,53 @@ import { analyzeAirportCapacity, capacityDelta, previewContractCapacity, type Ca
 import { airlineDef, airlinesFor, destinationDef, destinationsFor, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
 import { CAPABILITY_STATE_LABEL, OVERALL_CAPACITY_NOTE, OVERALL_CAPACITY_TITLE, OVERALL_LIMIT_LABEL, PLAN_ISSUE_LABEL } from '../i18n/ja';
-import { capabilityUtilization, layoutCapabilities, maintenanceReading, overnightReadings, readingsFromProcessPeak } from '../core/capability';
+import { capabilityUtilization, composeCapabilityReadings, maintenanceReading, overnightReadings, readingsFromProcessPeak, type CapabilityReading } from '../core/capability';
+import type { AirportLayout } from '../core/model/types';
+import { PHASE7B_UI } from '../i18n/ja';
+import { featureOn, lockLabel } from '../core/economy/unlocks';
+import { areaProcessingPerHour } from '../core/terminal/capacity';
 import { FACILITY_SIM_EFFECT } from '../core/model/catalog';
-import { AREA_KIND_LABEL } from '../i18n/ja';
+import { PROCESS_STEP_LABEL } from '../i18n/ja';
 import { createContext } from '../core/sim/context';
 import { planDayWithDemand } from '../core/economy/planning';
 import { editorStore, useEditor, useLayout, actions } from '../editor/store';
 import { PAX_FINAL_STATES } from '../core/sim/types';
 import { useCompany } from './ManagementPanels';
+import { serviceAggregateUsage } from '../core/sim/serviceAggregate';
+import { ServiceDetailSection, ServiceProfileSection } from './ServiceModesPanel';
+
+/** 共通能力ビューの階層切替（B6 / F6-03）: 施設別が従来表示。分野・ターミナルは reading の domain と所属から導く */
+export type CommonHierarchy = 'facility' | 'airport' | 'terminal' | 'domain';
+const DOMAIN_LABEL: Record<string, string> = { facility: PHASE7B_UI.domainFacility, night: PHASE7B_UI.domainNight, maintenance: PHASE7B_UI.domainMaintenance, airside: 'エアサイド', baggage: '手荷物', ground: '地上支援', airport: '空港全体' };
+const ATTENTION_STATES = new Set(['zeroCapacity', 'underConstruction', 'disconnected', 'closed', 'failed', 'resourceShortage']);
+
+export function terminalGroupOf(layout: AirportLayout, r: CapabilityReading): { id: string; label: string } {
+  if (r.domain !== 'facility') return { id: 'none', label: PHASE7B_UI.noTerminal };
+  let f = layout.facilities[r.subjectId];
+  const seen = new Set<string>();
+  while (f && !seen.has(f.id)) {
+    if (f.kind === 'terminal') return { id: f.id, label: f.name };
+    seen.add(f.id);
+    f = f.parentFacilityId ? layout.facilities[f.parentFacilityId] : undefined;
+  }
+  return { id: 'none', label: PHASE7B_UI.noTerminal };
+}
+
+/** 階層ごとのグループ化（純関数）。facility は見出しなしの1グループ（従来表示と同一） */
+export function groupCommonReadings(layout: AirportLayout, rows: CapabilityReading[], hierarchy: CommonHierarchy): { key: string; label: string | null; rows: CapabilityReading[] }[] {
+  if (hierarchy === 'facility') return [{ key: 'facility', label: null, rows }];
+  const groups = new Map<string, { key: string; label: string; rows: CapabilityReading[] }>();
+  for (const r of rows) {
+    const g = hierarchy === 'domain'
+      ? { id: r.domain, label: DOMAIN_LABEL[r.domain] ?? r.domain }
+      : terminalGroupOf(layout, r);
+    const key = hierarchy === 'domain' ? `domain-${g.id}` : `terminal-${g.id}`;
+    const entry = groups.get(key) ?? { key, label: g.label, rows: [] };
+    entry.rows.push(r);
+    groups.set(key, entry);
+  }
+  return [...groups.values()].sort((a, b) => (a.key === 'terminal-none' ? 1 : b.key === 'terminal-none' ? -1 : a.label! < b.label! ? -1 : 1));
+}
 
 const statusLabel: Record<CapacityStatus, string> = { adequate: '余裕あり', warning: '注意', shortage: '能力不足', uncomputed: '未算出' };
 const statusClass: Record<CapacityStatus, string> = { adequate: 'ok-text', warning: 'warning-text', shortage: 'ng-text', uncomputed: 'muted' };
@@ -36,6 +75,11 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
   const access = analyzeAccess(layout, { fees: company.fees, feedback: company.accessFeedback, city: company.city, day: company.day });
   const closedGates = editorStore.getState().ops?.sim.state.closures.gates ?? [];
   const simState = editorStore.getState().ops?.sim.state;
+  // 店舗粒度（5-19）: 運航中なら sim の粒度とカテゴリ実績を読む（表示専用）。
+  // 実績マップは両方式で読む: 店舗・飲食は集約方式でのみ立つが、ラウンジは詳細方式でも立つため
+  const liveSim = editorStore.getState().ops?.sim ?? null;
+  const liveGranularity = liveSim ? (liveSim.serviceGranularity ?? 'aggregate') : null;
+  const liveUsage = liveSim ? serviceAggregateUsage(liveSim) : null;
   const currentPaxByTerminal: Record<string, number> | undefined = simState ? Object.fromEntries(Object.keys(ctx.terminal.byTerminal).map((id) => [id, 0])) : undefined;
   if (simState && currentPaxByTerminal) for (const group of Object.values(simState.paxGroups)) {
     if (group.terminalId && !PAX_FINAL_STATES.includes(group.state)) currentPaxByTerminal[group.terminalId] = (currentPaxByTerminal[group.terminalId] ?? 0) + group.count;
@@ -61,6 +105,7 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
   );
   const deltas = baselineSnapshot ? capacityDelta(baselineSnapshot, snapshot) : [];
   const [filter, setFilter] = useState('すべて');
+  const [hierarchy, setHierarchy] = useState<CommonHierarchy>('facility');
   const [airlineId, setAirlineId] = useState(airlinesFor(company)[0]?.id ?? '');
   const [destinationId, setDestinationId] = useState(destinationsFor(company)[0]?.id ?? '');
   const fleet = company.fleets?.[airlineId] ?? airlineDef(airlineId).fleet;
@@ -110,28 +155,45 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
       </article>
       <div className="capacity-grid">{snapshot.summary.map((item) => <MetricCard key={item.name} item={item} />)}</div>
     </section>
-    {(snapshot.hub.transferPaxPerDay > 0 || Object.values(snapshot.hub.mctMin).some((m) => m.max !== null)) && (
-      <section data-testid="capacity-hub">
-        <h4>乗継・ハブ</h4>
-        <table className="board">
-          <thead><tr><th>乗継の種類</th><th>最短乗継時間（最大）</th><th>最短乗継時間（中央値）</th></tr></thead>
-          <tbody>
-            {([['DD', '国内→国内'], ['DI', '国内→国際'], ['ID', '国際→国内'], ['II', '国際→国際']] as const).map(([kind, label]) => (
-              <tr key={kind} data-testid={`capacity-hub-mct-${kind}`}>
-                <td>{label}</td>
-                <td>{snapshot.hub.mctMin[kind].max !== null ? `${Math.round(snapshot.hub.mctMin[kind].max!)} 分` : '接続不可'}</td>
-                <td>{snapshot.hub.mctMin[kind].median !== null ? `${Math.round(snapshot.hub.mctMin[kind].median!)} 分` : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="capacity-peak">
-          1 日の乗継旅客（計画）: <span data-testid="capacity-hub-transfer-pax">{snapshot.hub.transferPaxPerDay} 人</span>
-          {snapshot.hub.bankAircraft !== null && <> · バンク時の最大機数: {snapshot.hub.bankAircraft} 機</>}
-          {snapshot.hub.bankPax !== null && <> · バンク時の乗継処理能力: {snapshot.hub.bankPax} 人/時</>}
-        </div>
-      </section>
-    )}
+    {(() => {
+      // 乗継・ハブ欄は常時表示（UIデザイン更新 第3段階・§6-2）: 未解放・未有効化・未発生を状態として示し、0 人で消さない
+      const hubLock = lockLabel(company, 'hub');
+      const hubOn = featureOn(company, 'hub');
+      const tsAreas = Object.values(layout.terminalAreas).filter((a) => a.kind === 'transferSecurity');
+      const tsPerHour = tsAreas.reduce((sum, a) => sum + areaProcessingPerHour(a.kind, a.props), 0);
+      return (
+        <section data-testid="capacity-hub">
+          <h4>乗継・ハブ</h4>
+          {hubLock ? (
+            <p className="muted small" data-testid="capacity-hub-locked">乗継・ハブは{hubLock}です。乗継は計画されません。以下の最短乗継時間は、現在の配置のまま解放された場合の見込みです。接続ペアの見込みは経営ボード「乗継・拠点」にあります。</p>
+          ) : !hubOn ? (
+            <p className="muted small" data-testid="capacity-hub-off">解放済みですが機能が無効です。有効化（新規ゲーム設定／難易度・ルールで「乗継と波」を ON）するまで乗継は計画されません。以下の最短乗継時間は現在の配置での見込みです。</p>
+          ) : snapshot.hub.transferPaxPerDay === 0 ? (
+            <p className="muted small" data-testid="capacity-hub-none">有効ですが、当日の計画では乗継は発生していません。接続ペアの条件は経営ボード「乗継・拠点」で確認できます。</p>
+          ) : null}
+          <table className="board">
+            <thead><tr><th>乗継の種類</th><th>最短乗継時間（最大）</th><th>最短乗継時間（中央値）</th></tr></thead>
+            <tbody>
+              {([['DD', '国内→国内'], ['DI', '国内→国際'], ['ID', '国際→国内'], ['II', '国際→国際']] as const).map(([kind, label]) => (
+                <tr key={kind} data-testid={`capacity-hub-mct-${kind}`}>
+                  <td>{label}</td>
+                  <td>{snapshot.hub.mctMin[kind].max !== null ? `${Math.round(snapshot.hub.mctMin[kind].max!)} 分` : '接続不可'}</td>
+                  <td>{snapshot.hub.mctMin[kind].median !== null ? `${Math.round(snapshot.hub.mctMin[kind].median!)} 分` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="capacity-peak">
+            1 日の乗継旅客（計画）: <span data-testid="capacity-hub-transfer-pax">{snapshot.hub.transferPaxPerDay} 人</span>
+            {snapshot.hub.bankAircraft !== null && <> · バンク時の最大機数: {snapshot.hub.bankAircraft} 機</>}
+            {snapshot.hub.bankPax !== null && <> · バンク時の乗継処理能力: {snapshot.hub.bankPax} 人/時</>}
+          </div>
+          <p className="muted small" data-testid="capacity-hub-transfer-security">
+            乗継保安検査: {tsAreas.length === 0 ? '未設置（乗継の工程が処理できません）' : `${tsAreas.length} エリア・処理能力 ${tsPerHour.toLocaleString('ja-JP')} 人/時`}
+          </p>
+        </section>
+      );
+    })()}
     <section className="capacity-detail">
       <div className="capacity-heading"><h4>施設別の能力・状態</h4><label>種類 <select value={filter} onChange={(e) => setFilter(e.target.value)}>{categories.map((c) => <option key={c}>{c}</option>)}</select></label></div>
       <div className="capacity-table-scroll"><table className="board" data-testid="capacity-facilities">
@@ -144,36 +206,72 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
       </table></div>
     </section>
     <section data-testid="capacity-common">
-      <h4>共通能力ビュー（理論 / 有効能力と状態）</h4>
+      <div className="capacity-heading">
+        <h4>共通能力ビュー（理論 / 有効能力と状態）</h4>
+        <label>{PHASE7B_UI.hierarchy} <select value={hierarchy} onChange={(e) => setHierarchy(e.target.value as CommonHierarchy)} data-testid="capacity-hierarchy">
+          <option value="facility">{PHASE7B_UI.hierarchyFacility}</option>
+          <option value="terminal">{PHASE7B_UI.hierarchyTerminal}</option>
+          <option value="domain">{PHASE7B_UI.hierarchyDomain}</option>
+          <option value="airport">{PHASE7B_UI.hierarchyAirport}</option>
+        </select></label>
+      </div>
       {(() => {
-        const readings = [...layoutCapabilities(layout), ...overnightReadings(company, ctx, company.day), maintenanceReading(layout)];
-        const computed = readings.filter((r) => r.theoretical !== null);
+        // 運航中は閉鎖・故障・人員不足（F6-04 の operationalStateReadings を合成）も状態に含める
+        const readings = [...composeCapabilityReadings(layout, simState), ...overnightReadings(company, ctx, company.day), maintenanceReading(layout)];
+        // 閉鎖・故障・人員不足は能力値が未算出でも状態として表に出す（未算出の内訳には数えない）
+        const isStateRow = (r: CapabilityReading) => r.state === 'closed' || r.state === 'failed' || r.state === 'resourceShortage';
+        const computed = readings.filter((r) => r.theoretical !== null || isStateRow(r));
         const uncomputedCount = readings.length - computed.length;
         // 未算出の内訳（UI 改善 案3）: 施設の reading は subjectId = 施設 ID。
         // sim 効果分類（core/model/catalog）で「効果なし / 表示のみ / 能力式なし」に分ける
         const kindById = new Map(Object.values(layout.facilities).map((f) => [f.id, f.kind]));
         const uncomputedBreakdown = { none: 0, displayOnly: 0, noFormula: 0 };
         for (const r of readings) {
-          if (r.theoretical !== null) continue;
+          if (r.theoretical !== null || isStateRow(r)) continue;
           const kind = kindById.get(r.subjectId);
           const effect = kind ? FACILITY_SIM_EFFECT[kind] : undefined;
           if (effect === 'none') uncomputedBreakdown.none += 1;
           else if (effect === 'displayOnly') uncomputedBreakdown.displayOnly += 1;
           else uncomputedBreakdown.noFormula += 1;
         }
-        const attention = computed.filter((r) => r.state === 'zeroCapacity' || r.state === 'underConstruction' || r.state === 'disconnected');
+        const attention = computed.filter((r) => ATTENTION_STATES.has(r.state));
+        const renderRow = (r: CapabilityReading) => <tr key={r.subjectId} data-testid={`capacity-common-${r.subjectId}`}>
+          <td>{r.label}</td><td>{CAPABILITY_STATE_LABEL[r.state] ?? r.state}</td>
+          {/* 能力値を算出しない状態行（人員不足など）は数値セルを「未算出」にせず、状態行として見せる（根拠欄に内容を出す） */}
+          <td>{r.theoretical === null && isStateRow(r) ? '—' : <>{fmt(r.theoretical)} {r.unit}</>}</td>
+          <td>{r.effective === null && isStateRow(r) ? '—' : <>{fmt(r.effective)} {r.unit}</>}</td>
+          <td className="capacity-explain">{r.basis}</td>
+        </tr>;
         return <>
           {attention.length > 0 && <div className="capacity-alert" data-testid="capacity-common-attention">
             <strong>要確認の施設</strong>
-            <ul>{attention.map((r) => <li key={r.subjectId}>{r.label}: {CAPABILITY_STATE_LABEL[r.state] ?? r.state}（理論 {fmt(r.theoretical)} {r.unit} / 有効 {fmt(r.effective)} {r.unit}）</li>)}</ul>
+            <ul>{attention.map((r) => <li key={r.subjectId}>{r.label}: {CAPABILITY_STATE_LABEL[r.state] ?? r.state}{r.theoretical !== null ? `（理論 ${fmt(r.theoretical)} ${r.unit} / 有効 ${fmt(r.effective)} ${r.unit}）` : `（${r.basis}）`}</li>)}</ul>
           </div>}
           <div className="capacity-table-scroll"><table className="board">
             <thead><tr><th>施設</th><th>状態</th><th>理論能力</th><th>有効能力</th><th>根拠</th></tr></thead>
-            <tbody>{computed.map((r) => <tr key={r.subjectId} data-testid={`capacity-common-${r.subjectId}`}>
-              <td>{r.label}</td><td>{CAPABILITY_STATE_LABEL[r.state] ?? r.state}</td>
-              <td>{fmt(r.theoretical)} {r.unit}</td><td>{fmt(r.effective)} {r.unit}</td>
-              <td className="capacity-explain">{r.basis}</td>
-            </tr>)}</tbody>
+            <tbody>
+              {hierarchy === 'airport'
+                ? [...new Set(computed.map((r) => r.domain))].sort().map((domain) => {
+                    const rows = computed.filter((r) => r.domain === domain);
+                    const sums = new Map<string, { theo: number; eff: number }>();
+                    for (const r of rows) {
+                      if (!r.unit || r.theoretical === null) continue;
+                      const s = sums.get(r.unit) ?? { theo: 0, eff: 0 };
+                      s.theo += r.theoretical;
+                      s.eff += r.effective ?? 0;
+                      sums.set(r.unit, s);
+                    }
+                    return <tr key={domain} data-testid={`capacity-group-airport-${domain}`}>
+                      <td>{DOMAIN_LABEL[domain] ?? domain}</td>
+                      <td>{PHASE7B_UI.groupSummary(rows.length, rows.filter((r) => ATTENTION_STATES.has(r.state)).length)}</td>
+                      <td colSpan={3}>{sums.size > 0 ? [...sums.entries()].map(([u, s]) => `${u}: 理論 ${fmt(s.theo)} / 有効 ${fmt(s.eff)}`).join('・') : '—'}</td>
+                    </tr>;
+                  })
+                : groupCommonReadings(layout, computed, hierarchy).flatMap((g) => [
+                    ...(g.label !== null ? [<tr key={`h-${g.key}`} className="capacity-group-row" data-testid={`capacity-group-${g.key}`}><td colSpan={5}><strong>{g.label}</strong> <span className="muted">{PHASE7B_UI.groupSummary(g.rows.length, g.rows.filter((r) => ATTENTION_STATES.has(r.state)).length)}</span></td></tr>] : []),
+                    ...g.rows.map(renderRow),
+                  ])}
+            </tbody>
           </table></div>
           {uncomputedCount > 0 && <p className="muted small" data-testid="capacity-common-uncomputed">未算出の施設 {uncomputedCount} 件（0 能力とは区別しています）: 現在は効果なし {uncomputedBreakdown.none} 件・表示のみ {uncomputedBreakdown.displayOnly} 件・能力式なし {uncomputedBreakdown.noFormula} 件。理由は建設画面で施設を選ぶと表示されます。</p>}
         </>;
@@ -189,9 +287,11 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
           <thead><tr><th>工程</th><th>能力</th><th>需要</th><th>ピーク実績</th><th>使用率（需要÷有効能力）</th></tr></thead>
           <tbody>{actuals.map((r) => {
             const u = capabilityUtilization(r);
+            // 能力を算出しない工程（apronBus / access）は「能力 0」と出さず算出しない旨を示す（5-21 の設計）
+            const noCapacity = r.subjectId === 'apronBus' || r.subjectId === 'access';
             return <tr key={r.subjectId} data-testid={`capacity-actual-${r.subjectId}`}>
-              <td>{AREA_KIND_LABEL[r.subjectId as keyof typeof AREA_KIND_LABEL] ?? r.subjectId}</td>
-              <td>{fmt(r.effective)} {r.unit === 'pax/h' ? '人/時' : r.unit}</td>
+              <td>{PROCESS_STEP_LABEL[r.subjectId] ?? r.subjectId}</td>
+              <td>{noCapacity ? '算出しない' : <>{fmt(r.effective)} {r.unit === 'pax/h' ? '人/時' : r.unit}</>}</td>
               <td>{fmt(r.demand)} {r.unit === 'pax/h' ? '人/時' : r.unit}</td>
               <td>{fmt(r.actual)} 人</td>
               <td>{u === null ? '未算出' : `${Math.round(u * 100)}%`}</td>
@@ -236,5 +336,7 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
           })()}
       </div>}
     </section>
+    <ServiceProfileSection layout={layout} liveGranularity={liveGranularity} liveUsage={liveUsage} />
+    <ServiceDetailSection layout={layout} />
   </div>;
 }

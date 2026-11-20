@@ -9,6 +9,7 @@ import { isFreeRunway, type RunwayFree } from '../core/model/types';
 import { runwayAxis } from '../core/layout/runway';
 import { rotatedDims } from '../core/layout/footprint';
 import { interiorPlacementProblem, terminalAreaLevelProblem, type PlacementProblem } from '../core/layout/levelRules';
+import { validateOrthogonalPolygon } from '../core/geometry/polygon';
 import {
   addRoadPath,
   addTaxiwayPath,
@@ -365,6 +366,90 @@ export function computeOp(s: PreviewState): OpAttempt | null {
       );
     }
   }
+}
+
+// ---------------------------------------------------------------- 外形（フットプリント）編集（5-15 T3）
+// 頂点はタイル角の座標（Map フレーム）。以下の純関数が編集操作の正本で、
+// 確定は core/layout/operations の setFacilityFootprint を通す（検証はそちらと validateOrthogonalPolygon）。
+
+/** 座標（Map フレーム）から tol 以内にある頂点の番号。なければ -1 */
+export function footprintVertexAt(points: readonly Tile[], mp: { x: number; y: number }, tol: number): number {
+  let best = -1;
+  let bd = Infinity;
+  points.forEach((p, i) => {
+    const d = Math.hypot(mp.x - p.x, mp.y - p.y);
+    if (d <= tol && d < bd) {
+      bd = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
+/**
+ * 頂点を角（タイル角へ吸着した座標）へ動かす。隣接頂点は、共有している座標（縦辺なら x、
+ * 横辺なら y）だけを追随させるため、辺の直交は保たれる。自己交差などの不正は確定時の検証で弾く。
+ */
+export function moveFootprintVertex(points: readonly Tile[], index: number, corner: Tile): Tile[] {
+  const n = points.length;
+  const out = points.map((p) => ({ ...p }));
+  const old = points[index];
+  if (!old) return out;
+  out[index] = { x: corner.x, y: corner.y };
+  const prev = (index + n - 1) % n;
+  const next = (index + 1) % n;
+  if (prev !== index && points[prev]) {
+    if (points[prev]!.x === old.x) out[prev] = { ...out[prev]!, x: corner.x };
+    else if (points[prev]!.y === old.y) out[prev] = { ...out[prev]!, y: corner.y };
+  }
+  if (next !== index && next !== prev && points[next]) {
+    if (points[next]!.x === old.x) out[next] = { ...out[next]!, x: corner.x };
+    else if (points[next]!.y === old.y) out[next] = { ...out[next]!, y: corner.y };
+  }
+  return out;
+}
+
+/** 辺の近くを指したときの頂点挿入（挿入先の配列位置と、辺上に吸着した点）。端点そのもの・tol 外は null */
+export function footprintEdgeInsert(points: readonly Tile[], mp: { x: number; y: number }, tol: number): { index: number; point: Tile } | null {
+  let best: { index: number; point: Tile; d: number } | null = null;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i]!;
+    const b = points[(i + 1) % points.length]!;
+    let point: Tile;
+    let d: number;
+    if (a.x === b.x && a.y !== b.y) {
+      const y = Math.round(mp.y);
+      if (y <= Math.min(a.y, b.y) || y >= Math.max(a.y, b.y)) continue;
+      point = { x: a.x, y };
+      d = Math.abs(mp.x - a.x);
+    } else if (a.y === b.y && a.x !== b.x) {
+      const x = Math.round(mp.x);
+      if (x <= Math.min(a.x, b.x) || x >= Math.max(a.x, b.x)) continue;
+      point = { x, y: a.y };
+      d = Math.abs(mp.y - a.y);
+    } else continue;
+    if (d <= tol && (!best || d < best.d)) best = { index: i + 1, point, d };
+  }
+  return best;
+}
+
+/**
+ * 頂点を削除する。削除後に直交ポリゴンとして成立しない場合は、隣接頂点をつなぐ
+ * エルボー点への置き換えを試し、それでも成立しなければ null（削除できない）。
+ */
+export function deleteFootprintVertex(points: readonly Tile[], index: number): Tile[] | null {
+  if (points.length <= 4) return null;
+  const n = points.length;
+  const a = points[(index + n - 1) % n]!;
+  const b = points[(index + 1) % n]!;
+  const without = points.filter((_, i) => i !== index);
+  if (validateOrthogonalPolygon(without).length === 0) return without;
+  for (const elbow of [{ x: b.x, y: a.y }, { x: a.x, y: b.y }]) {
+    if (points.some((p, i) => i !== index && p.x === elbow.x && p.y === elbow.y)) continue;
+    const cand = points.map((p, i) => (i === index ? { ...elbow } : { ...p }));
+    if (validateOrthogonalPolygon(cand).length === 0) return cand;
+  }
+  return null;
 }
 
 /** 建物内に置くとき、その階・範囲で置けない理由（1-04）。独立施設なら null */

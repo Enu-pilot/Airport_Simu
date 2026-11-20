@@ -18,9 +18,13 @@ import type { DailyReport } from '../economy/company';
 
 export type HeatBand = 0 | 1 | 2;
 
+/** 使用率の帯の閾値（正本。地図の凡例文言もこの値から組み立てる） */
+export const HEAT_BAND_MID_MIN = 0.4;
+export const HEAT_BAND_HIGH_MIN = 0.7;
+
 /** 使用率の帯: 0 = 40%未満 / 1 = 40%以上 70%未満 / 2 = 70%以上 */
 export function heatBand(v: number): HeatBand {
-  return v < 0.4 ? 0 : v < 0.7 ? 1 : 2;
+  return v < HEAT_BAND_MID_MIN ? 0 : v < HEAT_BAND_HIGH_MIN ? 1 : 2;
 }
 
 // ---------------------------------------------------------------- 2a 静的ボトルネック

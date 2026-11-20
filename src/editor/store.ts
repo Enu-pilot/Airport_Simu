@@ -9,6 +9,7 @@ import type { OpResult } from '../core/layout/operations';
 import { createEmptyLayout } from '../core/layout/operations';
 import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { createSampleAirport } from '../core/sample/sampleAirport';
+import { facilityOutline } from '../core/layout/footprint';
 import { createSite, siteSizeById } from '../core/model/site';
 import { analyzeLayout, intlLockedIssues, overnightStandIssues, type LayoutAnalysis } from '../core/validation/validate';
 import { exportLayout, importLayout } from '../core/io/serialize';
@@ -37,6 +38,7 @@ import {
   type Scenario,
 } from '../core/scenario/scenario';
 import type { SimClock } from '../core/sim/clock';
+import type { ServiceGranularity } from '../core/sim/serviceAggregate';
 
 export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | 'land' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
 
@@ -76,6 +78,8 @@ export type Draft =
   | { kind: 'freeRunway'; start: WorldPoint }
   /** 選択中の自由形の端のハンドル: 端をドラッグして中点まわりに回転（fixOpposite = 反対の端を固定して方位・長さを変える） */
   | { kind: 'rwyHandle'; id: string; which: 'start' | 'end'; fixOpposite: boolean }
+  /** 外形（フットプリント）編集中の頂点ドラッグ（5-15 T3） */
+  | { kind: 'fpVertex'; index: number }
   | { kind: 'rect'; start: Tile }
   | { kind: 'move'; id: string; start: Tile }
   | null;
@@ -99,6 +103,12 @@ export interface Toast {
   text: string;
   kind: 'error' | 'info';
 }
+
+/** ワークスペースのレンズ（UIデザイン更新 第1段階。ATC は App 側の appMode で表す） */
+export type Lens = 'build' | 'manage' | 'operate';
+
+/** 建設レンズの左パネルに表示するタブ（UIデザイン更新 第2段階。UI 状態のみ） */
+export type BuildPanel = 'tools' | 'facilities' | 'inbox';
 
 export interface EditorState {
   history: History<AirportLayout>;
@@ -137,6 +147,20 @@ export interface EditorState {
   scenarioRun: { id: string; progress: number } | null;
   /** 表示: 2D マップ / 3D ビュー（切り替えてもシミュレーションは止めない） */
   viewMode: '2d' | '3d';
+  /**
+   * UIデザイン更新 第1段階: ワークスペースのレンズ（建設/経営/運航）。
+   * 画面の置き場所を示す UI 状態で、保存データには入れない。
+   * ATC は専用ストア・画面で完結する設計（air_traffic_control_mode_plan.md §3.1）のため、
+   * ここには含めず、App 側の appMode と併せて「レンズ」として扱う。
+   */
+  lens: Lens;
+  /** 建設レンズの左パネルのタブ（ツールボックス／施設一覧／要対応インボックス。UI 状態のみ） */
+  buildPanel: BuildPanel;
+  /**
+   * 外形（フットプリント）編集中の作業コピー（5-15 T3。UI 状態のみで、確定するまで
+   * レイアウト・保存データには入れない。確定は setFacilityFootprint を applyOp で通す）
+   */
+  footprintEdit: { facilityId: string; points: Tile[] } | null;
   /** 開いているプロジェクト（保存スロットの ID。未保存なら null）と名前 */
   projectId: string | null;
   projectName: string;
@@ -148,6 +172,13 @@ export interface EditorState {
   dayFlow: DayFlow;
   /** 運航の設定（localStorage に保存。表示・進め方だけで、シミュレーションの結果には関係しない） */
   opsPrefs: OpsPrefs;
+  /**
+   * 店舗・旅客サービス施設のシミュレーション粒度（5-19 T12）。
+   * 運航開始時に createSimulation へ渡す実行時オプションで、プロジェクトには保存しない
+   * （localStorage にだけ保存する）。'aggregate' = カテゴリ×ターミナルの集約方式（1B で既定化）/
+   * 'detailed' = 店舗ごと（従来方式）。
+   */
+  serviceGranularity: ServiceGranularity;
 }
 
 export interface DayFlow {
@@ -185,6 +216,26 @@ function loadPrefs(): OpsPrefs {
     // 既定値を使う
   }
   return d;
+}
+
+const GRANULARITY_KEY = 'skyport.serviceGranularity.v1';
+function loadServiceGranularity(): ServiceGranularity {
+  try {
+    // 1B: 未設定時の既定は集約方式（createSimulation の既定と同じ）。'detailed' の保存値だけが従来方式になる
+    return globalThis.localStorage?.getItem(GRANULARITY_KEY) === 'detailed' ? 'detailed' : 'aggregate';
+  } catch {
+    return 'aggregate';
+  }
+}
+
+/** 店舗シミュレーション粒度を変えて保存する（次回の運航開始から適用。プロジェクトには保存しない） */
+export function setServiceGranularity(value: ServiceGranularity): void {
+  editorStore.setState({ serviceGranularity: value });
+  try {
+    globalThis.localStorage?.setItem(GRANULARITY_KEY, value);
+  } catch {
+    // 保存できなくても設定は今の画面では有効
+  }
 }
 
 /** 運航の設定を変えて保存する */
@@ -307,8 +358,12 @@ export const editorStore = createStore<EditorState>(() => ({
   scenarios: [],
   scenarioRun: null,
   viewMode: '2d',
+  lens: 'build',
+  buildPanel: 'tools',
+  footprintEdit: null,
   dayFlow: initialDayFlow(),
   opsPrefs: loadPrefs(),
+  serviceGranularity: loadServiceGranularity(),
   journal: createJournal(),
   ...loadInitialMeta(),
 }));
@@ -654,9 +709,29 @@ export const actions = {
       tool,
       draft: null,
       ...(tool !== 'select' ? { selection: null } : {}),
+      // 外形編集中に別ツールへ移ったら編集は取り消す（作業コピーは保存しない）
+      ...(tool !== 'select' ? { footprintEdit: null } : {}),
       // 内部エリアのツールでは内部表示を自動で有効にする
       ...(tool.startsWith('area:') ? { overlays: { ...s.overlays, interior: true } } : {}),
     }));
+  },
+  /** 外形（フットプリント）編集を開始する。初期頂点は現在の外形（footprint があればそれ、なければ矩形リング） */
+  startFootprintEdit(facilityId: string): void {
+    const s = get();
+    const f = s.history.present.facilities[facilityId];
+    if (!f || s.mode === 'operate') return;
+    set({ footprintEdit: { facilityId, points: facilityOutline(f).map((p) => ({ ...p })) }, selection: facilityId, tool: 'select', draft: null });
+  },
+  /** 外形編集中の頂点列を差し替える（UI 状態のみ） */
+  setFootprintPoints(points: Tile[]): void {
+    const s = get();
+    if (!s.footprintEdit) return;
+    set({ footprintEdit: { ...s.footprintEdit, points } });
+  },
+  /** 外形編集を終える（確定・取り消しのどちらでも作業コピーを破棄する） */
+  endFootprintEdit(): void {
+    const s = get();
+    set({ footprintEdit: null, draft: s.draft?.kind === 'fpVertex' ? null : s.draft });
   },
   setOption<K extends keyof ToolOptions>(key: K, value: ToolOptions[K]): void {
     set((s) => ({ options: { ...s.options, [key]: value } }));
@@ -691,6 +766,16 @@ export const actions = {
   },
   setViewMode(viewMode: '2d' | '3d'): void {
     set({ viewMode });
+  },
+  /** レンズの切り替え（UI 状態のみ。レイアウト・会社・保存データには触らない） */
+  setLens(lens: Lens): void {
+    if (get().lens === lens) return;
+    set({ lens });
+  },
+  /** 建設レンズの左パネルのタブ切り替え（UI 状態のみ。保存データには触らない） */
+  setBuildPanel(buildPanel: BuildPanel): void {
+    if (get().buildPanel === buildPanel) return;
+    set({ buildPanel });
   },
   toggleOverlay(key: keyof Overlays): void {
     set((s) => ({ overlays: { ...s.overlays, [key]: !s.overlays[key] } }));

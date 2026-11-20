@@ -352,33 +352,12 @@ export function AirportSettings() {
   const runways = sortedValues(layout.runways);
   const disabled = mode === 'operate';
   const taxiGraph = blockGraphOf(layout);
+  // 空港設定の分割（ユーザ決定B）: 編集中の操作に直結する項目（走行方式・ブロックタイル数）と
+  // 参照情報（滑走路番号の一覧）はインスペクタに残し、低頻度項目（磁偏角・判定ルール・
+  // アクセスモデル）は設定モーダルへ分離する。保存先・反映経路（updateLayoutSettings）は従来どおり
+  const [detailOpen, setDetailOpen] = useState(false);
   return (
     <Section title={RUNWAY_UI.settingsTitle} testid="airport-settings">
-      <Field label={RUNWAY_UI.magVar}>
-        {disabled ? (
-          <span>{MAG_VAR_LABEL(variation)}</span>
-        ) : (
-          <DecimalInput value={variation} min={-180} max={180} step={0.1} onCommit={(v) => applyOp(updateLayoutSettings(layout, { magneticVariationDeg: v }))} testid="setting-magvar" />
-        )}
-        <span className="small muted" data-testid="setting-magvar-label">
-          {MAG_VAR_LABEL(variation)}
-        </span>
-      </Field>
-      <div className="muted small">{RUNWAY_UI.magVarHelp}</div>
-      <Field label={RUNWAY_UI.ruleSet}>
-        <select
-          value={ruleSet}
-          disabled={disabled}
-          onChange={(e) => applyOp(updateLayoutSettings(layout, { ruleSet: e.target.value as 'classic' | 'realistic' }))}
-          data-testid="setting-ruleSet"
-        >
-          <option value="classic">{RUNWAY_UI.ruleClassic}</option>
-          <option value="realistic">{RUNWAY_UI.ruleRealistic}</option>
-        </select>
-      </Field>
-      <div className="muted small" data-testid="setting-ruleExplain">
-        {RUNWAY_UI.ruleExplain}
-      </div>
       <Field label={TAXI_UI.mode}>
         <select
           value={layout.taxiMode ?? 'full'}
@@ -391,18 +370,6 @@ export function AirportSettings() {
         </select>
       </Field>
       <div className="muted small" data-testid="setting-taxiExplain">{TAXI_UI.modeExplain}</div>
-      <Field label={ACCESS_UI.model}>
-        <select
-          value={layout.accessCapacityModel ?? 'aggregate'}
-          disabled={disabled}
-          onChange={(e) => applyOp(updateLayoutSettings(layout, { accessCapacityModel: e.target.value === 'segment' ? 'segment' : null }))}
-          data-testid="setting-accessModel"
-        >
-          <option value="aggregate">{ACCESS_UI.modelAggregate}</option>
-          <option value="segment">{ACCESS_UI.modelSegment}</option>
-        </select>
-      </Field>
-      <div className="muted small" data-testid="setting-accessExplain">{ACCESS_UI.modelExplain}</div>
       <Field label={TAXI_UI.tiles}>
         {disabled ? (
           <span>{layout.taxiBlockTiles ?? TAXI_BLOCK_TILES_DEFAULT}</span>
@@ -429,6 +396,61 @@ export function AirportSettings() {
           );
         })}
       </div>
+      <div className="prop-actions">
+        <button onClick={() => setDetailOpen(true)} data-testid="airport-settings-open">
+          {RUNWAY_UI.settingsDetailOpen}
+        </button>
+      </div>
+      {detailOpen && (
+        <div className="settings-modal-backdrop" data-testid="airport-settings-modal" role="dialog" aria-label={RUNWAY_UI.settingsDetailTitle} onClick={() => setDetailOpen(false)}>
+          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-modal-head">
+              <strong>{RUNWAY_UI.settingsDetailTitle}</strong>
+              <button onClick={() => setDetailOpen(false)} data-testid="airport-settings-close">
+                {RUNWAY_UI.settingsClose}
+              </button>
+            </div>
+            <div className="muted small">{RUNWAY_UI.settingsDetailNote}</div>
+            <Field label={RUNWAY_UI.magVar}>
+              {disabled ? (
+                <span>{MAG_VAR_LABEL(variation)}</span>
+              ) : (
+                <DecimalInput value={variation} min={-180} max={180} step={0.1} onCommit={(v) => applyOp(updateLayoutSettings(layout, { magneticVariationDeg: v }))} testid="setting-magvar" />
+              )}
+              <span className="small muted" data-testid="setting-magvar-label">
+                {MAG_VAR_LABEL(variation)}
+              </span>
+            </Field>
+            <div className="muted small">{RUNWAY_UI.magVarHelp}</div>
+            <Field label={RUNWAY_UI.ruleSet}>
+              <select
+                value={ruleSet}
+                disabled={disabled}
+                onChange={(e) => applyOp(updateLayoutSettings(layout, { ruleSet: e.target.value as 'classic' | 'realistic' }))}
+                data-testid="setting-ruleSet"
+              >
+                <option value="classic">{RUNWAY_UI.ruleClassic}</option>
+                <option value="realistic">{RUNWAY_UI.ruleRealistic}</option>
+              </select>
+            </Field>
+            <div className="muted small" data-testid="setting-ruleExplain">
+              {RUNWAY_UI.ruleExplain}
+            </div>
+            <Field label={ACCESS_UI.model}>
+              <select
+                value={layout.accessCapacityModel ?? 'aggregate'}
+                disabled={disabled}
+                onChange={(e) => applyOp(updateLayoutSettings(layout, { accessCapacityModel: e.target.value === 'segment' ? 'segment' : null }))}
+                data-testid="setting-accessModel"
+              >
+                <option value="aggregate">{ACCESS_UI.modelAggregate}</option>
+                <option value="segment">{ACCESS_UI.modelSegment}</option>
+              </select>
+            </Field>
+            <div className="muted small" data-testid="setting-accessExplain">{ACCESS_UI.modelExplain}</div>
+          </div>
+        </div>
+      )}
     </Section>
   );
 }

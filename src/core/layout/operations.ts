@@ -1098,7 +1098,7 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
     case 'roadNode':
       err = apply(netNodes(d, netOfNode(id)!)[id], { name: str, holdShort: bool });
       break;
-    case 'taxiway':
+    case 'taxiway': {
       // blockMaxAircraft（区間ごとの走行の進入可能機数の上限。null = 解除＝キーを消す）
       if (d.taxiways[id] && patch.blockMaxAircraft === null) {
         const { blockMaxAircraft: _b, ...rest } = patch;
@@ -1108,8 +1108,46 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
         if (Object.keys(rest).length === 0) return had ? ok(finalize(d)) : fail('NO_CHANGE');
         return updateEntity(d, id, rest);
       }
+      // 実寸設計データ（5-17。任意項目で、null = 解除＝キーを消す。通行判定には使わない表示・設計用データ）
+      const DESIGN_KEYS = ['pavementWidthM', 'shoulderWidthM', 'designProfile', 'designGroup', 'role'] as const;
+      if (d.taxiways[id] && DESIGN_KEYS.some((k) => k in patch)) {
+        const e = d.taxiways[id];
+        const rest: Record<string, unknown> = {};
+        for (const [k, v] of entries) if (!(DESIGN_KEYS as readonly string[]).includes(k)) rest[k] = v;
+        let changed = false;
+        for (const k of DESIGN_KEYS) {
+          if (!(k in patch)) continue;
+          const v = patch[k];
+          if (v === null) {
+            if (e[k] !== undefined) {
+              delete e[k];
+              changed = true;
+            }
+            continue;
+          }
+          const valid =
+            k === 'pavementWidthM'
+              ? typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 100
+              : k === 'shoulderWidthM'
+                ? typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100
+                : k === 'designProfile'
+                  ? v === 'faa-tdg' || v === 'easa-omgws' || v === 'legacy-game'
+                  : k === 'designGroup'
+                    ? typeof v === 'string' && v.length >= 1 && v.length <= 8
+                    : v === 'normal' || v === 'rapidExit';
+          if (!valid) return fail('INVALID_VALUE');
+          if (e[k] !== v) {
+            (e as unknown as Record<string, unknown>)[k] = v;
+            changed = true;
+          }
+        }
+        if (Object.keys(rest).length === 0) return changed ? ok(finalize(d)) : fail('NO_CHANGE');
+        // 残りの項目は通常の検証へ（失敗すれば設計データの変更ごと破棄され、操作は原子的に失敗する）
+        return updateEntity(d, id, rest);
+      }
       err = apply(d.taxiways[id], { name: str, widthClass: size, oneWay: bool, buildState: isBuildState, codeF: bool, blockMaxAircraft: (v) => isInt(v, 1, TAXI_BLOCK_MAX_AIRCRAFT) });
       break;
+    }
     case 'road':
       err = apply(d.roads[id], {
         name: str,

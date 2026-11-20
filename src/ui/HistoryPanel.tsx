@@ -85,22 +85,3 @@ export function HistoryList() {
     </div>
   );
 }
-
-/** 履歴のオーバーレイ（上部バーの「履歴」・振り返りから開く） */
-export function HistoryOverlay() {
-  const open = useEditor((s) => s.dayFlow.historyOpen);
-  if (!open) return null;
-  return (
-    <div className="day-history" data-testid="history-overlay" role="dialog" aria-label={DAY_LOOP.historyTitle}>
-      <div className="ops-overlay-head">
-        <strong>{DAY_LOOP.historyTitle}</strong>
-        <button onClick={() => dayFlowActions.openHistory(false)} data-testid="history-close" title="閉じる">
-          ×
-        </button>
-      </div>
-      <div className="ops-overlay-body" style={{ padding: 8 }}>
-        <HistoryList />
-      </div>
-    </div>
-  );
-}

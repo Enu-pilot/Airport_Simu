@@ -1,4 +1,4 @@
-import { layoutCapabilities, type CapabilityState } from './capability';
+import { layoutCapabilities, type CapabilityReading, type CapabilityState } from './capability';
 import type { CompanyState, DailyReport } from './economy/company';
 import type { Tile } from './geometry/vec';
 import type { AirportLayout } from './model/types';
@@ -31,7 +31,21 @@ export type AttentionSource =
   | 'hub'
   | 'cargo'
   | 'access'
-  | 'maintenance';
+  | 'maintenance'
+  | 'ops';
+
+/**
+ * 運航中アラートのうち「注意」分をインボックスへ渡すための入力（アラートC の出し分け）。
+ * 重大（critical）は地図上のスタックだけに出し、ここへは渡さない（呼び出し側が partition する）。
+ * core は UI 層のアラート型に依存しないため、必要な項目だけの構造で受ける。
+ */
+export interface OpsAlertAttentionInput {
+  key: string;
+  title: string;
+  detail?: string;
+  count?: number;
+  targetId?: string | null;
+}
 
 export interface AttentionItem {
   /** `${source}:${subjectId}`（決定的なキー） */
@@ -117,7 +131,7 @@ const GROUND_WAIT_TEXT: Record<string, string> = {
   noEngineer: '整備士不足',
 };
 
-/** 工程ピークの step（ProcessStep）の表示名。i18n の AREA_KIND_LABEL の写し */
+/** 工程ピークの step（ProcessStep）の表示名。i18n の PROCESS_STEP_LABEL の写し（9工程） */
 const PROCESS_STEP_TEXT: Record<string, string> = {
   checkIn: 'チェックイン',
   security: '保安検査場',
@@ -125,7 +139,16 @@ const PROCESS_STEP_TEXT: Record<string, string> = {
   immigration: '入国審査',
   customs: '税関',
   transferSecurity: '乗継保安検査',
+  restroom: 'トイレ',
+  apronBus: 'ランプバス',
+  access: 'アクセス到着',
 };
+
+/** 工程ピークの開始表記: ローリング 60 分の開始分（peakStartMin）があればそれを正とし、無い旧日報は時台に落とす */
+const peakText = (p: { peakHour: number; peakStartMin?: number }): string =>
+  p.peakStartMin !== undefined
+    ? `ピーク ${String(Math.floor(p.peakStartMin / 60)).padStart(2, '0')}:${String(p.peakStartMin % 60).padStart(2, '0')}〜の60分`
+    : `ピーク ${p.peakHour} 時台`;
 
 function entityName(layout: AirportLayout, id: string): string {
   return layout.facilities[id]?.name ?? layout.terminalAreas[id]?.name ?? id;
@@ -137,6 +160,17 @@ export function buildAttentionItems(input: {
   layout: AirportLayout;
   analysis: LayoutAnalysis;
   company: CompanyState;
+  /**
+   * 能力の読み取り列（合成済み）。運航中は composeCapabilityReadings で
+   * operationalStateReadings（正本）を合成した列を渡すと、capability 由来に
+   * closed / failed / resourceShortage も出る。省略時は layoutCapabilities のみ（従来どおり）。
+   */
+  capabilities?: CapabilityReading[];
+  /**
+   * 運航中アラートの「注意」分（アラートC）。渡された分だけ source 'ops'・帯 mid で出す。
+   * 省略時・空のときは従来どおり（運航していないときはこちらが通常）。
+   */
+  opsAlerts?: readonly OpsAlertAttentionInput[];
 }): AttentionItem[] {
   const { layout, analysis, company } = input;
   const items: AttentionItem[] = [];
@@ -159,8 +193,14 @@ export function buildAttentionItems(input: {
     });
   }
 
-  // (b) 能力状態: 案3で統一した layoutCapabilities 経路（ポータル到達不能も disconnected として出る）
-  for (const r of layoutCapabilities(layout)) {
+  // (b) 能力状態: 案3で統一した能力経路（ポータル到達不能も disconnected として出る。
+  // 運航中の閉鎖・故障・人員不足は、合成済みの読み取り列を渡したときだけ
+  // closed / failed / resourceShortage として出る = F6-04 の operationalStateReadings が正本）
+  // targetId は subjectId がレイアウトの実体に対応する場合だけ付ける
+  // （staff:absence や belt:… のような実体の無い ID を地図フォーカス先にしない）
+  const isEntity = (id: string): boolean =>
+    !!(layout.facilities[id] ?? layout.terminalAreas[id] ?? layout.stands[id] ?? layout.runways[id]);
+  for (const r of input.capabilities ?? layoutCapabilities(layout)) {
     const band = CAPABILITY_BAND[r.state];
     if (!band) continue;
     const stateText = CAPABILITY_STATE_TEXT[r.state] ?? r.state;
@@ -174,7 +214,22 @@ export function buildAttentionItems(input: {
           ? `${stateText}（理論 ${fmtNum(r.theoretical)} ${r.unit} / 有効 ${fmtNum(r.effective ?? 0)} ${r.unit}）`
           : stateText,
       metric: r.theoretical ?? 0,
-      targetId: r.subjectId,
+      ...(isEntity(r.subjectId) ? { targetId: r.subjectId } : {}),
+    });
+  }
+
+  // (b2) 運航中アラートの「注意」分（アラートC: 重大はスタックのみ、注意はインボックスのみ）。
+  // 日報の有無に依らないライブ項目なので、(c) の日報ゲートの外で出す。
+  // targetId は能力由来と同じく、レイアウトの実体に対応する場合だけ付ける
+  for (const a of input.opsAlerts ?? []) {
+    push({
+      source: 'ops',
+      subjectId: a.key,
+      band: 'mid',
+      title: a.title,
+      detail: a.detail ?? '',
+      metric: a.count ?? 1,
+      ...(a.targetId && isEntity(a.targetId) ? { targetId: a.targetId } : {}),
     });
   }
 
@@ -240,7 +295,7 @@ export function buildAttentionItems(input: {
         subjectId: p.subjectId,
         band,
         title: `工程の混雑: ${PROCESS_STEP_TEXT[p.step] ?? p.step}${p.terminalId ? `（${p.terminalId}）` : ''}`,
-        detail: `使用率 ${Math.round(p.utilization * 100)}%（ピーク ${p.peakHour} 時台・平均待ち ${Math.round(p.avgWaitSec)} 秒）`,
+        detail: `使用率 ${Math.round(p.utilization * 100)}%（${peakText(p)}・平均待ち ${Math.round(p.avgWaitSec)} 秒）`,
         metric: p.utilization,
       });
     }

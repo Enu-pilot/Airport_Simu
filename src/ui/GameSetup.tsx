@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from 'react';
 import { CLIMATES, DIFFICULTIES, defaultGame, type GameSettings } from '../core/economy/game';
-import { CITY_TYPES, defaultCity, defaultCityNightOps, type CityType } from '../core/economy/city';
+import { CITY_PROFILE, CITY_TYPES, defaultCity, defaultCityNightOps, type CityType } from '../core/economy/city';
 import { editorStore, newGame, setCompanyCity, setCompanyFeatures, setCompanyMarket, setGameSettings } from '../editor/store';
 import { SITE_SIZES } from '../core/model/site';
 import { isUnlocked, lockLabel } from '../core/economy/unlocks';
@@ -31,6 +31,13 @@ const useOpen = (): Open =>
     },
     () => openState,
   );
+
+/** 都市種別の選択肢ラベル（人口は core の CITY_PROFILE が正本。i18n 側は種別名だけを持つ） */
+export function cityTypeLabel(type: CityType): string {
+  const pop = CITY_PROFILE[type].population;
+  const popText = pop >= 10_000 ? `${(pop / 10_000).toLocaleString('ja-JP')} 万` : `${pop.toLocaleString('ja-JP')}`;
+  return `${GAME_UI.cityType[type]}（人口 ${popText}）`;
+}
 
 /**
  * 新しいゲーム（難易度・気候・使うルールを選んで開始）と、既存の会社のゲーム設定の付け外し（建設モード）。
@@ -120,7 +127,7 @@ function Dialog({ kind }: { kind: 'new' | 'settings' }) {
             {GAME_UI.setupCityEnabled}
           </label>
           <select value={cityType} disabled={!cityEnabled} onChange={(e) => setCityType(e.target.value as CityType)} data-testid="setup-city-type">
-            {CITY_TYPES.map((type) => <option key={type} value={type}>{GAME_UI.cityType[type]}</option>)}
+            {CITY_TYPES.map((type) => <option key={type} value={type}>{cityTypeLabel(type)}</option>)}
           </select>
           <label>
             <input type="checkbox" checked={marketEnabled} disabled={!cityEnabled} onChange={(e) => setMarketEnabled(e.target.checked)} data-testid="setup-market-enabled" />

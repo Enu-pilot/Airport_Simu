@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Field, Info, NumberInput, Section, TextInput } from './fields';
+import { DecimalInput, Field, Info, NumberInput, Section, TextInput } from './fields';
+import { EASA_OMGWS_BANDS, FAA_TDG_PAVEMENT_WIDTH_M, assessTaxiwayWidth, requiredPavementWidthM } from '../core/airside/taxiwayDesign';
 import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
 import { FACILITY_SIM_EFFECT, FACILITY_SPECS, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
 import { blockCapacity } from '../core/sim/taxiBlocks';
@@ -27,13 +28,21 @@ import { edgesOfNode } from '../core/layout/network';
 import {
   deleteEntity,
   connectRoadLevels,
+  addPortal,
   addTerminalTransitLink,
+  deletePortal,
   deleteTerminalTransitLink,
   duplicateEntity,
   reverseEdge,
   rotateEntity,
+  setFacilityFootprint,
   updateEntity,
+  PORTAL_FACILITY_KINDS,
 } from '../core/layout/operations';
+import { rectRing, validateOrthogonalPolygon } from '../core/geometry/polygon';
+import { classifyFacilityConnection, verifyPortalAccess } from '../core/terminal/networkGraph';
+import { deriveTerminalComplexes } from '../core/terminal/complex';
+import { serviceComplexOf } from '../core/terminal/serviceComplex';
 import { designatorsOf } from '../core/layout/designators';
 import { runwayEnd, runwayLengthClass, runwayLengthM, runwayMaxSize } from '../core/layout/runway';
 import { actions, applyOp, closeTemporarily, editorStore, entityExists, showToast, useAnalysis, useEditor, useLayout } from '../editor/store';
@@ -47,8 +56,10 @@ import { turnaroundCapacityDetail } from '../core/economy/planning';
 import { analyzeAirportCapacity } from '../core/economy/capacity';
 import { peakProcessDemand } from '../core/economy/peakDemand';
 import { cargoHandlingCapacityM3PerHour } from '../core/economy/cargo';
-import { facilityCapability, layoutCapabilities } from '../core/capability';
-import type { Facility } from '../core/model/types';
+import { composeCapabilityReadings, facilityCapability, layoutCapabilities } from '../core/capability';
+import type { Facility, TerminalArea } from '../core/model/types';
+import { computePreview, areaKindOf, facilityKindOf } from '../editor/tools';
+import { serviceCategoryOfAreaKind, serviceProfilesFor } from '../core/terminal/serviceProfile';
 import { BALANCE } from '../core/economy/balance';
 import type { UnitKind } from '../core/sim/types';
 import type { TerminalAreaKind } from '../core/model/types';
@@ -77,6 +88,10 @@ import {
   PLACEMENT_PROBLEM_LABEL,
   INTERIOR_CHILDREN_LABEL,
   TAXI_UI,
+  PORTAL_UI,
+  FOOTPRINT_UI,
+  PHASE7B_UI,
+  PREVIEW_UI,
   UNIT_KIND_LABEL,
   CAPABILITY_STATE_LABEL,
   SIM_EFFECT_LABEL,
@@ -115,6 +130,7 @@ export function PropertiesPanel() {
           <li>Ctrl+Z: 元に戻す / Ctrl+Shift+Z・Ctrl+Y: やり直し</li>
           <li>矢印: 1タイル移動（Shift で10）/ Esc: 解除</li>
         </ul>
+        <PlacementPreviewSection />
         <AirportSettings />
       </div>
     );
@@ -165,6 +181,487 @@ function TaxiBlockFields({ layout, id, readOnly }: { layout: AirportLayout; id: 
       {layout.taxiMode !== 'block' && <div className="muted small" data-testid="prop-blockMax-inactive">{TAXI_UI.blockMaxInactive}</div>}
       {graph && blocks.length > 0 && <Info label="区間" testid="prop-blocks">{TAXI_UI.blocksOf(blocks.length, caps.length ? (Math.min(...caps) === Math.max(...caps) ? String(caps[0]) : `${Math.min(...caps)}〜${Math.max(...caps)}`) : '—')}</Info>}
     </>
+  );
+}
+
+/**
+ * 誘導路の実寸設計データ（5-17 T3）の編集と幅適合の表示。
+ * 設計データは保存される記録で、通行可否の判定（幅区分・コードF）には影響しない。
+ * 適合判定は core/airside/taxiwayDesign の assessTaxiwayWidth が正本で、判定に使う OMGWS は
+ * EASA バンドから選ぶ（帯内では必要幅が一定のため、帯の上限未満の代表値で判定する）。
+ * 必要幅が決まらないケースは unknown として推測しない。
+ */
+export function TaxiwayDesignFields({ layout, id, readOnly }: { layout: AirportLayout; id: string; readOnly: boolean }) {
+  const e = layout.taxiways[id]!;
+  const [bandIdx, setBandIdx] = useState(EASA_OMGWS_BANDS.length - 1);
+  const band = EASA_OMGWS_BANDS[Math.min(bandIdx, EASA_OMGWS_BANDS.length - 1)]!;
+  const omgwsM = band.maxOmgwsM - 0.01;
+  const hasWidth = e.pavementWidthM !== undefined;
+  const required = hasWidth ? requiredPavementWidthM(e.designProfile ?? 'legacy-game', { designGroup: e.designGroup, omgwsM }) : null;
+  const assessment = assessTaxiwayWidth(e, omgwsM);
+  return (
+    <Section title={TAXI_UI.designSection} testid="taxi-design">
+      <div className="muted small">{TAXI_UI.designExplain}</div>
+      <Field label={TAXI_UI.pavementWidth}>
+        <DecimalInput
+          value={e.pavementWidthM}
+          min={1}
+          max={100}
+          onCommit={(v) => update(layout, id, { pavementWidthM: v })}
+          testid="prop-pavementWidthM"
+          placeholder={TAXI_UI.unset}
+        />
+        {hasWidth && !readOnly && (
+          <button className="small" onClick={() => update(layout, id, { pavementWidthM: null })} data-testid="taxi-design-clear-pavement">
+            {TAXI_UI.clear}
+          </button>
+        )}
+      </Field>
+      <Field label={TAXI_UI.shoulderWidth}>
+        <DecimalInput
+          value={e.shoulderWidthM}
+          min={0}
+          max={100}
+          onCommit={(v) => update(layout, id, { shoulderWidthM: v })}
+          testid="prop-shoulderWidthM"
+          placeholder={TAXI_UI.unset}
+        />
+        {e.shoulderWidthM !== undefined && !readOnly && (
+          <button className="small" onClick={() => update(layout, id, { shoulderWidthM: null })} data-testid="taxi-design-clear-shoulder">
+            {TAXI_UI.clear}
+          </button>
+        )}
+      </Field>
+      <Field label={TAXI_UI.designProfile}>
+        <select
+          value={e.designProfile ?? ''}
+          disabled={readOnly}
+          onChange={(ev) => update(layout, id, { designProfile: ev.target.value === '' ? null : ev.target.value })}
+          data-testid="prop-designProfile"
+        >
+          <option value="">{TAXI_UI.profileNone}</option>
+          <option value="faa-tdg">{TAXI_UI.profileFaa}</option>
+          <option value="easa-omgws">{TAXI_UI.profileEasa}</option>
+          <option value="legacy-game">{TAXI_UI.profileLegacy}</option>
+        </select>
+      </Field>
+      {e.designProfile === 'faa-tdg' && (
+        <Field label={TAXI_UI.designGroup}>
+          <select
+            value={e.designGroup ?? ''}
+            disabled={readOnly}
+            onChange={(ev) => update(layout, id, { designGroup: ev.target.value === '' ? null : ev.target.value })}
+            data-testid="prop-designGroup"
+          >
+            <option value="">{TAXI_UI.groupNone}</option>
+            {Object.keys(FAA_TDG_PAVEMENT_WIDTH_M).map((g) => (
+              <option key={g} value={g}>
+                TDG {g}（必要幅 {FAA_TDG_PAVEMENT_WIDTH_M[g]} m）
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      <Field label={TAXI_UI.role}>
+        <select
+          value={e.role ?? 'normal'}
+          disabled={readOnly}
+          onChange={(ev) => update(layout, id, { role: ev.target.value === 'normal' ? null : ev.target.value })}
+          data-testid="prop-role"
+        >
+          <option value="normal">{TAXI_UI.roleNormal}</option>
+          <option value="rapidExit">{TAXI_UI.roleRapidExit}</option>
+        </select>
+      </Field>
+      {hasWidth && (
+        <Field label={TAXI_UI.assessBand}>
+          <select value={bandIdx} onChange={(ev) => setBandIdx(Number(ev.target.value))} data-testid="taxi-design-band">
+            {EASA_OMGWS_BANDS.map((b, i) => (
+              <option key={b.maxOmgwsM} value={i}>
+                OMGWS {b.maxOmgwsM} m 未満
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      <Info label={TAXI_UI.assessResult} testid="taxi-design-assessment">
+        <span data-state={assessment}>
+          {!hasWidth
+            ? TAXI_UI.assessLegacy
+            : assessment === 'sufficient' && required !== null
+              ? TAXI_UI.assessSufficient(String(required))
+              : assessment === 'insufficient' && required !== null
+                ? TAXI_UI.assessInsufficient(String(required))
+                : TAXI_UI.assessUnknown}
+        </span>
+      </Info>
+      {hasWidth && required !== null && <Info label={TAXI_UI.requiredWidth}>{`${required} m`}</Info>}
+    </Section>
+  );
+}
+
+const portalStatusText = (s: string): string =>
+  s === 'operational' ? PORTAL_UI.statusOperational : s === 'underConstruction' ? PORTAL_UI.statusPending : PORTAL_UI.statusUnreachable;
+
+/**
+ * 歩行ポータル（5-16 T2）の作成・削除（交通施設側）。
+ * 接続の作成・削除は core/layout/operations の addPortal / deletePortal が正本で、
+ * 到達性の表示は terminal/networkGraph の verifyPortalAccess（検証・能力と同じ判定）を読む。
+ * 作成が拒否される場合（階の不一致・遠隔すぎる接続など）は applyOp が理由を通知する。
+ */
+export function FacilityPortalSection({ layout, facilityId, readOnly }: { layout: AirportLayout; facilityId: string; readOnly: boolean }) {
+  const portals = sortedValues(layout.portals ?? {}).filter((p) => p.facilityId === facilityId);
+  const areas = sortedValues(layout.terminalAreas);
+  const [areaId, setAreaId] = useState('');
+  const chosen = areas.some((a) => a.id === areaId) ? areaId : (areas[0]?.id ?? '');
+  const access = verifyPortalAccess(layout).find((s) => s.facilityId === facilityId);
+  return (
+    <Section title={PORTAL_UI.section} testid="portal-section">
+      <div className="muted small">{PORTAL_UI.explain}</div>
+      {portals.length === 0 ? (
+        <Info label="接続">{PORTAL_UI.none}</Info>
+      ) : (
+        portals.map((p) => {
+          // B8: このポータル先エリアへの複合グラフ分類（経路の有無・所要秒）。検証・能力と同じ純関数を読む
+          const conn = classifyFacilityConnection(layout, facilityId, p.areaId);
+          const routeSec = conn.route ? Math.round(conn.route.costSec) : conn.futureRoute ? Math.round(conn.futureRoute.costSec) : null;
+          return (
+            <div key={p.id}>
+              <Info label="接続先">
+                <EntityLink layout={layout} id={p.areaId} />
+                <span className="muted small"> {PORTAL_UI.floor(p.floorIndex, p.mapLevel)}</span>
+                {!readOnly && (
+                  <button className="small danger" onClick={() => applyOp(deletePortal(layout, p.id))} data-testid={`portal-delete-${p.id}`}>
+                    {PORTAL_UI.remove}
+                  </button>
+                )}
+              </Info>
+              <Info label={PHASE7B_UI.diagRoute} testid={`portal-route-${p.id}`}>
+                {conn.status === 'underConstruction'
+                  ? PHASE7B_UI.diagFuture
+                  : PHASE7B_UI.diagRouteValue(portalStatusText(conn.status), conn.status === 'operational' ? routeSec : null)}
+              </Info>
+            </div>
+          );
+        })
+      )}
+      {access && (
+        <Info label={PORTAL_UI.access} testid="portal-access-status">
+          {PORTAL_UI.accessValue(portalStatusText(access.toEntrance), portalStatusText(access.fromExit))}
+        </Info>
+      )}
+      {!readOnly && areas.length > 0 && (
+        <Field label={PORTAL_UI.addLabel}>
+          <select value={chosen} onChange={(e) => setAreaId(e.target.value)} data-testid="portal-area-select">
+            {areas.map((a) => (
+              <option key={a.id} value={a.id}>
+                {`${displayName(layout, a.terminalId)} / ${AREA_KIND_LABEL[a.kind]}（${a.level < 0 ? `地下${-a.level}階` : `${a.level + 1}F`}）`}
+              </option>
+            ))}
+          </select>
+          <button onClick={() => chosen && applyOp(addPortal(layout, { facilityId, areaId: chosen }))} data-testid="portal-add">
+            {PORTAL_UI.add}
+          </button>
+        </Field>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * ターミナル複合体の表示（UIデザイン更新 第7段階b / B7）。
+ * 物理複合体（terminal/complex.ts: 辺接触＋運用中の高層連絡通路で決定的に導出）と、
+ * サービス複合体（terminal/serviceComplex.ts: 運用中ターミナルリンクで結ばれた建物群。
+ * サテライトが本体の入口・保安・受取所を使える候補集合）を併記する。どちらも派生データで保存には影響しない。
+ * 地図でのハイライトは構成建物のリンク（focusEntity による選択ハイライト）で代替する。
+ */
+export function TerminalComplexInfo({ layout, terminalId }: { layout: AirportLayout; terminalId: string }) {
+  const physical = deriveTerminalComplexes(layout).find((c) => c.buildingIds.includes(terminalId));
+  const service = serviceComplexOf(layout, terminalId);
+  const members = (ids: string[]) => (
+    <span>
+      {ids.map((id, i) => (
+        <span key={id}>
+          {i > 0 ? '、' : ''}
+          <EntityLink layout={layout} id={id} />
+        </span>
+      ))}
+      <span className="muted small"> {PHASE7B_UI.complexMembers(ids.length)}</span>
+    </span>
+  );
+  return (
+    <Section title={PHASE7B_UI.complexSection} testid="terminal-complex">
+      <Info label={PHASE7B_UI.complexPhysical} testid="complex-physical">
+        {physical && physical.buildingIds.length > 1 ? members(physical.buildingIds) : PHASE7B_UI.complexAlone}
+      </Info>
+      <Info label={PHASE7B_UI.complexService} testid="complex-service">
+        {service.length > 1 ? members(service) : PHASE7B_UI.complexAlone}
+      </Info>
+      <div className="muted small">{PHASE7B_UI.complexNote}</div>
+    </Section>
+  );
+}
+
+/** 歩行ポータルの接続一覧（ターミナルエリア側。作成は交通施設側から行う） */
+export function AreaPortalSection({ layout, areaId, readOnly }: { layout: AirportLayout; areaId: string; readOnly: boolean }) {
+  const portals = sortedValues(layout.portals ?? {}).filter((p) => p.areaId === areaId);
+  if (portals.length === 0) return null;
+  return (
+    <Section title={PORTAL_UI.section} testid="portal-section-area">
+      {portals.map((p) => (
+        <Info key={p.id} label="接続元">
+          <EntityLink layout={layout} id={p.facilityId} />
+          <span className="muted small"> {PORTAL_UI.floor(p.floorIndex, p.mapLevel)}</span>
+          {!readOnly && (
+            <button className="small danger" onClick={() => applyOp(deletePortal(layout, p.id))} data-testid={`portal-delete-${p.id}`}>
+              {PORTAL_UI.remove}
+            </button>
+          )}
+        </Info>
+      ))}
+      <div className="muted small">{PORTAL_UI.fromFacility}</div>
+    </Section>
+  );
+}
+
+/**
+ * 施設の外形（フットプリント、5-15 T3）の表示と編集。
+ * 編集そのものは地図上（頂点ドラッグ・辺への追加・ダブルクリックで削除）で行い、
+ * 作業コピーは editor store の footprintEdit に置く。確定は core の setFacilityFootprint を
+ * applyOp で通すため、プレビュー（MapRenderer の作業ポリゴン）と確定結果は同じ頂点列になる。
+ * 矩形そのものへ戻す場合は footprint を消す（矩形リングを footprint として保存しない）。
+ */
+export function FacilityFootprintSection({ layout, f, readOnly }: { layout: AirportLayout; f: Facility; readOnly: boolean }) {
+  const footprintEdit = useEditor((s) => s.footprintEdit);
+  const editing = footprintEdit?.facilityId === f.id ? footprintEdit : null;
+  if (editing) {
+    const issues = validateOrthogonalPolygon(editing.points);
+    const apply = () => {
+      const rect = rectRing(f.origin, f.w, f.h);
+      const sameAsRect = editing.points.length === 4 && rect.every((r) => editing.points.some((p) => p.x === r.x && p.y === r.y));
+      if (sameAsRect) {
+        if (f.footprint) applyOp(setFacilityFootprint(layout, f.id, null));
+        actions.endFootprintEdit();
+        return;
+      }
+      if (applyOp(setFacilityFootprint(layout, f.id, editing.points))) actions.endFootprintEdit();
+    };
+    return (
+      <Section title={FOOTPRINT_UI.section} testid="footprint-edit">
+        <Info label="頂点">{FOOTPRINT_UI.vertices(editing.points.length)}</Info>
+        <div className={issues.length === 0 ? 'muted small' : 'reason ng-text'} data-testid="footprint-validity">
+          {issues.length === 0 ? FOOTPRINT_UI.valid : FOOTPRINT_UI.invalid(issues.join(', '))}
+        </div>
+        <div className="muted small">{FOOTPRINT_UI.help}</div>
+        <div className="prop-actions">
+          <button className="primary" onClick={apply} disabled={issues.length > 0} data-testid="footprint-edit-apply">
+            {FOOTPRINT_UI.apply}
+          </button>
+          <button onClick={() => actions.endFootprintEdit()} data-testid="footprint-edit-cancel">
+            {FOOTPRINT_UI.cancel}
+          </button>
+        </div>
+      </Section>
+    );
+  }
+  return (
+    <Section title={FOOTPRINT_UI.section}>
+      <Info label="外形" testid="footprint-info">
+        {f.footprint ? FOOTPRINT_UI.free(f.footprint.length) : FOOTPRINT_UI.rect}
+      </Info>
+      {!readOnly && (
+        <div className="prop-actions">
+          {f.rotation === 0 ? (
+            <button onClick={() => actions.startFootprintEdit(f.id)} data-testid="footprint-edit-start">
+              {FOOTPRINT_UI.edit}
+            </button>
+          ) : (
+            <span className="muted small">{FOOTPRINT_UI.rotated}</span>
+          )}
+          {f.footprint && (
+            <button onClick={() => applyOp(setFacilityFootprint(layout, f.id, null))} data-testid="footprint-reset">
+              {FOOTPRINT_UI.reset}
+            </button>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/** 差分の表示（+N / -N / ±0） */
+const fmtDelta = (before: number, after: number): string => {
+  const d = Math.round((after - before) * 100) / 100;
+  return d > 0 ? `+${d}` : d < 0 ? `${d}` : '±0';
+};
+
+/**
+ * エリア1件の能力の代表値（F6-02 配置・増設プレビューの測り方）。
+ * 処理系=処理能力（人/時）、サービスカテゴリ=カテゴリ能力（ラウンジは席数・その他は窓口相当）、
+ * 昇降系=定員（人/時）、受託手荷物=ベルト本数。能力式のない種別は null。
+ */
+function areaOwnMeasure(layout: AirportLayout, a: TerminalArea): { value: number; unit: string } | null {
+  if (isProcessingArea(a.kind)) return { value: areaProcessingPerHour(a.kind, a.props), unit: '人/時' };
+  const category = serviceCategoryOfAreaKind(a.kind);
+  if (category) {
+    const f = serviceProfilesFor(layout).facilities.find((x) => x.areaId === a.id);
+    return f ? { value: f.capacity, unit: category === 'lounge' ? '席' : '窓口相当' } : null;
+  }
+  if (a.kind === 'stairs' || a.kind === 'escalator' || a.kind === 'elevator') {
+    return { value: Number(a.props.capacityPerHour ?? defaultVerticalCapacityPerHour(a.kind)), unit: '人/時' };
+  }
+  if (a.kind === 'baggageClaim') return { value: Math.max(0, Math.trunc(Number(a.props.belts ?? 0))), unit: '本' };
+  return null;
+}
+
+/**
+ * 配置プレビュー（F6-02）: 配置ツール使用中、現在のゴースト（computePreview の仮レイアウト）で
+ * 実計算した能力と、同種合計の現在→配置後を示す。確定後の能力表示と同じ計算式を使うため、
+ * プレビューと確定後の表示は一致する。
+ */
+function PlacementPreviewSection() {
+  const tool = useEditor((s) => s.tool);
+  const mode = useEditor((s) => s.mode);
+  useEditor((s) => s.hover);
+  useEditor((s) => s.draft);
+  useEditor((s) => s.options);
+  const layout = useLayout();
+  if (mode !== 'build') return null;
+  const fkind = facilityKindOf(tool);
+  const akind = areaKindOf(tool);
+  if (!fkind && !akind) return null;
+  const preview = computePreview(editorStore.getState());
+  const createdId = preview?.result.ok ? preview.result.created[0] : undefined;
+  const hypo = preview?.result.ok ? preview.result.layout : null;
+  let body: ReactNode = <div className="muted small">{PREVIEW_UI.placementHint}</div>;
+  if (createdId && hypo) {
+    if (fkind) {
+      const reading = layoutCapabilities(hypo).find((x) => x.subjectId === createdId);
+      const total = (l: AirportLayout) => layoutCapabilities(l).reduce((s2, x) => (l.facilities[x.subjectId]?.kind === fkind ? s2 + (x.effective ?? 0) : s2), 0);
+      const before = total(layout);
+      const after = total(hypo);
+      body = (
+        <>
+          <Info label={FACILITY_LABEL[fkind]} testid="placement-preview-capability">
+            {reading && reading.theoretical !== null ? `理論能力 ${reading.theoretical} ${reading.unit} / 有効能力 ${reading.effective} ${reading.unit}` : PREVIEW_UI.uncomputed}
+          </Info>
+          <Info label={PREVIEW_UI.kindTotal(FACILITY_LABEL[fkind])} testid="placement-preview-total">{`${before} → ${after}（${fmtDelta(before, after)}）`}</Info>
+        </>
+      );
+    } else {
+      const area = hypo.terminalAreas[createdId];
+      const m = area ? areaOwnMeasure(hypo, area) : null;
+      if (area && m) {
+        const total = (l: AirportLayout) =>
+          Object.values(l.terminalAreas).reduce((s2, x) => (x.terminalId === area.terminalId && x.kind === area.kind ? s2 + (areaOwnMeasure(l, x)?.value ?? 0) : s2), 0);
+        const before = total(layout);
+        const after = total(hypo);
+        body = (
+          <>
+            <Info label={AREA_KIND_LABEL[area.kind]} testid="placement-preview-capability">{`${m.value} ${m.unit}`}</Info>
+            <Info label={PREVIEW_UI.kindTotal(AREA_KIND_LABEL[area.kind])} testid="placement-preview-total">{`${before} → ${after} ${m.unit}（${fmtDelta(before, after)}）`}</Info>
+          </>
+        );
+      } else {
+        body = <div className="muted small">{PREVIEW_UI.uncomputed}</div>;
+      }
+    }
+  }
+  return (
+    <Section title={PREVIEW_UI.placementSection} testid="placement-preview">
+      {body}
+    </Section>
+  );
+}
+
+/**
+ * 増設プレビュー（F6-02）: 施設の数値項目を仮変更したときの能力（理論値・有効値）の変化を、
+ * 確定前に示す。仮変更は core の updateEntity を通した仮レイアウトで計算する（保存はしない）。
+ */
+export function FacilityCapabilityPreview({ layout, f }: { layout: AirportLayout; f: Facility }) {
+  const [key, setKey] = useState<string | null>(null);
+  const [val, setVal] = useState<number | null>(null);
+  const defs = (PROP_SCHEMAS[f.kind] ?? []).filter((d) => d.type === 'int');
+  const current = layoutCapabilities(layout).find((x) => x.subjectId === f.id);
+  if (defs.length === 0 || !current || current.theoretical === null) return null;
+  const def = defs.find((d) => d.key === key) ?? defs[0]!;
+  const curVal = typeof f.props[def.key] === 'number' ? (f.props[def.key] as number) : (propDefault(def) as number);
+  const hypoVal = val ?? curVal;
+  const hypo = updateEntity(layout, f.id, { props: { [def.key]: hypoVal } });
+  const after = hypo.ok ? layoutCapabilities(hypo.layout).find((x) => x.subjectId === f.id) : undefined;
+  return (
+    <Section title={PREVIEW_UI.expansionSection} testid="capability-preview">
+      <div className="muted small">{PREVIEW_UI.expansionExplain}</div>
+      <Field label={PREVIEW_UI.propLabel}>
+        <select
+          value={def.key}
+          onChange={(e) => {
+            setKey(e.target.value);
+            setVal(null);
+          }}
+          data-testid="capability-preview-prop"
+        >
+          {defs.map((d) => (
+            <option key={d.key} value={d.key}>
+              {propLabel(f.kind, d.key)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label={PREVIEW_UI.valueLabel}>
+        <NumberInput value={hypoVal} min={def.min} max={def.max} onCommit={(v) => setVal(v)} testid="capability-preview-value" />
+      </Field>
+      <Info label={PREVIEW_UI.delta} testid="capability-preview-result">
+        {after && after.theoretical !== null
+          ? `理論 ${current.theoretical} → ${after.theoretical}（${fmtDelta(current.theoretical, after.theoretical)}） / 有効 ${current.effective ?? '—'} → ${after.effective ?? '—'}`
+          : PREVIEW_UI.uncomputed}
+      </Info>
+    </Section>
+  );
+}
+
+/** 増設プレビュー（F6-02・エリア版）: 内部エリアの数値項目の仮変更に対する能力の変化 */
+export function AreaCapabilityPreview({ layout, a }: { layout: AirportLayout; a: TerminalArea }) {
+  const [key, setKey] = useState<string | null>(null);
+  const [val, setVal] = useState<number | null>(null);
+  const defs = TERMINAL_AREA_SPECS[a.kind].props.filter((d) => d.type === 'int');
+  const measure = areaOwnMeasure(layout, a);
+  if (defs.length === 0 || !measure) return null;
+  const def = defs.find((d) => d.key === key) ?? defs[0]!;
+  const curVal = typeof a.props[def.key] === 'number' ? (a.props[def.key] as number) : 0;
+  const hypoVal = val ?? curVal;
+  const hypo = updateEntity(layout, a.id, { props: { [def.key]: hypoVal } });
+  let after: { value: number; unit: string } | null = null;
+  if (hypo.ok) {
+    const afterArea = hypo.layout.terminalAreas[a.id];
+    after = afterArea ? areaOwnMeasure(hypo.layout, afterArea) : null;
+  }
+  return (
+    <Section title={PREVIEW_UI.expansionSection} testid="capability-preview">
+      <div className="muted small">{PREVIEW_UI.expansionExplain}</div>
+      <Field label={PREVIEW_UI.propLabel}>
+        <select
+          value={def.key}
+          onChange={(e) => {
+            setKey(e.target.value);
+            setVal(null);
+          }}
+          data-testid="capability-preview-prop"
+        >
+          {defs.map((d) => (
+            <option key={d.key} value={d.key}>
+              {AREA_PROP_LABEL[d.key] ?? d.key}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label={PREVIEW_UI.valueLabel}>
+        <NumberInput value={hypoVal} min={def.min} max={def.max} onCommit={(v) => setVal(v)} testid="capability-preview-value" />
+      </Field>
+      <Info label={PREVIEW_UI.delta} testid="capability-preview-result">
+        {after ? `${measure.value} → ${after.value} ${measure.unit}（${fmtDelta(measure.value, after.value)}）` : PREVIEW_UI.uncomputed}
+      </Info>
+    </Section>
   );
 }
 
@@ -528,6 +1025,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
           )}
         </Field>
         <TaxiBlockFields layout={layout} id={id} readOnly={readOnly} />
+        <TaxiwayDesignFields layout={layout} id={id} readOnly={readOnly} />
         <Info label="区間">
           <EntityLink layout={layout} id={e.from} /> {e.oneWay ? '→' : '↔'} <EntityLink layout={layout} id={e.to} />
         </Info>
@@ -753,6 +1251,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             </Field>
           ) : null,
         )}
+        {!readOnly && <AreaCapabilityPreview layout={layout} a={a} />}
         {isProcessingArea(a.kind) && (
           <Info label="処理能力" title="窓口数 × 3600 ÷ 1人あたり処理秒数（docs/12 の処理時間。エリアの serviceSecPerPax 設定があればそれを優先）">
             {areaServerCount(a.props) > 0
@@ -779,6 +1278,8 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         <Info label={`接続（${links.length}）`}>
           {links.length === 0 ? <span className="ng-text">どこにも接していません</span> : links.map((l) => <EntityLink key={l} layout={layout} id={l} />)}
         </Info>
+        <AreaPortalSection layout={layout} areaId={id} readOnly={readOnly} />
+        <TerminalComplexInfo layout={layout} terminalId={a.terminalId} />
         {!readOnly && <AreaOpsSection id={id} />}
       </>
     );
@@ -795,6 +1296,9 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         <SimEffectBadge kind={f.kind} />
         <Info label="位置">{`(${f.origin.x}, ${f.origin.y})`}</Info>
         <FacilityCapabilityInfo layout={layout} f={f} />
+        {!readOnly && <FacilityCapabilityPreview layout={layout} f={f} />}
+        {(PORTAL_FACILITY_KINDS as readonly string[]).includes(f.kind) && <FacilityPortalSection layout={layout} facilityId={id} readOnly={readOnly} />}
+        {f.kind === 'terminal' && <TerminalComplexInfo layout={layout} terminalId={id} />}
         {f.parentFacilityId ? (
           <Field label={`建物内配置（${layout.facilities[f.parentFacilityId]?.name || f.parentFacilityId}）`}>
             <select
@@ -840,6 +1344,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         ) : (
           <Info label="大きさ">{`${dims.w} × ${dims.h} タイル`}</Info>
         )}
+        <FacilityFootprintSection layout={layout} f={f} readOnly={readOnly} />
         {f.kind !== 'gate' && <RotationField value={f.rotation} onChange={(r) => update(layout, id, { rotation: r })} label="向き" />}
         {PROP_SCHEMAS[f.kind]
           .filter((def) => !(f.kind === 'gate' && busGate && (def.key === 'standId' || def.key === 'jetBridge')))
@@ -1076,8 +1581,10 @@ function SimEffectBadge({ kind }: { kind: Facility['kind'] }) {
 /** Phase 6 / F6-02: 施設の共通能力インスペクター。値は core/capability の正本から表示する */
 function FacilityCapabilityInfo({ layout, f }: { layout: AirportLayout; f: Facility }) {
   // ポータル到達不能の減額（disconnected）まで含めて CapacityPanel と同じ値にするため、
-  // facilityCapability の直接呼び出しではなく layoutCapabilities 経由で取る（UI 改善 案3 の統一修正）
-  const r = layoutCapabilities(layout).find((x) => x.subjectId === f.id) ?? facilityCapability(f);
+  // facilityCapability の直接呼び出しではなく合成済みの読み取り列経由で取る（UI 改善 案3 の統一修正）。
+  // 運航中は閉鎖・故障（F6-04 の operationalStateReadings が正本）も同じ合成から反映する:
+  // 同じ subjectId の運航中状態の行があればそちらを表示する
+  const r = composeCapabilityReadings(layout, editorStore.getState().ops?.sim.state).find((x) => x.subjectId === f.id) ?? facilityCapability(f);
   return (
     <Section title="能力">
       <div data-testid="facility-capability">

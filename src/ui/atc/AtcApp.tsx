@@ -28,12 +28,23 @@ import {
   queueForRole,
 } from '../../atc/viewModel';
 import { RadarMap } from './RadarMap';
+import { atcLensUi, useAtcLensUi } from './atcLensUi';
+import { SHELL_UI } from '../../i18n/ja';
+import type { MainPage } from '../shell/TopBar';
 import './atc.css';
 
 /**
  * ATC-08: 管制官モード専用画面。
  * 経営モードの EditorState / OpsState には一切触れず、ATC専用ストア
  * （src/atc/store.ts）と core/atc の公開関数だけで構成する。
+ *
+ * UIデザイン更新 第6段階: ワークスペースの「ATC レンズ」として収める。
+ * - 上段 = ATC 専用ヘッダー（ブランド・時計・時間操作。トップバーの役割）
+ * - 左端 = レンズ切替レール（建設／経営へ戻る・管制官が現在レンズ。未処理件数バッジ）
+ * - 左パネル = GROUND / TOWER キューと到着順序、中央 = レーダー（専用 SVG のまま差し替え）
+ * - 右 = 選択機の詳細と評価（インスペクタ）、下部 = 通信ログ（タイムラインと切替の位置）
+ * - 開始画面と保存データはボード（右シート）で開く
+ * ATC のコア・セッション保存形式（skyport-atc-session）には触れていない。
  */
 
 function downloadTextFile(fileName: string, text: string): void {
@@ -49,13 +60,22 @@ function downloadTextFile(fileName: string, text: string): void {
 export function AtcApp({
   currentLayout,
   onExit,
+  onExitTo,
 }: {
   currentLayout: AirportLayout;
   onExit: () => void;
+  /** レンズ切替レール用: 指定した経営ページへ戻る（未指定なら onExit と同じ） */
+  onExitTo?: (page: MainPage) => void;
 }) {
   useAtc((s) => s.revision);
   const st = atcStore.getState();
   const { session, scenario, playing, speed } = st;
+  const savesOpen = useAtcLensUi((s) => s.savesOpen);
+
+  // セッションが無くなったら保存ボードは閉じる（開始画面ボードが保存一覧を兼ねる）
+  useEffect(() => {
+    if (!session) atcLensUi.closeSaves();
+  }, [session]);
 
   // 再生ループ: 実時間 250ms ごとに速度分のゲーム秒を tick へ渡す
   const accRef = useRef(0);
@@ -73,11 +93,16 @@ export function AtcApp({
     return () => clearInterval(id);
   }, [playing, speed]);
 
-  // キーボード: Space=再生/停止、→=10秒ステップ、1-4=速度
+  // キーボード: Space=再生/停止、→=10秒ステップ、1-4=速度、Esc=保存ボードを閉じる
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       const t = e.target;
       if (t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+      if (e.key === 'Escape' && atcLensUi.get().savesOpen) {
+        atcLensUi.closeSaves();
+        e.preventDefault();
+        return;
+      }
       if (!atcStore.getState().session) return;
       if (e.key === ' ') {
         atcActions.togglePlaying();
@@ -98,7 +123,7 @@ export function AtcApp({
   }, []);
 
   return (
-    <div className="atc-app">
+    <div className="atc-app atc-lens">
       <header className="atc-top">
         <button onClick={onExit} data-testid="atc-exit">
           ← 経営モードへ戻る
@@ -150,6 +175,9 @@ export function AtcApp({
             >
               シナリオ選択へ
             </button>
+            <button onClick={() => atcLensUi.openSaves()} data-testid="atc-open-saves">
+              保存データ
+            </button>
           </>
         ) : (
           <span className="atc-scenario">シナリオを選んで開始してください</span>
@@ -165,37 +193,102 @@ export function AtcApp({
         <div className="atc-notice ok">保存先: メモリ（IndexedDB が使えないため、このタブを閉じると保存データは消えます）</div>
       )}
 
-      {!session || !scenario ? (
-        <StartPanel currentLayout={currentLayout} />
-      ) : (
-        <>
-          <div className="atc-main">
-            <aside className="atc-col atc-queues">
-              <QueuePanel role="ground" />
-              <QueuePanel role="tower" />
-              <SequencePanel />
-            </aside>
-            <section className="atc-col atc-center">
-              <RadarMap
-                airport={scenario.airport}
-                session={session}
-                selectedAircraftId={st.selectedAircraftId}
-                onSelect={(id) => atcActions.selectAircraft(id)}
-              />
-              <AircraftList />
-            </section>
-            <aside className="atc-col atc-right">
-              <DetailPanel />
-              <ReportPanel />
-              <SavePanel />
-            </aside>
-          </div>
-          <footer className="atc-comm">
-            <CommLog />
-          </footer>
-        </>
-      )}
+      <div className="atc-lens-body">
+        <AtcRail onExit={onExit} onExitTo={onExitTo} />
+        <div className="atc-lens-main">
+          {!session || !scenario ? (
+            <>
+              {/* 開始画面はボード（第6段階）: 背面にはレンズの受け皿だけを残し、
+                  シナリオ選択・保存一覧を右シートに収める */}
+              <div className="atc-lens-placeholder">
+                <p>シナリオを開始すると、ここにレーダー・キュー・通信ログが表示されます。</p>
+              </div>
+              <div className="atc-board-overlay" data-testid="atc-start-board">
+                <div className="atc-board-backdrop" aria-hidden="true" />
+                <div className="atc-board-sheet">
+                  <StartPanel currentLayout={currentLayout} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="atc-main">
+                <aside className="atc-col atc-queues">
+                  <QueuePanel role="ground" />
+                  <QueuePanel role="tower" />
+                  <SequencePanel />
+                </aside>
+                <section className="atc-col atc-center">
+                  <RadarMap
+                    airport={scenario.airport}
+                    session={session}
+                    selectedAircraftId={st.selectedAircraftId}
+                    onSelect={(id) => atcActions.selectAircraft(id)}
+                  />
+                  <AircraftList />
+                </section>
+                <aside className="atc-col atc-right">
+                  <DetailPanel />
+                  <ReportPanel />
+                </aside>
+              </div>
+              <footer className="atc-comm">
+                <CommLog />
+              </footer>
+              {/* 保存データはボードで開く（第6段階。右インスペクタからは外した） */}
+              {savesOpen && (
+                <div className="atc-board-overlay" data-testid="atc-saves-board">
+                  <div
+                    className="atc-board-backdrop"
+                    onClick={() => atcLensUi.closeSaves()}
+                    aria-hidden="true"
+                  />
+                  <div className="atc-board-sheet">
+                    <div className="atc-board-head">
+                      <button onClick={() => atcLensUi.closeSaves()} data-testid="atc-saves-close" title="閉じる">
+                        × 閉じる
+                      </button>
+                    </div>
+                    <SavePanel />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * レンズ切替レール（第6段階）: 経営側シェルのレールと同じ置き場所・寸法で、
+ * 建設／経営へ戻る入口と現在のレンズ（管制官）を並べる。
+ * 管制官ボタンには未処理キュー（GROUND+TOWER）の合計件数バッジを出す。
+ */
+function AtcRail({ onExit, onExitTo }: { onExit: () => void; onExitTo?: (page: MainPage) => void }) {
+  useAtc((s) => s.revision);
+  const { session } = atcStore.getState();
+  const counts = session ? openQueueCounts(session) : null;
+  const openTotal = counts ? counts.ground + counts.tower : 0;
+  const go = (page: MainPage) => (onExitTo ? onExitTo(page) : onExit());
+  return (
+    <nav className="atc-rail" aria-label="ワークスペース" data-testid="atc-rail">
+      <button className="atc-rail-btn" onClick={() => go('construction')} data-testid="rail-build">
+        {SHELL_UI.railBuild}
+      </button>
+      <button className="atc-rail-btn" onClick={() => go('management')} data-testid="rail-manage">
+        {SHELL_UI.railManage}
+      </button>
+      <button className="atc-rail-btn active" disabled aria-pressed="true" data-testid="rail-atc">
+        <span>{SHELL_UI.railAtc}</span>
+        {openTotal > 0 && (
+          <span className="atc-rail-badge" data-testid="atc-rail-queue-count">
+            {openTotal}
+          </span>
+        )}
+      </button>
+    </nav>
   );
 }
 

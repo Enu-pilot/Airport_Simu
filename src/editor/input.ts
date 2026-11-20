@@ -15,8 +15,8 @@ import {
 } from '../core/layout/operations';
 import { pickCandidatesAt, type PickView } from '../core/layout/pick';
 import { actions, applyOp, editorStore, showToast, type EditorState } from './store';
-import { PLACEMENT_PROBLEM_LABEL } from '../i18n/ja';
-import { areaKindOf, computeOp, computePreview, facilityKindOf, handleAt, nextPathPoint, nextTaxiPoint, snapPointW } from './tools';
+import { FOOTPRINT_UI, PLACEMENT_PROBLEM_LABEL } from '../i18n/ja';
+import { areaKindOf, computeOp, computePreview, deleteFootprintVertex, facilityKindOf, footprintEdgeInsert, footprintVertexAt, handleAt, moveFootprintVertex, nextPathPoint, nextTaxiPoint, snapPointW } from './tools';
 import { aircraftAt } from '../core/sim/query';
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { ops } from './simRunner';
@@ -49,8 +49,9 @@ function worldAt(s: EditorState, screen: Vec2): WorldPoint {
 
 /** カーソルの World 座標を精密に持つ必要があるか（自由形の配置・ハンドル操作中・自由形の選択中） */
 function needsPrecise(s: EditorState): boolean {
-  if (s.draft?.kind === 'rwyHandle' || s.draft?.kind === 'freeRunway') return true;
+  if (s.draft?.kind === 'rwyHandle' || s.draft?.kind === 'freeRunway' || s.draft?.kind === 'fpVertex') return true;
   if (s.tool === 'runway' && s.options.runwayAlignment === 'free') return true;
+  if (s.footprintEdit) return true;
   return false;
 }
 
@@ -125,6 +126,23 @@ export function onPointerDown(screen: Vec2, button: number, mods: { shift?: bool
 
   switch (s.tool) {
     case 'select': {
+      // 外形（フットプリント）編集中は、頂点のドラッグと辺への頂点追加だけを受け付ける
+      if (s.footprintEdit) {
+        const mp = worldToMap(wp);
+        const pts = s.footprintEdit.points;
+        const tol = HANDLE_PX / s.camera.zoom;
+        const vi = footprintVertexAt(pts, mp, tol);
+        if (vi >= 0) {
+          actions.setDraft({ kind: 'fpVertex', index: vi });
+          return;
+        }
+        const ins = footprintEdgeInsert(pts, mp, tol);
+        if (ins) {
+          actions.setFootprintPoints([...pts.slice(0, ins.index), ins.point, ...pts.slice(ins.index)]);
+          actions.setDraft({ kind: 'fpVertex', index: ins.index });
+        }
+        return;
+      }
       const world = screenToWorld(s.camera, screen);
       // 選択中の自由形の端のハンドル: 端をつかんで回転（Shift = 反対の端を固定）
       const handle = handleAt(s.history.present, s.selection, wp, HANDLE_PX / s.camera.zoom);
@@ -196,6 +214,15 @@ export function onPointerMove(screen: Vec2): void {
     return;
   }
   updateHover(s, screen);
+  // 外形編集中の頂点ドラッグ: カーソルに最も近いタイル角へ頂点を動かす（直交は moveFootprintVertex が保つ）
+  if (s.draft?.kind === 'fpVertex') {
+    const cur = get();
+    if (cur.footprintEdit) {
+      const mp = worldToMap(worldAt(cur, screen));
+      const corner = { x: Math.round(mp.x), y: Math.round(mp.y) };
+      actions.setFootprintPoints(moveFootprintVertex(cur.footprintEdit.points, s.draft.index, corner));
+    }
+  }
 }
 
 export function onPointerUp(screen: Vec2, button: number): void {
@@ -215,7 +242,10 @@ export function onPointerUp(screen: Vec2, button: number): void {
   const tile = tileAt(s, screen);
   const wp = worldAt(s, screen);
   const d = s.draft;
-  if (d?.kind === 'rwyHandle') {
+  if (d?.kind === 'fpVertex') {
+    // 頂点ドラッグの終了（作業コピーはストアに残り、確定はプロパティパネルから）
+    actions.setDraft(null);
+  } else if (d?.kind === 'rwyHandle') {
     // 離した位置のプレビューを確定する（ハンドルを動かさなければ何もしない）
     const preview = computePreview({ ...s, hover: tile, hoverW: wp });
     if (preview) applyOp(preview.result, { quietNoChange: true });
@@ -239,6 +269,18 @@ export function onPointerUp(screen: Vec2, button: number): void {
 }
 
 export function onDoubleClick(): void {
+  const s = get();
+  // 外形編集中は、頂点のダブルクリックで頂点を削除する（経路の確定より優先）
+  if (s.footprintEdit && s.hoverW) {
+    const mp = worldToMap(s.hoverW);
+    const vi = footprintVertexAt(s.footprintEdit.points, mp, HANDLE_PX / s.camera.zoom);
+    if (vi >= 0) {
+      const next = deleteFootprintVertex(s.footprintEdit.points, vi);
+      if (next) actions.setFootprintPoints(next);
+      else showToast(FOOTPRINT_UI.cannotDeleteVertex, 'error');
+      return;
+    }
+  }
   finishPath();
 }
 
@@ -285,6 +327,7 @@ export function onKeyDown(k: KeyInfo): boolean {
   switch (key) {
     case 'escape':
       if (s.draft) actions.setDraft(null);
+      else if (s.footprintEdit) actions.endFootprintEdit();
       else if (s.tool !== 'select') actions.setTool('select');
       else actions.select(null);
       return true;

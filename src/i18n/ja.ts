@@ -18,6 +18,11 @@ import type { PlanIssueCode } from '../core/economy/planning';
 import type { AirlineScore, ScoreComponent, ScoreKey, ScoreLevel } from '../core/economy/airlineScore';
 import type { ReviewMetric } from '../core/analytics/review';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
+import { HEAT_BAND_HIGH_MIN, HEAT_BAND_MID_MIN } from '../core/access/heatmap';
+import { BALANCE } from '../core/economy/balance';
+import { CITY_NIGHT_CURFEW, NIGHT_OPS_DEFAULTS, NIGHT_OPS_RANGES } from '../core/economy/city';
+import { DIFFICULTY, type DifficultyDef } from '../core/economy/game';
+import type { SeasonalityProfile } from '../core/data/types';
 
 export const FACILITY_LABEL: Record<FacilityKind, string> = {
   apron: 'エプロン',
@@ -251,11 +256,34 @@ export const SIM_EFFECT_LABEL: Record<'none' | 'displayOnly', string> = {
 };
 
 /** 混雑マップ（ヒート）の凡例。帯の定義は core/access/heatmap の heatBand と一致させる */
+/** 凡例の閾値は core の帯判定（heatBand の HEAT_BAND_*）が正本。文言はそこから組み立てる */
 export const HEAT_LEGEND = {
   title: '混雑の凡例（使用率）',
-  low: '40%未満',
-  mid: '40%以上 70%未満',
-  high: '70%以上',
+  low: `${Math.round(HEAT_BAND_MID_MIN * 100)}%未満`,
+  mid: `${Math.round(HEAT_BAND_MID_MIN * 100)}%以上 ${Math.round(HEAT_BAND_HIGH_MIN * 100)}%未満`,
+  high: `${Math.round(HEAT_BAND_HIGH_MIN * 100)}%以上`,
+} as const;
+
+/** ワークスペース骨格（UIデザイン更新 第1段階）: 左レールと下部タイムラインの文言 */
+export const SHELL_UI = {
+  railAttention: '要対応',
+  railAttentionTitle: (n: number) => `要対応 ${n} 件（建設レンズの左パネル「要対応」タブを開きます）`,
+  railBuild: '建設',
+  railManage: '経営',
+  railOperate: '運行',
+  railAtc: '管制官',
+  railLayers: 'レイヤー',
+  railLayersTitle: 'マップの表示切り替え（レイヤー）',
+  buildPanelTools: 'ツール',
+  buildPanelFacilities: '施設一覧',
+  buildPanelInbox: '要対応',
+  timelineTitle: '24時間タイムライン',
+  timelinePlanNote: '今日の計画（発着回数/時）',
+  timelineNow: (hh: number, mm: number) => `現在 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`,
+  timelineFlights: (n: number) => `${n} 回`,
+  drawerLabel: '振り返りと履歴',
+  drawerReviewTab: '振り返り',
+  drawerHistoryTab: '履歴',
 } as const;
 
 const portalStatusJa = (s: unknown): string =>
@@ -1077,6 +1105,11 @@ export const RUNWAY_UI = {
   refGame: 'ゲーム値',
   refRef: '参考値',
   settingsTitle: '空港の設定',
+  // 空港設定の分割（決定B）: 低頻度項目は設定モーダルへ分離する
+  settingsDetailOpen: '空港の詳細設定（磁偏角・判定ルール・アクセスモデル）',
+  settingsDetailTitle: '空港の詳細設定',
+  settingsDetailNote: 'めったに変えない項目です。変更は従来どおり即時に反映されます。',
+  settingsClose: '閉じる',
   magVar: '磁気偏角（°、東を正）',
   magVarHelp: '東偏差を正で入力します（例: 10 = 10°E、-5 = 5°W）。公式の偏角（NOAA の磁場計算機など）を手入力します。滑走路番号は磁方位から決まります。',
   ruleSet: '判定ルール',
@@ -1225,6 +1258,11 @@ export const OPS_UI = {
   alertMore: (n: number) => `他 ${n} 件を表示`,
   alertLess: '畳む',
   alertOpenEvents: 'イベントを開く',
+  // アラートの出し分け（決定C）: 重大だけを地図上のスタックに出し、注意は要対応インボックスのみ
+  alertInboxNote: (n: number) => `注意 ${n} 件は要対応インボックスにあります`,
+  // FIDS の出し分け（決定C）: 浮動パネルは要約のみ、全列は運航ボード
+  fidsOpenBoard: '全列表示（運航ボード）',
+  fidsBoardNote: '全列表示です。浮動の運航表は要約表示で、行への操作（遅延・スポット変更など）は浮動側から行います',
 } as const;
 
 // ---------------------------------------------------------------- 航空会社の評価カード（12B-1）
@@ -1468,12 +1506,220 @@ export const TAXI_UI = {
   blockMaxInactive: '（現在の地上走行の方式は従来のため、効きません）',
   blocksOf: (n: number, cap: string) => `区間 ${n} 個・M 機の進入可能機数 ${cap}`,
   legend: '区間の区切り（点線）と「機数 / 進入可能機数（M）」',
+  // 実寸設計データ（5-17 T3 の UI。ゲーム内の設計参考値で、実在の基準への適合をうたうものではない）
+  designSection: '実寸設計（5-17）',
+  designExplain: '舗装幅・肩幅・設計プロファイルは設計用の記録で、通行可否の判定（幅区分・コードF）には影響しません。幅の適合は、想定する機体の主脚外幅（OMGWS）に対してのみ判定します（推測はしません）。',
+  pavementWidth: '実舗装幅（m）',
+  shoulderWidth: '肩幅（m）',
+  designProfile: '設計プロファイル',
+  profileNone: '未設定',
+  profileFaa: 'FAA TDG',
+  profileEasa: 'EASA OMGWS',
+  profileLegacy: '従来（ゲーム内区分）',
+  designGroup: '設計グループ（TDG）',
+  groupNone: '未設定',
+  role: '役割',
+  roleNormal: '通常誘導路',
+  roleRapidExit: '高速離脱誘導路（RET）',
+  unset: '未設定（従来の幅区分で判定）',
+  clear: 'クリア',
+  assessBand: '判定に使う OMGWS 帯',
+  assessResult: '幅の適合',
+  assessLegacy: '実寸データなし（従来の幅区分・コードF で判定）',
+  assessUnknown: '判定できません（必要幅が決まらないため推測しません）',
+  assessSufficient: (req: string) => `適合（必要幅 ${req} m 以上）`,
+  assessInsufficient: (req: string) => `不足（必要幅 ${req} m）`,
+  requiredWidth: '必要舗装幅',
 } as const;
+
+/** 歩行ポータル（5-16）の編集 UI */
+export const PORTAL_UI = {
+  section: '歩行ポータル接続',
+  explain: '交通施設とターミナル内エリアを明示的に接続します。座標が近いだけでは接続しません。接続は入口/出口エリアへの到達性で判定されます。',
+  none: '接続なし',
+  addLabel: '接続先エリア',
+  add: 'ポータルを作成',
+  remove: '削除',
+  floor: (floorIndex: number, mapLevel: number) => `エリア ${floorIndex < 0 ? `地下${-floorIndex}階` : `${floorIndex + 1}F`} ・ 地図階層 ${mapLevel}`,
+  access: '到達性（入口/出口）',
+  accessValue: (toEntrance: string, fromExit: string) => `入口方向: ${toEntrance} ／ 出口方向: ${fromExit}`,
+  statusOperational: '接続済み',
+  statusPending: '完成待ち',
+  statusUnreachable: '到達不能',
+  fromFacility: '交通施設から作成します（このエリアへの接続は交通施設のプロパティで追加・削除できます）',
+} as const;
+
+/** 施設の外形（フットプリント、5-15 T3）の編集 UI */
+export const FOOTPRINT_UI = {
+  section: '外形（フットプリント）',
+  rect: '矩形',
+  free: (n: number) => `自由形状（頂点 ${n}）`,
+  edit: '外形を編集',
+  reset: '矩形に戻す',
+  apply: '確定',
+  cancel: 'キャンセル',
+  help: '頂点をドラッグで移動、辺をクリックで頂点を追加、頂点をダブルクリックで削除できます。確定するまでは保存されません。',
+  vertices: (n: number) => `頂点 ${n}`,
+  valid: '有効な形状です',
+  invalid: (issues: string) => `形状が不正です（${issues}）`,
+  rotated: '回転している施設は外形編集の対象外です（回転を 0° に戻すと編集できます）',
+  cannotDeleteVertex: 'この頂点は削除できません（直交ポリゴンとして成立しなくなります）',
+} as const;
+
+/** 配置・増設プレビュー（F6-02）の UI */
+export const PREVIEW_UI = {
+  placementSection: '配置プレビュー',
+  placementHint: '地図上で配置位置を動かすと、配置後の能力（仮レイアウトで実計算した値）を表示します。',
+  expansionSection: '増設プレビュー',
+  expansionExplain: 'props の想定値を入れると、変更後の能力を仮レイアウトで計算して差分を表示します（確定はしません）。',
+  propLabel: '対象の項目',
+  valueLabel: '想定値',
+  current: '現在',
+  after: '変更後',
+  delta: '差分',
+  uncomputed: '未算出',
+  kindTotal: (label: string) => `${label}の合計（有効）`,
+} as const;
+
+/** UIデザイン更新 第7段階b（表示系）: hubOd・portalUsage・就航範囲・階層切替・複合体・複合グラフ診断・ハブ設定 */
+export const PHASE7B_UI = {
+  // 日報ドロワー: OD 別の計画配分（5A の DailyReport.hubOd）
+  hubOdTitle: '乗継の計画配分（OD別）',
+  hubOdExplain: 'その日の計画で配分された乗継の記録です（計画値であり、上の実績とは一致しないのが通常です）。便ペアごとの見込みは経営ボード「乗継・拠点」にあります。',
+  hubOdFrom: '到着路線（出発地）',
+  hubOdTo: '出発路線（行き先）',
+  // 日報ドロワー: 歩行ポータルの通過実績（B4 の DailyReport.portalUsage）
+  portalUsageTitle: '歩行ポータルの通過実績',
+  portalUsageExplain: 'ポータルを通って交通施設へ出入りした旅客の実績です（連絡設備・上下移動の利用実績とは別集計）。',
+  // 会社詳細: 就航範囲（networkDestinations）
+  networkScope: '就航範囲',
+  networkUnrestricted: '全目的地（制限なし）',
+  networkRestricted: (n: number) => `${n} 目的地のみ（範囲外の路線は提案されません）`,
+  // 能力ビュー: 階層切替（B6 / F6-03）
+  hierarchy: '階層',
+  hierarchyAirport: '空港全体',
+  hierarchyTerminal: 'ターミナル別',
+  hierarchyDomain: '分野別',
+  hierarchyFacility: '施設別',
+  domainFacility: '施設',
+  domainNight: '夜間滞泊',
+  domainMaintenance: '整備',
+  noTerminal: 'ターミナル外・空港全体',
+  groupSummary: (total: number, attention: number) => `${total} 件（要確認 ${attention} 件）`,
+  // 複合体（B7）
+  complexSection: 'ターミナル複合体',
+  complexPhysical: '物理複合体（隣接・連絡通路）',
+  complexService: 'サービス複合体（運用中リンク）',
+  complexAlone: '単独（他の建物と複合体を組みません）',
+  complexMembers: (n: number) => `構成 ${n} 建物`,
+  complexNote: '複合体は派生情報です。旅客が実際に通行できるかはエリアの経路とリンクが決めます。建物名を押すとその建物へ移動します。',
+  // 複合グラフ診断（B8）
+  diagSection: '複合グラフ診断（ポータル接続）',
+  diagExplain: '複合グラフ（施設＋ポータル＋エリア）での到達分類です。アクセスの接続マトリクス（landside 側の判定）とは別系統で、検証・能力の disconnected と同じ判定です。',
+  diagNone: 'ポータルを持つ交通施設はありません',
+  diagToEntrance: '往路（入口まで）',
+  diagFromExit: '復路（出口から）',
+  diagRoute: 'このポータルの接続分類',
+  diagRouteValue: (status: string, sec: number | null) => (sec !== null ? `${status}（経路 ${sec} 秒）` : status),
+  diagFuture: '完成後に接続（建設中の経路のみ）',
+  // ハブ設定の編集
+  hubSettingsEdit: '乗継の設定（編集）',
+  hubMaxConnect: '接続の上限（分）',
+  hubBankArrive: 'バンク到着帯',
+  hubBankDepart: 'バンク出発帯',
+  hubBankAdd: 'バンクを追加',
+  hubBankRemove: '削除',
+  hubSettingsNote: '設定は会社の保存データ（hub）に記録され、次回の計画計算から反映されます。バンクは能力表示（バンク時の機数・処理能力）の算出に使います。',
+  hubSettingsSaved: '乗継の設定を保存しました',
+} as const;
+
+/** 工程（ProcessStep）の表示名 9 工程分。DayReview の工程ピーク・工程別待ちと、core/attention の写しの正本 */
+export const PROCESS_STEP_LABEL: Record<string, string> = {
+  checkIn: 'チェックイン',
+  security: '保安検査場',
+  emigration: '出国審査',
+  immigration: '入国審査',
+  customs: '税関',
+  transferSecurity: '乗継保安検査',
+  restroom: 'トイレ',
+  apronBus: 'ランプバス',
+  access: 'アクセス到着',
+};
+
+/** バックエンド追随（5-21/5-23 日報項目）: ローリング 60 分ピーク・工程別待ち・外部境界の文言 */
+export const REPORT_FOLLOWUP_UI = {
+  processPeakNote: '60分窓は時計の区切りに縛られず、最も混んだ連続60分です',
+  peakWindow: (hhmm: string) => `ピーク ${hhmm}〜の60分`,
+  peakHourBand: (hour: number) => `ピーク ${hour} 時台`,
+  noCapacity: '能力は算出しない（実績のみ）',
+  stepWaitsTitle: '工程別の待ち時間（中央値 / 95%点）',
+  stepWaitsNote: '処理時間ではなく、各工程で待った時間です',
+  doorDepartureLabel: '出発（空港到着→搭乗）',
+  doorDepartureNote: '出発の所要時間は、アクセス移動を含む空港への到着時点から測ります',
+} as const;
+
+/** バックエンド追随 第2弾（項目1 ラウンジ実績 / 項目3 貨物 Tier 6・7 / 項目4 F6-17）の文言 */
+export const FOLLOWUP_UI = {
+  // 項目3: 日報ドロワーの積替貨物（Tier 7・翌日便接続のみ）
+  cargoTransshipmentLabel: 'うち積替',
+  cargoTransshipmentValue: (m3: string) => `${m3} m³（翌日便へ接続します。当日便への積替はありません。空港外へ出ないためトラック輸送の対象外です）`,
+  // 項目3: アクセスボードの貨物トラック時間帯配分（Tier 6・計画ベース）
+  cargoTruckTitle: '貨物トラックの時間帯配分（計画ベースの見込み）',
+  cargoTruckExplain:
+    '貨物トラックの搬出入は、1日の計画台数を時間帯の重みで配分して道路の背景交通に使います。これは計画ベースの見込みで、実績の台数は日報の貨物行（トラック台数）が正です。',
+  cargoTruckLocked: '格6でトラックの時間帯配分が有効になります（現在は24時間の均等配分です）。',
+  cargoTruckTotal: (n: number) => `計画台数 ${n} 台/日`,
+  cargoTruckPeak: (hour: number, trips: string) => `ピーク ${hour} 時台・約 ${trips} 台`,
+  // 項目4: 直行競合の採用率（HubChoiceShare。係数は暫定）
+  hubChoiceColumn: '乗継の採用率（対 直行便）',
+  hubChoiceNote:
+    '採用率は、同じ OD（出発地→行き先）に仮想の直行便があると仮定したときに、その需要のうち自空港での乗継が選ばれる割合です。実在の直行便の有無とは無関係で、表示される乗継人数には既に反映済みです（二重には掛かりません）。直行便への寄り方を決める係数は暫定値で、校正は未確定です。',
+  hubOdExplainFollowup: '魅力は、直行競合の採用率を掛ける前の値です。採用率は暫定の前提での値です。',
+  // 項目4: 路線表の基準搭乗率への脚注（LF への乗継統合）
+  trafficLfTransferNote:
+    '到着便の実際の搭乗率は、乗継需要が空席を埋める分だけ基準搭乗率より高くなることがあります（乗継の内訳は経営ボード「乗継・拠点」で確認できます）。',
+} as const;
+
+/** バックエンド追随 第3弾（項目2: docs/46 需要根拠・季節性の表示）の文言。数値は BALANCE / demand の正本から動的に読む */
+export const DEMAND_UI = {
+  basisToggle: '根拠',
+  basisTitle: '需要の根拠（ゲーム値）',
+  catchment: '利用圏人口',
+  catchmentFallback: '未設定のため都市人口で代用',
+  originMarket: '出発側の航空市場人口（自都市）',
+  originFallback: '未設定のため都市人口',
+  aviationDependency: '航空依存度',
+  essential: '必須需要の指数',
+  leisure: '観光指数',
+  demandIndex: '需要指数',
+  distance: (km: number) => `距離 ${km.toLocaleString('ja-JP')} km`,
+  distanceFactor: '距離減衰',
+  formula: (k: number, alpha: number, beta: number) =>
+    `需要 = K ${k.toLocaleString('ja-JP')} × (出発側人口/100万)^${alpha} × (利用圏人口/100万)^${beta} × 需要指数 × 航空依存度 × 距離減衰 × ほか（料金・評価・アクセス）`,
+  seasonalityTitle: '季節性',
+  profile: '季節プロファイル',
+  profileNone: 'なし（従来の月別表で計算）',
+  todayFactor: '今日の季節・曜日係数',
+  month: (m: number) => `${m} 月`,
+  demandNote: '需要モデルは暫定校正中（K 値を含みます）で、一部の路線では実績より大きく出ることがあります。根拠の数値はすべてゲーム用の値です。',
+} as const;
+
+/** 季節プロファイルの表示名（内部名 URBAN 等をそのまま出さない） */
+export const SEASONALITY_PROFILE_LABEL: Record<SeasonalityProfile, string> = {
+  URBAN: '都市型',
+  RAIL: '鉄道競合型',
+  REGIONAL: '地方型',
+  HOKKAIDO: '北海道型',
+  SNOW: '雪国型',
+  OKINAWA: '沖縄型',
+  ISLAND: '離島型',
+  SUMMER: '夏季型',
+};
 
 /** アクセスの区間能力モデル（フェーズ 4、docs/44） */
 export const ACCESS_UI = {
   model: 'アクセスの能力モデル',
-  modelAggregate: '集約（出入口数 × 900 台/時・既定）',
+  modelAggregate: `集約（出入口数 × ${BALANCE.accessModel.roadPerEntrance} 台/時・既定）`,
   modelSegment: '区間（最も細い区間で決める）',
   modelExplain:
     '「区間」にすると、出入口から車寄せ・駐車場までの経路で最も細い区間の能力が上限になり、混雑の遅れも区間ごとに計算します。道路の車線数・線路の単線/複線・駅のホーム数が効きます。ゲーム内の値です。',
@@ -1482,10 +1728,10 @@ export const ACCESS_UI = {
 /** 夜間の運用・出発時刻の制限（フェーズ 2、docs/40） */
 export const NIGHT_UI = {
   title: '夜間の運用（出発時刻の制限）',
-  note: '夜間の騒音規制（22:00〜06:00）の前に出発を終えるための設定です。ゲーム内のモデルで、実在の空港の運用基準ではありません。',
+  note: `夜間の騒音規制（${formatMinute(CITY_NIGHT_CURFEW.fromMin)}〜${formatMinute(CITY_NIGHT_CURFEW.toMin)}）の前に出発を終えるための設定です。ゲーム内のモデルで、実在の空港の運用基準ではありません。`,
   enabled: '最終出発時刻を設ける（オフ = 従来の計画・運航）',
   cutoff: '最終出発時刻',
-  cutoffHelp: '計画する出発はこの時刻までに収まります（制限開始の 120〜15 分前）。既定は 21:15。収まらない契約は「計画できない便」になります。',
+  cutoffHelp: `計画する出発はこの時刻までに収まります（制限開始の ${CITY_NIGHT_CURFEW.fromMin - NIGHT_OPS_RANGES.departureCutoffMin.min}〜${CITY_NIGHT_CURFEW.fromMin - NIGHT_OPS_RANGES.departureCutoffMin.max} 分前）。既定は ${formatMinute(NIGHT_OPS_DEFAULTS.departureCutoffMin)}。収まらない契約は「計画できない便」になります。`,
   airborneMax: '上空の夜間待機の上限（分）',
   airborneMaxHelp: '到着が夜間にかかっても、まず出発地で待機します。すでに上空にいる便はこの時間を超えるとダイバートします。',
   warnLead: '離陸見込みの警告（制限開始の何分前）',
@@ -1496,6 +1742,17 @@ export const NIGHT_UI = {
   manualWarn: '手動の便が最終出発時刻を過ぎる場合は警告のみで、追加は止めません。',
   riskAlert: (flight: string, predicted: string) => `夜間の持ち越しの恐れ: ${flight} の離陸が ${predicted} 頃の見込みです`,
 } as const;
+
+/** 倍率の表示（1 → 「1.0」、0.6 → 「0.6」、0.75 → 「0.75」のように末尾の 0 を1つだけ残す） */
+const mulText = (v: number): string => v.toFixed(2).replace(/0$/, '');
+
+/** 難易度のヒント文を core の DIFFICULTY 表から生成する（数値の正本は game.ts の DIFFICULTY） */
+function difficultyHintOf(d: DifficultyDef): string {
+  return (
+    `悪天 ×${mulText(d.weatherScale)} / 障害 ×${mulText(d.disruptionScale)} / 資金 ×${mulText(d.cashMul)} / 建設費 ×${mulText(d.costMul)}` +
+    `${d.otpAdd > 0 ? ` / 定時率 +${Math.round(d.otpAdd * 100)}pt` : ''} / 予報 ${Math.round(d.forecastAccuracy * 100)}%`
+  );
+}
 
 export const GAME_UI = {
   setupNew: '設定して新規',
@@ -1511,14 +1768,15 @@ export const GAME_UI = {
   setupRules: '使うルール',
   setupCity: '都市・空港需要（ゲーム値）',
   setupCityEnabled: '都市規模を旅客需要・アクセス所要時間・人口成長に反映する',
-  setupMarket: '路線需要モデル（都市と就航先の規模から路線ごとの需要・搭乗率を決め、就航先と航空会社が増える）',
+  setupMarket: '路線需要モデル（就航先の利用圏人口・航空依存度・季節変動と、自都市の規模から路線ごとの需要・搭乗率を決めます）',
   setupFeatures: '新しい運航の仕組み（フェーズ 4）',
   setupFeatureOvernight: '夜間滞泊（夕方に着いて翌朝出る便と、拠点の土台）',
   setupFeatureBased: '拠点航空会社（常駐機と整備）',
   setupFeatureInternational: '国際線（出入国審査・税関・国際ゲート）',
   setupFeatureHub: '乗継と波（乗継旅客・バンク）',
   setupFeatureCargo: '貨物輸送（貨物契約・運搬量の集計）',
-  cityType: { regional: '地方都市（人口 60 万）', core: '中核都市（人口 400 万）', metropolitan: '大都市（人口 2,000 万）' } as Record<string, string>,
+  // 人口は core の CITY_PROFILE が正本。表示側（GameSetup）が人口を付けて出すため、ここは種別名だけを持つ
+  cityType: { regional: '地方都市', core: '中核都市', metropolitan: '大都市' } as Record<string, string>,
   setupWeather: '天候 5 段階・予報（オフ = 従来の 4 種の天候の障害）',
   setupEval: '航空会社の評価要素・不満・要望',
   setupGoals: '目標・空港の格',
@@ -1530,10 +1788,11 @@ export const GAME_UI = {
   setupApplyConfirm: 'ルールを変更しますか？（運航の結果が変わります）',
   setupNote: '数値はすべてゲーム用の値です。難易度は初期資金・建設費・悪天の頻度・求める定時率・予報の的中率を変えます',
   difficulty: { normal: '標準', hard: '難しい', expert: '上級' } as Record<string, string>,
+  // 倍率は core の DIFFICULTY 表が正本。ヒント文はそこから生成する（difficultyHintOf）
   difficultyHint: {
-    normal: '悪天 ×1.0 / 障害 ×0.6 / 資金 ×1.0 / 建設費 ×1.0 / 予報 90%',
-    hard: '悪天 ×1.5 / 障害 ×1.0 / 資金 ×0.75 / 建設費 ×1.1 / 定時率 +5pt / 予報 80%',
-    expert: '悪天 ×2.0 / 障害 ×1.5 / 資金 ×0.5 / 建設費 ×1.2 / 定時率 +10pt / 予報 65%',
+    normal: difficultyHintOf(DIFFICULTY.normal),
+    hard: difficultyHintOf(DIFFICULTY.hard),
+    expert: difficultyHintOf(DIFFICULTY.expert),
   } as Record<string, string>,
   climate: { temperate: '温帯', snowy: '雪国', humid: '多雨' } as Record<string, string>,
   difficultyBadge: (d: string) => d,

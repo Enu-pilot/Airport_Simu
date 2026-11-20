@@ -42,14 +42,75 @@ select, input[type='text'], input[type='number'] {
 }
 input[type='number'] { width: 80px; }
 
+/* ワークスペース骨格（UIデザイン更新 第1段階）: 上にトップバー、左にレール、下にタイムライン。
+   中央の .app は従来のページ内グリッド（左/中央/右/下部）をそのまま保つ */
+.app-shell { display: flex; flex-direction: column; height: 100vh; }
+.shell-body { display: flex; flex: 1; min-height: 0; position: relative; }
+.shell-rail {
+  flex: none; width: 58px; display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 4px; background: var(--panel); border-right: 1px solid var(--border);
+}
+.rail-btn {
+  position: relative; padding: 7px 2px; font-size: 11px; line-height: 1.25;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.rail-btn.active { background: var(--accent); color: #062026; border-color: var(--accent); font-weight: 600; }
+.rail-badge {
+  background: var(--error); color: #fff; border-radius: 8px; padding: 0 6px;
+  font-size: 11px; font-weight: 700; line-height: 1.5;
+}
+/* レイヤーポップオーバー（第2段階: オーバーレイ切替をレールへ集約。operate.css に依存しないよう骨格側で定義） */
+.shell-rail .overlays-pop { position: relative; margin-top: auto; }
+.shell-rail .overlays-pop > summary {
+  list-style: none; cursor: pointer; text-align: center;
+  padding: 7px 2px; font-size: 11px; line-height: 1.25;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; color: var(--text);
+}
+.shell-rail .overlays-pop > summary::-webkit-details-marker { display: none; }
+.shell-rail .overlays-pop .overlays-menu {
+  position: absolute; z-index: 60; left: calc(100% + 6px); bottom: 0; top: auto;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 6px;
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 5px;
+  white-space: nowrap; box-shadow: 0 6px 24px #000a;
+}
+.shell-rail .overlays-pop .overlays-menu label { display: flex; align-items: center; gap: 5px; color: var(--text); }
+.shell-rail .overlays-pop .overlays-menu .overlay-legend { flex-wrap: wrap; white-space: normal; color: var(--text); border-top: 1px solid var(--border, #444); padding-top: 5px; }
+/* 建設レンズの左パネル（第2段階: ツールボックス／施設一覧／要対応インボックスのタブ同居） */
+.build-panel-tabs { display: flex; gap: 2px; padding: 5px 6px 0; border-bottom: 1px solid var(--border); flex: none; }
+.build-panel-tabs button {
+  flex: 1; padding: 5px 2px; font-size: 12px;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+}
+.build-panel-tabs button.active { background: var(--accent); color: #062026; border-color: var(--accent); font-weight: 600; }
+.build-panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.build-panel-body > .toolbox { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+.build-panel-body > .issues { flex: 1; min-height: 0; height: auto; }
+.shell-timeline {
+  flex: none; display: flex; gap: 12px; align-items: stretch;
+  padding: 5px 10px 7px; background: var(--panel); border-top: 1px solid var(--border);
+}
+.timeline-head { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 128px; }
+.timeline-wave { position: relative; flex: 1; display: flex; align-items: flex-end; gap: 2px; min-height: 34px; }
+.timeline-bar { flex: 1; min-height: 1px; background: var(--accent); opacity: 0.55; border-radius: 1px 1px 0 0; }
+.timeline-bar.peak { opacity: 1; box-shadow: inset 0 0 0 1px var(--warning); }
+.timeline-bar.clickable { cursor: pointer; }
+.timeline-bar.clickable:hover { opacity: 0.9; }
+.timeline-now { position: absolute; top: 0; bottom: 8px; width: 2px; background: var(--warning); }
+.cargo-truck-bars { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 6px 0 2px; }
+.cargo-truck-bar { flex: 1; min-height: 1px; background: var(--accent); opacity: 0.65; border-radius: 1px 1px 0 0; }
+.cargo-truck-bar.peak { opacity: 1; box-shadow: inset 0 0 0 1px var(--warning); }
+.timeline-ticks { position: absolute; left: 0; right: 0; bottom: -2px; height: 10px; }
+.timeline-ticks span { position: absolute; transform: translateX(-50%); font-size: 9px; color: var(--muted); }
 .app {
   display: grid;
   grid-template-columns: 230px 1fr 300px;
-  grid-template-rows: auto 1fr 170px;
-  grid-template-areas: 'top top top' 'left center right' 'left bottom right';
-  height: 100vh;
+  grid-template-rows: 1fr 170px;
+  grid-template-areas: 'left center right' 'left bottom right';
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
-.app.page-management { grid-template-rows: auto minmax(0, 1fr); grid-template-areas: 'top top top' 'management management management'; }
+.app.page-management { grid-template-rows: minmax(0, 1fr); grid-template-areas: 'management management management'; }
 .management-page { grid-area: management; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 .management-page-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 18px 8px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .management-page-head h2 { margin: 0; font-size: 18px; }
@@ -58,6 +119,28 @@ input[type='number'] { width: 80px; }
 .management-sections button { flex: none; }
 .management-sections button.active { background: var(--accent); color: #062026; border-color: var(--accent); }
 .management-content { min-height: 0; overflow: auto; padding: 12px 16px 24px; }
+/* UIデザイン更新 第3段階: 経営ボード（地図の上に重なるシート。背面は薄く残る） */
+.board-overlay { position: absolute; inset: 0; z-index: 25; display: flex; }
+.board-backdrop { flex: 1; background: rgba(4, 10, 14, 0.55); cursor: pointer; }
+/* UIデザイン更新 第5段階: 日報ドロワー（右から重なる。背面の地図は見えたまま・操作も妨げない） */
+.review-drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 30;
+  width: min(720px, 96%); display: flex; flex-direction: column;
+  background: var(--panel); border-left: 2px solid var(--accent);
+  box-shadow: -10px 0 36px rgba(0, 0, 0, 0.55);
+}
+.review-drawer-tabs { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+.review-drawer-tabs button.active { background: var(--accent); color: #062026; border-color: var(--accent); font-weight: 600; }
+.review-drawer-close { margin-left: auto; flex: none; }
+.review-drawer .day-review { flex: 1; min-height: 0; }
+.review-drawer-history { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; }
+.management-page.board-sheet { flex: none; width: min(1280px, 86%); height: 100%; border-left: 1px solid var(--border); box-shadow: -10px 0 36px rgba(0, 0, 0, 0.55); }
+.management-page-actions { display: flex; gap: 6px; flex: none; }
+.app.board-open { grid-template-rows: minmax(0, 1fr); grid-template-areas: 'left center right'; } /* 建設背景用。運航背景（mode-operate）のグリッドには付けない */
+.tier-chip { border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.based-contract { margin-bottom: 14px; }
+.based-contract-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+.based-summary { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; padding: 3px 0; }
 .management-content > .issues, .management-content > .mgmt { max-width: 1600px; margin: 0 auto; }
 .management-stack { display: grid; gap: 18px; max-width: 1500px; margin: auto; }
 .build-readonly { display: grid; gap: 5px; padding: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
@@ -71,11 +154,10 @@ input[type='number'] { width: 80px; }
 .settings-menu-body { position: absolute; top: calc(100% + 5px); right: 0; width: min(370px, 90vw); padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 30px #0009; }
 .settings-menu-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 9px 0; }
 .settings-menu-actions button { min-height: 30px; }
-.top { grid-area: top; display: flex; align-items: center; gap: 14px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.top { display: flex; align-items: center; gap: 14px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .brand { font-weight: 700; font-size: 15px; }
 .subtitle { color: var(--muted); }
 .top-group { display: flex; gap: 6px; align-items: center; }
-.overlays label { display: flex; align-items: center; gap: 3px; color: var(--muted); }
 .left { grid-area: left; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .center { grid-area: center; position: relative; min-width: 0; min-height: 0; }
 .right { grid-area: right; background: var(--panel); border-left: 1px solid var(--border); overflow-y: auto; }
@@ -252,6 +334,8 @@ tr.warn-row td:first-child { box-shadow: inset 3px 0 var(--warning); }
 .mgmt-grid > section { min-width: 0; overflow-x: auto; }
 .fee-grid input[type='range'] { width: 110px; }
 .capacity-panel { display: grid; gap: 14px; max-width: 1600px; margin: 0 auto; }
+/* 店舗・サービス施設（5-19 粒度分離の UI 接続） */
+.capacity-panel section h5 { margin: 10px 0 4px; }
 .capacity-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .capacity-heading h3, .capacity-heading h4 { margin: 0; }
 .capacity-peak { padding: 5px 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); font-variant-numeric: tabular-nums; }
@@ -296,6 +380,7 @@ tr.selected td { background: rgba(63, 240, 255, 0.08); }
 /* 3D ビュー */
 .view3d { cursor: grab; }
 .view3d canvas { display: block; }
+.view3d-note { position: absolute; left: 8px; bottom: 8px; z-index: 2; background: rgba(16, 24, 32, 0.85); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-size: 11px; pointer-events: none; }
 .perf-hud { position: absolute; left: 8px; top: 8px; padding: 2px 8px; font-size: 11px; background: rgba(0, 0, 0, 0.55); color: #e5f2ff; border-radius: 4px; pointer-events: none; }
 .pilot-follow-toggle { position: absolute; right: 8px; top: 8px; z-index: 2; }
 
@@ -315,3 +400,8 @@ tr.selected td { background: rgba(63, 240, 255, 0.08); }
 .small { font-size: 11px; }
 .muted { color: var(--muted); }
 .link-like { color: var(--accent); }
+
+/* 空港の詳細設定モーダル（空港設定の分割・決定B。operate.css の .modal と同じ見た目を建設レンズでも使うため、こちらにも置く） */
+.settings-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 60; }
+.settings-modal { background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; padding: 14px 18px; width: min(520px, 92vw); max-height: 90vh; overflow: auto; }
+.settings-modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }

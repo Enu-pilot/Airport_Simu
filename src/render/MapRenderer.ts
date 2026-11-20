@@ -19,6 +19,7 @@ import type { LayoutAnalysis } from '../core/validation/validate';
 import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_COLOR } from './colors';
 import { visibleFacilityLabelIds, visibleInteriorFacilityIds } from './labels';
 import { computePreview, facilityKindOf, nextPathPoint, nextTaxiPoint, rectFromDrag } from '../editor/tools';
+import { validateOrthogonalPolygon } from '../core/geometry/polygon';
 import { getAnalysis, type EditorState, type OpsState } from '../editor/store';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../core/sim/aircraftTypes';
 import { isVisible } from '../core/sim/query';
@@ -117,6 +118,7 @@ export class MapRenderer {
     this.drawLayout(layout, analysis, s);
     this.drawConnectors(layout, analysis, s.selection);
     this.drawTerminalTransit(layout, s.selection);
+    this.drawPortalLinks(layout, s.selection);
     if (s.overlays.interior) this.drawInterior(layout, s, cam);
     if (s.overlays.network) this.drawNetwork(analysis);
     if (s.overlays.network) this.drawTaxiBlocks(layout, s.ops, cam, s.overlays.labels);
@@ -131,6 +133,7 @@ export class MapRenderer {
       this.outline(o, layout, id, bad ? COLOR.ghostBad : COLOR.ghostOk, 3);
     }
     this.drawDraft(s);
+    this.drawFootprintEdit(s);
     // 配置・回転のプレビュー中の滑走路: 番号・真方位・磁方位・長さを表示
     for (const id of ghostIds) {
       const gr = layout.runways[id];
@@ -638,6 +641,40 @@ export class MapRenderer {
       this.dashed(g, a, b, 0.65, 0.4, { width: this.px(selected ? 3 : 1.7), color, alpha });
       if (!link.bidirectional) this.arrow(g, a, b, color, alpha);
       for (const p of [a, b]) g.circle(p.x, p.y, this.px(selected ? 4 : 2.5)).fill({ color, alpha });
+    }
+  }
+
+  /** 外形（フットプリント）編集中の作業ポリゴンと頂点ハンドル（5-15 T3）。有効=緑、不正=赤 */
+  private drawFootprintEdit(s: EditorState): void {
+    const fe = s.footprintEdit;
+    if (!fe || fe.points.length === 0) return;
+    const g = this.overlay;
+    const pts = fe.points;
+    const valid = validateOrthogonalPolygon(pts).length === 0;
+    const color = valid ? COLOR.ghostOk : COLOR.ghostBad;
+    g.poly(pts.flatMap((p) => [p.x, p.y])).fill({ color, alpha: 0.15 });
+    for (let i = 0; i < pts.length; i++) {
+      this.dashed(g, pts[i]!, pts[(i + 1) % pts.length]!, 0.4, 0.3, { width: this.px(2), color, alpha: 0.9 });
+    }
+    for (const p of pts) g.circle(p.x, p.y, this.px(5)).fill({ color }).stroke({ width: this.px(1), color: 0x000000 });
+  }
+
+  /** 歩行ポータル（5-16）の接続線。選択中の交通施設・エリアに関係するものだけを破線で描く */
+  private drawPortalLinks(layout: AirportLayout, selection: string | null): void {
+    if (!selection) return;
+    const portals = Object.values(layout.portals ?? {}).filter((p) => p.facilityId === selection || p.areaId === selection);
+    if (portals.length === 0) return;
+    const g = this.overlay;
+    for (const p of portals) {
+      const f = layout.facilities[p.facilityId];
+      const a = layout.terminalAreas[p.areaId];
+      if (!f || !a) continue;
+      const dims = facilityDims(f);
+      const from = c({ x: f.origin.x + dims.w / 2, y: f.origin.y + dims.h / 2 });
+      const to = c({ x: a.origin.x + a.w / 2, y: a.origin.y + a.h / 2 });
+      const alpha = BUILD_ALPHA[p.buildState];
+      this.dashed(g, from, to, 0.65, 0.4, { width: this.px(2.5), color: 0xc792ea, alpha });
+      for (const pt of [from, to]) g.circle(pt.x, pt.y, this.px(4)).fill({ color: 0xc792ea, alpha });
     }
   }
 

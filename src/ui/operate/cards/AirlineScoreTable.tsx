@@ -1,8 +1,19 @@
-import { airlineDef } from '../../../core/economy/registry';
-import { AIRLINE_TYPE_LABEL, OPS_UI, SCORE_LABEL, SCORE_LEVEL_LABEL, complaintDetailText, lackingText, scoreText } from '../../../i18n/ja';
+import { airlineDef, destinationDef } from '../../../core/economy/registry';
+import { AIRLINE_TYPE_LABEL, OPS_UI, PHASE7B_UI, SCORE_LABEL, SCORE_LEVEL_LABEL, complaintDetailText, lackingText, scoreText } from '../../../i18n/ja';
 import { useScorecard } from './useScorecard';
 import { useOps } from '../../OpsPanels';
 import { GAME_UI } from '../../../i18n/ja';
+
+/**
+ * 就航範囲の表示文（UIデザイン更新 第7段階b）: networkDestinations で制限された会社は
+ * 許可目的地を列挙し、範囲外の路線の提案が来ない理由が分かるようにする。無制限はその旨。
+ */
+export function airlineNetworkScopeText(airlineId: string): string {
+  const def = airlineDef(airlineId);
+  return def.networkDestinations
+    ? `${PHASE7B_UI.networkRestricted(def.networkDestinations.length)}（${def.networkDestinations.map((id) => destinationDef(id).name).join('、')}）`
+    : PHASE7B_UI.networkUnrestricted;
+}
 
 /**
  * 航空会社ごとの評価の詳細（要素別の点数と「足りないもの」）。既存のデータからの導出で、満足度の計算には使わない。
@@ -46,6 +57,10 @@ export function AirlineScoreTable() {
                     )}
                   </div>
                 ))}
+              </div>
+              {/* 就航範囲（第7段階b）: 制限つき会社は範囲外の路線の提案が来ない理由がここで分かるようにする */}
+              <div className="score-lacking muted" data-testid={`airline-network-${s.airlineId}`}>
+                {PHASE7B_UI.networkScope}: {airlineNetworkScopeText(s.airlineId)}
               </div>
               {evalState?.[s.airlineId]?.complaints.map((x) => {
                 const comp = s.components.find((c) => c.key === x.key);

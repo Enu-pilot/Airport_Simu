@@ -77,6 +77,9 @@ export function View3D() {
         }
       }}
     >
+      <div className="view3d-note" data-testid="view3d-note">
+        3D は観賞用です（編集は 2D で行います）
+      </div>
       <button
         className="pilot-follow-toggle"
         type="button"
