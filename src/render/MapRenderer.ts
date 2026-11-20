@@ -74,6 +74,62 @@ export class MapRenderer {
   private kpiCache: { now: number; sim: unknown; k: AirportKpis } | null = null;
   private interiorShown = false;
   private mapLevel: number | 'all' = 0;
+  /** 現在のカメラで見えている範囲（マップ座標＝タイル単位）。draw の冒頭で更新し、画面外カリングの判定に使う */
+  private view = { x0: 0, y0: 0, x1: 0, y1: 0 };
+
+  /** 矩形（x, y, w, h）が表示範囲（margin 分だけ拡張）と重なるか。重ならない要素は描いても画面に出ない */
+  private boxInView(x: number, y: number, w: number, h: number, margin: number): boolean {
+    const v = this.view;
+    return x + w >= v.x0 - margin && x <= v.x1 + margin && y + h >= v.y0 - margin && y <= v.y1 + margin;
+  }
+
+  private pointInView(x: number, y: number, margin: number): boolean {
+    const v = this.view;
+    return x >= v.x0 - margin && x <= v.x1 + margin && y >= v.y0 - margin && y <= v.y1 + margin;
+  }
+
+  /** 線分が表示範囲（margin 分だけ拡張）と交わるか（Liang–Barsky 法による正確な交差判定） */
+  private segInView(ax: number, ay: number, bx: number, by: number, margin: number): boolean {
+    const v = this.view;
+    const x0 = v.x0 - margin;
+    const y0 = v.y0 - margin;
+    const x1 = v.x1 + margin;
+    const y1 = v.y1 + margin;
+    const dx = bx - ax;
+    const dy = by - ay;
+    let t0 = 0;
+    let t1 = 1;
+    const clip = (p: number, q: number): boolean => {
+      if (p === 0) return q >= 0;
+      const t = q / p;
+      if (p < 0) {
+        if (t > t1) return false;
+        if (t > t0) t0 = t;
+      } else {
+        if (t < t0) return false;
+        if (t < t1) t1 = t;
+      }
+      return true;
+    };
+    return clip(-dx, ax - x0) && clip(dx, x1 - ax) && clip(-dy, ay - y0) && clip(dy, y1 - ay);
+  }
+
+  /** flat な多角形座標列 [x, y, x, y, ...] の外接矩形が表示範囲と重なるか */
+  private flatPolyInView(pts: number[], margin: number): boolean {
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (let i = 0; i + 1 < pts.length; i += 2) {
+      const x = pts[i]!;
+      const y = pts[i + 1]!;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    return this.boxInView(x0, y0, x1 - x0, y1 - y0, margin);
+  }
 
   async init(host: HTMLElement): Promise<void> {
     await this.app.init({
@@ -103,6 +159,8 @@ export class MapRenderer {
     const ghostIds = new Set(preview?.ghostIds ?? []);
     const cam = s.camera;
     this.zoom = cam.zoom;
+    // 画面外カリング用の表示範囲（drawGrid のクリップと同じ式）
+    this.view = { x0: cam.x, y0: cam.y, x1: cam.x + s.viewSize.w / cam.zoom, y1: cam.y + s.viewSize.h / cam.zoom };
     this.world.scale.set(cam.zoom);
     this.world.position.set(-cam.x * cam.zoom, -cam.y * cam.zoom);
     this.usedTexts.clear();
@@ -275,6 +333,8 @@ export class MapRenderer {
       const fromLevel = a.level ?? 0;
       const toLevel = b.level ?? 0;
       if (s.mapLevel !== 'all' && fromLevel !== s.mapLevel && toLevel !== s.mapLevel) continue;
+      // 画面外の区間は描かない（破線・矢印・状態印・中点の印はすべて区間とその太さの周辺に収まる）
+      if (!this.segInView(c(a.pos).x, c(a.pos).y, c(b.pos).x, c(b.pos).y, mToTiles(roadDrawWidthM(e)) / 2 + 0.45 + 2 / this.zoom)) continue;
       const alpha = BUILD_ALPHA[e.buildState] * (s.mapLevel === 'all' && fromLevel !== toLevel ? 0.65 : 1);
       if (e.roadClass === 'rail') {
         // 鉄道: 細い道床と枕木
@@ -301,7 +361,13 @@ export class MapRenderer {
     const taxiEdges = Object.values(layout.taxiways).flatMap((e) => {
       const a = layout.taxiNodes[e.from];
       const b = layout.taxiNodes[e.to];
-      return a && b ? [{ e, p: c(a.pos), q: c(b.pos), band: worldPolyToMap(taxiwayBandSurface(a.pos, b.pos, e)), half: mToTiles(taxiwayDrawWidthM(e)) / 2 }] : [];
+      if (!a || !b) return [];
+      const p = c(a.pos);
+      const q = c(b.pos);
+      const half = mToTiles(taxiwayDrawWidthM(e)) / 2;
+      // 画面外の区間は帯の形状計算ごと省く（節点の円は half + px(1) まで広がる）
+      if (!this.segInView(p.x, p.y, q.x, q.y, half + 0.3 + 2 / this.zoom)) return [];
+      return [{ e, p, q, band: worldPolyToMap(taxiwayBandSurface(a.pos, b.pos, e)), half }];
     });
     for (const t of taxiEdges) {
       const alpha = BUILD_ALPHA[t.e.buildState];
@@ -357,13 +423,17 @@ export class MapRenderer {
     const showNodes = this.zoom >= 6 || s.overlays.network || s.tool === 'taxiway' || s.tool === 'road';
     if (showNodes) {
       for (const n of Object.values(layout.taxiNodes)) {
+        const p = c(n.pos);
+        if (!this.pointInView(p.x, p.y, 0.3)) continue;
         const kind = analysis.network.nodes[n.id]?.kind ?? 'taxiway';
         const r = kind === 'taxiway' ? 0.14 : 0.22;
-        g.circle(c(n.pos).x, c(n.pos).y, r).fill({ color: NODE_COLOR[kind] }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.6 });
+        g.circle(p.x, p.y, r).fill({ color: NODE_COLOR[kind] }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.6 });
       }
       for (const n of Object.values(layout.roadNodes)) {
         if (s.mapLevel !== 'all' && (n.level ?? 0) !== s.mapLevel) continue;
-        g.circle(c(n.pos).x, c(n.pos).y, 0.14).fill({ color: 0xd7ccc8 }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.6 });
+        const p = c(n.pos);
+        if (!this.pointInView(p.x, p.y, 0.3)) continue;
+        g.circle(p.x, p.y, 0.14).fill({ color: 0xd7ccc8 }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.6 });
       }
     }
   }
@@ -416,6 +486,11 @@ export class MapRenderer {
   private drawFacility(f: Facility): void {
     const g = this.g;
     const d = facilityDims(f);
+    // 画面外の施設は描かない（矩形施設は origin + 寸法、非矩形は footprint の外接矩形で判定。
+    // 内部の印・枠線はすべてその内側か縁に収まる）
+    if (f.footprint && f.footprint.length >= 3) {
+      if (!this.flatPolyInView(flat(f.footprint.map((p) => ({ x: p.x, y: p.y }))), 0.3 + 3 / this.zoom)) return;
+    } else if (!this.boxInView(f.origin.x, f.origin.y, d.w, d.h, 0.3 + 3 / this.zoom)) return;
     const alpha = BUILD_ALPHA[f.buildState];
     const color = FACILITY_COLOR[f.kind];
     const layer = FACILITY_SPECS[f.kind].layer;
@@ -464,6 +539,8 @@ export class MapRenderer {
   private drawStand(st: Stand, connected: boolean): void {
     const g = this.g;
     const d = standDims(st);
+    // 画面外のスポットは描かない（枠・シルエット・入口の印はすべて矩形の内側に収まる）
+    if (!this.boxInView(st.origin.x, st.origin.y, d.w, d.h, 0.3 + 3 / this.zoom)) return;
     const alpha = BUILD_ALPHA[st.buildState];
     const { x, y } = st.origin;
     g.rect(x + 0.05, y + 0.05, d.w - 0.1, d.h - 0.1).stroke({ width: this.px(1.5), color: COLOR.standLine, alpha: 0.85 * alpha });
@@ -938,9 +1015,14 @@ export class MapRenderer {
     }
     for (const a of Object.values(layout.terminalAreas)) {
       if (areaMapLevel(layout, a) !== level) continue;
-      g.rect(a.origin.x + 0.05, a.origin.y + 0.05, a.w - 0.1, a.h - 0.1).fill({ color: AREA_COLOR[a.kind], alpha: 0.9 });
-      g.rect(a.origin.x + 0.05, a.origin.y + 0.05, a.w - 0.1, a.h - 0.1).stroke({ width: this.px(1), color: ZONE_COLOR[a.zone], alpha: 0.9 });
-      if (occupancy && ops) {
+      // 画面外のエリアは図形（塗り・混雑・閉鎖の斜線）を描かない。ラベルは中心基準で
+      // 画面端に掛かりうるため、従来どおり常に出す（ラベル側の判定は変えない）
+      const areaVisible = this.boxInView(a.origin.x, a.origin.y, a.w, a.h, 0.15 + 3 / this.zoom);
+      if (areaVisible) {
+        g.rect(a.origin.x + 0.05, a.origin.y + 0.05, a.w - 0.1, a.h - 0.1).fill({ color: AREA_COLOR[a.kind], alpha: 0.9 });
+        g.rect(a.origin.x + 0.05, a.origin.y + 0.05, a.w - 0.1, a.h - 0.1).stroke({ width: this.px(1), color: ZONE_COLOR[a.zone], alpha: 0.9 });
+      }
+      if (occupancy && ops && areaVisible) {
         const node = ops.sim.ctx.terminal.areas[a.id];
         const load = node ? (occupancy.get(a.id) ?? 0) / node.capacity : 0;
         if (load > 0.25) g.rect(a.origin.x, a.origin.y, a.w, a.h).fill({ color: load > 1 ? 0xff3030 : 0xffb020, alpha: Math.min(0.55, load * 0.4) });
@@ -970,8 +1052,11 @@ export class MapRenderer {
     for (const id of visibleInteriorFacilityIds(layout, level)) {
       const f = layout.facilities[id]!;
       const d = facilityDims(f);
-      g.rect(f.origin.x + 0.2, f.origin.y + 0.2, Math.max(0.6, d.w - 0.4), Math.max(0.6, d.h - 0.4))
-        .fill({ color: FACILITY_COLOR[f.kind], alpha: BUILD_ALPHA[f.buildState] });
+      // 画面外の設備は矩形を描かない（ラベルは従来どおり常に出す）
+      if (this.boxInView(f.origin.x, f.origin.y, d.w, d.h, 0.3)) {
+        g.rect(f.origin.x + 0.2, f.origin.y + 0.2, Math.max(0.6, d.w - 0.4), Math.max(0.6, d.h - 0.4))
+          .fill({ color: FACILITY_COLOR[f.kind], alpha: BUILD_ALPHA[f.buildState] });
+      }
       if (s.overlays.labels && f.name) this.label(`interior-fac:${f.id}`, f.name, { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 }, cam, { size: 9, color: 0xffffff });
     }
     if (ops) this.drawPax(ops, level);
@@ -992,6 +1077,8 @@ export class MapRenderer {
       if (!p.area) continue;
       const here = model.areas[p.area];
       if (!here) continue;
+      // 滞在中の代表点はエリア矩形の内側にある。矩形ごと画面外なら描くものはない
+      if (p.state !== 'walking' && !this.boxInView(here.x, here.y, here.w, here.h, 0.3 + 2 / this.zoom)) continue;
       let x: number;
       let y: number;
       let onLevel = effLevel(here) === level;
@@ -1018,6 +1105,8 @@ export class MapRenderer {
         y = here.y + 0.2 + (((h >> 10) % 991) / 991) * Math.max(0.1, here.h - 0.4);
       }
       if (!onLevel) continue;
+      // 画面外の点は描かない（半径は最大でも margin の内側）
+      if (!this.pointInView(x, y, 0.3 + 2 / this.zoom)) continue;
       const color =
         p.state === 'stranded' || p.state === 'waitingFacility' ? 0xff4d4f : p.direction === 'departure' ? 0xffb74d : 0x4fc3f7;
       g.circle(x, y, Math.max(this.px(2), 0.06 + 0.03 * p.count)).fill({ color, alpha: 0.95 });
@@ -1038,6 +1127,8 @@ export class MapRenderer {
       const r = sim.ctx.layout.runways[rid];
       if (!r) continue;
       const poly = flat(worldPolyToMap(runwaySurfaces(r, sim.ctx.layout).pavement));
+      // 画面外の滑走路は状態の輪郭を描かない
+      if (!this.flatPolyInView(poly, 0.3 + 3 / this.zoom)) continue;
       if (rs.occupant) o.poly(poly).stroke({ width: this.px(3), color: 0xff4d4f });
       else if (rs.booking) o.poly(poly).stroke({ width: this.px(3), color: 0xffd400 });
     }
@@ -1049,10 +1140,12 @@ export class MapRenderer {
         if (!e) continue;
         const a = node(e.from);
         const b = node(e.to);
+        if (!this.segInView(a.x, a.y, b.x, b.y, 0.2 + 3 / this.zoom)) continue;
         o.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: this.px(5), color: aircraftColor(acId), alpha: 0.55 });
       }
       for (const [nid, acId] of Object.entries(sim.state.nodeReservations)) {
         const p = node(nid);
+        if (!this.pointInView(p.x, p.y, 0.2 + 6 / this.zoom)) continue;
         o.circle(p.x, p.y, this.px(6)).stroke({ width: this.px(2), color: aircraftColor(acId) });
       }
     }
@@ -1085,6 +1178,8 @@ export class MapRenderer {
     for (const u of Object.values(sim.state.units)) {
       if (u.kind === 'staff' || u.status === 'idle') continue;
       const { x, y } = worldToMap(u);
+      // 画面外の車両は描かない（台数ラベルは車両の真上に出るため、余白にその分も含める）
+      if (!this.pointInView(x, y, 2.2)) continue;
       const color = u.status === 'broken' ? 0xff4d4f : UNIT_COLOR[u.kind];
       // ランプバスは他の車両の 2 倍の長さ。乗車中の人数を表示
       if (u.kind === 'apronBus') {
@@ -1103,10 +1198,20 @@ export class MapRenderer {
     const list = Object.values(sim.state.aircraft).filter(isVisible);
     for (const ac of list) {
       const { x, y } = worldToMap({ x: ac.px + (ac.x - ac.px) * alpha, y: ac.py + (ac.y - ac.py) * alpha });
-      const dh = ((ac.heading - ac.pheading + 540) % 360) - 180;
-      const heading = ac.pheading + dh * alpha;
-      this.drawAircraft(ac, x, y, heading, ac.id === ops.selectedAircraft);
-      if (this.zoom >= 6 || ac.id === ops.selectedAircraft) {
+      // 画面外の機体はシルエットを描かない（外接範囲は機首方向の半長 + 翼幅の半分が上限）。
+      // コールサインは画面端に掛かりうるためシルエットとは別に判定し、見える範囲なら従来どおり出す
+      const t = resolveType(this.typeTable ?? AIRCRAFT_TYPES, ac.typeId);
+      const extent = Math.max(0.5, t.lengthM / 25 / 2) + Math.max(0.5, t.wingspanM / 25 / 2);
+      const bodyVisible = this.boxInView(x - extent, y - extent, extent * 2, extent * 2, 0.3 + 3 / this.zoom);
+      const showLabel = this.zoom >= 6 || ac.id === ops.selectedAircraft;
+      const labelVisible = showLabel && this.pointInView(x, y - 1.4, 30 / this.zoom);
+      if (!bodyVisible && !labelVisible) continue;
+      if (bodyVisible) {
+        const dh = ((ac.heading - ac.pheading + 540) % 360) - 180;
+        const heading = ac.pheading + dh * alpha;
+        this.drawAircraft(ac, x, y, heading, ac.id === ops.selectedAircraft);
+      }
+      if (labelVisible) {
         this.label(`ac:${ac.id}`, ac.callsign, { x, y: y - 1.4 }, cam, { size: 11, color: 0xffffff });
       }
     }

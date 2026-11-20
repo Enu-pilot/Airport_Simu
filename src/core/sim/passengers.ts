@@ -122,7 +122,29 @@ function log(state: SimState, e: SimState['events'][number]): void {
 }
 
 function facility(state: SimState, key: string): FacilityRuntime {
-  return (state.facilities[key] ??= { queue: [], inService: [], served: 0, waitTotal: 0, maxQueue: 0 });
+  const f = state.facilities[key];
+  if (f) return f;
+  const created: FacilityRuntime = { queue: [], inService: [], served: 0, waitTotal: 0, maxQueue: 0 };
+  state.facilities[key] = created;
+  // キー集合が変わったので、ソート済みキー一覧のキャッシュを捨てる（下記）
+  facilityKeysCache.delete(state.facilities);
+  return created;
+}
+
+/**
+ * stepFacility 用の施設キー一覧（ソート済み）のキャッシュ。
+ * state.facilities のキー集合は facility() で新規作成されたときにだけ変わり、
+ * その場でキャッシュを捨てるため、毎 tick の Object.keys + sort を省略しても
+ * 並び・対象は従来と同一になる（性能改善計画 第3弾-3）。
+ */
+const facilityKeysCache = new WeakMap<Record<string, FacilityRuntime>, string[]>();
+function sortedFacilityKeys(facilities: Record<string, FacilityRuntime>): string[] {
+  let keys = facilityKeysCache.get(facilities);
+  if (!keys) {
+    keys = Object.keys(facilities).sort();
+    facilityKeysCache.set(facilities, keys);
+  }
+  return keys;
 }
 
 const isClosed = (state: SimState, areaId: string) => state.closedAreas.includes(areaId);
@@ -196,7 +218,7 @@ export function stepPassengers(sim: Simulation): void {
   for (const id of state.activePax) stepGroup(sim, state.paxGroups[id]!, occupancy);
   // 終了したグループを処理対象から外す
   state.activePax = state.activePax.filter((id) => !PAX_FINAL_STATES.includes(state.paxGroups[id]!.state));
-  for (const key of Object.keys(state.facilities).sort()) stepFacility(sim, key);
+  for (const key of sortedFacilityKeys(state.facilities)) stepFacility(sim, key);
 }
 
 /** エリアごとの滞在人数（歩行中は出発側のエリアに数える） */
