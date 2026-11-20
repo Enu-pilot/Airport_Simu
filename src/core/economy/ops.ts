@@ -59,7 +59,7 @@ import { evaluateGoals } from './goals';
 import { airlineDef, internationalProcessingFor, routeCapabilitiesForAirport } from './registry';
 import { routeDemandSummary } from './demand';
 import { stepMarket } from './market';
-import { aircraftNoisePoints, applyCityNoiseImpact, cityDemandCeiling, cityDemandFactor, cityEventEffects, expectedPassengers, growCity, isCityNightMovement } from './city';
+import { aircraftNoisePoints, applyCityNoiseImpact, cityDemandCeiling, cityDemandFactor, cityEventEffects, expectedPassengers, growCity, isCityNightMovement, residentFacilityBonus } from './city';
 
 /**
  * 運航中の経営処理（docs/14_management_rules.md §3・§5・§6）。
@@ -203,11 +203,12 @@ function discount(sim: Simulation & { company: CompanyState }, f: Flight): numbe
   return 1 - (contractOf(sim, f)?.feeDiscount ?? 0);
 }
 
-/** 着陸料 = 最大離陸重量(t) × 150 × 料金倍率 × (ピーク時 1.25) × (1 − 契約割引) */
+/** 着陸料 = 最大離陸重量(t) × 150 × 料金倍率 × (ピーク時 1.25) × (夜間 22時〜6時 1.3、機能E) × (1 − 契約割引) */
 export function landingFee(c: CompanyState, ac: Pick<Aircraft, 'typeId'>, at: number, disc: number, types: TypeTable = AIRCRAFT_TYPES): number {
   const F = BALANCE.fees;
   const peak = isPeak(c.hours, Math.floor((at % DAY_SEC) / 60)) ? 1 + F.peakSurcharge : 1;
-  return resolveType(types, ac.typeId).mtowT * F.landingPerTonne * c.fees.landing * peak * disc;
+  const night = isCityNightMovement(at) ? 1 + F.nightSurcharge : 1;
+  return resolveType(types, ac.typeId).mtowT * F.landingPerTonne * c.fees.landing * peak * night * disc;
 }
 
 /** 駐機料 = 切り上げ(駐機時間 − 2時間) × 区分の時間料金 × 料金倍率 × (1 − 契約割引) */
@@ -538,7 +539,8 @@ export function nextRating(prev: number, kpi: Pick<DailyKpi, 'paxSatisfaction' |
   return round1(clamp(0.7 * prev + 0.3 * today));
 }
 
-function cityNoiseMetrics(state: SimState, ctx: SimContext, from: number, to: number) {
+/** 期間内の騒音集計（日報の city セクションと運航画面の NoiseCard で共用する） */
+export function cityNoiseMetrics(state: SimState, ctx: SimContext, from: number, to: number) {
   let movements = 0;
   let nightMovements = 0;
   let noisePoints = 0;
@@ -560,7 +562,7 @@ function cityNoiseMetrics(state: SimState, ctx: SimContext, from: number, to: nu
  * 収支を日報に移し、航空会社の満足度・契約・評価・新しい提案を更新して、会社の日を進める。
  */
 /** 乗継統計の前回締め時点の累計（保存対象にしないため WeakMap で保持する） */
-const hubStatsPrev = new WeakMap<object, { spawned: number; connected: number; missed: number; noShow: number; byLink: Record<string, number> }>();
+const hubStatsPrev = new WeakMap<object, { spawned: number; connected: number; missed: number; noShow: number }>();
 /** 地上支援ユニットの稼働累計の前回締め時点（5-02。保存対象にしないため WeakMap で保持する） */
 const unitBusyPrev = new WeakMap<object, { at: number; busyById: Map<string, number> }>();
 
@@ -704,7 +706,11 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   dailyAnalysisByReport.set(report, airlineAnalysis);
   checkBankruptcy(c);
   if (c.city && !partial) {
-    const residentDelta = applyCityNoiseImpact(c.city, cityNoise?.noisePoints ?? 0, cityNoise?.nightMovements ?? 0);
+    // 海上移転係数は締め時点の格（この締めで昇格した場合は新格）で、住民向け施設は現レイアウトの運用中施設で効かせる
+    const residentDelta = applyCityNoiseImpact(c.city, cityNoise?.noisePoints ?? 0, cityNoise?.nightMovements ?? 0, {
+      tier: c.goals?.tier ?? 0,
+      facilityBonus: residentFacilityBonus(ctx.layout),
+    });
     for (const event of growCity(c.city, kpi.paxDeparted + kpi.paxArrived, cityCeiling)) log(state, event);
     if (report.city) {
       report.city.populationEnd = c.city.population;
@@ -897,14 +903,9 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   // 乗継の当日分（フェーズ 4 §5.6）。累計ではなく当日の増分を記録する
   if (c.features?.hub && state.hubStats) {
     const h = state.hubStats;
-    const prev = hubStatsPrev.get(state) ?? { spawned: 0, connected: 0, missed: 0, noShow: 0, byLink: {} };
-    const byLink: Record<string, number> = {};
-    for (const [linkId, n] of Object.entries(h.byLink)) {
-      const delta = n - (prev.byLink[linkId] ?? 0);
-      if (delta > 0) byLink[linkId] = delta;
-    }
-    report.hub = { spawned: h.spawned - prev.spawned, connected: h.connected - prev.connected, missed: h.missed - prev.missed, noShow: h.noShow - prev.noShow, ...(Object.keys(byLink).length > 0 ? { byLink } : {}) };
-    hubStatsPrev.set(state, { spawned: h.spawned, connected: h.connected, missed: h.missed, noShow: h.noShow, byLink: { ...h.byLink } });
+    const prev = hubStatsPrev.get(state) ?? { spawned: 0, connected: 0, missed: 0, noShow: 0 };
+    report.hub = { spawned: h.spawned - prev.spawned, connected: h.connected - prev.connected, missed: h.missed - prev.missed, noShow: h.noShow - prev.noShow };
+    hubStatsPrev.set(state, { spawned: h.spawned, connected: h.connected, missed: h.missed, noShow: h.noShow });
   }
   // 乗継 OD 集計（5A）: その日の計画で配分した人数の OD 別内訳（表示用）。
   // report.hub（当日の実績）とは別フェーズの値で、二重計上ではない

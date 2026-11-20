@@ -30,6 +30,9 @@ export const FACILITY_COLOR: Record<FacilityKind, number> = {
   railStation: 0x9c5fbf,
   staffParking: 0x4d5560,
   hotel: 0xc98a5c,
+  shoppingMall: 0xcf6f9f,
+  culturalHall: 0x6f7fc9,
+  park: 0x4e9b47,
 };
 
 export const SIZE_COLOR: Record<SizeClass, number> = { S: 0x66bb6a, M: 0x42a5f5, L: 0xba68c8 };

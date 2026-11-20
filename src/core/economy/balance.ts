@@ -25,7 +25,7 @@ export const BALANCE = {
     movingWalkwayPerTile: 12_000,
     stand: { S: 60_000, M: 100_000, L: 180_000 } as Record<SizeClass, number>,
     /** 面積型の施設（タイルあたり、ターミナルは階ごと） */
-    perTile: { apron: 1_500, terminal: 20_000, serviceArea: 500, parking: 800 } as Partial<Record<FacilityKind, number>>,
+    perTile: { apron: 1_500, terminal: 20_000, serviceArea: 500, parking: 800, park: 400 } as Partial<Record<FacilityKind, number>>,
     facility: {
       gate: 50_000,
       hangar: 1_200_000,
@@ -36,6 +36,8 @@ export const BALANCE = {
       gseBase: 400_000,
       baggageSort: 700_000,
       cargoTerminal: 1_500_000,
+      shoppingMall: 3_000_000,
+      culturalHall: 1_500_000,
     } as Partial<Record<FacilityKind, number>>,
     jetBridge: 150_000,
     /** 車両の購入費（GSE基地のプロパティの台数分） */
@@ -61,6 +63,8 @@ export const BALANCE = {
     /** 着陸料（最大離陸重量 1t あたり）。ピーク時間は割増 */
     landingPerTonne: 150,
     peakSurcharge: 0.25,
+    /** 夜間（22時〜6時）の着陸料の割増（機能E。3b 設計 E.2 の原案: 夜間着陸料 ×1.3） */
+    nightSurcharge: 0.3,
     /** 駐機料（無料時間を超えた1時間あたり） */
     parkingFreeHours: 2,
     parkingPerHour: { S: 500, M: 1_000, L: 2_000 } as Record<SizeClass, number>,
@@ -228,6 +232,50 @@ export const BALANCE = {
      */
     transshipmentShare: 0.35,
   },
+  // ------------------------------------------------------------ 住民・騒音（機能E）
+  /**
+   * 防音工事助成（段階制）。費用を払ってレベルを上げると、実施時に住民満足度が即時回復し、
+   * 以後の日次騒音影響のうち騒音ポイントの効きが noiseFactor 倍に緩和される。
+   * 夜間運航 1 件あたりの効き（applyCityNoiseImpact の −0.15）は緩和対象にしない
+   * （夜間割増とのトレードオフを残すため）。配列はレベル 1〜3 の順（index = レベル − 1）。
+   * noiseFactor はレベル 0〜3 の順（index = レベル）。
+   * 拡張1（海上移転係数）・拡張2（住民向け施設・騒音対策費の拠出）もこの節に集約する。
+   */
+  noise: {
+    soundproof: {
+      maxLevel: 3,
+      cost: [2_000_000, 5_000_000, 12_000_000],
+      recovery: [4, 6, 8],
+      noiseFactor: [1, 0.85, 0.7, 0.5],
+    },
+    /**
+     * 海上移転係数（機能E拡張1、PO 決定の強め案）: 空港の格（goals.tier）が上がるタイミングで
+     * 空港が沖合へ移転・拡張した想定とし、騒音ポイントの効きをこの係数倍に軽減する。
+     * 防音工事の noiseFactor と乗算で併用する。夜間運航 1 件あたりの効き（−0.15）は対象外。
+     * 配列は格 0〜7 の順（index = 格）。格 0〜3 は移転前で ×1.0。
+     */
+    offshore: {
+      factorByTier: [1, 1, 1, 1, 0.75, 0.5, 0.3, 0.15],
+    },
+    /**
+     * 住民向け施設（機能E拡張2）: 建設して置くだけで、運航シミュレーションには影響せず
+     * 住民満足度に日次のプラスを与える施設。運用中 1 棟ごとのプラス（/日）と、
+     * 施設由来のプラス合計の上限（/日）。プラスは日次変化の回復側に加算され、
+     * 既存の日次クランプ（−1〜+0.05）の内側で効く。
+     */
+    residentFacilities: {
+      dailyBonus: { shoppingMall: 0.03, culturalHall: 0.02, park: 0.01 } as Partial<Record<FacilityKind, number>>,
+      dailyCap: 0.1,
+    },
+    /**
+     * 騒音対策費の拠出（機能E拡張2）: 費用を払うと住民満足度が即時回復する。1 日 1 回まで
+     * （最終拠出日は CityConfig.lastNoiseContributionDay に持つ）。
+     */
+    contribution: {
+      cost: 1_000_000,
+      recovery: 1,
+    },
+  },
   offers: { baseProb: 0.12, ratingProb: 0.3, maxOpen: 6, expireDays: 3, contractDays: 30 },
   contracts: { renewGoodSat: 70, renewOkSat: 45, withdrawSat: 25, withdrawDays: 3, increaseMinSat: 60, decreasePenaltySat: 10 },
   bankruptcyDays: 30,
@@ -253,7 +301,7 @@ export const BALANCE = {
     taxiPaxPerBerth: 30,
     busSeats: 50,
     busesPerBay: 6,
-    trainSeats: 1000,
+    trainSeats: 200,
     /** 混雑による遅れ（BPR 型）: 遅れ = 基本時間 × 0.15 × (交通量/容量)^4、上限（分） */
     congestionMaxMin: 90,
     /** 駐車場が満車のときに探し回る時間（分） */

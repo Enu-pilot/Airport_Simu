@@ -12,10 +12,10 @@ import { BALANCE } from '../core/economy/balance';
 import { forecastForDay } from '../core/sim/weather';
 import { analyzeAccess, type AccessMode } from '../core/access/model';
 import { companyActions } from '../editor/simRunner';
-import { addCityEvent, setCompanyCity, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
+import { addCityEvent, contributeNoiseFund, purchaseSoundproofing, setCompanyCity, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
 import { NightOpsSettings } from './NightOpsSettings';
 import { terminalCapacitySummaries } from '../core/terminal/terminalCapacitySummary';
-import { airMarketPopulationOf, CITY_EVENT_CONGESTED, CITY_EVENT_KINDS, cityEventCost, cityEventOutcome, cityEventRisk, type CityEventKind, type CityEventLocation } from '../core/economy/city';
+import { airMarketPopulationOf, canMakeNoiseContribution, CITY_EVENT_CONGESTED, CITY_EVENT_KINDS, cityEventCost, cityEventOutcome, cityEventRisk, nextSoundproofCost, offshoreNoiseFactor, residentFacilityBonus, soundproofLevelOf, soundproofNoiseFactor, type CityEventKind, type CityEventLocation } from '../core/economy/city';
 import {
   ACCESS_MODE_LABEL,
   DEMAND_UI,
@@ -402,6 +402,7 @@ export function PlanPanel() {
       <div className="issues-list mgmt-grid">
         <CityEventPlanner company={c} />
         {c.city && <NightOpsSettings city={c.city} readOnly={mode === 'operate'} onChange={(next) => { const { nightOps: _n, ...rest } = c.city!; void _n; setCompanyCity(next ? { ...rest, nightOps: next } : rest); }} />}
+        {c.city && <SoundproofPanel company={c} readOnly={mode === 'operate'} />}
         <WorkOrdersPanel />
         <RouteTrafficSection c={c} accessFactor={accessFactor} ctx={ctx} routeCapabilities={routeCapabilities} />
 
@@ -913,6 +914,72 @@ function CounterOfferCell({ contract: k, disabled = false }: { contract: Contrac
         逆提案
       </button>
     </span>
+  );
+}
+
+/** 住民・騒音パネル（機能E）: 防音工事助成と騒音対策費の拠出の実施口。運航中は表示のみ（購入は建設モード） */
+function SoundproofPanel({ company, readOnly }: { company: CompanyState; readOnly: boolean }) {
+  const layout = useLayout();
+  const city = company.city!;
+  const level = soundproofLevelOf(city);
+  const cost = nextSoundproofCost(city);
+  const spec = BALANCE.noise.soundproof;
+  const nextRecovery = cost !== null ? spec.recovery[level]! : null;
+  const nextFactor = cost !== null ? soundproofNoiseFactor(level + 1) : null;
+  const tier = company.goals?.tier ?? 0;
+  const offshoreFactor = offshoreNoiseFactor(tier);
+  const facilityBonus = residentFacilityBonus(layout);
+  const contribution = BALANCE.noise.contribution;
+  const contributedToday = !canMakeNoiseContribution(city, company.day);
+  return (
+    <section data-testid="soundproof-panel">
+      <h4>住民・騒音（防音工事助成）</h4>
+      <div className="muted small">
+        住民満足度 {city.residents.toFixed(1)} / 100、防音工事 Lv{level}（騒音ポイントの影響 ×{soundproofNoiseFactor(level)}）。
+        夜間（22時〜6時）の着陸料は ×{1 + BALANCE.fees.nightSurcharge}、夜間運航の満足度への影響は防音工事では緩和されません。
+      </div>
+      {offshoreFactor < 1 && (
+        <div className="muted small" data-testid="soundproof-offshore">
+          海上移転（格{tier}）により、騒音ポイントの影響はさらに ×{offshoreFactor} に軽減されています（防音工事と合わせた最終係数 ×{soundproofNoiseFactor(level) * offshoreFactor}）。
+        </div>
+      )}
+      {facilityBonus > 0 && (
+        <div className="muted small" data-testid="soundproof-facility-bonus">
+          住民向け施設により、住民満足度が +{facilityBonus.toFixed(2)} / 日 されています（上限 +{BALANCE.noise.residentFacilities.dailyCap.toFixed(2)} / 日）。
+        </div>
+      )}
+      {cost !== null ? (
+        <div>
+          <button
+            className="small"
+            disabled={readOnly || company.cash < cost}
+            onClick={() => purchaseSoundproofing()}
+            data-testid="soundproof-buy"
+            title={readOnly ? '運航中は実施できません（建設モードで実施してください）' : company.cash < cost ? '資金が不足しています' : undefined}
+          >
+            Lv{level + 1} の防音工事を実施（{formatCr(cost)}、満足度 +{nextRecovery}、騒音の影響 ×{nextFactor}）
+          </button>
+          {readOnly && <span className="muted small"> 運航中は実施できません。</span>}
+          {!readOnly && company.cash < cost && <span className="muted small"> 資金が不足しています。</span>}
+        </div>
+      ) : (
+        <div className="muted small">防音工事は最大レベル（Lv{spec.maxLevel}）です。</div>
+      )}
+      <div>
+        <button
+          className="small"
+          disabled={readOnly || contributedToday || company.cash < contribution.cost}
+          onClick={() => contributeNoiseFund()}
+          data-testid="noise-contribution"
+          title={readOnly ? '運航中は拠出できません（建設モードで拠出してください）' : contributedToday ? '今日はすでに拠出済みです（1 日 1 回まで）' : company.cash < contribution.cost ? '資金が不足しています' : undefined}
+        >
+          騒音対策費を拠出（{formatCr(contribution.cost)}、満足度 +{contribution.recovery}、1 日 1 回まで）
+        </button>
+        {readOnly && <span className="muted small"> 運航中は拠出できません。</span>}
+        {!readOnly && contributedToday && <span className="muted small"> 今日は拠出済みです。</span>}
+        {!readOnly && !contributedToday && company.cash < contribution.cost && <span className="muted small"> 資金が不足しています。</span>}
+      </div>
+    </section>
   );
 }
 

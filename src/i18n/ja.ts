@@ -44,6 +44,9 @@ export const FACILITY_LABEL: Record<FacilityKind, string> = {
   railStation: '空港連絡駅',
   staffParking: '職員用駐車場',
   hotel: '空港ホテル',
+  shoppingMall: 'ショッピングモール',
+  culturalHall: '文化ホール',
+  park: '公園',
 };
 
 export const ENTITY_LABEL: Record<EntityType, string> = {

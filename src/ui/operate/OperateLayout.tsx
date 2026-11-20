@@ -10,6 +10,7 @@ import { EventsCard } from './cards/EventsCard';
 import { GoalsCard } from './cards/GoalsCard';
 import { GroundCard } from './cards/GroundCard';
 import { RunwayCard } from './cards/RunwayCard';
+import { NoiseCard } from './cards/NoiseCard';
 import { TerminalCard } from './cards/TerminalCard';
 import { TodayKpiCard } from './cards/TodayKpiCard';
 import { WeatherCard } from './cards/WeatherCard';
@@ -65,6 +66,7 @@ export function OperateLayout() {
         <GroundCard />
         <AccessCard />
         <AirlineCard />
+        <NoiseCard />
         <EventsCard />
       </aside>
     </>
