@@ -5,6 +5,10 @@ import { recordDayClose } from './dayHistory';
 import { buildTypeTable } from '../core/sim/aircraftTypes';
 import { effectiveModels } from '../core/io/project';
 import { advanceClock, createClock } from '../core/sim/clock';
+import { recordFrame, setPerfClock } from '../core/sim/perfStats';
+
+// 性能計測の時計は editor 層から注入する（core は実時間に依存しない）
+setPerfClock(() => performance.now());
 import { INBOUND_LEAD_SEC } from '../core/sim/rules';
 import { setAreaClosed } from '../core/sim/passengers';
 import { setUnitBroken } from '../core/sim/ground';
@@ -124,6 +128,8 @@ function frame(ts: number): void {
   }
   const ui = ts - lastUi > 100 || r.ticks === 0;
   if (ui) lastUi = ts;
+  // 性能計測: このフレームで進めた tick 数と dropped を記録する（計測のみ。進行には影響しない）
+  recordFrame(r.ticks, r.dropped);
   patchOps({ clock, frame: ops.frame + 1, dropped: r.dropped, uiVersion: ui ? ops.uiVersion + 1 : ops.uiVersion });
   raf = requestAnimationFrame(frame);
 }

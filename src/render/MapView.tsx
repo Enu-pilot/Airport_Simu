@@ -12,6 +12,7 @@ import {
   onWheel,
 } from '../editor/input';
 import { MapRenderer } from './MapRenderer';
+import { recordDraw } from '../core/sim/perfStats';
 
 /** PixiJS キャンバスを保持し、状態変化のたびに（フレーム単位で間引いて）描き直す */
 export function MapView() {
@@ -39,7 +40,10 @@ export function MapView() {
       if (frame || !ready) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
+        // 性能計測: 描画1回の所要時間を記録する（描画自体は変えない）
+        const t0 = performance.now();
         renderer.draw(editorStore.getState());
+        recordDraw(performance.now() - t0);
       });
     };
     const unsubscribe = editorStore.subscribe(schedule);

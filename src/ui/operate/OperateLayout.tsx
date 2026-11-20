@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Viewport } from '../../render/MapView';
+import { useEditor } from '../../editor/store';
 import { OpsControls } from '../OpsPanels';
 import { StatusBar, Toast } from '../StatusBar';
 import { AirlineCard } from './cards/AirlineCard';
@@ -13,6 +14,7 @@ import { TerminalCard } from './cards/TerminalCard';
 import { TodayKpiCard } from './cards/TodayKpiCard';
 import { WeatherCard } from './cards/WeatherCard';
 import { AlertStack } from './AlertStack';
+import { FidsBoard } from './FidsBoard';
 import { FidsOverlay } from './FidsOverlay';
 import { OpsDetail } from './OpsDetail';
 import { opsUi } from './opsUi';
@@ -28,6 +30,9 @@ import './operate.css';
 export function OperateLayout() {
   // 運航モードを離れたら表示の状態（ボード・運航表の設定）を初期化する
   useEffect(() => () => opsUi.reset(), []);
+  // 地図なしモード（opsPrefs.noMap）: 地図をアンマウントし、運行表（全列表示）を中央の主表示にする。
+  // sim の進行は simRunner が担い描画と独立しているため、地図が無くても運航はそのまま進む
+  const noMap = useEditor((s) => s.opsPrefs.noMap);
   return (
     <>
       <aside className="left ops-left" data-testid="ops-left">
@@ -38,13 +43,22 @@ export function OperateLayout() {
         <ConstructionCard />
         <GoalsCard />
       </aside>
-      <main className="center ops-center">
-        <Viewport />
-        <FidsOverlay />
-        <AlertStack />
-        <StatusBar />
-        <Toast />
-      </main>
+      {noMap ? (
+        <main className="center ops-center ops-center-nomap" data-testid="ops-nomap">
+          <FidsBoard />
+          <AlertStack />
+          <StatusBar />
+          <Toast />
+        </main>
+      ) : (
+        <main className="center ops-center">
+          <Viewport />
+          <FidsOverlay />
+          <AlertStack />
+          <StatusBar />
+          <Toast />
+        </main>
+      )}
       <aside className="right ops-right" data-testid="ops-right">
         <OpsDetail />
         <TerminalCard />

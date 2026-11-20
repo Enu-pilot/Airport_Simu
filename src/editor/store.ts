@@ -209,18 +209,20 @@ export interface OpsPrefs {
   pauseAtDayClose: boolean;
   /** 1 日スキップを重大な障害（滑走路の閉鎖・整備、ダイバート）で止める（既定 ON） */
   skipAutoStop: boolean;
+  /** 地図なしモード（運航画面で地図を描画せず運行表を主表示にする。表示だけの設定で、プロジェクトには保存しない） */
+  noMap: boolean;
 }
 
 export const initialDayFlow = (): DayFlow => ({ phase: 'none', review: null, viewing: null, atClose: false, skip: null, historyOpen: false });
 
 const PREFS_KEY = 'skyport.opsPrefs.v1';
 function loadPrefs(): OpsPrefs {
-  const d: OpsPrefs = { pauseAtDayClose: true, skipAutoStop: true };
+  const d: OpsPrefs = { pauseAtDayClose: true, skipAutoStop: true, noMap: false };
   try {
     const raw = globalThis.localStorage?.getItem(PREFS_KEY);
     if (raw) {
       const p = JSON.parse(raw) as Partial<OpsPrefs>;
-      return { pauseAtDayClose: typeof p.pauseAtDayClose === 'boolean' ? p.pauseAtDayClose : d.pauseAtDayClose, skipAutoStop: typeof p.skipAutoStop === 'boolean' ? p.skipAutoStop : d.skipAutoStop };
+      return { pauseAtDayClose: typeof p.pauseAtDayClose === 'boolean' ? p.pauseAtDayClose : d.pauseAtDayClose, skipAutoStop: typeof p.skipAutoStop === 'boolean' ? p.skipAutoStop : d.skipAutoStop, noMap: typeof p.noMap === 'boolean' ? p.noMap : d.noMap };
     }
   } catch {
     // 既定値を使う
