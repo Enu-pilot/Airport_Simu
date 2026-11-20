@@ -2,20 +2,29 @@ name: Vercel Production Deployment
 
 on:
   push:
+    # 本番ブランチ（デフォルトブランチを main へ改名する前提）
     branches:
       - main
+    # 文書のみのコミットではデプロイしない（deployment 自体を作らないので
+    # Vercel Hobby の deployment rate limit を消費しない）
     paths-ignore:
       - '**.md'
       - 'docs/**'
 
-# 連続プッシュやPRが溜まった際、古い実行をキャンセルして最新のみ動かす設定
+# 連続プッシュが溜まった際、古い実行をキャンセルして最新のみ動かす設定
 concurrency:
   group: vercel-deploy-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Vercel CLI
