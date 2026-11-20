@@ -50,13 +50,11 @@ export function standTiles(s: Stand): Tile[] {
   return rectTiles(s.origin, d.w, d.h);
 }
 
-/**
- * スポット入口（機首の反対側、外接矩形のすぐ外側の中央タイル）。
- * 誘導路ノードがこのタイルにあるとき、スポットはネットワークに接続される。
- */
-export function standEntry(s: Pick<Stand, 'origin' | 'size' | 'rotation'>): Tile {
-  const { w, d } = STAND_DIMS[s.size];
-  const half = (w - 1) / 2;
+function entryFor(s: Pick<Stand, 'origin' | 'size' | 'rotation'>, dims: { w: number; d: number }): Tile {
+  const { w, d } = dims;
+  // 入口は中央に最も近いタイル。偶数幅では 2 つの中央タイルのうち小さい方（左/上）に寄せる。
+  // 横方向の軸長は全回転で w（0/180 は x 方向、90/270 は y 方向が横になる）。
+  const half = Math.floor((w - 1) / 2);
   const o = s.origin;
   switch (s.rotation) {
     case 0: // 機首 北 → 入口は南
@@ -68,6 +66,26 @@ export function standEntry(s: Pick<Stand, 'origin' | 'size' | 'rotation'>): Tile
     case 270: // 機首 西 → 入口は東
       return { x: o.x + d, y: o.y + half };
   }
+}
+
+/**
+ * スポット入口（機首の反対側、外接矩形のすぐ外側の中央付近のタイル）。
+ * 誘導路ノードがこのタイルにあるとき、スポットはネットワークに接続される。
+ */
+export function standEntry(s: Pick<Stand, 'origin' | 'size' | 'rotation'>): Tile {
+  return entryFor(s, STAND_DIMS[s.size]);
+}
+
+/** 寸法改定（S 2×2・M 3×2・L 4×4）前の旧寸法。旧セーブの入口位置の互換判定に使う */
+export const LEGACY_STAND_DIMS: Record<Stand['size'], { w: number; d: number }> = {
+  S: { w: 3, d: 3 },
+  M: { w: 3, d: 4 },
+  L: { w: 5, d: 5 },
+};
+
+/** 旧寸法でのスポット入口。旧セーブは入口タイルに誘導路ノードを置いてあるため、接続判定の互換に使う */
+export function legacyStandEntry(s: Pick<Stand, 'origin' | 'size' | 'rotation'>): Tile {
+  return entryFor(s, LEGACY_STAND_DIMS[s.size]);
 }
 
 /** 回転後の外接矩形の中心（世界座標） */

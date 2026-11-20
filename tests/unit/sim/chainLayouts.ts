@@ -7,10 +7,10 @@ function apron(l0: AirportLayout, x0: number): AirportLayout {
   let l = l0;
   const step = (r: OpResult) => (l = must(r).layout);
   step(placeFacility(l, 'apron', { x: x0, y: 15 }, { w: 26, h: 9 }));
-  step(placeStand(l, { x: x0 + 5, y: 19 }, 'M', 0, 'operational', 'S1'));
-  step(placeStand(l, { x: x0 + 10, y: 19 }, 'M', 0, 'operational', 'S2'));
-  step(placeStand(l, { x: x0 + 16, y: 19 }, 'M', 0, 'operational', 'S3'));
-  step(placeStand(l, { x: x0 + 21, y: 19 }, 'M', 0, 'operational', 'S4'));
+  step(placeStand(l, { x: x0 + 5, y: 21 }, 'M', 0, 'operational', 'S1'));
+  step(placeStand(l, { x: x0 + 10, y: 21 }, 'M', 0, 'operational', 'S2'));
+  step(placeStand(l, { x: x0 + 16, y: 21 }, 'M', 0, 'operational', 'S3'));
+  step(placeStand(l, { x: x0 + 21, y: 21 }, 'M', 0, 'operational', 'S4'));
   step(placeFacility(l, 'gseBase', { x: x0 + 27, y: 18 }));
   step(placeFacility(l, 'fuelFarm', { x: x0 + 27, y: 12 }));
   step(placeFacility(l, 'maintenance', { x: x0 - 6, y: 18 }));

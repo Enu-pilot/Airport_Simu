@@ -4,7 +4,7 @@ import { distance, type Tile, type Vec2 } from '../geometry/vec';
 import { POS_EPS_T } from '../geometry/tolerance';
 import { classifySegmentIntersection } from '../geometry/segment';
 import { mapToWorld } from '../geometry/frames';
-import { rectCenter, standDims, standEntry } from '../layout/footprint';
+import { legacyStandEntry, rectCenter, standDims, standEntry } from '../layout/footprint';
 import { edgesOfNode, findNodeAt } from '../layout/network';
 import { compareIds, sortedValues } from '../model/ids';
 import { positionOnRunway, runwayAxis, runwayEnd, runwayMaxSize } from '../layout/runway';
@@ -269,7 +269,8 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
   // スポット
   for (const s of sortedValues(layout.stands)) {
     const entry = standEntry(s);
-    const entryNode = findNodeAt(layout.taxiNodes, entry);
+    // 旧寸法で作られたセーブは入口タイルが旧位置にある。新入口にノードが無ければ旧入口でも探す（互換）
+    const entryNode = findNodeAt(layout.taxiNodes, entry) ?? findNodeAt(layout.taxiNodes, legacyStandEntry(s));
     const dims = standDims(s);
     const c: Vec2 = rectCenter(s.origin, dims.w, dims.h);
     const pid = `${s.id}:P`;

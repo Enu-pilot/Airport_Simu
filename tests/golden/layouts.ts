@@ -87,14 +87,15 @@ export function createStressLayout(): AirportLayout {
 
   // エプロンとエプロン誘導路 B（サンプルを y+20 にしたもの）
   step(placeFacility(l, 'apron', { x: 40, y: 59 }, { w: 80, h: 10 }));
-  taxi([{ x: 45, y: 58 }, { x: 45, y: 61 }], 'B1');
-  taxi([{ x: 115, y: 58 }, { x: 115, y: 61 }], 'B2');
+  taxi([{ x: 45, y: 58 }, { x: 45, y: 63 }], 'B1');
+  taxi([{ x: 115, y: 58 }, { x: 115, y: 63 }], 'B2');
   taxi([{ x: 45, y: 61 }, { x: 115, y: 61 }], 'B');
+  taxi([{ x: 45, y: 63 }, { x: 115, y: 63 }], 'B');
 
   // スポット 12（M×10 と L×2）。機首は南
   const standIds: string[] = [];
-  for (let i = 0; i < 10; i++) standIds.push(step(placeStand(l, { x: 48 + i * 5, y: 62 }, 'M', 180, 'operational', String(i + 1)))[0]!);
-  for (const [i, x] of [98, 108].entries()) standIds.push(step(placeStand(l, { x, y: 62 }, 'L', 180, 'operational', `L${i + 1}`))[0]!);
+  for (let i = 0; i < 10; i++) standIds.push(step(placeStand(l, { x: 48 + i * 5, y: 64 }, 'M', 180, 'operational', String(i + 1)))[0]!);
+  for (const [i, x] of [98, 108].entries()) standIds.push(step(placeStand(l, { x, y: 64 }, 'L', 180, 'operational', `L${i + 1}`))[0]!);
 
   // ターミナルとゲート
   const terminal = step(placeFacility(l, 'terminal', { x: 46, y: 69 }, { w: 72, h: 8, name: '旅客ターミナル', props: { levels: 2 } }))[0]!;

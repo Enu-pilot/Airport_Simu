@@ -57,10 +57,10 @@ const CASES: Case[] = [
 ];
 
 const BASELINE: Record<string, string> = {
-  'd1a linear single entry 4 aircraft': '1f491d73729bc6295b5bc256c728010115567800484388ae8b56edfb8c698159',
-  'd1b linear dual entry 4 aircraft': 'bbd1952b427da86d618d49dfe9725f64400f9ede79ae7eb0f4f95d5fa886b04c',
-  'stress 30 aircraft 2h': 'eceefdb2828e21d391393d3579dadf83b9f7b3212d26f5487299972fc89c9d4f',
-  'crossingAirport 6 aircraft': '1d1ce4ae34d8dfe58eb0d213ec84bb7d1d43fa781cb06d18bdeb7a6b6ced45ef',
+  'd1a linear single entry 4 aircraft': 'a8aa498a7606e41acdc2e1d25bd1dc12edfba0a05a0b6b89aca28f0f55ecc3e4',
+  'd1b linear dual entry 4 aircraft': '0ff9547a89d54de5f84c277ceee92d1f29f99c081aa894deff60385979dd9843',
+  'stress 30 aircraft 2h': '0164d2786c6e9c88557419962b730cf4645df2f94d38ce5adbc8cb66c2d08b4f',
+  'crossingAirport 6 aircraft': '7591b7ef53ec28b37890677bdc6efe44dba96d0d18ad3c9b906afd9d3913920f',
   // 2026-11-18 再採取（ユーザー承認済み）: フェーズ 5 の 5-02/5-03/5-04 が日報へ記録項目
   // （リンク利用実績・資源別稼働率・満足度内訳）を追加したため、会社データを含む 2 件だけが変わった。
   // 追加項目を除いたハッシュは旧基準値と完全一致することを確認済みで、運航そのものは無変更。
@@ -85,8 +85,15 @@ const BASELINE: Record<string, string> = {
   // stepWaits + 外部境界計測）により、会社データを含む 2 件のみ変化。JSON 全体差分で
   // 帰属を再証明済み: city core の差分 102 件・sample の差分 31 件すべてが reports の
   // processPeak / processPeakByTerminal / doorToDoor 内に限定され、SimState はバイト同一。
-  'city core 3 days (no nightOps)': '2353f4b91c3c6557be55c2d7ca10161b1f3b23b898a188ffd4e26ba19163ca10',
-  'sample airport 1 day': 'c93e2ae8b9393f145254d3364bd506a88210d19b8f4600c34c205259f8a05732',
+  // 2026-11-20 再採取（ユーザー承認済み）: スポット寸法改定（S 2×2・M 3×2・L 4×4）と
+  // ターミナル隣接の自動接続により全 6 件が変化。スポット中心の移動によるタキシング
+  // 時刻の変化が主因で、終了状態（出発/ダイバート数）は旧基準と同等であることを
+  // 旧コードとの対照実行で確認済み（d1a 4/4 出発、stress のダイバート 13 は旧来どおり、
+  // crossing 4 出発/2 ダイバート、sample 27 出発も旧来どおり）。
+  // あわせてサンプル空港と stress レイアウトは、新寸法でゲート〜スポット距離が
+  // 検証上限を超えないようスポット位置とエプロン誘導路を調整した（配置の追随）。
+  'city core 3 days (no nightOps)': '471a988aeb8a75aa0b58cb3aee7b9d855108e20d9de3ce3e117867a75d1d0c97',
+  'sample airport 1 day': 'f303fa498adfc82b1019013b1d10cb5c8e3e46100d4865bf26b620df0a907a2a',
 };
 
 describe('legacyFingerprint: taxiMode / nightOps なしの運航は T0 の基準値と一致', () => {
