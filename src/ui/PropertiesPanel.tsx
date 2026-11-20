@@ -1431,6 +1431,11 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             {`${GATE_LOUNGE_CAPACITY} 人`}
           </Info>
         )}
+        {f.kind === 'gate' && sim?.state.swingGates?.[f.id] && (
+          <Info label="現在の割当（兼用ゲート）" testid="prop-swing-gate" title="国内線・国際線を兼用するゲートの現在の割当（運航中のシミュレーション状態）">
+            {`${sim.state.swingGates[f.id]!.routeType === 'domestic' ? '国内線' : '国際線'}として使用中`}
+          </Info>
+        )}
         {(f.kind === 'gseBase' || f.kind === 'maintenance') && <GroundCapacityInfo layout={layout} />}
         {f.kind === 'baggageSort' && (
           <Info label="処理上限" title="仕分け機1施設あたりの処理上限。合計は運用中の全仕分け施設の合算（空港全体の仕分け能力）">

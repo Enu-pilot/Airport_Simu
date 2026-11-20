@@ -5,7 +5,7 @@ import { ops } from '../../editor/simRunner';
 import { SHELL_UI } from '../../i18n/ja';
 import { DayReviewPanel } from '../DayReview';
 import { HistoryList } from '../HistoryPanel';
-import { reviewUi, useReviewUi } from './reviewUi';
+import { reviewUi, useReviewUi, type ReviewCategory } from './reviewUi';
 
 /**
  * UIデザイン更新 第5段階: 日報ドロワー。
@@ -23,6 +23,7 @@ export function ReviewDrawer() {
   const hasReview = review !== null;
   const historyOpen = df.historyOpen;
   const tab = useReviewUi((s) => s.tab);
+  const reviewTab = useReviewUi((s) => s.reviewTab);
 
   // 開くきっかけ（履歴を開く／新しい振り返り）にタブを同期する。以降の手動選択は尊重される
   useEffect(() => {
@@ -39,8 +40,22 @@ export function ReviewDrawer() {
 
   if (!review && !historyOpen) return null;
   const showReview = tab === 'review' && review !== null;
+  const categories: [ReviewCategory, string][] = [
+    ['finance', SHELL_UI.drawerFinanceTab],
+    ['ground', SHELL_UI.drawerGroundTab],
+    ['ops', SHELL_UI.drawerOpsTab],
+    ['airlines', SHELL_UI.drawerAirlinesTab],
+  ];
+  const closeDrawer = () => {
+    if (live) return; // ライブの振り返りは「次の日へ／建設に戻る」の選択が必須なので閉じない
+    if (review) ops.viewReview(null);
+    dayFlowActions.openHistory(false);
+  };
   return (
-    <div className="review-drawer" data-testid="review-drawer">
+    <>
+      {/* 背面の運航画面が見えるのに押せない状態を避けるため、ドロワー表示中は背面を遮断する */}
+      <div className="review-drawer-backdrop" data-testid="review-drawer-backdrop" onClick={closeDrawer} aria-hidden="true" />
+      <div className="review-drawer" data-testid="review-drawer">
       <div className="review-drawer-tabs" role="tablist" aria-label={SHELL_UI.drawerLabel}>
         {review && (
           <button
@@ -83,6 +98,21 @@ export function ReviewDrawer() {
           </button>
         ) : null}
       </div>
+      {showReview && (
+        <div className="review-drawer-categories" role="tablist" aria-label={SHELL_UI.drawerReviewTab}>
+          {categories.map(([key, label]) => (
+            <button
+              key={key}
+              className={reviewTab === key ? 'active' : ''}
+              onClick={() => reviewUi.setReviewTab(key)}
+              data-testid={`review-drawer-tab-${key}`}
+              aria-pressed={reviewTab === key}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {showReview ? (
         <DayReviewPanel />
       ) : (
@@ -90,6 +120,7 @@ export function ReviewDrawer() {
           <HistoryList />
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

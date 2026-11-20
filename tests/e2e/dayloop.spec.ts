@@ -62,11 +62,19 @@ test('0:00 で自動的に一時停止し、収支・定時率・明日の見通
   await expect(page.getByTestId('review-title')).toHaveText('1日目の振り返り');
   await expect(page.getByTestId('today-kpi-delay')).toBeVisible();
   await expect(page.getByTestId('today-kpi-actual-delay')).toBeVisible();
+  // 経理タブ（初期表示）: 収支と前日比較・明日の見通し
   await expect(page.getByTestId('review-revenue-total')).toContainText('cr');
   await expect(page.getByTestId('review-cost-total')).toContainText('cr');
+  await expect(page.getByTestId('review-compare')).toContainText('最初の日');
+  await expect(page.getByTestId('review-tomorrow-flights')).toContainText('便');
+  await expect(page.getByTestId('review-tomorrow')).toContainText('予報なし');
+  // 地上・サービスタブ: 定時率・遅延理由・障害
+  await page.getByTestId('review-drawer-tab-ground').click();
   await expect(page.getByTestId('review-otp-value')).toContainText('%');
   await expect(page.getByTestId('review-causes')).toBeVisible();
   await expect(page.getByTestId('review-disruptions')).toBeVisible();
+  // 運行タブ: 便別の問題・時系列
+  await page.getByTestId('review-drawer-tab-ops').click();
   await expect(page.getByTestId('review-flights')).toBeVisible();
   const issueFlights = page.getByTestId('review-flights').locator('details.review-flight');
   if (await issueFlights.count()) {
@@ -75,10 +83,9 @@ test('0:00 で自動的に一時停止し、収支・定時率・明日の見通
     await expect(issueFlights.first()).toContainText('到着遅延（実績 / 評価対象）');
     await expect(issueFlights.first()).toContainText('運航時系列');
   }
-  await expect(page.getByTestId('review-compare')).toContainText('最初の日');
+  // 航空会社タブ: 評価（理由付き）
+  await page.getByTestId('review-drawer-tab-airlines').click();
   await expect(page.getByTestId('review-airlines')).toBeVisible();
-  await expect(page.getByTestId('review-tomorrow-flights')).toContainText('便');
-  await expect(page.getByTestId('review-tomorrow')).toContainText('予報なし');
   // 上部バーは残り、時計は 0:00 の直後で止まっている
   await expect(page.getByTestId('stop-ops')).toBeVisible();
   const clock = await page.getByTestId('sim-clock').textContent();

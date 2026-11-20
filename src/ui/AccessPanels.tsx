@@ -353,7 +353,7 @@ export function ExpansionPanel() {
       <div className="issues-list mgmt-grid">
         <section>
           <h4>工事中{c.mode === 'sandbox' ? '（サンドボックスは工期なし）' : ''}</h4>
-          <table className="board" data-testid="projects">
+          <table className="board clickable-rows" data-testid="projects">
             <tbody>
               {projects.map((p) => (
                 <tr key={p.id} onClick={() => focusEntity(p.id)} data-testid={`project-${p.id}`}>

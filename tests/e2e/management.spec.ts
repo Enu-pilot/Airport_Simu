@@ -31,10 +31,13 @@ test('新しいゲームは小さな飛行場と初期資金・初期契約で�
   await expect(page.getByTestId('count-error')).toHaveText('0');
   await page.getByTestId('tab-plan').click();
   const panel = page.getByTestId('plan-panel');
-  await expect(panel.getByTestId('contracts')).toContainText('リージョナルジェット');
-  await expect(panel.getByTestId('contracts')).toContainText('ハミングバード');
   await expect(panel.getByTestId('plan-schedule').locator('tbody tr')).toHaveCount(3);
   await expect(panel).toContainText('実在の空港料金とは無関係');
+  // 契約は独立した「契約」タブへ分離された
+  await page.getByTestId('tab-contracts').click();
+  const contractsPanel = page.getByTestId('contracts-panel');
+  await expect(contractsPanel.getByTestId('contracts')).toContainText('リージョナルジェット');
+  await expect(contractsPanel.getByTestId('contracts')).toContainText('ハミングバード');
 });
 
 test('建設すると建設費を支払い、元に戻すと同額が戻る。資金が足りない建設はできない', async ({ page }) => {

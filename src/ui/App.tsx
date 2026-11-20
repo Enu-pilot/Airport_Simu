@@ -4,7 +4,7 @@ import { actions, editorStore, useAnalysis, useEditor, useLayout, type BuildPane
 import { buildAttentionItems } from '../core/attention';
 import { composeCapabilityReadings } from '../core/capability';
 import { SHELL_UI } from '../i18n/ja';
-import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
+import { AirlinesPanel, ContractsPanel, FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
 import { CatalogPanel } from './CatalogPanel';
 import { ScenarioPanel } from './AnalysisPanels';
@@ -174,6 +174,7 @@ function BuildLayout({ readOnly = false, boardOpen = false }: { readOnly?: boole
 /** 建設レンズの左パネル: ツールボックス・施設一覧・要対応（配置チェック＋案1の要対応）をタブで同居させる */
 function BuildLeftPanel({ readOnly = false }: { readOnly?: boolean }) {
   const panel = useEditor((s) => s.buildPanel);
+  const viewMode = useEditor((s) => s.viewMode);
   const layout = useLayout();
   const analysis = useAnalysis();
   const company = useCompany();
@@ -209,6 +210,13 @@ function BuildLeftPanel({ readOnly = false }: { readOnly?: boolean }) {
           <IssuesPanel />
         ) : readOnly ? (
           <div className="build-readonly"><strong>建設・確認</strong><span>運航中は空港構造を変更できません。運航を終了すると編集できます。</span></div>
+        ) : viewMode === '3d' ? (
+          <>
+            <div className="build-readonly" data-testid="toolbox-3d-note"><strong>3D表示中</strong><span>3D は観賞用です。配置・編集はトップバーの「2D表示へ」で 2D に戻して行ってください。</span></div>
+            <fieldset disabled className="guard-fieldset" aria-label="3D表示中は配置操作できません">
+              <Toolbox />
+            </fieldset>
+          </>
         ) : (
           <Toolbox />
         )}
@@ -217,7 +225,7 @@ function BuildLeftPanel({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
-type BottomTab = 'plan' | 'capacity' | 'finance' | 'access' | 'expansion' | 'catalog' | 'scenarios' | 'project';
+type BottomTab = 'plan' | 'contracts' | 'airlines' | 'capacity' | 'finance' | 'access' | 'expansion' | 'catalog' | 'scenarios' | 'project';
 
 function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
   return (
@@ -238,6 +246,8 @@ function BuildBottom() {
       <Tabs
         tabs={[
           ['plan', '運航計画'],
+          ['contracts', '契約'],
+          ['airlines', '航空会社'],
           ['capacity', '空港能力'],
           ['finance', '経営'],
           ['access', 'アクセス'],
@@ -252,6 +262,10 @@ function BuildBottom() {
       <div className="tab-body">
         {tab === 'plan' ? (
           <PlanPanel />
+        ) : tab === 'contracts' ? (
+          <ContractsPanel />
+        ) : tab === 'airlines' ? (
+          <AirlinesPanel />
         ) : tab === 'capacity' ? (
           <CapacityPanel />
         ) : tab === 'finance' ? (

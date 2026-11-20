@@ -54,8 +54,9 @@ export function Rail({ page, setPage, onOpenAtc }: { page: MainPage; setPage: (p
       onClick={() => setPage(target)}
       data-testid={testid}
       aria-pressed={page === target}
+      title={target === 'construction' && mode === 'operate' ? '運航中は閲覧専用です。建設するには運航を終了してください' : undefined}
     >
-      {label}
+      {target === 'construction' && mode === 'operate' ? '建設（閲覧）' : label}
     </button>
   );
   return (
@@ -82,7 +83,7 @@ export function Rail({ page, setPage, onOpenAtc }: { page: MainPage; setPage: (p
       >
         {SHELL_UI.railOperate}
       </button>
-      <button className="rail-btn" onClick={onOpenAtc} disabled={mode === 'operate'} data-testid="rail-atc">
+      <button className="rail-btn" onClick={onOpenAtc} disabled={mode === 'operate'} title={mode === 'operate' ? '運航中は管制官モードへ移れません（モードを同時に進行させないため）。建設モードに戻ってから開いてください' : '管制官モード（ATC）を開きます。経営モードの状態は変更されません'} data-testid="rail-atc">
         {SHELL_UI.railAtc}
       </button>
       {/* レイヤーポップオーバー: マップのオーバーレイ切替（旧トップバーの表示切替を集約。混雑マップの凡例も同居） */}

@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ops } from '../editor/simRunner';
 import { goalText } from './operate/cards/GoalsCard';
 import { formatCr, useEditor } from '../editor/store';
 import { focusEntity } from '../editor/input';
-import { useReviewUi } from './shell/reviewUi';
+import { useReviewUi, type ReviewCategory } from './shell/reviewUi';
 import type { MissBreakdownEntry } from '../core/sim/missBreakdown';
 import { airlineDef, destinationDef } from '../core/economy/registry';
 import { hubChoiceShare, type TransferOdEntry } from '../core/economy/hub';
@@ -195,6 +195,7 @@ export function DayReviewPanel() {
   const mode = useEditor((s) => s.mode);
   const live = mode === 'operate' && df.phase === 'review';
   const review = live ? df.review : df.viewing;
+  const reviewTab = useReviewUi((s) => s.reviewTab);
   const focusNonce = useReviewUi((s) => s.focusNonce);
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -207,9 +208,10 @@ export function DayReviewPanel() {
       <div className="day-review-head">
         <h2 data-testid="review-title">{DAY_LOOP.reviewTitle(review.day)}</h2>
         <span className="muted">{live ? DAY_LOOP.reviewSub : DAY_LOOP.reviewArchive}</span>
+        {live && <span className="muted small" data-testid="review-live-note">{'締め直後の振り返りは、「次の日へ」か「建設モードに戻る」を選ぶまで閉じられません'}</span>}
       </div>
       <div className="day-review-body" ref={bodyRef}>
-        <ReviewBody review={review} />
+        <ReviewBody review={review} category={reviewTab} />
       </div>
       <div className="day-review-foot">
         {live ? (
@@ -270,7 +272,12 @@ function Row({
   );
 }
 
-export function ReviewBody({ review }: { review: DayReview }) {
+/** 便別の初期表示件数（便数が増えても日報が縦に伸び続けないようにする） */
+export const REVIEW_FLIGHTS_PAGE = 20;
+
+export function ReviewBody({ review, category = 'all' }: { review: DayReview; category?: ReviewCategory | 'all' }) {
+  const [flightLimit, setFlightLimit] = useState(REVIEW_FLIGHTS_PAGE);
+  const show = (c: ReviewCategory): boolean => category === 'all' || category === c;
   const { report: r, prev } = review;
   const k = r.kpi;
   const layout = useEditor((s) => s.history.present);
@@ -289,6 +296,8 @@ export function ReviewBody({ review }: { review: DayReview }) {
   const cost = COST_CATEGORIES.filter((c) => r.cost[c]);
   return (
     <div className="review-grid">
+      {show('finance') && (
+        <>
       <Section id="review-revenue" title={DAY_LOOP.money}>
         <div className="review-cols">
           <div>
@@ -313,11 +322,213 @@ export function ReviewBody({ review }: { review: DayReview }) {
         <Row label={DAY_LOOP.cashEnd} value={formatCr(r.cashEnd)} tone={r.cashEnd < 0 ? 'bad' : undefined} />
       </Section>
 
+      <Section id="review-compare" title={DAY_LOOP.compareTitle}>
+        {!prev ? (
+          <div className="card-sub">{DAY_LOOP.noPrev}</div>
+        ) : (
+          <table className="board">
+            <tbody>
+              {review.compare.map((c) => (
+                <tr key={c.metric} data-testid={`review-compare-${c.metric}`} className={`verdict-${c.verdict}`}>
+                  <td>{REVIEW_METRIC_LABEL[c.metric]}</td>
+                  <td className="num">{fmtMetric(c.metric, c.a)}</td>
+                  <td className="num">→ {fmtMetric(c.metric, c.b)}</td>
+                  <td className={`verdict v-${c.verdict}`}>{c.verdict === 'improved' ? `▲ ${DAY_LOOP.improved}` : c.verdict === 'worse' ? `▼ ${DAY_LOOP.worse}` : c.verdict === 'same' ? `＝ ${DAY_LOOP.same}` : DAY_LOOP.na}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Section>
+
+      {prev && (
+        <Section id="review-compare-money" title="収入・費用の前日比較">
+          <div className="review-cols">
+            <div>
+              <h4>{DAY_LOOP.revenue}</h4>
+              {REVENUE_CATEGORIES.filter((c) => r.revenue[c] || prev.revenue[c]).map((c) => (
+                <Row key={c} label={REVENUE_LABEL[c]} value={`${formatCr(prev.revenue[c] ?? 0)} → ${formatCr(r.revenue[c] ?? 0)}`} />
+              ))}
+            </div>
+            <div>
+              <h4>{DAY_LOOP.cost}</h4>
+              {COST_CATEGORIES.filter((c) => r.cost[c] || prev.cost[c]).map((c) => (
+                <Row key={c} label={COST_LABEL[c]} value={`${formatCr(prev.cost[c] ?? 0)} → ${formatCr(r.cost[c] ?? 0)}`} />
+              ))}
+            </div>
+          </div>
+        </Section>
+      )}
+      <Section id="review-tomorrow" title={DAY_LOOP.tomorrowTitle}>
+        <div data-testid="review-tomorrow-flights">{DAY_LOOP.tomorrowFlights(review.tomorrow.flights)}</div>
+        <div className="card-sub">
+          <b>{DAY_LOOP.tomorrowIssues}</b>
+          {review.tomorrow.issues.length === 0 ? (
+            <div>{DAY_LOOP.noIssues}</div>
+          ) : (
+            review.tomorrow.issues.slice(0, 5).map((i, n) => (
+              <div key={n} className={i.severity === 'error' ? 'ng-text' : i.severity === 'info' ? 'muted' : 'warn-text'}>
+                {PLAN_ISSUE_LABEL[i.code]}
+                {i.detail ? `（${i.detail}）` : ''}
+              </div>
+            ))
+          )}
+        </div>
+        <div className="card-sub">
+          <b>{DAY_LOOP.completing}</b>
+          {review.tomorrow.completing.length === 0 ? (
+            <div>{DAY_LOOP.noCompleting}</div>
+          ) : (
+            review.tomorrow.completing.map((p) => (
+              <div key={p.id}>
+                {DAY_LOOP.projectKind[p.kind] ?? p.kind}: {nameOf(p.id)}
+              </div>
+            ))
+          )}
+        </div>
+        <div className="card-sub">
+          <b>{DAY_LOOP.weather}</b>
+          {review.tomorrow.weather ? <ForecastBlocks f={review.tomorrow.weather} testId="review-forecast" /> : <div>{DAY_LOOP.weatherNone}</div>}
+        </div>
+      </Section>
+      {review.goals && (
+        <Section id="review-goals" title={GAME_UI.reviewGoals}>
+          {review.goals.completed.length === 0 ? (
+            <div className="card-sub">{GAME_UI.reviewNoGoals}</div>
+          ) : (
+            review.goals.completed.map((g) => <Row key={g.id} label={goalText(g).title} value={g.cash > 0 ? formatCr(g.cash) : goalText(g).reward} />)
+          )}
+          <Row label={GAME_UI.tierLabel(GAME_UI.tier[review.goals.tier]!)} value={review.goals.tierUp ? GAME_UI.tierUp(GAME_UI.tier[review.goals.tier]!) : ''} />
+        </Section>
+      )}
+
+      {r.city && (
+        <Section id="review-city" title="都市・旅客需要">
+          <Row label="都市規模" value={GAME_UI.cityType[r.city.type]} />
+          <Row label="人口" value={`${r.city.populationStart.toLocaleString('ja-JP')} → ${r.city.populationEnd.toLocaleString('ja-JP')} 人`} />
+          <Row label="需要上限" value={`${r.city.demandCeiling.toLocaleString('ja-JP')} 人/日`} />
+          <Row label="計画需要 / 実績" value={`${r.city.expectedPax.toLocaleString('ja-JP')} / ${r.city.actualPax.toLocaleString('ja-JP')} 人`} />
+          <Row label="都市係数" value={`×${r.city.cityFactor.toFixed(2)}`} />
+          <Row label="道路 / 鉄道品質" value={`${r.city.roadQuality} / ${r.city.railQuality}`} />
+          {r.city.noiseMovements !== undefined && <Row label="航空機の騒音ポイント" value={`${r.city.noisePoints ?? 0}（${r.city.noiseMovements} 動作）`} />}
+          {r.city.nightMovements !== undefined && <Row label={`夜間運航（${formatMinute(CITY_NIGHT_CURFEW.fromMin)}〜${formatMinute(CITY_NIGHT_CURFEW.toMin)}）`} value={`${r.city.nightMovements} 回`} tone={r.city.nightMovements > 0 ? 'warn' : undefined} />}
+          {r.city.residentsStart !== undefined && r.city.residentsEnd !== undefined && <Row label="住民満足度" value={`${r.city.residentsStart.toFixed(1)} → ${r.city.residentsEnd.toFixed(1)}（${(r.city.residentDelta ?? 0) >= 0 ? '+' : ''}${(r.city.residentDelta ?? 0).toFixed(2)}）`} tone={(r.city.residentDelta ?? 0) < 0 ? 'warn' : undefined} />}
+          {(r.city.events?.length ?? 0) > 0 && <Row label="開催イベント" value={r.city.events!.map((event) => `${({ festival: '祭り', sports: 'スポーツ大会', conference: '会議・展示会' } as const)[event.kind]}（規模${event.scale}・${event.location === 'cityCenter' ? '市街地' : '空港周辺'}）`).join('、')} />}
+          {(r.city.eventDemandMultiplier ?? 1) > 1 && <Row label="イベント需要係数" value={`×${r.city.eventDemandMultiplier!.toFixed(2)} / 道路混雑 ×${(r.city.eventTrafficMultiplier ?? 1).toFixed(2)}`} />}
+          {r.night && (
+            <>
+              <Row label="最後の出発の離陸の遅れ" value={r.night.lastDepartureDelayMin === null ? '—' : `${r.night.lastDepartureDelayMin} 分`} tone={(r.night.lastDepartureDelayMin ?? 0) >= 60 ? 'warn' : undefined} />
+              <Row label="夜間の保留（スポット待機 / 出発地待機）" value={`${r.night.standHeld} / ${r.night.originHeld} 便`} />
+              <Row label="翌朝への持ち越し / ダイバート / 欠航" value={`${r.night.carriedOver} / ${r.night.diverted} / ${r.night.cancelled} 便`} tone={r.night.carriedOver > 0 ? 'warn' : undefined} />
+            </>
+          )}
+          <div className="muted small">騒音ポイントは機種サイズ・エンジン数を使ったゲーム内指標で、実測dBではありません。都市設定時は夜間の着陸・離陸を06:00まで待機させます。</div>
+        </Section>
+      )}
+
+        </>
+      )}
+      {show('ground') && (
+        <>
       <Section id="review-otp" title={DAY_LOOP.punctuality}>
         <Row label={DAY_LOOP.otp} value={<b data-testid="review-otp-value">{pct(k.otp)}</b>} tone={k.otp === null ? undefined : k.otp >= 0.85 ? 'ok' : k.otp >= 0.6 ? 'warn' : 'bad'} />
         <Row label="評価対象の平均遅延" value={`${num(k.avgDelayMin)} 分`} />
         {k.actualAvgDelayMin !== undefined && <Row label="実績の平均遅延" value={`${k.actualAvgDelayMin.toFixed(1)} 分`} />}
         <Row label={DAY_LOOP.flights} value={`${k.flights}`} />
+        <div className="card-sub" data-testid="review-causes">
+          <b>{DAY_LOOP.causes}</b>
+          {review.delayCauses.length === 0 ? (
+            <div>{DAY_LOOP.noCauses}</div>
+          ) : (
+            review.delayCauses.slice(0, 6).map((c) => <Row key={c.cause} label={causeLabel(c.cause)} value={DAY_LOOP.flightsN(c.flights)} />)
+          )}
+        </div>
+      </Section>
+
+      <Section id="review-pax" title={DAY_LOOP.paxTitle}>
+        <Row label={DAY_LOOP.pax} value={`${(k.paxDeparted + k.paxArrived).toLocaleString('ja-JP')} 人`} />
+        <Row label={DAY_LOOP.missed} value={`${k.missedPax} 人`} tone={k.missedPax > 0 ? 'warn' : undefined} />
+        {review.missedBreakdown && review.missedBreakdown.summary.length > 0 && (
+          <div data-testid="review-missed-breakdown">
+            <Row
+              label="乗り遅れの内訳"
+              value={review.missedBreakdown.summary
+                .map((s) => `${MISS_BOTTLENECK_LABEL[s.category]} ${s.count} 人${s.topSpotId ? `（${displayName(layout, s.topSpotId)}）` : ''}`)
+                .join('・')}
+            />
+            <Row
+              label="主なボトルネック"
+              value={`${MISS_BOTTLENECK_LABEL[review.missedBreakdown.summary[0]!.category]} ${review.missedBreakdown.summary[0]!.count} 人${review.missedBreakdown.summary[0]!.topSpotId ? `（${displayName(layout, review.missedBreakdown.summary[0]!.topSpotId!)}）` : ''}`}
+              tone="warn"
+              onFocus={focusId(review.missedBreakdown.summary[0]!.topSpotId)}
+            />
+            {review.missedBreakdown.advice.map((a) => (
+              <div key={a.category} className="small">
+                改善案（{MISS_BOTTLENECK_LABEL[a.category]}）: {a.recommendation}
+              </div>
+            ))}
+          </div>
+        )}
+        <Row label={DAY_LOOP.bags} value={`${k.leftBags} 個`} tone={k.leftBags > 0 ? 'warn' : undefined} />
+        <Row label={DAY_LOOP.paxSat} value={num(k.paxSatisfaction)} />
+        {k.paxSatisfactionDetail && (
+          <div data-testid="review-pax-satisfaction-detail">
+            <Row label="満足度の内訳" value={`待ち時間 −${k.paxSatisfactionDetail.waitPenalty}（平均 ${k.paxSatisfactionDetail.avgWaitMin} 分）・歩行 −${k.paxSatisfactionDetail.walkPenalty}（平均 ${k.paxSatisfactionDetail.avgWalkMin} 分）・遅延 −${k.paxSatisfactionDetail.delayPenalty}（平均 ${k.paxSatisfactionDetail.avgDelayMin} 分）・乗り遅れ −${k.paxSatisfactionDetail.missedPenalty}（${Math.round(k.paxSatisfactionDetail.missedRate * 1000) / 10}%）・手荷物 −${k.paxSatisfactionDetail.bagsPenalty}（${Math.round(k.paxSatisfactionDetail.leftRate * 1000) / 10}%）`} />
+          </div>
+        )}
+        <Row label={DAY_LOOP.airSat} value={num(k.airlineSatisfaction)} />
+        <Row label={DAY_LOOP.rating} value={num(k.rating)} />
+              {r.doorToDoor && (r.doorToDoor.departure || r.doorToDoor.arrival || r.doorToDoor.transfer) && (
+          <div data-testid="review-door-to-door">
+            <b>Door-to-Door 所要時間（中央値 / 95%点）</b>
+            {/* 5-23 外部境界: 出発の起点はアクセス移動を含む空港への到着時点（従来の入口起点から変更） */}
+            {r.doorToDoor.departure && <Row label={REPORT_FOLLOWUP_UI.doorDepartureLabel} value={`${Math.round(r.doorToDoor.departure.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.departure.p95Sec / 60)} 分（${r.doorToDoor.departure.pax} 人）`} />}
+            {r.doorToDoor.arrival && <Row label="到着（降機→退出）" value={`${Math.round(r.doorToDoor.arrival.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.arrival.p95Sec / 60)} 分（${r.doorToDoor.arrival.pax} 人）`} />}
+            {r.doorToDoor.transfer && <Row label="乗継（ゲート間）" value={`${Math.round(r.doorToDoor.transfer.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.transfer.p95Sec / 60)} 分（${r.doorToDoor.transfer.pax} 人）`} />}
+            {r.doorToDoor.stepFree.rate !== null && <Row label="Step-free 完了率" value={`${Math.round(r.doorToDoor.stepFree.rate * 100)}%（完了 ${r.doorToDoor.stepFree.completed} 人・乗り遅れ ${r.doorToDoor.stepFree.missed} 人）`} />}
+            <div className="muted small">{REPORT_FOLLOWUP_UI.doorDepartureNote}</div>
+            {/* 5-23: 工程別の待ち時間（処理時間ではなく待ち時間）。stepWaits を持たない旧日報では節ごと出さない */}
+            {stepWaitRows(r.doorToDoor.stepWaits).length > 0 && (
+              <div data-testid="review-door-step-waits">
+                <b>{REPORT_FOLLOWUP_UI.stepWaitsTitle}</b>
+                <div className="muted small">{REPORT_FOLLOWUP_UI.stepWaitsNote}</div>
+                {stepWaitRows(r.doorToDoor.stepWaits).map((w) => (
+                  <div key={w.step} data-testid={`review-door-step-wait-${w.step}`}>
+                    <Row label={w.label} value={`中央値 ${duration(w.p50Sec)} / 95%点 ${duration(w.p95Sec)}（${w.pax} 人）`} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Section>
+      <Section id="review-disruptions" title={DAY_LOOP.disruptionsTitle}>
+        {(review.weather?.changes.length ?? 0) > 0 && (
+          <div data-testid="review-weather">
+            <Row label={DAY_LOOP.weatherTitle} value={DAY_LOOP.weatherMax(review.weather!.maxLevel)} tone={review.weather!.maxLevel >= 4 ? 'warn' : undefined} />
+            {review.weather!.changes.map((c) => (
+              <Row key={c.t} label={`${hhmm(c.t)} ${DAY_LOOP.weatherChange}`} value={`段階 ${c.level}`} />
+            ))}
+          </div>
+        )}
+        {review.disruptions.length === 0 ? (
+          (review.weather?.changes.length ?? 0) > 0 ? null : <div className="card-sub">{DAY_LOOP.noDisruptions}</div>
+        ) : (
+          review.disruptions.map((d) => (
+            <Row
+              key={d.id}
+              label={`${hhmm(d.start)} ${DISRUPTION_KIND_LABEL[d.kind]}${d.target ? `（${nameOf(d.target)}）` : ''}`}
+              value={d.resolvedBy === 'player' ? DAY_LOOP.resolvedByPlayer : d.resolvedBy === 'time' ? DAY_LOOP.resolvedByTime : DAY_LOOP.unresolved}
+              onFocus={focusId(d.target)}
+            />
+          ))
+        )}
+        <div className="card-sub" data-testid="review-responses">
+          {DAY_LOOP.responses(review.responses)}
+        </div>
+      </Section>
+
+      <Section id="review-ground" title="地上実績">
         {r.morningWave && (
           <div data-testid="review-morning-wave">
             <Row
@@ -384,6 +595,16 @@ export function ReviewBody({ review }: { review: DayReview }) {
             )}
           </div>
         )}
+        {r.hub?.byLink && Object.keys(r.hub.byLink).length > 0 && (
+          <div data-testid="review-hub-bylink">
+            <b>乗継リンク別の接続成功</b>
+            {Object.entries(r.hub.byLink)
+              .sort((a, b) => b[1] - a[1])
+              .map(([linkId, n]) => (
+                <Row key={linkId} label={layout.terminalLinks?.[linkId]?.name ?? linkId} value={`${n} 人`} onFocus={focusId(layout.terminalLinks?.[linkId]?.fromAreaId)} />
+              ))}
+          </div>
+        )}
         {r.cargo && (
           <div data-testid="review-cargo">
             <Row label="貨物" value={`取扱 ${r.cargo.carriedM3} m³（積み残し ${r.cargo.leftoverM3} m³）・収入 ${formatCr(r.cargo.revenue)}・荷役費 ${formatCr(r.cargo.handlingCost)}・トラック ${r.cargo.truckTrips} 台`} />
@@ -391,29 +612,6 @@ export function ReviewBody({ review }: { review: DayReview }) {
             {cargoTransshipmentText(r.cargo) !== null && (
               <div data-testid="review-cargo-transshipment">
                 <Row label={FOLLOWUP_UI.cargoTransshipmentLabel} value={cargoTransshipmentText(r.cargo)!} />
-              </div>
-            )}
-          </div>
-        )}
-        {r.doorToDoor && (r.doorToDoor.departure || r.doorToDoor.arrival || r.doorToDoor.transfer) && (
-          <div data-testid="review-door-to-door">
-            <b>Door-to-Door 所要時間（中央値 / 95%点）</b>
-            {/* 5-23 外部境界: 出発の起点はアクセス移動を含む空港への到着時点（従来の入口起点から変更） */}
-            {r.doorToDoor.departure && <Row label={REPORT_FOLLOWUP_UI.doorDepartureLabel} value={`${Math.round(r.doorToDoor.departure.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.departure.p95Sec / 60)} 分（${r.doorToDoor.departure.pax} 人）`} />}
-            {r.doorToDoor.arrival && <Row label="到着（降機→退出）" value={`${Math.round(r.doorToDoor.arrival.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.arrival.p95Sec / 60)} 分（${r.doorToDoor.arrival.pax} 人）`} />}
-            {r.doorToDoor.transfer && <Row label="乗継（ゲート間）" value={`${Math.round(r.doorToDoor.transfer.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.transfer.p95Sec / 60)} 分（${r.doorToDoor.transfer.pax} 人）`} />}
-            {r.doorToDoor.stepFree.rate !== null && <Row label="Step-free 完了率" value={`${Math.round(r.doorToDoor.stepFree.rate * 100)}%（完了 ${r.doorToDoor.stepFree.completed} 人・乗り遅れ ${r.doorToDoor.stepFree.missed} 人）`} />}
-            <div className="muted small">{REPORT_FOLLOWUP_UI.doorDepartureNote}</div>
-            {/* 5-23: 工程別の待ち時間（処理時間ではなく待ち時間）。stepWaits を持たない旧日報では節ごと出さない */}
-            {stepWaitRows(r.doorToDoor.stepWaits).length > 0 && (
-              <div data-testid="review-door-step-waits">
-                <b>{REPORT_FOLLOWUP_UI.stepWaitsTitle}</b>
-                <div className="muted small">{REPORT_FOLLOWUP_UI.stepWaitsNote}</div>
-                {stepWaitRows(r.doorToDoor.stepWaits).map((w) => (
-                  <div key={w.step} data-testid={`review-door-step-wait-${w.step}`}>
-                    <Row label={w.label} value={`中央値 ${duration(w.p50Sec)} / 95%点 ${duration(w.p95Sec)}（${w.pax} 人）`} />
-                  </div>
-                ))}
               </div>
             )}
           </div>
@@ -472,16 +670,11 @@ export function ReviewBody({ review }: { review: DayReview }) {
             ))}
           </div>
         )}
-        <div className="card-sub" data-testid="review-causes">
-          <b>{DAY_LOOP.causes}</b>
-          {review.delayCauses.length === 0 ? (
-            <div>{DAY_LOOP.noCauses}</div>
-          ) : (
-            review.delayCauses.slice(0, 6).map((c) => <Row key={c.cause} label={causeLabel(c.cause)} value={DAY_LOOP.flightsN(c.flights)} />)
-          )}
-        </div>
       </Section>
-
+        </>
+      )}
+      {show('ops') && (
+        <>
       <Section id="review-flights" title="便別の問題・時系列">
         {!review.flights ? (
           <div className="card-sub">この保存済み振り返りには便別の原因記録がありません。過去の記録から時刻や原因を補完していません。</div>
@@ -490,50 +683,25 @@ export function ReviewBody({ review }: { review: DayReview }) {
         ) : (
           <>
             <div className="muted small">実績時刻・原因・待ち時間は便記録とシミュレーション履歴から表示します。記録のない事象の時刻は補っていません。</div>
+            <div className="muted small" data-testid="review-flights-count">問題のあった便 {review.flights.length} 件{review.flights.length > flightLimit ? `（先頭 ${flightLimit} 件を表示）` : ''}</div>
             <div className="review-flight-list">
-              {review.flights.map((flight) => (
+              {review.flights.slice(0, flightLimit).map((flight) => (
                 <ReviewFlightDetail key={flight.aircraftId} flight={flight} review={review} />
               ))}
             </div>
+            {review.flights.length > flightLimit && (
+              <button onClick={() => setFlightLimit((n) => n + REVIEW_FLIGHTS_PAGE)} data-testid="review-flights-more">
+                もっと見る（残り {review.flights.length - flightLimit} 件）
+              </button>
+            )}
           </>
         )}
       </Section>
 
-      <Section id="review-pax" title={DAY_LOOP.paxTitle}>
-        <Row label={DAY_LOOP.pax} value={`${(k.paxDeparted + k.paxArrived).toLocaleString('ja-JP')} 人`} />
-        <Row label={DAY_LOOP.missed} value={`${k.missedPax} 人`} tone={k.missedPax > 0 ? 'warn' : undefined} />
-        {review.missedBreakdown && review.missedBreakdown.summary.length > 0 && (
-          <div data-testid="review-missed-breakdown">
-            <Row
-              label="乗り遅れの内訳"
-              value={review.missedBreakdown.summary
-                .map((s) => `${MISS_BOTTLENECK_LABEL[s.category]} ${s.count} 人${s.topSpotId ? `（${displayName(layout, s.topSpotId)}）` : ''}`)
-                .join('・')}
-            />
-            <Row
-              label="主なボトルネック"
-              value={`${MISS_BOTTLENECK_LABEL[review.missedBreakdown.summary[0]!.category]} ${review.missedBreakdown.summary[0]!.count} 人${review.missedBreakdown.summary[0]!.topSpotId ? `（${displayName(layout, review.missedBreakdown.summary[0]!.topSpotId!)}）` : ''}`}
-              tone="warn"
-              onFocus={focusId(review.missedBreakdown.summary[0]!.topSpotId)}
-            />
-            {review.missedBreakdown.advice.map((a) => (
-              <div key={a.category} className="small">
-                改善案（{MISS_BOTTLENECK_LABEL[a.category]}）: {a.recommendation}
-              </div>
-            ))}
-          </div>
-        )}
-        <Row label={DAY_LOOP.bags} value={`${k.leftBags} 個`} tone={k.leftBags > 0 ? 'warn' : undefined} />
-        <Row label={DAY_LOOP.paxSat} value={num(k.paxSatisfaction)} />
-        {k.paxSatisfactionDetail && (
-          <div data-testid="review-pax-satisfaction-detail">
-            <Row label="満足度の内訳" value={`待ち時間 −${k.paxSatisfactionDetail.waitPenalty}（平均 ${k.paxSatisfactionDetail.avgWaitMin} 分）・歩行 −${k.paxSatisfactionDetail.walkPenalty}（平均 ${k.paxSatisfactionDetail.avgWalkMin} 分）・遅延 −${k.paxSatisfactionDetail.delayPenalty}（平均 ${k.paxSatisfactionDetail.avgDelayMin} 分）・乗り遅れ −${k.paxSatisfactionDetail.missedPenalty}（${Math.round(k.paxSatisfactionDetail.missedRate * 1000) / 10}%）・手荷物 −${k.paxSatisfactionDetail.bagsPenalty}（${Math.round(k.paxSatisfactionDetail.leftRate * 1000) / 10}%）`} />
-          </div>
-        )}
-        <Row label={DAY_LOOP.airSat} value={num(k.airlineSatisfaction)} />
-        <Row label={DAY_LOOP.rating} value={num(k.rating)} />
-      </Section>
-
+        </>
+      )}
+      {show('airlines') && (
+        <>
       <Section id="review-airport-causes" title="空港全体の評価要因と改善提案">
         <Row label="空港評価（締め時点）" value={prev ? `${num(prev.kpi.rating)} → ${num(k.rating)}` : `${num(k.rating)}（前日記録なし）`} tone={prev && k.rating < prev.kpi.rating ? 'warn' : undefined} />
         <Row label="当日の評価入力" value={`旅客満足度 ${num(k.paxSatisfaction)} · 航空会社満足度 ${num(k.airlineSatisfaction)} · 定時率 ${pct(k.otp)}`} />
@@ -555,76 +723,40 @@ export function ReviewBody({ review }: { review: DayReview }) {
         )}
       </Section>
 
-      {r.city && (
-        <Section id="review-city" title="都市・旅客需要">
-          <Row label="都市規模" value={GAME_UI.cityType[r.city.type]} />
-          <Row label="人口" value={`${r.city.populationStart.toLocaleString('ja-JP')} → ${r.city.populationEnd.toLocaleString('ja-JP')} 人`} />
-          <Row label="需要上限" value={`${r.city.demandCeiling.toLocaleString('ja-JP')} 人/日`} />
-          <Row label="計画需要 / 実績" value={`${r.city.expectedPax.toLocaleString('ja-JP')} / ${r.city.actualPax.toLocaleString('ja-JP')} 人`} />
-          <Row label="都市係数" value={`×${r.city.cityFactor.toFixed(2)}`} />
-          <Row label="道路 / 鉄道品質" value={`${r.city.roadQuality} / ${r.city.railQuality}`} />
-          {r.city.noiseMovements !== undefined && <Row label="航空機の騒音ポイント" value={`${r.city.noisePoints ?? 0}（${r.city.noiseMovements} 動作）`} />}
-          {r.city.nightMovements !== undefined && <Row label={`夜間運航（${formatMinute(CITY_NIGHT_CURFEW.fromMin)}〜${formatMinute(CITY_NIGHT_CURFEW.toMin)}）`} value={`${r.city.nightMovements} 回`} tone={r.city.nightMovements > 0 ? 'warn' : undefined} />}
-          {r.city.residentsStart !== undefined && r.city.residentsEnd !== undefined && <Row label="住民満足度" value={`${r.city.residentsStart.toFixed(1)} → ${r.city.residentsEnd.toFixed(1)}（${(r.city.residentDelta ?? 0) >= 0 ? '+' : ''}${(r.city.residentDelta ?? 0).toFixed(2)}）`} tone={(r.city.residentDelta ?? 0) < 0 ? 'warn' : undefined} />}
-          {(r.city.events?.length ?? 0) > 0 && <Row label="開催イベント" value={r.city.events!.map((event) => `${({ festival: '祭り', sports: 'スポーツ大会', conference: '会議・展示会' } as const)[event.kind]}（規模${event.scale}・${event.location === 'cityCenter' ? '市街地' : '空港周辺'}）`).join('、')} />}
-          {(r.city.eventDemandMultiplier ?? 1) > 1 && <Row label="イベント需要係数" value={`×${r.city.eventDemandMultiplier!.toFixed(2)} / 道路混雑 ×${(r.city.eventTrafficMultiplier ?? 1).toFixed(2)}`} />}
-          {r.night && (
-            <>
-              <Row label="最後の出発の離陸の遅れ" value={r.night.lastDepartureDelayMin === null ? '—' : `${r.night.lastDepartureDelayMin} 分`} tone={(r.night.lastDepartureDelayMin ?? 0) >= 60 ? 'warn' : undefined} />
-              <Row label="夜間の保留（スポット待機 / 出発地待機）" value={`${r.night.standHeld} / ${r.night.originHeld} 便`} />
-              <Row label="翌朝への持ち越し / ダイバート / 欠航" value={`${r.night.carriedOver} / ${r.night.diverted} / ${r.night.cancelled} 便`} tone={r.night.carriedOver > 0 ? 'warn' : undefined} />
-            </>
-          )}
-          <div className="muted small">騒音ポイントは機種サイズ・エンジン数を使ったゲーム内指標で、実測dBではありません。都市設定時は夜間の着陸・離陸を06:00まで待機させます。</div>
-        </Section>
-      )}
-
-      <Section id="review-disruptions" title={DAY_LOOP.disruptionsTitle}>
-        {(review.weather?.changes.length ?? 0) > 0 && (
-          <div data-testid="review-weather">
-            <Row label={DAY_LOOP.weatherTitle} value={DAY_LOOP.weatherMax(review.weather!.maxLevel)} tone={review.weather!.maxLevel >= 4 ? 'warn' : undefined} />
-            {review.weather!.changes.map((c) => (
-              <Row key={c.t} label={`${hhmm(c.t)} ${DAY_LOOP.weatherChange}`} value={`段階 ${c.level}`} />
-            ))}
-          </div>
-        )}
-        {review.disruptions.length === 0 ? (
-          (review.weather?.changes.length ?? 0) > 0 ? null : <div className="card-sub">{DAY_LOOP.noDisruptions}</div>
+      <Section id="review-airlines-summary" title="航空会社評価（サマリ：数字の変化のみ）">
+        {review.airlines.length === 0 ? (
+          <div className="card-sub">{DAY_LOOP.noAirlines}</div>
         ) : (
-          review.disruptions.map((d) => (
-            <Row
-              key={d.id}
-              label={`${hhmm(d.start)} ${DISRUPTION_KIND_LABEL[d.kind]}${d.target ? `（${nameOf(d.target)}）` : ''}`}
-              value={d.resolvedBy === 'player' ? DAY_LOOP.resolvedByPlayer : d.resolvedBy === 'time' ? DAY_LOOP.resolvedByTime : DAY_LOOP.unresolved}
-              onFocus={focusId(d.target)}
-            />
-          ))
-        )}
-        <div className="card-sub" data-testid="review-responses">
-          {DAY_LOOP.responses(review.responses)}
-        </div>
-      </Section>
-
-      <Section id="review-compare" title={DAY_LOOP.compareTitle}>
-        {!prev ? (
-          <div className="card-sub">{DAY_LOOP.noPrev}</div>
-        ) : (
-          <table className="board">
+          <table className="board" data-testid="review-airlines-summary-table">
+            <thead>
+              <tr>
+                <th>航空会社</th>
+                <th>満足度</th>
+                <th>変化</th>
+                <th>不満</th>
+              </tr>
+            </thead>
             <tbody>
-              {review.compare.map((c) => (
-                <tr key={c.metric} data-testid={`review-compare-${c.metric}`} className={`verdict-${c.verdict}`}>
-                  <td>{REVIEW_METRIC_LABEL[c.metric]}</td>
-                  <td className="num">{fmtMetric(c.metric, c.a)}</td>
-                  <td className="num">→ {fmtMetric(c.metric, c.b)}</td>
-                  <td className={`verdict v-${c.verdict}`}>{c.verdict === 'improved' ? `▲ ${DAY_LOOP.improved}` : c.verdict === 'worse' ? `▼ ${DAY_LOOP.worse}` : c.verdict === 'same' ? `＝ ${DAY_LOOP.same}` : DAY_LOOP.na}</td>
+              {review.airlines.map((a) => (
+                <tr key={a.id} data-testid={`review-airline-summary-${a.id}`}>
+                  <td>{airlineDef(a.id).name}</td>
+                  <td>
+                    {a.before.toFixed(1)} → <b>{a.after.toFixed(1)}</b>
+                  </td>
+                  <td className={a.delta > 0 ? 'ok-text' : a.delta < 0 ? 'ng-text' : 'muted'}>
+                    {a.delta > 0 ? '+' : ''}
+                    {a.delta.toFixed(1)}
+                  </td>
+                  <td>
+                    {a.complaintsBefore?.length ?? 0} → {a.complaintsAfter?.length ?? 0} 件
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </Section>
-
-      <Section id="review-airlines" title={DAY_LOOP.airlinesTitle}>
+      <Section id="review-airlines" title="航空会社評価（理由付き）">
         {review.airlines.length === 0 ? (
           <div className="card-sub">{DAY_LOOP.noAirlines}</div>
         ) : (
@@ -691,49 +823,8 @@ export function ReviewBody({ review }: { review: DayReview }) {
         )}
       </Section>
 
-      {review.goals && (
-        <Section id="review-goals" title={GAME_UI.reviewGoals}>
-          {review.goals.completed.length === 0 ? (
-            <div className="card-sub">{GAME_UI.reviewNoGoals}</div>
-          ) : (
-            review.goals.completed.map((g) => <Row key={g.id} label={goalText(g).title} value={g.cash > 0 ? formatCr(g.cash) : goalText(g).reward} />)
-          )}
-          <Row label={GAME_UI.tierLabel(GAME_UI.tier[review.goals.tier]!)} value={review.goals.tierUp ? GAME_UI.tierUp(GAME_UI.tier[review.goals.tier]!) : ''} />
-        </Section>
+        </>
       )}
-
-      <Section id="review-tomorrow" title={DAY_LOOP.tomorrowTitle}>
-        <div data-testid="review-tomorrow-flights">{DAY_LOOP.tomorrowFlights(review.tomorrow.flights)}</div>
-        <div className="card-sub">
-          <b>{DAY_LOOP.tomorrowIssues}</b>
-          {review.tomorrow.issues.length === 0 ? (
-            <div>{DAY_LOOP.noIssues}</div>
-          ) : (
-            review.tomorrow.issues.slice(0, 5).map((i, n) => (
-              <div key={n} className={i.severity === 'error' ? 'ng-text' : i.severity === 'info' ? 'muted' : 'warn-text'}>
-                {PLAN_ISSUE_LABEL[i.code]}
-                {i.detail ? `（${i.detail}）` : ''}
-              </div>
-            ))
-          )}
-        </div>
-        <div className="card-sub">
-          <b>{DAY_LOOP.completing}</b>
-          {review.tomorrow.completing.length === 0 ? (
-            <div>{DAY_LOOP.noCompleting}</div>
-          ) : (
-            review.tomorrow.completing.map((p) => (
-              <div key={p.id}>
-                {DAY_LOOP.projectKind[p.kind] ?? p.kind}: {nameOf(p.id)}
-              </div>
-            ))
-          )}
-        </div>
-        <div className="card-sub">
-          <b>{DAY_LOOP.weather}</b>
-          {review.tomorrow.weather ? <ForecastBlocks f={review.tomorrow.weather} testId="review-forecast" /> : <div>{DAY_LOOP.weatherNone}</div>}
-        </div>
-      </Section>
     </div>
   );
 }

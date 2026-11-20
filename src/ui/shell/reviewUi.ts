@@ -9,13 +9,17 @@ import { useSyncExternalStore } from 'react';
  */
 export type ReviewDrawerTab = 'review' | 'history';
 
+/** 振り返りの分類タブ（日報再配置: 経理／地上・サービス／運行／航空会社） */
+export type ReviewCategory = 'finance' | 'ground' | 'ops' | 'airlines';
+
 export interface ReviewUiState {
   tab: ReviewDrawerTab;
+  reviewTab: ReviewCategory;
   focusHour: number | null;
   focusNonce: number;
 }
 
-const initial = (): ReviewUiState => ({ tab: 'review', focusHour: null, focusNonce: 0 });
+const initial = (): ReviewUiState => ({ tab: 'review', reviewTab: 'finance', focusHour: null, focusNonce: 0 });
 
 let state: ReviewUiState = initial();
 const listeners = new Set<() => void>();
@@ -39,6 +43,10 @@ export const reviewUi = {
   setTab(tab: ReviewDrawerTab): void {
     if (state.tab !== tab) set({ tab });
   },
+  /** 振り返りの分類タブの選択 */
+  setReviewTab(reviewTab: ReviewCategory): void {
+    if (state.reviewTab !== reviewTab) set({ reviewTab });
+  },
   /**
    * ドロワーを開くきっかけの変化にタブを同期する（コンポーネントの effect から毎回呼ぶ）。
    * - 履歴が開かれた（historyOpen の立ち上がり）→ 履歴タブ
@@ -48,12 +56,15 @@ export const reviewUi = {
    */
   syncDrawer(input: { historyOpen: boolean; reviewKey: string | null; hasReview: boolean }): void {
     let tab = state.tab;
+    let reviewTab = state.reviewTab;
     if (input.historyOpen && !prevHistoryOpen) tab = 'history';
-    else if (input.reviewKey !== null && input.reviewKey !== prevReviewKey) tab = 'review';
-    else if (!input.hasReview && input.historyOpen) tab = 'history';
+    else if (input.reviewKey !== null && input.reviewKey !== prevReviewKey) {
+      tab = 'review';
+      reviewTab = 'finance'; // 新しい振り返りは経理から開く
+    } else if (!input.hasReview && input.historyOpen) tab = 'history';
     prevHistoryOpen = input.historyOpen;
     prevReviewKey = input.reviewKey;
-    if (tab !== state.tab) set({ tab });
+    if (tab !== state.tab || reviewTab !== state.reviewTab) set({ tab, reviewTab });
   },
   /** タイムラインの時間帯から日報の該当行へジャンプする指定（nonce で再指定でも effect を起こす） */
   requestFocusHour(hour: number): void {

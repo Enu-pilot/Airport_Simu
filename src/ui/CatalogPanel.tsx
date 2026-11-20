@@ -59,7 +59,7 @@ export function CatalogPanel() {
       </div>
       <div className="issues-list mgmt-grid">
         <section>
-          <table className="board" data-testid="catalog-list">
+          <table className="board clickable-rows" data-testid="catalog-list">
             <thead>
               <tr>
                 <th>機種</th>
