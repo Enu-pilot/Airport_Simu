@@ -24,6 +24,7 @@ export const FACILITY_HEIGHT_M: Partial<Record<FacilityKind, number>> = {
   terminal: 18, tower: 45, hangar: 24, maintenance: 14, fuelFarm: 10, fireStation: 9,
   gseBase: 6, baggageSort: 10, serviceArea: 6, parking: 3, gate: 6, apron: 0.2,
   railStation: 8, taxiStand: 2, busStop: 3, busTerminal: 6, cargoTerminal: 9, staffParking: 1, hotel: 18,
+  shoppingMall: 12, culturalHall: 10, park: 1,
 };
 
 /** 占有判定のレイヤー。重なりの可否は validation の互換表で決める */
@@ -78,6 +79,9 @@ export const FACILITY_SPECS: Record<FacilityKind, FacilitySpec> = {
   railStation: { layer: 'building', defaultW: 6, defaultH: 3, resizable: false, minW: 6, minH: 3, dragPlace: false, needsAirsideAccess: false },
   staffParking: { layer: 'area', defaultW: 6, defaultH: 4, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
   hotel: { layer: 'building', defaultW: 5, defaultH: 4, resizable: false, minW: 5, minH: 4, dragPlace: false, needsAirsideAccess: false },
+  shoppingMall: { layer: 'building', defaultW: 8, defaultH: 5, resizable: false, minW: 8, minH: 5, dragPlace: false, needsAirsideAccess: false },
+  culturalHall: { layer: 'building', defaultW: 6, defaultH: 4, resizable: false, minW: 6, minH: 4, dragPlace: false, needsAirsideAccess: false },
+  park: { layer: 'area', defaultW: 8, defaultH: 5, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
 };
 
 export const FACILITY_KINDS = Object.keys(FACILITY_SPECS) as FacilityKind[];
@@ -137,6 +141,11 @@ export const FACILITY_SIM_EFFECT: Partial<Record<FacilityKind, FacilitySimEffect
   staffParking: 'active',
   // rooms が宿泊収入（economy/ops の hotelPerRoomNight）と access の hotelRooms に効く
   hotel: 'active',
+  // 運航 sim には影響しないが、economy/city の residentFacilityBonus が住民満足度の
+  // 日次プラスとして参照する（機能E拡張2）。プラス量は BALANCE.noise.residentFacilities
+  shoppingMall: 'active',
+  culturalHall: 'active',
+  park: 'active',
 };
 
 export type PropDef =
@@ -216,6 +225,9 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
   ],
   staffParking: [{ key: 'spaces', type: 'int', min: 0, max: 5000 }],
   hotel: [{ key: 'rooms', type: 'int', min: 10, max: 2000 }],
+  shoppingMall: [],
+  culturalHall: [],
+  park: [],
 };
 
 export const DEFAULT_PROPS: Record<FacilityKind, Record<string, PropValue>> = {
@@ -238,6 +250,9 @@ export const DEFAULT_PROPS: Record<FacilityKind, Record<string, PropValue>> = {
   railStation: { trainsPerHour: 4 },
   staffParking: { spaces: 120 },
   hotel: { rooms: 200 },
+  shoppingMall: {},
+  culturalHall: {},
+  park: {},
 };
 
 /** スポットの寸法（幅 = 機首と直交方向、奥行き = 機首方向）。入口は中央に最も近いタイルに置くため偶数幅も可 */
