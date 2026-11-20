@@ -25,6 +25,7 @@ import {
   counterOffer,
   rejectOffer,
   setDedicatedStand,
+  setAirlineTerminals,
   setFees,
   setHours,
   type CompanyState,
@@ -529,6 +530,9 @@ export const companyActions = {
   },
   setDedicatedStand(id: string, standId: string | null): void {
     mutateCompany((c) => setDedicatedStand(c, id, standId));
+  },
+  setAirlineTerminals(airlineId: string, routeType: 'domestic' | 'international', terminalIds: string[] | null): void {
+    mutateCompany((c) => setAirlineTerminals(c, airlineId, routeType, terminalIds));
   },
   changeFrequency(id: string, delta: 1 | -1): void {
     const s = get();

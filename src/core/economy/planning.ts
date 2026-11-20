@@ -8,7 +8,7 @@ import type { UnitKind } from '../sim/types';
 import { checkStand } from '../aircraft/compat';
 import { operableTypes, type SimContext } from '../sim/context';
 import { BALANCE } from './balance';
-import { activeContractsOn, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
+import { activeContractsOn, allowedTerminalsFor, seatsFor, type CompanyState, type Contract, type OperatingHours, type TimeWindow } from './company';
 import { planCargoDay } from './cargo';
 import { airlineDef, classifyRoute, destinationDef, HOME_COUNTRY_ID, routeAvailability, routeCapabilitiesForAirport, type RouteCapabilities } from './registry';
 import { CITY_NIGHT_CURFEW, cityDemandCeiling, cityEventEffects, cityOperatingHours, expectedLocalPassengers } from './city';
@@ -18,6 +18,7 @@ import { featureOn } from './unlocks';
 import { routeLoadFactors } from './demand';
 import type { TransferKind } from './phase4Types';
 import { resolveBusGateForStand } from '../terminal/busGateAssignment';
+import { standTerminalId } from '../terminal/standTerminal';
 
 /**
  * 運航計画（docs/14_management_rules.md §4）。
@@ -104,6 +105,8 @@ export interface DayPlan {
   departureCutoffMin?: number;
   /** Carrier or airport route requirements prevent these contracts from being scheduled. */
   unsupportedRoutes?: { contractId: string; destinationId: string; reason: 'airline-unsupported' | 'international-processing-required' }[];
+  /** 航空会社の使用ターミナル制限の写し（planDay が会社から引き継ぐ。分析の仮割り当てで参照する） */
+  airlineTerminals?: CompanyState['airlineTerminals'];
 }
 
 /** 契約の時間帯と運用時間から、到着できる時間の範囲（日内の分）。出発が閉場時刻を越えない */
@@ -306,7 +309,7 @@ export function planDay(
     }
     if (prev.length > 0) prevOvernight = prev;
   }
-  return { day, flights, dropped, unsupportedRoutes, ...(prevOvernight ? { prevOvernight } : {}), ...(cargoFlights.length > 0 ? { cargoFlights: cargoFlights.sort((a, b) => a.arrivalAt - b.arrivalAt || compareIds(a.key, b.key)) } : {}) };
+  return { day, flights, dropped, unsupportedRoutes, ...(prevOvernight ? { prevOvernight } : {}), ...(c.airlineTerminals ? { airlineTerminals: c.airlineTerminals } : {}), ...(cargoFlights.length > 0 ? { cargoFlights: cargoFlights.sort((a, b) => a.arrivalAt - b.arrivalAt || compareIds(a.key, b.key)) } : {}) };
 }
 
 /** 都市設定があるときだけ、アクセス性に都市需要上限を反映する計画。設定なしは従来の計画を返す。 */
@@ -364,6 +367,7 @@ export type PlanIssueCode =
   | 'OVERNIGHT_CAPACITY_EXCEEDED' // 滞泊できる機数を超える
   | 'BASED_CONDITIONS_UNMET' // 拠点契約の条件を満たさない
   | 'INTL_GATE_MISSING' // 国際のゲートがない
+  | 'TERMINAL_RESTRICTED' // 航空会社の使用ターミナル制限の範囲内にスポットがない
   | 'MCT_UNAVAILABLE' // 乗継の経路がなく MCT が出せない
   | 'FIRE_CATEGORY_LOW' // 消防区分が機体に必要な区分に足りない（5-05、警告）
   | 'TOWER_CAPACITY_LOW'; // 管制塔レベルの処理能力をピークの発着回数が超える（5-05、警告）
@@ -590,6 +594,8 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
   // 専用スポット（5-08）: 契約ごとの専用スポットは、その契約の便が優先し、他契約の便は空きがないときだけ使う
   const dedicatedByStand = new Map<string, string>();
   for (const f of plan.flights) if (f.dedicatedStandId) dedicatedByStand.set(f.dedicatedStandId, f.contractId);
+  // 使用ターミナル制限の判定用: スポット→所属ターミナルのキャッシュ（分析中は不変）
+  const policyTerminalCache = new Map<string, string | null>();
   const assignments: PlanAnalysis['assignments'] = {};
   for (const f of plan.flights) {
     if (!operable.has(f.typeId)) {
@@ -604,7 +610,17 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
     if (!blockers) blockersByType.set(f.typeId, (blockers = groundBlockers(ctx, type)));
     if (blockers.length > 0) add('GROUND_SUPPORT_MISSING', 'error', f.key, blockers.join('・'));
     const intl = f.routeType === 'international';
-    const fits = (x: (typeof stands)[number]) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt && standRouteOk(x.id, intl, f.arrivalAt);
+    // 航空会社の使用ターミナル制限: 許可ターミナル外のスポットは仮割り当ての候補にしない（運航の assignStand と同じ規則。
+    // 契約の専用スポットはより具体的な指定として制限より優先する）
+    const allowedTerminals = allowedTerminalsFor({ airlineTerminals: plan.airlineTerminals }, f.airlineId, intl ? 'international' : 'domestic');
+    const policyOk = (x: (typeof stands)[number]): boolean => {
+      if (!allowedTerminals || x.id === f.dedicatedStandId) return true;
+      if (!policyTerminalCache.has(x.id)) policyTerminalCache.set(x.id, standTerminalId(ctx, x.id, closedBusGateIds));
+      const t = policyTerminalCache.get(x.id);
+      return t != null && allowedTerminals.has(t);
+    };
+    const fitsBase = (x: (typeof stands)[number]) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && (freeAt.get(x.id) ?? -Infinity) <= f.arrivalAt && standRouteOk(x.id, intl, f.arrivalAt);
+    const fits = (x: (typeof stands)[number]) => fitsBase(x) && policyOk(x);
     const s = (f.dedicatedStandId ? stands.find((x) => x.id === f.dedicatedStandId && fits(x)) : undefined)
       ?? stands.find((x) => fits(x) && (!dedicatedByStand.has(x.id) || dedicatedByStand.get(x.id) === f.contractId))
       ?? stands.find(fits);
@@ -612,7 +628,9 @@ export function analyzeDayPlan(plan: DayPlan, ctx: SimContext, closedBusGateIds:
       assignments[f.key] = { standId: null, gateId: null, terminalId: null };
       // 国際便で、空き時間に関係なく置けるスポット自体がない場合はゲート不足として区別する（フェーズ 4 §4.5）
       const anyRouteOk = intl && stands.some((x) => checkStand(type, ctx.layout.stands[x.id]!, ctx.network).status === 'ok' && standRouteOk(x.id, true, f.arrivalAt, false));
-      add(intl && !anyRouteOk ? 'INTL_GATE_MISSING' : 'STAND_CONFLICT', 'error', f.key);
+      // 制限を外せば置けるスポットがある場合は、スポット不足ではなくターミナル制限として区別する
+      const blockedByPolicy = !!allowedTerminals && stands.some((x) => fitsBase(x));
+      add(blockedByPolicy ? 'TERMINAL_RESTRICTED' : intl && !anyRouteOk ? 'INTL_GATE_MISSING' : 'STAND_CONFLICT', 'error', f.key);
       continue;
     }
     freeAt.set(s.id, f.departureAt + STAND_GAP_SEC);
