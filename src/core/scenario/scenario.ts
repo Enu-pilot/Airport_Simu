@@ -18,7 +18,7 @@ import { aggregate, metricsOf, type GroupMetrics } from '../analytics/kpi';
  */
 
 /** シミュレーションモデルの版（運航・旅客・地上支援・経営の計算規則を変えたら上げる） */
-export const SIM_MODEL_VERSION = 'skyport-sim-10.8';
+export const SIM_MODEL_VERSION = 'skyport-sim-10.9';
 
 export interface ScenarioDisruption extends DisruptionInput {
   /** 運航開始からの秒（start/end の代わりに保存する） */

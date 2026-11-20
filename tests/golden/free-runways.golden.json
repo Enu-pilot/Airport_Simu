@@ -219,7 +219,7 @@
      "id": "std_1:P",
      "pos": {
       "x": 48,
-      "y": 20.5
+      "y": 19.5
      },
      "kind": "stand",
      "runwayIds": [],
@@ -233,7 +233,7 @@
      "id": "std_2:P",
      "pos": {
       "x": 53,
-      "y": 20.5
+      "y": 19.5
      },
      "kind": "stand",
      "runwayIds": [],
@@ -247,7 +247,7 @@
      "id": "std_3:P",
      "pos": {
       "x": 59,
-      "y": 20.5
+      "y": 19.5
      },
      "kind": "stand",
      "runwayIds": [],
@@ -261,7 +261,7 @@
      "id": "std_4:P",
      "pos": {
       "x": 64,
-      "y": 20.5
+      "y": 19.5
      },
      "kind": "stand",
      "runwayIds": [],
@@ -541,7 +541,7 @@
      "from": "tn_12",
      "to": "std_1:P",
      "bidirectional": true,
-     "lengthM": 63,
+     "lengthM": 88,
      "maxSize": "M",
      "codeF": false,
      "operational": true
@@ -553,7 +553,7 @@
      "from": "tn_13",
      "to": "std_2:P",
      "bidirectional": true,
-     "lengthM": 63,
+     "lengthM": 88,
      "maxSize": "M",
      "codeF": false,
      "operational": true
@@ -565,7 +565,7 @@
      "from": "tn_14",
      "to": "std_3:P",
      "bidirectional": true,
-     "lengthM": 63,
+     "lengthM": 88,
      "maxSize": "M",
      "codeF": false,
      "operational": true
@@ -577,7 +577,7 @@
      "from": "tn_15",
      "to": "std_4:P",
      "bidirectional": true,
-     "lengthM": 63,
+     "lengthM": 88,
      "maxSize": "M",
      "codeF": false,
      "operational": true
@@ -1486,7 +1486,7 @@
      "id": "std_1:P",
      "pos": {
       "x": 48,
-      "y": 42.5
+      "y": 41.5
      },
      "kind": "stand",
      "runwayIds": [],
@@ -1500,7 +1500,7 @@
      "id": "std_2:P",
      "pos": {
       "x": 53,
-      "y": 42.5
+      "y": 41.5
      },
      "kind": "stand",
      "runwayIds": [],
@@ -1514,7 +1514,7 @@
      "id": "std_3:P",
      "pos": {
       "x": 59,
-      "y": 42.5
+      "y": 41.5
      },
      "kind": "stand",
      "runwayIds": [],
@@ -1528,7 +1528,7 @@
      "id": "std_4:P",
      "pos": {
       "x": 64,
-      "y": 42.5
+      "y": 41.5
      },
      "kind": "stand",
      "runwayIds": [],
@@ -1697,7 +1697,7 @@
      "from": "tn_7",
      "to": "std_1:P",
      "bidirectional": true,
-     "lengthM": 63,
+     "lengthM": 88,
      "maxSize": "M",
      "codeF": false,
      "operational": true
@@ -1709,7 +1709,7 @@
      "from": "tn_8",
      "to": "std_2:P",
      "bidirectional": true,
-     "lengthM": 63,
+     "lengthM": 88,
      "maxSize": "M",
      "codeF": false,
      "operational": true
@@ -1721,7 +1721,7 @@
      "from": "tn_9",
      "to": "std_3:P",
      "bidirectional": true,
-     "lengthM": 63,
+     "lengthM": 88,
      "maxSize": "M",
      "codeF": false,
      "operational": true
@@ -1733,7 +1733,7 @@
      "from": "tn_10",
      "to": "std_4:P",
      "bidirectional": true,
-     "lengthM": 63,
+     "lengthM": 88,
      "maxSize": "M",
      "codeF": false,
      "operational": true

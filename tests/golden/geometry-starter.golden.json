@@ -161,7 +161,7 @@
     "id": "std_1:P",
     "pos": {
      "x": 49,
-     "y": 43.5
+     "y": 42.5
     },
     "kind": "stand",
     "runwayIds": [],
@@ -175,7 +175,7 @@
     "id": "std_2:P",
     "pos": {
      "x": 54,
-     "y": 43.5
+     "y": 42.5
     },
     "kind": "stand",
     "runwayIds": [],
@@ -189,7 +189,7 @@
     "id": "std_3:P",
     "pos": {
      "x": 59,
-     "y": 43.5
+     "y": 42.5
     },
     "kind": "stand",
     "runwayIds": [],
@@ -390,7 +390,7 @@
     "from": "tn_10",
     "to": "std_1:P",
     "bidirectional": true,
-    "lengthM": 63,
+    "lengthM": 38,
     "maxSize": "M",
     "codeF": false,
     "operational": true
@@ -402,7 +402,7 @@
     "from": "tn_11",
     "to": "std_2:P",
     "bidirectional": true,
-    "lengthM": 63,
+    "lengthM": 38,
     "maxSize": "M",
     "codeF": false,
     "operational": true
@@ -414,7 +414,7 @@
     "from": "tn_12",
     "to": "std_3:P",
     "bidirectional": true,
-    "lengthM": 63,
+    "lengthM": 38,
     "maxSize": "M",
     "codeF": false,
     "operational": true
@@ -5508,30 +5508,6 @@
      {
       "x": 50,
       "y": 43
-     },
-     {
-      "x": 48,
-      "y": 44
-     },
-     {
-      "x": 49,
-      "y": 44
-     },
-     {
-      "x": 50,
-      "y": 44
-     },
-     {
-      "x": 48,
-      "y": 45
-     },
-     {
-      "x": 49,
-      "y": 45
-     },
-     {
-      "x": 50,
-      "y": 45
      }
     ]
    }
@@ -5564,30 +5540,6 @@
      {
       "x": 55,
       "y": 43
-     },
-     {
-      "x": 53,
-      "y": 44
-     },
-     {
-      "x": 54,
-      "y": 44
-     },
-     {
-      "x": 55,
-      "y": 44
-     },
-     {
-      "x": 53,
-      "y": 45
-     },
-     {
-      "x": 54,
-      "y": 45
-     },
-     {
-      "x": 55,
-      "y": 45
      }
     ]
    }
@@ -5620,30 +5572,6 @@
      {
       "x": 60,
       "y": 43
-     },
-     {
-      "x": 58,
-      "y": 44
-     },
-     {
-      "x": 59,
-      "y": 44
-     },
-     {
-      "x": 60,
-      "y": 44
-     },
-     {
-      "x": 58,
-      "y": 45
-     },
-     {
-      "x": 59,
-      "y": 45
-     },
-     {
-      "x": 60,
-      "y": 45
      }
     ]
    }

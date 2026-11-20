@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.8",
+ "simModelVersion": "skyport-sim-10.9",
  "runs": {
   "day0-normal": {
    "day": 0,
@@ -8,42 +8,42 @@
     "movements": 38,
     "paxDeparted": 2197,
     "paxArrived": 2204,
-    "otp": 0.9736842105263158,
-    "avgDelayMin": 1.1,
-    "actualAvgDelayMin": 3.3,
+    "otp": 1,
+    "avgDelayMin": 0.5,
+    "actualAvgDelayMin": 2.7,
     "runwayUtil": 0.07037037037037037,
-    "gateUtil": 0.16247256515775035,
-    "facilityUtil": 0.10208410493827161,
-    "avgWaitMin": 3.6,
-    "avgWalkMin": 9.9,
-    "avgGroundMin": 46.1,
+    "gateUtil": 0.1595610425240055,
+    "facilityUtil": 0.10173611111111111,
+    "avgWaitMin": 3.7,
+    "avgWalkMin": 9.8,
+    "avgGroundMin": 45,
     "unprocessedPax": 0,
     "missedPax": 0,
     "leftBags": 0,
     "diverted": 0,
     "cancelled": 0,
-    "paxSatisfaction": 91.6,
+    "paxSatisfaction": 92.1,
     "paxSatisfactionDetail": {
-     "waitPenalty": 7.3,
+     "waitPenalty": 7.4,
      "walkPenalty": 0,
-     "delayPenalty": 1.1,
+     "delayPenalty": 0.5,
      "missedPenalty": 0,
      "bagsPenalty": 0,
-     "avgWaitMin": 3.6,
-     "avgWalkMin": 9.9,
-     "avgDelayMin": 1.1,
+     "avgWaitMin": 3.7,
+     "avgWalkMin": 9.8,
+     "avgDelayMin": 0.5,
      "missedRate": 0,
      "leftRate": 0
     },
     "airlineSatisfaction": 61.1,
-    "rating": 60.2,
+    "rating": 60.4,
     "modePax": {
-     "car": 1801,
-     "dropoff": 2591,
+     "car": 1806,
+     "dropoff": 2589,
      "taxi": 0,
      "bus": 0,
      "rail": 0,
-     "walk": 9
+     "walk": 6
     },
     "parkingFull": 0,
     "roadDelayMin": 0,
@@ -54,8 +54,8 @@
    "airlines": {
     "NP": 61.16,
     "RJ": 61.12,
-    "AQ": 61.16,
-    "HB": 61.07,
+    "AQ": 61.2,
+    "HB": 61.11,
     "ML": 60
    },
    "airlineEval": {
@@ -102,7 +102,7 @@
     "RJ": {
      "ema": {
       "otp": 72,
-      "turnaround": 63.6,
+      "turnaround": 64.2,
       "stand": 72,
       "fees": 72,
       "slots": 72,
@@ -127,7 +127,7 @@
     "AQ": {
      "ema": {
       "otp": 72,
-      "turnaround": 69.3,
+      "turnaround": 72,
       "stand": 72,
       "fees": 72,
       "slots": 72,
@@ -152,7 +152,7 @@
     "HB": {
      "ema": {
       "otp": 72,
-      "turnaround": 63.6,
+      "turnaround": 66.3,
       "stand": 72,
       "fees": 72,
       "slots": 72,
@@ -251,8 +251,8 @@
     ],
     "boostUntil": 31
    },
-   "cash": 1000999689,
-   "rating": 60.2,
+   "cash": 1001004563,
+   "rating": 60.4,
    "weatherCancels": 0
   },
   "bad-winter-hard": {
@@ -260,44 +260,44 @@
    "kpi": {
     "flights": 36,
     "movements": 36,
-    "paxDeparted": 2160,
-    "paxArrived": 2177,
+    "paxDeparted": 2217,
+    "paxArrived": 2088,
     "otp": 0.9210526315789473,
     "avgDelayMin": 1.3,
-    "actualAvgDelayMin": 3,
+    "actualAvgDelayMin": 4.9,
     "runwayUtil": 0.06666666666666667,
-    "gateUtil": 0.15007201646090534,
-    "facilityUtil": 0.10173611111111111,
-    "avgWaitMin": 3.7,
-    "avgWalkMin": 9.8,
-    "avgGroundMin": 41.3,
+    "gateUtil": 0.1426954732510288,
+    "facilityUtil": 0.10643595679012345,
+    "avgWaitMin": 4,
+    "avgWalkMin": 10.3,
+    "avgGroundMin": 41.7,
     "unprocessedPax": 0,
     "missedPax": 0,
     "leftBags": 0,
     "diverted": 0,
     "cancelled": 1,
-    "paxSatisfaction": 91.1,
+    "paxSatisfaction": 90.3,
     "paxSatisfactionDetail": {
-     "waitPenalty": 7.5,
-     "walkPenalty": 0,
+     "waitPenalty": 7.9,
+     "walkPenalty": 0.3,
      "delayPenalty": 1.3,
      "missedPenalty": 0,
      "bagsPenalty": 0,
-     "avgWaitMin": 3.7,
-     "avgWalkMin": 9.8,
+     "avgWaitMin": 4,
+     "avgWalkMin": 10.3,
      "avgDelayMin": 1.3,
      "missedRate": 0,
      "leftRate": 0
     },
     "airlineSatisfaction": 60.5,
-    "rating": 59.7,
+    "rating": 59.6,
     "modePax": {
-     "car": 1709,
-     "dropoff": 2611,
+     "car": 1760,
+     "dropoff": 2614,
      "taxi": 0,
      "bus": 0,
      "rail": 0,
-     "walk": 17
+     "walk": 11
     },
     "parkingFull": 0,
     "roadDelayMin": 0.1,
@@ -307,8 +307,8 @@
    "grants": 300000,
    "airlines": {
     "NP": 61.11,
-    "RJ": 58.7,
-    "AQ": 61.2,
+    "RJ": 61.2,
+    "AQ": 58.7,
     "HB": 61.16,
     "ML": 60
    },
@@ -406,7 +406,7 @@
     "HB": {
      "ema": {
       "otp": 72,
-      "turnaround": 69,
+      "turnaround": 69.3,
       "stand": 72,
       "fees": 72,
       "slots": 72,
@@ -505,8 +505,8 @@
     ],
     "boostUntil": 139
    },
-   "cash": 1000988904,
-   "rating": 59.7,
+   "cash": 1000983744,
+   "rating": 59.6,
    "weatherCancels": 1
   }
  }
