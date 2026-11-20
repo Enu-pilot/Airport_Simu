@@ -253,7 +253,7 @@ export const BALANCE = {
     taxiPaxPerBerth: 30,
     busSeats: 50,
     busesPerBay: 6,
-    trainSeats: 200,
+    trainSeats: 1000,
     /** 混雑による遅れ（BPR 型）: 遅れ = 基本時間 × 0.15 × (交通量/容量)^4、上限（分） */
     congestionMaxMin: 90,
     /** 駐車場が満車のときに探し回る時間（分） */
