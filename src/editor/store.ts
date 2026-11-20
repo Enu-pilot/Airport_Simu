@@ -124,9 +124,12 @@ export interface EditorState {
   hoverW: WorldPoint | null;
   draft: Draft;
   overlays: Overlays;
-  /** ターミナル内部の表示・編集中の階（0 = 1F） */
+  /**
+   * ターミナル内部の表示・編集中の階（絶対階層。mapLevel が数値のときは常に同じ値に同期する）。
+   * 建物内階そのものではなく、エリア・内包施設の判定は実効階層（親の地図階層＋建物内階）で行う。
+   */
   interiorLevel: number;
-  /** 2D/3D の交通レイヤ表示。地上=0、地下<0、高架>0。 */
+  /** 2D/3D の交通レイヤ表示。地上=0、地下<0、高架>0。数値を選ぶと interiorLevel も同じ値になる。 */
   mapLevel: number | 'all';
   toast: Toast | null;
   /** build: 建設（編集）モード / operate: 運航モード（レイアウトの編集は不可） */
@@ -347,7 +350,7 @@ export const editorStore = createStore<EditorState>(() => ({
   hoverW: null,
   draft: null,
   overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true, congestion: false, daylight: true },
-  interiorLevel: 1,
+  interiorLevel: 0,
   mapLevel: 0,
   toast: null,
   mode: 'build',
@@ -758,11 +761,13 @@ export const actions = {
     set({ draft });
   },
   setInteriorLevel(level: number): void {
-    set((s) => ({ interiorLevel: level, overlays: { ...s.overlays, interior: true } }));
+    // 表示階は建物の内と外で 1 つに統一する: 内部の階を変えたら地図の階層（と配置先の階）も同じ値にする
+    set((s) => ({ interiorLevel: level, mapLevel: level, options: { ...s.options, roadLevel: level }, overlays: { ...s.overlays, interior: true } }));
   },
   setMapLevel(level: number | 'all'): void {
     // 「全レイヤ」は表示だけの切り替えで、配置先の階は最後に選んだ階のままにする（5-09 / W-11 で確定）
-    set((s) => ({ mapLevel: level, options: level === 'all' ? s.options : { ...s.options, roadLevel: level } }));
+    // 数値を選んだときは内部の表示階も同じ値に同期し、建物の内外で表示階が食い違わないようにする
+    set((s) => (level === 'all' ? { mapLevel: level } : { mapLevel: level, interiorLevel: level, options: { ...s.options, roadLevel: level } }));
   },
   setViewMode(viewMode: '2d' | '3d'): void {
     set({ viewMode });

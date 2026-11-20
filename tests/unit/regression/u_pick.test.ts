@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addRoadPath, placeFacility, placeStand, placeTerminalArea } from '../../../src/core/layout/operations';
-import { pickAt, pickCandidatesAt, type PickView } from '../../../src/core/layout/pick';
+import { pickAt, pickCandidatesAt, pickTerminalArea, type PickView } from '../../../src/core/layout/pick';
 import type { AirportLayout } from '../../../src/core/model/types';
 import { emptyLayout, must } from '../helpers';
 
@@ -71,6 +71,20 @@ describe('pickAt / pickCandidatesAt（階層・内部表示）', () => {
     expect(pickAt(l2, { x: 6.5, y: 6.5 })).toBe('std_1');
     expect(pickAt(l2, { x: 15.5, y: 15.5 })).toBe('fac_1');
     expect(pickAt(l2, { x: 50.5, y: 50.5 })).toBeNull();
+  });
+
+  it('高架 1 階のターミナルでは、建物内階 0 のエリア・設備が表示階 1 で選ばれる（実効階層）', () => {
+    let l = must(placeFacility(emptyLayout(), 'terminal', { x: 10, y: 10 }, { w: 12, h: 8, props: { levels: 2 }, mapLevel: 1 })).layout;
+    l = must(placeTerminalArea(l, 'fac_1', 0, 'waiting', { x: 12, y: 12 }, { w: 4, h: 4 })).layout;
+    l = must(placeFacility(l, 'gseBase', { x: 13, y: 13 }, { parentFacilityId: 'fac_1', floorIndex: 0 })).layout;
+    const inner = Object.values(l.facilities).find((f) => f.parentFacilityId)!.id;
+    const p = at(13, 13);
+    // エリアの実効階層は 1（ターミナル 1 ＋ 建物内階 0）
+    expect(pickTerminalArea(l, p, 1)).toBe('ta_1');
+    expect(pickTerminalArea(l, p, 0)).toBeNull();
+    expect(pickCandidatesAt(l, p, view(1, true, 1)).slice(0, 2)).toEqual([inner, 'ta_1']);
+    // 表示階 0 では内部設備もエリアも選ばれず、親のターミナルになる
+    expect(pickAt(l, p, view(1, true, 0))).toBe('fac_1');
   });
 
   it('重なりの候補の順序: スポット > エプロン。先頭が pickAt と同じ。重複しない', () => {

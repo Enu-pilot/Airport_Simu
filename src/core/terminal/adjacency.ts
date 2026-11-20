@@ -32,6 +32,13 @@ export function areaMapLevel(layout: AirportLayout, area: TerminalArea): number 
   return (terminal ? facilityLevel(terminal) : 0) + area.level;
 }
 
+/** 建物内設備の実効地図階層（親施設の mapLevel ＋ floorIndex）。親が無い設備は自身の地図階層 */
+export function interiorFacilityMapLevel(layout: AirportLayout, facility: Facility): number {
+  if (!facility.parentFacilityId) return facilityLevel(facility);
+  const parent = layout.facilities[facility.parentFacilityId];
+  return (parent ? facilityLevel(parent) : 0) + (facility.floorIndex ?? 0);
+}
+
 /**
  * 施設が同一階層で辺接触しているターミナルエリアの一覧（エリア ID 順）。
  * 対象種別でない施設・階層が違うエリア・角接触のみのエリアは含まない。

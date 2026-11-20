@@ -9,6 +9,7 @@ import { isFreeRunway, type RunwayFree } from '../core/model/types';
 import { runwayAxis } from '../core/layout/runway';
 import { rotatedDims } from '../core/layout/footprint';
 import { interiorPlacementProblem, terminalAreaLevelProblem, type PlacementProblem } from '../core/layout/levelRules';
+import { facilityLevel } from '../core/model/levels';
 import { validateOrthogonalPolygon } from '../core/geometry/polygon';
 import {
   addRoadPath,
@@ -325,10 +326,12 @@ export function computeOp(s: PreviewState): OpAttempt | null {
         if (!terminal) return null;
         const spec = TERMINAL_AREA_SPECS[areaKind];
         const r = draft?.kind === 'rect' ? rectFromDrag(draft.start, hover) : { origin: hover, w: spec.defaultW, h: spec.defaultH };
+        // 表示中の階は絶対階層なので、対象ターミナルの建物内階（表示階 − ターミナルの地図階層）に変換して渡す
+        const areaLevel = s.interiorLevel - facilityLevel(layout.facilities[terminal]!);
         return wrap(
-          placeTerminalArea(layout, terminal, s.interiorLevel, areaKind, r.origin, { w: Math.max(r.w, spec.minW), h: Math.max(r.h, spec.minH) }),
+          placeTerminalArea(layout, terminal, areaLevel, areaKind, r.origin, { w: Math.max(r.w, spec.minW), h: Math.max(r.h, spec.minH) }),
           [],
-          terminalAreaLevelProblem(layout, terminal, s.interiorLevel),
+          terminalAreaLevelProblem(layout, terminal, areaLevel),
         );
       }
       const kind = facilityKindOf(tool);

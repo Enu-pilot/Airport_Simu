@@ -190,6 +190,16 @@ export const INTERIOR_CHILDREN_LABEL = '建物内の設備';
 /** 親の階数を超える階の選択肢の注記（1-04） */
 export const FLOOR_NOT_IN_PARENT_LABEL = '（この建物にはありません）';
 
+/**
+ * 建物内階の表記（階セレクタ・Toolbox／運航コントロールと地図上の階ラベルで共通に使う）。
+ * 階の数値は建物内階（0 = 1F、-1 = B1、1 = 2F）。
+ */
+export const floorShortLabel = (level: number): string => (level < 0 ? `B${-level}` : `${level + 1}F`);
+/** 建物内階の日本語表記（-1 → 地下1階、0 → 1階）。ボタンの title などに使う */
+export const floorNameLabel = (level: number): string => (level < 0 ? `地下${-level}階` : `${level + 1}階`);
+/** 階セレクタの選択肢（B3〜4F。ターミナル内エリアの最下階 TERMINAL_AREA_MIN_LEVEL に合わせる） */
+export const FLOOR_SELECTOR_LEVELS: readonly number[] = [-3, -2, -1, 0, 1, 2, 3];
+
 /** エンティティの表示名（名前が無ければ種別名 + 番号） */
 export function displayName(layout: AirportLayout, id: string): string {
   const type = entityTypeOf(id);
