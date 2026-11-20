@@ -75,6 +75,14 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
       { id: 'land', label: '土地を購入', hint: '敷地外（暗い部分）をドラッグして購入。取得済みの敷地に隣接する土地のみ' },
     ],
   },
+  {
+    title: '住民向け施設',
+    tools: [
+      fac('shoppingMall', '置くだけで住民満足度 +0.03/日。運航には影響しません（施設由来のプラスは合計 +0.10/日まで）'),
+      fac('culturalHall', '置くだけで住民満足度 +0.02/日。運航には影響しません'),
+      fac('park', 'ドラッグで範囲を指定。置くだけで住民満足度 +0.01/日。運航には影響しません'),
+    ],
+  },
 ];
 
 const ALL_TOOLS = GROUPS.flatMap((g) => g.tools);

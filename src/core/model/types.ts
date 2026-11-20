@@ -219,7 +219,11 @@ export type FacilityKind =
   | 'cargoTerminal'
   | 'railStation'
   | 'staffParking'
-  | 'hotel';
+  | 'hotel'
+  // 住民向け施設（機能E拡張2）: 運航に影響せず、住民満足度に日次プラスを与える
+  | 'shoppingMall'
+  | 'culturalHall'
+  | 'park';
 
 export type PropValue = string | number | boolean | null;
 

@@ -43,6 +43,9 @@ const FACILITY_DAYS: Partial<Record<FacilityKind, number>> = {
   cargoTerminal: 4,
   railStation: 5,
   hotel: 4,
+  shoppingMall: 4,
+  culturalHall: 3,
+  park: 1,
 };
 
 /** 建設状態を持つエンティティ（ノード・ターミナル内部のエリアは対象外） */

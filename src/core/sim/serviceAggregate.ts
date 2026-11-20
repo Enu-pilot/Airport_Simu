@@ -5,6 +5,8 @@ import {
   isLoungeEligible,
   serviceProfileKey,
   type ServiceCategory,
+  type ServiceFacilityProfile,
+  type ServiceProfiles,
 } from '../terminal/serviceProfile';
 import type { Simulation } from './simulation';
 import type { PaxGroup } from './types';
@@ -75,6 +77,21 @@ const VISIT_CATEGORIES: readonly ServiceCategory[] = ['retail', 'dining'];
 const MAX_EXPECTED_WAIT_SEC = 10 * 60;
 
 /**
+ * profiles.facilities（layout から 1 回だけ生成され、以後変更されない）から引く
+ * areaId → profile の Map。呼び出しごとに作り直さず、配列の同一性で使い回す
+ * （中身は従来の都度構築と同一。性能改善計画 第3弾-3）。
+ */
+const facilityByIdCache = new WeakMap<ServiceFacilityProfile[], Map<string, ServiceFacilityProfile>>();
+function facilityByIdOf(profiles: ServiceProfiles): Map<string, ServiceFacilityProfile> {
+  let m = facilityByIdCache.get(profiles.facilities);
+  if (!m) {
+    m = new Map(profiles.facilities.map((f) => [f.areaId, f]));
+    facilityByIdCache.set(profiles.facilities, m);
+  }
+  return m;
+}
+
+/**
  * 'shop' ステップの集約処理。立寄りを開始したら true（呼び出し側はここで終える）。
  * 立寄らない場合は advance（stepIndex を進めて次を計画する、passengers 側の処理）を
  * 呼んでから true を返す。集約方式が使えない状況（profile が無い等）だけ false を返し、
@@ -98,7 +115,7 @@ export function planAggregateShopVisit(
     const profile = categoryProfile(profiles, terminalId, category);
     if (!profile || profile.status !== 'available' || profile.dwellSec === null) continue;
     // 閉鎖中でない運用中施設の能力だけを使う（profile は layout 由来なので閉鎖はここで差し引く）
-    const facilityById = new Map(profiles.facilities.map((f) => [f.areaId, f]));
+    const facilityById = facilityByIdOf(profiles);
     let openCapacity = 0;
     for (const id of profile.facilityIds) {
       const f = facilityById.get(id)!;
@@ -199,7 +216,7 @@ export function planAggregateLoungeVisit(
   }
   const key = serviceProfileKey(terminalId, 'lounge');
   const runtime = serviceRuntimeOf(sim);
-  const facilityById = new Map(profiles.facilities.map((f) => [f.areaId, f]));
+  const facilityById = facilityByIdOf(profiles);
   let openSeats = 0;
   for (const id of profile.facilityIds) {
     const f = facilityById.get(id)!;

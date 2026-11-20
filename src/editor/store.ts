@@ -21,13 +21,13 @@ import type { CatalogPin } from '../core/io/project';
 import { createCareerCompany, createSandboxCompany, importCompany, post, type CompanyState } from '../core/economy/company';
 import { constructionCost } from '../core/economy/construction';
 import { applyGameState, defaultGame, scaleConstructionCost, startGame, type GameSettings } from '../core/economy/game';
-import { cityEventCost, type CityConfig, type CityEvent } from '../core/economy/city';
+import { applyNoiseContribution, applySoundproofPurchase, canMakeNoiseContribution, cityEventCost, nextSoundproofCost, soundproofLevelOf, type CityConfig, type CityEvent } from '../core/economy/city';
 import { applyCompletedProjects, prepareCareerEdit, startClosure, syncProjects } from '../core/economy/expansion';
 import { createStarterAirfield } from '../core/sample/starterAirfield';
 import type { DayReview } from '../core/analytics/review';
 import { createJournal, type Journal } from '../core/analytics/journal';
 import { clearUnsavedHistory } from './dayHistoryStore';
-import { CURRENCY } from '../core/economy/balance';
+import { BALANCE, CURRENCY } from '../core/economy/balance';
 import {
   changeScenarioAircraft,
   changeScenarioFrequency,
@@ -675,6 +675,58 @@ export function removeCityEvent(eventId: string): void {
   if (target?.wagered && target.day > company.day) company.cash += cityEventCost(target);
   set({ company });
   showToast('都市イベントを予定から削除しました');
+}
+
+/**
+ * 防音工事助成の実施（機能E、建設モードのみ）。費用を払ってレベルを 1 つ上げ、
+ * 住民満足度を即時回復させる。イベント協力費と同じく現金から直接差し引く（台帳には載せない）。
+ */
+export function purchaseSoundproofing(): void {
+  const s = get();
+  if (s.mode === 'operate' || !s.company.city) return;
+  const cost = nextSoundproofCost(s.company.city);
+  if (cost === null) {
+    showToast('防音工事はすでに最大レベルです');
+    return;
+  }
+  if (s.company.cash < cost) {
+    showToast(`資金が不足しています（防音工事 ${formatCr(cost)}）`);
+    return;
+  }
+  const company = structuredClone(s.company);
+  const applied = applySoundproofPurchase(company.city!);
+  if (!applied) return;
+  company.cash -= cost;
+  set({ company });
+  showToast(`防音工事助成を実施しました（Lv${applied.level}、住民満足度 +${applied.recovery}）`);
+}
+
+/** 現在の防音工事レベル（UI 表示用） */
+export function soundproofLevel(company: CompanyState): number {
+  return company.city ? soundproofLevelOf(company.city) : 0;
+}
+
+/**
+ * 騒音対策費の拠出（機能E拡張2、建設モードのみ・1 日 1 回まで）。費用を払って
+ * 住民満足度を即時回復させる。防音工事と同じく現金から直接差し引く（台帳には載せない）。
+ */
+export function contributeNoiseFund(): void {
+  const s = get();
+  if (s.mode === 'operate' || !s.company.city) return;
+  const cost = BALANCE.noise.contribution.cost;
+  if (!canMakeNoiseContribution(s.company.city, s.company.day)) {
+    showToast('騒音対策費は 1 日 1 回までです');
+    return;
+  }
+  if (s.company.cash < cost) {
+    showToast(`資金が不足しています（騒音対策費 ${formatCr(cost)}）`);
+    return;
+  }
+  const company = structuredClone(s.company);
+  if (!applyNoiseContribution(company.city!, company.day)) return;
+  company.cash -= cost;
+  set({ company });
+  showToast(`騒音対策費を拠出しました（住民満足度 +${BALANCE.noise.contribution.recovery}）`);
 }
 
 export const actions = {

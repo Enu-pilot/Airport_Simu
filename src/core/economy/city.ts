@@ -4,7 +4,7 @@ import { airlineDef, destinationDef, routeAvailability, routeCapabilitiesForAirp
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../sim/aircraftTypes';
 import type { DayPlan } from './planning';
 import type { OperatingHours } from './company';
-import type { SizeClass } from '../model/types';
+import type { AirportLayout, SizeClass } from '../model/types';
 import { BALANCE } from './balance';
 
 export type CityType = 'regional' | 'core' | 'metropolitan';
@@ -64,6 +64,10 @@ export interface CityConfig {
   roadQuality: 1 | 2 | 3 | 4 | 5;
   railQuality: 0 | 1 | 2 | 3 | 4 | 5;
   residents: number;
+  /** 防音工事助成の実施レベル（機能E、0〜3）。欠落（旧セーブ）= 0（未実施） */
+  soundproofLevel?: number;
+  /** 騒音対策費を最後に拠出した日（機能E拡張2、会社日 company.day 基準）。欠落（旧セーブ）= 未拠出 */
+  lastNoiseContributionDay?: number;
   events?: CityEvent[];
   /** 出発時刻の制限と夜間の運用（フェーズ 2、docs/40）。欠落 = 従来どおり */
   nightOps?: CityNightOps;
@@ -185,11 +189,106 @@ export function aircraftNoisePoints(size: SizeClass, engines: number): number {
   return sizePoints[size] + Math.max(1, engines) * 0.5;
 }
 
-export function applyCityNoiseImpact(city: CityConfig, noisePoints: number, nightMovements: number): number {
+/** 防音工事助成の実施レベル（欠落・不正値は 0 として扱う。検証は isCityConfig 側でも行う） */
+export function soundproofLevelOf(city: Pick<CityConfig, 'soundproofLevel'>): number {
+  const v = city.soundproofLevel;
+  return typeof v === 'number' && Number.isInteger(v) ? Math.max(0, Math.min(BALANCE.noise.soundproof.maxLevel, v)) : 0;
+}
+
+/** レベルに応じた騒音ポイントの効きの緩和率（1 = 緩和なし） */
+export function soundproofNoiseFactor(level: number): number {
+  return BALANCE.noise.soundproof.noiseFactor[level] ?? 1;
+}
+
+/** 次のレベルへ上げる費用。最大レベルなら null */
+export function nextSoundproofCost(city: Pick<CityConfig, 'soundproofLevel'>): number | null {
+  const level = soundproofLevelOf(city);
+  return level >= BALANCE.noise.soundproof.maxLevel ? null : BALANCE.noise.soundproof.cost[level]!;
+}
+
+/**
+ * 防音工事助成の実施（純粋な状態変更のみ。資金チェックと差し引きは呼び出し側）。
+ * レベルを 1 つ上げ、住民満足度を即時回復させる。最大レベルなら何もせず null を返す。
+ */
+export function applySoundproofPurchase(city: CityConfig): { level: number; recovery: number } | null {
+  const level = soundproofLevelOf(city);
+  if (level >= BALANCE.noise.soundproof.maxLevel) return null;
+  const recovery = BALANCE.noise.soundproof.recovery[level]!;
+  city.soundproofLevel = level + 1;
+  city.residents = Math.max(0, Math.min(100, city.residents + recovery));
+  return { level: level + 1, recovery };
+}
+
+/**
+ * 海上移転係数（機能E拡張1）: 格（goals.tier）に応じた騒音ポイントの効きの軽減率。
+ * 格が上がるタイミングで空港が沖合へ移転・拡張した想定。goals が無い会社は格 0 扱い（×1.0）。
+ */
+export function offshoreNoiseFactor(tier: number): number {
+  const t = typeof tier === 'number' && Number.isInteger(tier) ? Math.max(0, tier) : 0;
+  return BALANCE.noise.offshore.factorByTier[t] ?? 1;
+}
+
+/** 騒音ポイントの効きにかかる最終係数（防音工事 × 海上移転。表示・見込み計算で共用する） */
+export function noiseMitigationFactor(city: Pick<CityConfig, 'soundproofLevel'>, tier: number): number {
+  return soundproofNoiseFactor(soundproofLevelOf(city)) * offshoreNoiseFactor(tier);
+}
+
+/**
+ * 住民向け施設の日次プラス合計（機能E拡張2）。運用中（operational）の対象施設だけを数え、
+ * 合計は BALANCE.noise.residentFacilities.dailyCap で頭打ちにする。運航シミュレーションには影響しない。
+ */
+export function residentFacilityBonus(layout: AirportLayout): number {
+  const per = BALANCE.noise.residentFacilities.dailyBonus;
+  let sum = 0;
+  for (const f of Object.values(layout.facilities)) {
+    if (f.buildState !== 'operational') continue;
+    const bonus = per[f.kind];
+    if (bonus !== undefined) sum += bonus;
+  }
+  return Math.min(BALANCE.noise.residentFacilities.dailyCap, sum);
+}
+
+/** 日次騒音影響の追加条件（海上移転の格と住民向け施設のプラス。欠落時は従来どおり） */
+export interface NoiseImpactOptions {
+  /** 空港の格（goals.tier）。欠落・goals なしは 0（海上移転なし） */
+  tier?: number;
+  /** 住民向け施設の日次プラス合計（residentFacilityBonus の結果）。上限はこの関数側でも守る */
+  facilityBonus?: number;
+}
+
+/**
+ * 日次の住民満足度の変化量（見込み計算にも使う純関数。状態は変えない）。
+ * 防音工事と海上移転は騒音ポイントの効きだけを緩和する（最終係数は両者の積）。
+ * 夜間運航 1 件あたり −0.15 はどちらでも緩和しない。
+ * 住民向け施設のプラスは回復側に加算し、既存の日次クランプ（−1〜+0.05）の内側で効く。
+ */
+export function noiseImpactDelta(city: Pick<CityConfig, 'soundproofLevel'>, noisePoints: number, nightMovements: number, opts?: NoiseImpactOptions): number {
+  const mitigatedNoise = noisePoints * noiseMitigationFactor(city, opts?.tier ?? 0);
+  const facilityBonus = Math.max(0, Math.min(BALANCE.noise.residentFacilities.dailyCap, opts?.facilityBonus ?? 0));
+  return Math.max(-1, Math.min(0.05, 0.03 + facilityBonus - mitigatedNoise * 0.0004 - nightMovements * 0.15));
+}
+
+export function applyCityNoiseImpact(city: CityConfig, noisePoints: number, nightMovements: number, opts?: NoiseImpactOptions): number {
   const before = city.residents;
-  const delta = Math.max(-1, Math.min(0.05, 0.03 - noisePoints * 0.0004 - nightMovements * 0.15));
+  const delta = noiseImpactDelta(city, noisePoints, nightMovements, opts);
   city.residents = Math.max(0, Math.min(100, city.residents + delta));
   return Math.round((city.residents - before) * 100) / 100;
+}
+
+/** 騒音対策費の拠出が今日まだ可能か（1 日 1 回まで。day は会社日 company.day） */
+export function canMakeNoiseContribution(city: Pick<CityConfig, 'lastNoiseContributionDay'>, day: number): boolean {
+  return city.lastNoiseContributionDay !== day;
+}
+
+/**
+ * 騒音対策費の拠出（機能E拡張2。純粋な状態変更のみ。資金チェックと差し引きは呼び出し側）。
+ * 住民満足度を即時回復させる。同日に 2 回目なら何もせず false を返す。
+ */
+export function applyNoiseContribution(city: CityConfig, day: number): boolean {
+  if (!canMakeNoiseContribution(city, day)) return false;
+  city.lastNoiseContributionDay = day;
+  city.residents = Math.max(0, Math.min(100, city.residents + BALANCE.noise.contribution.recovery));
+  return true;
 }
 
 export const CITY_TYPES: readonly CityType[] = ['regional', 'core', 'metropolitan'];
@@ -226,6 +325,8 @@ export function isCityConfig(value: unknown): value is CityConfig {
     && Number.isInteger(c.roadQuality) && Number(c.roadQuality) >= 1 && Number(c.roadQuality) <= 5
     && Number.isInteger(c.railQuality) && Number(c.railQuality) >= 0 && Number(c.railQuality) <= 5
     && Number.isFinite(c.residents) && Number(c.residents) >= 0 && Number(c.residents) <= 100
+    && (c.soundproofLevel === undefined || (Number.isInteger(c.soundproofLevel) && Number(c.soundproofLevel) >= 0 && Number(c.soundproofLevel) <= BALANCE.noise.soundproof.maxLevel))
+    && (c.lastNoiseContributionDay === undefined || (Number.isInteger(c.lastNoiseContributionDay) && Number(c.lastNoiseContributionDay) >= 0))
     && (c.events === undefined || (Array.isArray(c.events) && c.events.every(isCityEvent)));
 }
 
