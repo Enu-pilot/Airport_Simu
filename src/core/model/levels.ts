@@ -7,6 +7,35 @@ export const DEFAULT_LEVEL_HEIGHT_M = 6;
 export const MIN_MAP_LEVEL = -5;
 export const MAX_MAP_LEVEL = 10;
 
+export interface FloorDisplay {
+  /** 建物内階の表記（実効地図階層 + 1。0層 = 1F、−1層 = B1F） */
+  building: string;
+  /** 地図階層の符号つき表記（+3 / −1 / +0） */
+  map: string;
+  /** 床高（m）= 実効地図階層 × 1層の高さ */
+  floorM: number;
+}
+
+/**
+ * 階の統一表記（J-1）: 実効地図階層から建物内階・床高・地図階層を導く唯一の変換。
+ * 建物内階 = 実効地図階層 + 1（0層が 1F）の換算はここに閉じ、UI は
+ * floorDisplayLabel の「4F（床 +18m／地図階層 +3）」形式で併記する。
+ */
+export function floorDisplay(effectiveMapLevel: number): FloorDisplay {
+  return {
+    building: effectiveMapLevel < 0 ? `B${-effectiveMapLevel}F` : `${effectiveMapLevel + 1}F`,
+    map: effectiveMapLevel >= 0 ? `+${effectiveMapLevel}` : `${effectiveMapLevel}`,
+    floorM: effectiveMapLevel * DEFAULT_LEVEL_HEIGHT_M,
+  };
+}
+
+/** 併記ラベル: 「4F（床 +18m／地図階層 +3）」「B1F（床 -6m／地図階層 -1）」 */
+export function floorDisplayLabel(effectiveMapLevel: number): string {
+  const d = floorDisplay(effectiveMapLevel);
+  const m = d.floorM > 0 ? `+${d.floorM}` : `${d.floorM}`;
+  return `${d.building}（床 ${m}m／地図階層 ${d.map}）`;
+}
+
 export const levelOf = (node: NetNode | undefined): number => node?.level ?? 0;
 export const elevationOf = (node: NetNode | undefined): number => node?.elevationM ?? levelOf(node) * DEFAULT_LEVEL_HEIGHT_M;
 /**

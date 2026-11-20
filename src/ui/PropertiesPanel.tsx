@@ -19,10 +19,12 @@ import {
   type RoadConnectorKind,
   type Rotation,
   type TerminalTransitKind,
+  type CrossingMaxCode,
 } from '../core/model/types';
+import { deckElevationForCode, requiredClearanceForCode } from '../core/sim/aircraftTypes';
 import { distance } from '../core/geometry/vec';
 import { facilityDims, standEntry } from '../core/layout/footprint';
-import { facilityLevel, roadEdgeLevelValid } from '../core/model/levels';
+import { DEFAULT_LEVEL_HEIGHT_M, facilityLevel, floorDisplayLabel, roadEdgeLevelValid } from '../core/model/levels';
 import { INTERIOR_MIN_FLOOR, TERMINAL_AREA_MIN_LEVEL, levelsInUse } from '../core/layout/levelRules';
 import { edgesOfNode } from '../core/layout/network';
 import {
@@ -325,11 +327,14 @@ export function FacilityPortalSection({ layout, facilityId, readOnly }: { layout
           // B8: このポータル先エリアへの複合グラフ分類（経路の有無・所要秒）。検証・能力と同じ純関数を読む
           const conn = classifyFacilityConnection(layout, facilityId, p.areaId);
           const routeSec = conn.route ? Math.round(conn.route.costSec) : conn.futureRoute ? Math.round(conn.futureRoute.costSec) : null;
+          // J-1: エリアの階は、そのターミナルを基点にした実効階の併記で出す
+          const areaTerminal = layout.facilities[layout.terminalAreas[p.areaId]?.terminalId ?? ''];
+          const areaEffectiveLevel = (areaTerminal ? facilityLevel(areaTerminal) : 0) + p.floorIndex;
           return (
             <div key={p.id}>
               <Info label="接続先">
                 <EntityLink layout={layout} id={p.areaId} />
-                <span className="muted small"> {PORTAL_UI.floor(p.floorIndex, p.mapLevel)}</span>
+                <span className="muted small"> {PORTAL_UI.floor(areaEffectiveLevel, p.mapLevel)}</span>
                 {!readOnly && (
                   <button className="small danger" onClick={() => applyOp(deletePortal(layout, p.id))} data-testid={`portal-delete-${p.id}`}>
                     {PORTAL_UI.remove}
@@ -355,7 +360,7 @@ export function FacilityPortalSection({ layout, facilityId, readOnly }: { layout
           <select value={chosen} onChange={(e) => setAreaId(e.target.value)} data-testid="portal-area-select">
             {areas.map((a) => (
               <option key={a.id} value={a.id}>
-                {`${displayName(layout, a.terminalId)} / ${AREA_KIND_LABEL[a.kind]}（${a.level < 0 ? `地下${-a.level}階` : `${a.level + 1}F`}）`}
+                {`${displayName(layout, a.terminalId)} / ${AREA_KIND_LABEL[a.kind]}（${floorDisplayLabel((layout.facilities[a.terminalId] ? facilityLevel(layout.facilities[a.terminalId]!) : 0) + a.level)}）`}
               </option>
             ))}
           </select>
@@ -795,6 +800,7 @@ function TerminalTransitControls({ layout, areaId, readOnly }: { layout: Airport
   const [widthM, setWidthM] = useState(6);
   const [elevationM, setElevationM] = useState(36);
   const [aircraftClearanceM, setAircraftClearanceM] = useState(33);
+  const [crossingMaxCode, setCrossingMaxCode] = useState<CrossingMaxCode | ''>('');
   const [bidirectional, setBidirectional] = useState(true);
   if (!area) return null;
   const candidates = Object.values(layout.terminalAreas)
@@ -809,6 +815,7 @@ function TerminalTransitControls({ layout, areaId, readOnly }: { layout: Airport
       return <div key={link.id} className="operability" data-testid={`terminal-link-${link.id}`}>
         <strong>{TERMINAL_TRANSIT_LABEL[link.kind]} · {from?.terminalId ?? '?'} → {to?.terminalId ?? '?'}</strong>
         <div>{link.distanceM} m · {link.travelSec} 秒 · 幅 {link.widthM ?? 6} m · 標高 {link.elevationM ?? 36} m · 航空機クリアランス {link.aircraftClearanceM ?? 33} m</div>
+        {link.crossingMaxCode && <div className="muted small">下を通る最大の航空機コード: {link.crossingMaxCode}（宣言基準で判定）</div>}
         <div>{link.bidirectional ? '双方向' : '片方向'} · {(link.capacityPerHour ?? Math.floor((link.widthM ?? 6) * 200)).toLocaleString()} 人/時</div>
         <div className="muted small">利用区域: {link.allowedZones.map((zone) => ZONE_LABEL[zone]).join('、')} · {BUILD_STATE_LABEL[link.buildState]}</div>
         {!readOnly && <button className="danger" onClick={() => applyOp(deleteTerminalTransitLink(layout, link.id))}>連絡設備を撤去</button>}
@@ -827,12 +834,20 @@ function TerminalTransitControls({ layout, areaId, readOnly }: { layout: Airport
       <Field label="幅 (m)"><NumberInput value={widthM} min={1} max={100} onCommit={setWidthM} /></Field>
       <Field label="輸送能力 (人/時、0=幅から算出)"><NumberInput value={capacity} min={0} max={1000000} onCommit={setCapacity} /></Field>
       {kind === 'elevatedWalkway' && <>
+        <Field label="下を通る最大の航空機コード">
+          <select value={crossingMaxCode} onChange={(e) => { const v = e.target.value as CrossingMaxCode | ''; setCrossingMaxCode(v); if (v) { setAircraftClearanceM(requiredClearanceForCode(v)); setElevationM(deckElevationForCode(v)); } }} data-testid="terminal-link-crossing-code">
+            <option value="">指定なし（全体基準）</option>
+            <option value="C">コード C まで</option>
+            <option value="E">コード E まで</option>
+            <option value="F">コード F（A380 級）まで</option>
+          </select>
+        </Field>
         <Field label="通路階の高さ (m)"><NumberInput value={elevationM} min={1} max={200} onCommit={setElevationM} /></Field>
         <Field label="航空機クリアランス (m)"><NumberInput value={aircraftClearanceM} min={1} max={200} onCommit={setAircraftClearanceM} /></Field>
-        <div className="muted small">橋脚のないクリアスパンとして扱い、通路下の航空機経路は既存の地上ネットワークを維持します。</div>
+        <div className="muted small">橋脚のないクリアスパンとして扱い、通路下の航空機経路は既存の地上ネットワークを維持します。{crossingMaxCode && `コード ${crossingMaxCode} の宣言では、クリアランス ${requiredClearanceForCode(crossingMaxCode)} m 以上・通路階は ${floorDisplayLabel(deckElevationForCode(crossingMaxCode) / DEFAULT_LEVEL_HEIGHT_M)} 以上が必要です。`}</div>
       </>}
       <label className="prop-field"><span className="prop-label">方向</span><select value={bidirectional ? 'both' : 'oneWay'} onChange={(e) => setBidirectional(e.target.value === 'both')}><option value="both">双方向</option><option value="oneWay">選択元から片方向</option></select></label>
-      <button className="primary" disabled={!targetId} onClick={() => applyOp(addTerminalTransitLink(layout, { kind, fromAreaId: areaId, toAreaId: targetId, distanceM, travelSec, widthM, ...(capacity > 0 ? { capacityPerHour: capacity } : {}), ...(kind === 'elevatedWalkway' ? { elevationM, aircraftClearanceM } : {}), bidirectional, allowedZones: [area.zone], name: TERMINAL_TRANSIT_LABEL[kind] }))} data-testid="terminal-link-create">連絡設備を建設</button>
+      <button className="primary" disabled={!targetId} onClick={() => applyOp(addTerminalTransitLink(layout, { kind, fromAreaId: areaId, toAreaId: targetId, distanceM, travelSec, widthM, ...(capacity > 0 ? { capacityPerHour: capacity } : {}), ...(kind === 'elevatedWalkway' ? { elevationM, aircraftClearanceM, ...(crossingMaxCode ? { crossingMaxCode } : {}) } : {}), bidirectional, allowedZones: [area.zone], name: TERMINAL_TRANSIT_LABEL[kind] }))} data-testid="terminal-link-create">連絡設備を建設</button>
     </div>}
     {!candidates.length && <div className="muted">接続できる別ターミナルの同一区域エリアがありません。対象側のエリアを先に配置してください。</div>}
   </Section>;
@@ -1220,7 +1235,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
           <select value={a.level} onChange={(e) => update(layout, id, { level: Number(e.target.value) })} data-testid="prop-level">
             {Array.from({ length: levels - TERMINAL_AREA_MIN_LEVEL }, (_, i) => i + TERMINAL_AREA_MIN_LEVEL).map((l) => (
               <option key={l} value={l}>
-                {l < 0 ? `地下${-l}階` : `${l + 1}F`}
+                {floorDisplayLabel((terminal ? facilityLevel(terminal) : 0) + l)}
               </option>
             ))}
           </select>
@@ -1314,7 +1329,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             >
               {Array.from({ length: Math.max(1, Number(layout.facilities[f.parentFacilityId]?.props.levels ?? 1)) - INTERIOR_MIN_FLOOR }, (_, i) => i + INTERIOR_MIN_FLOOR).map((floor) => (
                 <option key={floor} value={floor}>
-                  {floor < 0 ? `地下${-floor}階` : `${floor + 1}階`}
+                  {floorDisplayLabel((layout.facilities[f.parentFacilityId!] ? facilityLevel(layout.facilities[f.parentFacilityId!]!) : 0) + floor)}
                 </option>
               ))}
             </select>

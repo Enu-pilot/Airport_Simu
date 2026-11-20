@@ -299,6 +299,11 @@ export interface TerminalArea {
 }
 
 export type TerminalTransitKind = 'walkway' | 'movingWalkway' | 'elevatedWalkway' | 'escalator' | 'elevator';
+/**
+ * 高層連絡通路の下を通る最大の航空機コードの宣言（J-1 の宣言方式）。
+ * 欠落 = 従来の全体基準（未知機種 30m + 余裕 3m）で判定する。
+ */
+export type CrossingMaxCode = 'C' | 'E' | 'F';
 /** Explicit passenger transport between area nodes in distinct terminals (separate from GateConnector). */
 export interface TerminalTransitLink {
   id: string;
@@ -316,6 +321,8 @@ export interface TerminalTransitLink {
   elevationM?: number;
   /** Vertical clear span below the deck, reserved for aircraft (m). */
   aircraftClearanceM?: number;
+  /** 下を通る最大の航空機コードの宣言（J-1。任意項目で、欠落時は全体基準のまま判定する） */
+  crossingMaxCode?: CrossingMaxCode;
   bidirectional: boolean;
   buildState: BuildState;
   /** Passenger/security zones permitted to use this link. */

@@ -4,7 +4,7 @@ import { terminalServiceComplexes } from '../core/terminal/serviceComplex';
 import { terminalCapacitySummaries } from '../core/terminal/terminalCapacitySummary';
 import { terminalFloorSummary } from '../core/terminal/terminalFloorSummary';
 import { TERMINAL_AREA_MIN_LEVEL } from '../core/layout/levelRules';
-import { facilityLevel } from '../core/model/levels';
+import { facilityLevel, floorDisplayLabel } from '../core/model/levels';
 import { featureForAreaKind, lockLabel } from '../core/economy/unlocks';
 import type { TerminalAreaKind } from '../core/model/types';
 import { AREA_KIND_LABEL, FACILITY_LABEL } from '../i18n/ja';
@@ -18,9 +18,6 @@ import { AREA_KIND_LABEL, FACILITY_LABEL } from '../i18n/ja';
 
 /** フロアタブに出す建物内階（B3〜4F） */
 const FLOOR_TABS = [-3, -2, -1, 0, 1, 2, 3] as const;
-
-/** 建物内階の表示名（0 = 1F、-1 = B1） */
-const floorLabel = (floor: number): string => (floor < 0 ? `B${-floor}` : `${floor + 1}F`);
 
 /** ターミナル内部エリアのツール（Toolbox の内部グループと同じ 21 種＋選択） */
 const AREA_TOOLS: { id: ToolId; kind: TerminalAreaKind | null; label: string }[] = [
@@ -75,6 +72,8 @@ export function TerminalWorkspace() {
   }
 
   const baseLevel = facilityLevel(terminal);
+  /** J-1: 建物内階は、ターミナル基点の実効地図階層に換算して統一表記（併記）で出す */
+  const floorLabel = (floor: number): string => floorDisplayLabel(baseLevel + floor);
   const currentFloor = interiorLevel - baseLevel;
   const levels = Math.max(1, Number(terminal.props.levels ?? 1));
   const floorExists = (floor: number) => floor >= TERMINAL_AREA_MIN_LEVEL && floor < levels;

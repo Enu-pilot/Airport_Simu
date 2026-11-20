@@ -5,8 +5,9 @@ import { actions, useEditor, type ToolId } from '../editor/store';
 import { facilityKindOf } from '../editor/tools';
 import { useLayout } from '../editor/store';
 import { RunwayToolOptions } from './RunwayPanels';
-import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, FLOOR_SELECTOR_LEVELS, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL, SIM_EFFECT_LABEL, floorNameLabel, floorShortLabel } from '../i18n/ja';
+import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, FLOOR_SELECTOR_LEVELS, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL, SIM_EFFECT_LABEL } from '../i18n/ja';
 import { floorExistsInParent } from '../core/layout/levelRules';
+import { facilityLevel, floorDisplay, floorDisplayLabel } from '../core/model/levels';
 import { featureForAreaKind, lockLabel } from '../core/economy/unlocks';
 import type { TerminalAreaKind } from '../core/model/types';
 
@@ -179,9 +180,11 @@ export function Toolbox() {
             <select value={options.interiorFloorIndex} onChange={(e) => actions.setOption('interiorFloorIndex', Number(e.target.value))} data-testid="facility-floor">
               {Array.from({ length: 8 }, (_, i) => i - 5).map((floor) => {
                 const exists = floorExistsInParent(layout, options.interiorParentId!, floor);
+                // J-1: 親建物を基点にした実効階の併記で出す
+                const parent = layout.facilities[options.interiorParentId!];
                 return (
                   <option key={floor} value={floor} title={exists ? undefined : PLACEMENT_PROBLEM_LABEL.floorOutOfRange}>
-                    {floorNameLabel(floor)}{exists ? '' : FLOOR_NOT_IN_PARENT_LABEL}
+                    {floorDisplayLabel((parent ? facilityLevel(parent) : 0) + floor)}{exists ? '' : FLOOR_NOT_IN_PARENT_LABEL}
                   </option>
                 );
               })}
@@ -192,8 +195,8 @@ export function Toolbox() {
           ターミナル内部の階
           <span>
             {FLOOR_SELECTOR_LEVELS.map((l) => (
-              <button key={l} className={interior && level === l ? 'small tool active' : 'small'} onClick={() => actions.setInteriorLevel(l)} data-testid={`level-${l}`} title={floorNameLabel(l)}>
-                {floorShortLabel(l)}
+              <button key={l} className={interior && level === l ? 'small tool active' : 'small'} onClick={() => actions.setInteriorLevel(l)} data-testid={`level-${l}`} title={floorDisplayLabel(l)}>
+                {floorDisplay(l).building}
               </button>
             ))}
           </span>

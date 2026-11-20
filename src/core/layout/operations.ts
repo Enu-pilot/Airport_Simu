@@ -27,6 +27,7 @@ import {
   type TerminalArea,
   type TerminalAreaKind,
   type TerminalTransitKind,
+  type CrossingMaxCode,
   Terrain,
 } from '../model/types';
 import { add, distance, sameTile, tileKey, type Tile } from '../geometry/vec';
@@ -51,7 +52,7 @@ import { TERMINAL_AREA_MIN_LEVEL, undergroundFacilityProblem } from './levelRule
 import { facilityLevel, roadEdgeLevelValid } from '../model/levels';
 import { orthogonalPolygonTiles, validateOrthogonalPolygon } from '../geometry/polygon';
 import { DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, DEFAULT_TERMINAL_LINK_WIDTH_M } from '../terminal/model';
-import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
+import { deckElevationForCode, requiredAircraftClearanceM, requiredClearanceForCode } from '../sim/aircraftTypes';
 
 /**
  * 編集操作。すべて純粋関数で、入力レイアウトを変更せず新しいレイアウトを返す。
@@ -490,6 +491,8 @@ export interface TerminalTransitOptions {
   capacityPerHour?: number;
   elevationM?: number;
   aircraftClearanceM?: number;
+  /** 下を通る最大の航空機コードの宣言（J-1。指定時は宣言基準で判定し、既定値も宣言から導く） */
+  crossingMaxCode?: CrossingMaxCode;
   bidirectional?: boolean;
   buildState?: BuildState;
   allowedZones: PaxZone[];
@@ -502,12 +505,19 @@ export function addTerminalTransitLink(layout: AirportLayout, opts: TerminalTran
   if (!from || !to) return fail('NOT_FOUND');
   if (from.terminalId === to.terminalId) return fail('INVALID_VALUE');
   if (!['walkway', 'movingWalkway', 'elevatedWalkway', 'escalator', 'elevator'].includes(opts.kind)) return fail('INVALID_VALUE');
+  if (opts.crossingMaxCode !== undefined && !['C', 'E', 'F'].includes(opts.crossingMaxCode)) return fail('INVALID_VALUE');
   if (!Number.isFinite(opts.distanceM) || opts.distanceM <= 0 || !Number.isFinite(opts.travelSec) || opts.travelSec <= 0) return fail('INVALID_VALUE');
   const widthM = opts.widthM ?? DEFAULT_TERMINAL_LINK_WIDTH_M;
-  const elevationM = opts.elevationM ?? DEFAULT_TERMINAL_LINK_ELEVATION_M;
-  const aircraftClearanceM = opts.aircraftClearanceM ?? DEFAULT_TERMINAL_LINK_CLEARANCE_M;
+  // J-1: 下を通る最大コードの宣言がある場合は、全体基準ではなく宣言基準で判定し、
+  // 既定値（クリアランス = 宣言の必要値、標高 = それを満たす最小の層の床高）も宣言から導く。
+  // 宣言が無い場合は従来の全体基準・既定値と完全一致させる。
+  const required = opts.crossingMaxCode ? requiredClearanceForCode(opts.crossingMaxCode) : requiredAircraftClearanceM();
+  const elevationM = opts.elevationM ?? (opts.crossingMaxCode ? deckElevationForCode(opts.crossingMaxCode) : DEFAULT_TERMINAL_LINK_ELEVATION_M);
+  const aircraftClearanceM = opts.aircraftClearanceM ?? (opts.crossingMaxCode ? required : DEFAULT_TERMINAL_LINK_CLEARANCE_M);
   if (!Number.isFinite(widthM) || widthM <= 0 || !Number.isFinite(elevationM) || elevationM <= 0) return fail('INVALID_VALUE');
-  if (!Number.isFinite(aircraftClearanceM) || aircraftClearanceM < requiredAircraftClearanceM() || elevationM < aircraftClearanceM) return fail('INVALID_VALUE');
+  if (!Number.isFinite(aircraftClearanceM) || aircraftClearanceM < required || elevationM < aircraftClearanceM) return fail('INVALID_VALUE');
+  // 宣言がある場合、標高は手入力でも宣言のデッキ床高（最小の層）未満にはできない
+  if (opts.crossingMaxCode && elevationM < deckElevationForCode(opts.crossingMaxCode)) return fail('INVALID_VALUE');
   if (opts.capacityPerHour !== undefined && (!Number.isFinite(opts.capacityPerHour) || opts.capacityPerHour <= 0)) return fail('INVALID_VALUE');
   const zones = [...new Set(opts.allowedZones)];
   if (!zones.length || zones.some((zone) => zone !== from.zone || zone !== to.zone)) return fail('INVALID_VALUE');
@@ -525,6 +535,7 @@ export function addTerminalTransitLink(layout: AirportLayout, opts: TerminalTran
     widthM,
     elevationM,
     aircraftClearanceM,
+    ...(opts.crossingMaxCode === undefined ? {} : { crossingMaxCode: opts.crossingMaxCode }),
     ...(opts.capacityPerHour === undefined ? {} : { capacityPerHour: opts.capacityPerHour }),
     bidirectional: opts.bidirectional ?? true,
     buildState: opts.buildState ?? 'operational',

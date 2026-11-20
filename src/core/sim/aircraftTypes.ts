@@ -1,6 +1,7 @@
-import type { SizeClass } from '../model/types';
+import type { CrossingMaxCode, SizeClass } from '../model/types';
+import { DEFAULT_LEVEL_HEIGHT_M } from '../model/levels';
 import { TICK_SEC } from './rules';
-import { CATALOG, sizeClassOf, type AircraftModel, type GameProfile } from '../aircraft/catalog';
+import { CATALOG, codeLetterOf, sizeClassOf, type AircraftModel, type GameProfile } from '../aircraft/catalog';
 
 /**
  * シミュレーションが使う機種の属性（機種カタログ core/aircraft/catalog.ts から作る）。
@@ -105,6 +106,26 @@ export function requiredAircraftClearanceM(types: TypeTable = AIRCRAFT_TYPES): n
     UNKNOWN_AIRCRAFT_HEIGHT_M,
     ...Object.values(types).map((type) => type.heightM ?? UNKNOWN_AIRCRAFT_HEIGHT_M),
   ) + AIRCRAFT_CLEARANCE_MARGIN_M;
+}
+
+/**
+ * 宣言されたコード区分に対する必要クリアランス（J-1 の宣言方式）:
+ * そのコード区分（翼幅からのコード文字）に属し、高さが既知の機種の最大尾翼高 + 余裕。
+ * 高さ不明の機種（汎用機材などのプレースホルダ）は区分の最大に数えない
+ * （区分全体が未知機種の保守値に引っ張られないようにするため）。
+ * 区分内に高さ既知の機種が無ければ全体基準と同じ保守値に落とす。
+ */
+export function requiredClearanceForCode(code: CrossingMaxCode, types: TypeTable = AIRCRAFT_TYPES): number {
+  const heights = Object.values(types)
+    .filter((type) => type.heightM !== null && codeLetterOf(type.wingspanM) === code)
+    .map((type) => type.heightM as number);
+  return (heights.length ? Math.max(...heights) : UNKNOWN_AIRCRAFT_HEIGHT_M) + AIRCRAFT_CLEARANCE_MARGIN_M;
+}
+
+/** 宣言コードに対するデッキ床高: 必要クリアランスを満たす最小の層（1層 = DEFAULT_LEVEL_HEIGHT_M）の床高 */
+export function deckElevationForCode(code: CrossingMaxCode, types: TypeTable = AIRCRAFT_TYPES): number {
+  const clearance = requiredClearanceForCode(code, types);
+  return Math.ceil(clearance / DEFAULT_LEVEL_HEIGHT_M) * DEFAULT_LEVEL_HEIGHT_M;
 }
 
 /**
