@@ -277,11 +277,18 @@ export function maintenanceReading(layout: AirportLayout): CapabilityReading {
 
 /**
  * 運航中の状態（F6-04 残件、2026-11-19）: 有効な障害（sim/disruptions）と
- * 閉鎖理由台帳（sim/closureState）、滑走路モードから closed / failed /
+ * 閉鎖理由台帳（sim/closureState）、滑走路モード、設備故障台帳
+ * （sim/baggage の state.equipment）から closed / failed /
  * resourceShortage 状態の読み取りを生成する。減額源は既存の正本だけを使い、
  * 能力値は正本（facilityCapability）がある場合のみ写す（推定で埋めない）。
  * supplyShortage は F6-13（供給インフラ、保留中）の領域なので生成しない。
  * 表示への統合は UI 担当の引き継ぎ事項（HANDOFF_PROMPT.md）。
+ * 設備故障台帳の生成（2026-11-20 追加）: 障害に由来しない停止
+ * （sim/ground のランダム故障、運航画面からの手動停止）も failed として拾う。
+ * 障害由来の分は障害側の生成が優先され、二重には出さない。`belt:` キー
+ * （受取所ベルト）と車両・作業員ユニットのキーは施設を主体とする行の
+ * 対象外とする（旧 UI 側導出と同じ範囲。ユニットの障害由来分は障害側で生成）。
+ * 本関数は読み取り専用の導出で、運航状態の変更・乱数消費はしない。
  */
 export function operationalStateReadings(state: SimState, layout: AirportLayout): CapabilityReading[] {
   const out: CapabilityReading[] = [];
@@ -331,6 +338,24 @@ export function operationalStateReadings(state: SimState, layout: AirportLayout)
       default:
         break; // 天候・需要急増・到着遅延・整備は資産の状態ではないため対象外
     }
+  }
+  // 設備故障台帳（sim/baggage の state.equipment）: 停止中の設備のうち施設を
+  // 主体とするものを failed として生成する。障害由来の分は上の障害ループで
+  // 生成済み（push の重複排除で障害側の根拠が優先される）。
+  // 理由の区別は repairUntil で行う: ランダム故障は自動復旧予定が入る
+  // （sim/ground の randomFailures は repairSec を必ず指定する）ため
+  // repairUntil あり、手動停止（editor/simRunner 経由）は repairSec を
+  // 指定しないため repairUntil が null のままになる。
+  for (const [key, eq] of Object.entries(state.equipment ?? {})) {
+    if (!eq.broken) continue;
+    if (key.startsWith('belt:')) continue; // 受取所ベルトは施設 ID ではない（旧 UI 導出でも対象外）
+    if (!layout.facilities[key]) continue; // 車両・作業員ユニット等のキーは施設の行にしない
+    push({
+      domain: 'baggage', subjectId: key, label: nameOf(key), unit: '', theoretical: null, effective: 0, demand: null, actual: null, state: 'failed',
+      basis: eq.repairUntil !== null
+        ? '設備故障台帳（障害に由来しない故障で停止中、自動復旧予定あり。sim/ground のランダム故障 / sim/baggage の equipment）'
+        : '設備故障台帳（運航画面で手動停止中、自動復旧なし。sim/baggage の equipment）',
+    });
   }
   // 滑走路モード 'closed'（Work Order 実施中・障害）: 障害側で出した分は重ねない
   for (const r of Object.values(layout.runways)) {
