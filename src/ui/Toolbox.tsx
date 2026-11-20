@@ -5,7 +5,7 @@ import { actions, useEditor, type ToolId } from '../editor/store';
 import { facilityKindOf } from '../editor/tools';
 import { useLayout } from '../editor/store';
 import { RunwayToolOptions } from './RunwayPanels';
-import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL, SIM_EFFECT_LABEL } from '../i18n/ja';
+import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, FLOOR_SELECTOR_LEVELS, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL, SIM_EFFECT_LABEL, floorNameLabel, floorShortLabel } from '../i18n/ja';
 import { floorExistsInParent } from '../core/layout/levelRules';
 import { featureForAreaKind, lockLabel } from '../core/economy/unlocks';
 import type { TerminalAreaKind } from '../core/model/types';
@@ -173,7 +173,7 @@ export function Toolbox() {
                 const exists = floorExistsInParent(layout, options.interiorParentId!, floor);
                 return (
                   <option key={floor} value={floor} title={exists ? undefined : PLACEMENT_PROBLEM_LABEL.floorOutOfRange}>
-                    {floor < 0 ? `地下${-floor}階` : `${floor + 1}階`}{exists ? '' : FLOOR_NOT_IN_PARENT_LABEL}
+                    {floorNameLabel(floor)}{exists ? '' : FLOOR_NOT_IN_PARENT_LABEL}
                   </option>
                 );
               })}
@@ -183,9 +183,9 @@ export function Toolbox() {
         <label>
           ターミナル内部の階
           <span>
-            {[-3, -2, -1, 0, 1, 2, 3].map((l) => (
-              <button key={l} className={interior && level === l ? 'small tool active' : 'small'} onClick={() => actions.setInteriorLevel(l)} data-testid={`level-${l}`} title={l < 0 ? `地下${-l}階` : `${l + 1}階`}>
-                {l < 0 ? `B${-l}` : `${l + 1}F`}
+            {FLOOR_SELECTOR_LEVELS.map((l) => (
+              <button key={l} className={interior && level === l ? 'small tool active' : 'small'} onClick={() => actions.setInteriorLevel(l)} data-testid={`level-${l}`} title={floorNameLabel(l)}>
+                {floorShortLabel(l)}
               </button>
             ))}
           </span>

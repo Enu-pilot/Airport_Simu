@@ -4,6 +4,7 @@ import type { AirportLayout, NetNode } from '../model/types';
 import { distPointSegment, distance, pointInPolygon, type Vec2 } from '../geometry/vec';
 import { mapToWorld } from '../geometry/frames';
 import { facilityLevel } from '../model/levels';
+import { areaMapLevel, interiorFacilityMapLevel } from '../terminal/adjacency';
 import { facilityDims, standDims } from './footprint';
 import { runwayPolygon } from './runway';
 
@@ -19,7 +20,8 @@ export interface PickView {
  * ノード > ゲート > スポット > 建物 > 誘導路 > 道路 > 滑走路 > エリア（エプロン等）
  *
  * `view` を渡すと描画と同じ条件で絞る（1-03）:
- *  1. 内部表示がオンのとき: 階 floorIndex === interior.level の内部設備 → その階のターミナルエリア → 通常の候補
+ *  1. 内部表示がオンのとき: 実効階層（親の地図階層＋floorIndex／エリアはターミナルの地図階層＋建物内階）が
+ *     interior.level（表示中の絶対階層）と一致する内部設備 → その階のターミナルエリア → 通常の候補
  *  2. 通常の候補: 道路のノード・辺・独立施設は表示中の階のもの（mapLevel 'all' なら全部）。滑走路・誘導路・スポットは常に候補
  *  3. 内部表示がオフのとき、建物内設備（parentFacilityId）は候補にしない
  */
@@ -38,7 +40,7 @@ export function pickCandidatesAt(layout: AirportLayout, world: Vec2, view?: Pick
   if (view?.interior.shown) {
     push(
       Object.values(layout.facilities)
-        .filter((f) => f.parentFacilityId && (f.floorIndex ?? 0) === view.interior.level)
+        .filter((f) => f.parentFacilityId && interiorFacilityMapLevel(layout, f) === view.interior.level)
         .filter((f) => {
           const d = facilityDims(f);
           return inRect(f.origin, d.w, d.h);
@@ -103,10 +105,10 @@ export function pickAt(layout: AirportLayout, world: Vec2, view?: PickView): str
   return pickCandidatesAt(layout, world, view)[0] ?? null;
 }
 
-/** 指定階のターミナル内エリアを選ぶ（小さいものを優先） */
+/** 表示中の階（絶対階層）のターミナル内エリアを選ぶ（小さいものを優先）。エリアの判定は実効階層で行う */
 export function pickTerminalArea(layout: AirportLayout, world: Vec2, level: number): string | null {
   const hits = Object.values(layout.terminalAreas)
-    .filter((a) => a.level === level && world.x >= a.origin.x && world.x < a.origin.x + a.w && world.y >= a.origin.y && world.y < a.origin.y + a.h)
+    .filter((a) => areaMapLevel(layout, a) === level && world.x >= a.origin.x && world.x < a.origin.x + a.w && world.y >= a.origin.y && world.y < a.origin.y + a.h)
     .sort((a, b) => a.w * a.h - b.w * b.h || compareIds(a.id, b.id));
   return hits[0]?.id ?? null;
 }

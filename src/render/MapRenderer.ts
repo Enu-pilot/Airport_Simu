@@ -27,7 +27,9 @@ import { edgeIndexAt, pointAt } from '../core/sim/routes';
 import type { Aircraft, UnitKind } from '../core/sim/types';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { linkBetween } from '../core/terminal/route';
-import { AREA_KIND_LABEL } from '../i18n/ja';
+import { areaMapLevel } from '../core/terminal/adjacency';
+import { terminalAreaLevelProblem } from '../core/layout/levelRules';
+import { AREA_KIND_LABEL, floorShortLabel } from '../i18n/ja';
 import { airportKpis, type AirportKpis } from '../core/analytics/kpi';
 import { heatBand, processAreaHeat, segmentEdgeLoads, staticBottlenecks } from '../core/access/heatmap';
 import { daylight } from './daylight';
@@ -927,10 +929,15 @@ export class MapRenderer {
       if (t.kind !== 'terminal') continue;
       const d = facilityDims(t);
       g.rect(t.origin.x, t.origin.y, d.w, d.h).fill({ color: 0x20262d, alpha: 0.85 });
-      if (s.overlays.labels) this.label(`lvl:${t.id}`, `${level + 1}F / ${Number(t.props.levels ?? 1)}階`, { x: t.origin.x + 1.2, y: t.origin.y - 0.6 }, cam, { size: 11, color: 0x9fd3ff });
+      // 階ラベルはターミナルごとの建物内階（表示階 − そのターミナルの地図階層）で出す。
+      // その階が建物の範囲外ならラベル自体を出さない（内外で階の意味が食い違わないように）
+      const floor = level - facilityLevel(t);
+      if (s.overlays.labels && terminalAreaLevelProblem(layout, t.id, floor) === null) {
+        this.label(`lvl:${t.id}`, `${floorShortLabel(floor)} / ${Number(t.props.levels ?? 1)}階`, { x: t.origin.x + 1.2, y: t.origin.y - 0.6 }, cam, { size: 11, color: 0x9fd3ff });
+      }
     }
     for (const a of Object.values(layout.terminalAreas)) {
-      if (a.level !== level) continue;
+      if (areaMapLevel(layout, a) !== level) continue;
       g.rect(a.origin.x + 0.05, a.origin.y + 0.05, a.w - 0.1, a.h - 0.1).fill({ color: AREA_COLOR[a.kind], alpha: 0.9 });
       g.rect(a.origin.x + 0.05, a.origin.y + 0.05, a.w - 0.1, a.h - 0.1).stroke({ width: this.px(1), color: ZONE_COLOR[a.zone], alpha: 0.9 });
       if (occupancy && ops) {
@@ -970,11 +977,16 @@ export class MapRenderer {
     if (ops) this.drawPax(ops, level);
   }
 
-  /** 旅客グループの代表点（業務計算は sim、ここでは表示だけ） */
+  /** 旅客グループの代表点（業務計算は sim、ここでは表示だけ）。level は表示中の絶対階層で、エリアの実効階層と比べる */
   private drawPax(ops: OpsState, level: number): void {
     const g = this.overlay;
     const { state, ctx } = ops.sim;
     const model = ctx.terminal;
+    const layout = ctx.layout;
+    const effLevel = (a: { terminalId: string; level: number }): number => {
+      const t = layout.facilities[a.terminalId];
+      return (t ? facilityLevel(t) : 0) + a.level;
+    };
     for (const id of state.activePax) {
       const p = state.paxGroups[id]!;
       if (!p.area) continue;
@@ -982,7 +994,7 @@ export class MapRenderer {
       if (!here) continue;
       let x: number;
       let y: number;
-      let onLevel = here.level === level;
+      let onLevel = effLevel(here) === level;
       if (p.state === 'walking' && p.route.length > 0 && p.legLength > 0) {
         const next = model.areas[p.route[0]!]!;
         const link = linkBetween(model, here.id, next.id);
@@ -997,7 +1009,7 @@ export class MapRenderer {
         } else {
           x = via.x + (next.center.x - via.x) * (d2 > 0 ? (k - d1) / d2 : 0);
           y = via.y + (next.center.y - via.y) * (d2 > 0 ? (k - d1) / d2 : 0);
-          onLevel = next.level === level;
+          onLevel = effLevel(next) === level;
         }
       } else {
         // 滞在中: エリア内の決定的な位置にばらす

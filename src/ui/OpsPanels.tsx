@@ -45,6 +45,9 @@ import {
   formatClock,
   formatSimTime,
   BUS_PHASE_LABEL,
+  FLOOR_SELECTOR_LEVELS,
+  floorNameLabel,
+  floorShortLabel,
 } from '../i18n/ja';
 
 /** 運航状態（約10Hzで更新）。sim は可変オブジェクトなので uiVersion の変化で再描画する */
@@ -89,9 +92,9 @@ export function OpsControls() {
 
       <div className="tool-group-title">ターミナル内部の表示</div>
       <div className="speed-buttons">
-        {[0, 1, 2].map((l) => (
-          <button key={l} className={interior && level === l ? 'tool active' : 'tool'} onClick={() => actions.setInteriorLevel(l)}>
-            {l + 1}F
+        {FLOOR_SELECTOR_LEVELS.map((l) => (
+          <button key={l} className={interior && level === l ? 'tool active' : 'tool'} onClick={() => actions.setInteriorLevel(l)} title={floorNameLabel(l)}>
+            {floorShortLabel(l)}
           </button>
         ))}
         <button className={!interior ? 'tool active' : 'tool'} disabled={!interior} title={!interior ? '現在は外観表示です（階ボタンを押すとターミナル内部を表示します）' : '外観表示に戻します'} onClick={() => interior && actions.toggleOverlay('interior')}>

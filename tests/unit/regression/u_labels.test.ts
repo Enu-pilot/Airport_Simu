@@ -35,6 +35,30 @@ describe('施設ラベル・内部設備の表示条件（1-05: W-1・W-2）', (
   });
 });
 
+describe('内部設備の実効階層（親の地図階層＋floorIndex）', () => {
+  it('親が地下 1 階にあると、floorIndex 1 の設備は表示階 0（地上）に出る', () => {
+    // 地下に単独で置ける building 層の親として地下駅（railStation）を使う
+    let l = must(placeFacility(emptyLayout(), 'railStation', { x: 10, y: 10 }, { mapLevel: -1, props: { levels: 2 } })).layout;
+    const parent = Object.values(l.facilities).find((f) => f.kind === 'railStation')!;
+    l = must(placeFacility(l, 'gseBase', { x: parent.origin.x, y: parent.origin.y }, { parentFacilityId: parent.id, floorIndex: 1 })).layout;
+    l = must(placeFacility(l, 'gseBase', { x: parent.origin.x + 3, y: parent.origin.y }, { parentFacilityId: parent.id, floorIndex: 0 })).layout;
+    const upper = Object.values(l.facilities).find((f) => f.parentFacilityId && (f.floorIndex ?? 0) === 1)!.id;
+    const lower = Object.values(l.facilities).find((f) => f.parentFacilityId && (f.floorIndex ?? 0) === 0)!.id;
+    // 実効階層: upper = -1 + 1 = 0、lower = -1 + 0 = -1
+    expect(visibleInteriorFacilityIds(l, 0)).toEqual([upper]);
+    expect(visibleInteriorFacilityIds(l, -1)).toEqual([lower]);
+    expect(visibleInteriorFacilityIds(l, 1)).toEqual([]);
+  });
+  it('親が高架 1 階にあると、floorIndex 0 の設備は表示階 1 に出る', () => {
+    let l = must(placeFacility(emptyLayout(), 'hangar', { x: 10, y: 10 }, { mapLevel: 1, props: { levels: 2 } })).layout;
+    const parent = Object.values(l.facilities).find((f) => f.kind === 'hangar')!;
+    l = must(placeFacility(l, 'gseBase', { x: parent.origin.x + 1, y: parent.origin.y + 1 }, { parentFacilityId: parent.id, floorIndex: 0 })).layout;
+    const inner = Object.values(l.facilities).find((f) => f.parentFacilityId)!.id;
+    expect(visibleInteriorFacilityIds(l, 1)).toEqual([inner]);
+    expect(visibleInteriorFacilityIds(l, 0)).toEqual([]);
+  });
+});
+
 describe('接続設備の和名（W-8）', () => {
   it('connectorKind があり名前が空か内部名のとき、和名と番号で表示する。保存データの name は変えない', () => {
     let l = must(addRoadPath(emptyLayout(60, 60), [{ x: 10, y: 10 }, { x: 20, y: 10 }], { roadClass: 'walkway', level: 0, capacityPerHour: 600 })).layout;
