@@ -19,6 +19,15 @@ const OPERABLE = Object.keys(AIRCRAFT_TYPES);
  * 1 日 1 件の貨物枠を先に取るため、評価を 75 にすると同じ航空会社 NP
  * （貨物適格・国際旅客あり・最低評価なし）だけで格 3/4 を比較でき、
  * 「国ゲート」だけを切り分けて検証できる。
+ *
+ * 機能F（架空会社の就航制限）導入後の組み替え: NP は架空会社になり、
+ * 格 3 以上では架空の目的地にしか飛べなくなった。架空の海外目的地
+ * （NDB/BNH/LUM）は最低評価が 85/85/90 のため、評価 75 の構成では
+ * NP の国際貨物自体が消え、「格 4 で国際が出る」側の断言が NP 前提では
+ * 成立しない。そのため国際貨物の出現側の断言は、評価 90＋実在会社 SK
+ * （格 4 解放・最低評価 80）基準に移した。格 3 で国際ゼロの検証は
+ * CARGO-08 のゲートが格で閉じるため評価 90 でも効く（格 3・評価 90 でも
+ * 国際貨物は 0 件であることを実入口のテストで併せて確認する）。
  */
 function cargoCareer(tier: Tier, seed: string, rating = 75): CompanyState {
   const c = createCompany('career', seed);
@@ -68,12 +77,13 @@ describe('CARGO-08 国際貨物の格ゲート（実検証）', () => {
     expect(offers.every((o) => o.airlineId === 'NP')).toBe(true);
   });
 
-  it('格 4: 同じ会社構成で国際貨物提案が実際に出現する', () => {
-    const offers = sweepCargoOffers(4);
+  it('格 4: 評価 90 では実在会社 SK から国際貨物提案が実際に出現する', () => {
+    // 機能F以降、国際の出現側は NP（架空）でなく SK（実在）で検証する（冒頭コメント参照）
+    const offers = sweepCargoOffers(4, 90);
     const intl = offers.filter(isIntl);
     expect(offers.length).toBeGreaterThanOrEqual(60);
     expect(intl.length).toBeGreaterThanOrEqual(5);
-    expect(intl.every((o) => o.airlineId === 'NP')).toBe(true);
+    expect(intl.filter((o) => o.airlineId === 'SK').length).toBeGreaterThanOrEqual(5);
     // 国内貨物も引き続き出る（格 4 で国内が消えていない）
     expect(offers.length - intl.length).toBeGreaterThanOrEqual(5);
   });
@@ -86,17 +96,22 @@ describe('CARGO-08 国際貨物の格ゲート（実検証）', () => {
   });
 
   it('実入口 generateOffers 経由でも、格 3 は国際貨物なし・格 4 は出現する', () => {
+    // 評価 90 で掃引し、格 4 の出現は実在会社 SK の国際貨物でも裏付ける（機能F対応。冒頭コメント参照）
     for (const tier of [3, 4] as Tier[]) {
       let cargoTotal = 0;
       let cargoIntl = 0;
+      let cargoIntlSK = 0;
       for (let s = 0; s < 3; s++) {
-        const c = cargoCareer(tier, `cargo-gate-full-${tier}-${s}`);
+        const c = cargoCareer(tier, `cargo-gate-full-${tier}-${s}`, 90);
         for (let d = 0; d < DAYS; d++) {
           c.day = d;
           for (const o of generateOffers(c, OPERABLE, 'JP', true)) {
             if (o.kind === 'cargo') {
               cargoTotal++;
-              if (isIntl(o)) cargoIntl++;
+              if (isIntl(o)) {
+                cargoIntl++;
+                if (o.airlineId === 'SK') cargoIntlSK++;
+              }
             }
             o.status = 'expired';
           }
@@ -104,7 +119,10 @@ describe('CARGO-08 国際貨物の格ゲート（実検証）', () => {
       }
       expect(cargoTotal).toBeGreaterThan(0);
       if (tier === 3) expect(cargoIntl).toBe(0);
-      else expect(cargoIntl).toBeGreaterThanOrEqual(3);
+      else {
+        expect(cargoIntl).toBeGreaterThanOrEqual(3);
+        expect(cargoIntlSK).toBeGreaterThanOrEqual(3);
+      }
     }
   });
 });
@@ -164,10 +182,13 @@ describe('F6-07 貨物の格境界（格 2 以下と格 5〜7）', () => {
   });
 
   it('格 5〜7: 国際貨物提案が引き続き出現する（上位格で後退しない）', () => {
+    // 出現側は評価 90＋実在会社 SK 基準（機能F対応。冒頭コメント参照）
     for (const tier of [5, 6, 7] as Tier[]) {
-      const offers = sweepCargoOffers(tier);
+      const offers = sweepCargoOffers(tier, 90);
+      const intl = offers.filter(isIntl);
       expect(offers.length).toBeGreaterThanOrEqual(60);
-      expect(offers.filter(isIntl).length).toBeGreaterThanOrEqual(5);
+      expect(intl.length).toBeGreaterThanOrEqual(5);
+      expect(intl.filter((o) => o.airlineId === 'SK').length).toBeGreaterThanOrEqual(5);
     }
   });
 });

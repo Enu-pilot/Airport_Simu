@@ -851,6 +851,7 @@ export const CONTRACT_ACTION_LABEL: Record<Exclude<ContractActionResult, { ok: t
   LOCKED: 'この種類の契約はまだ解放されていないか、有効化されていません',
   NO_CHANGE: '逆提案の内容が現在の条件と同じです',
   COUNTER_TOO_SOON: '逆提案は断られた当日には再提案できません',
+  NOT_REASSIGNABLE: '付け替えできません（対象外の契約か、条件を満たす実在会社がありません）',
 };
 
 export const PLAN_ISSUE_LABEL: Record<PlanIssueCode, string> = {

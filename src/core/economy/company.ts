@@ -2,7 +2,7 @@ import { Rng, type RngState } from '../rng';
 import { compareIds } from '../model/ids';
 import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
-import { AIRLINES, HOME_COUNTRY_ID, airlineDef, airlineNetworkAllows, airlinesFor, destinationDef, destinationsFor, findAirline, findDestination, resolveAirlineId, resolveDestinationId, routeAvailability, type DestinationDef, type FleetEntry } from './registry';
+import { AIRLINES, FICTIONAL_RESTRICTION_TIER, HOME_COUNTRY_ID, airlineDef, airlineFictionalAllows, airlineNetworkAllows, airlinesFor, destinationDef, destinationsFor, findAirline, findDestination, resolveAirlineId, resolveDestinationId, routeAvailability, type AirlineDef, type DestinationDef, type FleetEntry } from './registry';
 import { routeDemand } from './demand';
 import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
 import { checkGameSettings, otpAddOf, type GameSettings } from './game';
@@ -186,8 +186,7 @@ export interface DailyReport {
   /** 翌朝の出発可能機数（F6-11。翌朝 06:00–10:00 に滞泊便の出発予定がある日だけ）: 予定・確定可能・リスクあり */
   morningReadiness?: { scheduled: number; ready: number; atRisk: number };
   /** 乗継の記録（フェーズ 4 §5.6。ハブが有効な日だけ） */
-  hub?: { spawned: number; connected: number; missed: number; noShow: number; /** 乗継リンク（ターミナル連絡設備）別の接続成功数。その日の増分のみ。持たない旧日報では未表示 */
-    byLink?: Record<string, number> };
+  hub?: { spawned: number; connected: number; missed: number; noShow: number };
   /**
    * 乗継 OD 集計（5A。ハブが有効で、その日の計画に乗継配分があった日だけ）:
    * 計画時に OD（到着路線 × 出発路線）ごとに配分した人数と魅力/品質の内訳。
@@ -486,7 +485,7 @@ export function addContract(c: CompanyState, k: Omit<Contract, 'id' | 'numberBas
 
 // ---------------------------------------------------------------- プレイヤーの操作
 
-export type ContractActionResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'NOT_OFFERED' | 'NOT_ACTIVE' | 'UNSUPPORTED' | 'AIRLINE_ROUTE_UNSUPPORTED' | 'INTERNATIONAL_PROCESSING_REQUIRED' | 'CAPACITY_INSUFFICIENT' | 'AIRLINE_REFUSED' | 'MIN_FREQUENCY' | 'LOCKED' | 'NO_CHANGE' | 'COUNTER_TOO_SOON' };
+export type ContractActionResult = { ok: true } | { ok: false; reason: 'NOT_FOUND' | 'NOT_OFFERED' | 'NOT_ACTIVE' | 'UNSUPPORTED' | 'AIRLINE_ROUTE_UNSUPPORTED' | 'INTERNATIONAL_PROCESSING_REQUIRED' | 'CAPACITY_INSUFFICIENT' | 'AIRLINE_REFUSED' | 'MIN_FREQUENCY' | 'LOCKED' | 'NO_CHANGE' | 'COUNTER_TOO_SOON' | 'NOT_REASSIGNABLE' };
 
 /** 提案を受け入れる（翌運航日から有効）。supported = 空港で運航可能な機種か */
 export function acceptOffer(
@@ -641,7 +640,7 @@ export function allowedTerminalsFor(
 }
 
 /** 契約一覧のソートキー（航空会社・行き先は登録データの名称順、時間帯は朝→昼→夕→終日） */
-export type ContractSortKey = 'airline' | 'destination' | 'window' | 'status' | 'perDay' | 'startDay' | 'endDay' | 'type';
+export type ContractSortKey = 'airline' | 'destination' | 'window' | 'status' | 'perDay' | 'startDay';
 
 const CONTRACT_WINDOW_ORDER: Record<TimeWindow, number> = { morning: 0, daytime: 1, evening: 2, any: 3 };
 const CONTRACT_STATUS_ORDER: Record<Contract['status'], number> = { active: 0, offered: 1, ended: 2, expired: 3, withdrawn: 4, rejected: 5 };
@@ -662,10 +661,6 @@ export function sortContracts(contracts: readonly Contract[], key: ContractSortK
         return b.perDay - a.perDay || a.startDay - b.startDay;
       case 'startDay':
         return a.startDay - b.startDay || a.endDay - b.endDay;
-      case 'endDay':
-        return a.endDay - b.endDay || a.startDay - b.startDay;
-      case 'type':
-        return resolveType(AIRCRAFT_TYPES, a.typeId).label.localeCompare(resolveType(AIRCRAFT_TYPES, b.typeId).label, 'ja') || compareIds(a.typeId, b.typeId);
     }
   };
   return [...contracts].sort((a, b) => by(a, b) || compareIds(a.id, b.id));
@@ -692,6 +687,18 @@ function withRng<T>(c: CompanyState, fn: (rng: Rng) => T): T {
 }
 
 /**
+ * 架空会社の就航制限（機能F）に使う格。目標（goals）のある会社だけが対象で、それ以外は 0（制限なし）。
+ * effectiveTier は使わない: サンドボックス・目標なしを全解放（7）として返すため、制限が常時掛かってしまう。
+ * unlock.minTier の既存判定と同じ形（game.goals フラグと goals 本体の両方があるときだけ格で絞る）。
+ */
+const fictionalTierOf = (c: CompanyState): number => (c.game?.goals && c.goals ? c.goals.tier : 0);
+
+/** 架空会社の就航制限が効いているか（目標のある会社で格が閾値以上） */
+export function fictionalRestrictionActive(c: CompanyState): boolean {
+  return fictionalTierOf(c) >= FICTIONAL_RESTRICTION_TIER;
+}
+
+/**
  * 新しい契約提案を作る。航空会社ごとに、空港評価が高いほど提案しやすい。
  * operableTypes = 現在の空港で運航できる機種（それ以外の機種の提案も「受け入れ不可」として届く）
  */
@@ -703,6 +710,7 @@ export function generateOffers(
 ): Contract[] {
   const out: Contract[] = [];
   const open = () => contractsOf(c, 'offered').length;
+  const tier = fictionalTierOf(c);
   withRng(c, (rng) => {
     for (const a of airlinesFor(c)) {
       if (open() >= BALANCE.offers.maxOpen) break;
@@ -717,7 +725,7 @@ export function generateOffers(
       const dests = destinationsFor(c).filter((d) => {
         if (served.has(d.id) || c.rating < (d.minimumAirportRating ?? 0)) return false;
         if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
-        return airlineNetworkAllows(a, d) && routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
+        return airlineNetworkAllows(a, d) && airlineFictionalAllows(a, d, tier) && routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
       });
       if (dests.length === 0) continue;
       // market 有効時（フェーズ 3 §4.3）: 行き先は未充足需要 w = max(0.05, D_r − S_r) の重みで選ぶ（乱数は 1 回だけ使う）
@@ -806,6 +814,7 @@ export function generatePhase4Offers(
   const wantBased = featureOn(c, 'based');
   if (!wantOvernight && !wantBased) return out;
   const rng = new Rng(`${c.seed}:offers4:${c.day}`);
+  const tier = fictionalTierOf(c);
   // 新しい種類の提案は従来の枠（maxOpen）とは別に最大 2 件まで（従来の提案を押し出さない）
   const open = () => contractsOf(c, 'offered').filter((k) => k.kind !== undefined).length + out.length;
   for (const a of airlinesFor(c)) {
@@ -816,7 +825,7 @@ export function generatePhase4Offers(
     const dests = destinationsFor(c).filter((d) => {
       if (c.rating < (d.minimumAirportRating ?? 0)) return false;
       if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
-      return airlineNetworkAllows(a, d) && routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
+      return airlineNetworkAllows(a, d) && airlineFictionalAllows(a, d, tier) && routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
     });
     const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId).filter((t) => operable.includes(t));
     if (own.length === 0) continue;
@@ -863,6 +872,7 @@ export function generateCargoOffers(
   const out: Contract[] = [];
   if (!featureOn(c, 'cargo') || !c.city) return out;
   const rng = new Rng(`${c.seed}:offersCargo:${c.day}`);
+  const tier = fictionalTierOf(c);
   // addContract は生成と同時に c.contracts へ status 'offered' で登録するので、contractsOf だけで
   // 生成直後の分も数えられる（out.length を足すと二重に数えて上限 2 件が実質 1 件になっていた）
   const open = () => contractsOf(c, 'offered').filter((k) => k.kind === 'cargo').length;
@@ -884,6 +894,7 @@ export function generateCargoOffers(
       if (c.rating < (d.minimumAirportRating ?? 0)) return false;
       if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
       if (!airlineNetworkAllows(a, d)) return false;
+      if (!airlineFictionalAllows(a, d, tier)) return false;
       if (routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) !== 'available') return false;
       // 国際貨物は格 4（国際空港）が必要（CARGO-08）。国内貨物は貨物解放の格 3 で足りる
       if (d.countryId !== originCountryId && effectiveTier(c) < 4) return false;
@@ -1036,51 +1047,107 @@ export interface NetworkReassignment {
   toAirlineId: string;
 }
 
+/** 付け替え候補の判定に使う会社の機材（貨物契約は旅客フリート＋貨物専用機のうち容積が判明している機種） */
+function reassignmentFleetTypes(c: CompanyState, a: AirlineDef, isCargo: boolean): AircraftTypeId[] {
+  return isCargo
+    ? [...new Set([...(c.fleets[a.id] ?? a.fleet).map((e) => e.typeId), ...(a.cargoFleet ?? [])])].filter((t) => cargoHoldM3(t) !== null)
+    : (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId);
+}
+
+/**
+ * 契約の航空会社付け替え候補（決定的順序）を返す共通処理。読み込み時の範囲外付け替えと
+ * 架空会社の持ち替え（機能F）で、候補条件と順序を共有する（二重実装を避ける）。
+ * - 条件: 目的地が就航範囲内 / 路線種別・サービス（旅客・貨物）に対応 / 空港評価の要件を満たす /
+ *   契約機種と同じサイズ区分の機材を保有（スポットサイズ互換を壊さない）。extra は呼び出し側の追加条件。
+ * - 順序は決定的（RNG なし）: 契約機種そのものを持つ会社を最優先し、同点は会社 ID 順。
+ */
+function reassignmentCandidatesFor(c: CompanyState, k: Contract, extra: (a: AirlineDef) => boolean): AirlineDef[] {
+  const dest = findDestination(k.destinationId);
+  if (!dest) return [];
+  const isCargo = k.kind === 'cargo';
+  const wantSize = resolveType(AIRCRAFT_TYPES, k.typeId).size;
+  const caps = { originCountryId: HOME_COUNTRY_ID, internationalPassengerProcessing: true };
+  const candidates = airlinesFor(c).filter((a) => {
+    if (a.id === k.airlineId) return false;
+    if (!extra(a)) return false;
+    if (!airlineNetworkAllows(a, dest)) return false;
+    if (c.rating < (a.minimumAirportRating ?? 0)) return false;
+    if (isCargo && !airlineCargoEligible(a.id)) return false;
+    if (routeAvailability(a, dest, caps, isCargo ? 'cargo' : 'passenger') !== 'available') return false;
+    return reassignmentFleetTypes(c, a, isCargo).some((t) => resolveType(AIRCRAFT_TYPES, t).size === wantSize);
+  });
+  candidates.sort((x, y) => {
+    const ex = reassignmentFleetTypes(c, x, isCargo).includes(k.typeId) ? 0 : 1;
+    const ey = reassignmentFleetTypes(c, y, isCargo).includes(k.typeId) ? 0 : 1;
+    return ex - ey || compareIds(x.id, y.id);
+  });
+  return candidates;
+}
+
 /**
  * 就航範囲（networkDestinations）を持つ会社の有効契約のうち、範囲外の目的地のものを、
  * 路線（目的地・頻度・機種）はそのままに航空会社だけ範囲内の会社へ付け替える（2026-11-19 ユーザー決定）。
  * - 対象は status 'active' のみ。当日分の運航・計画済みの便には触らない（読み込み後の次の計画から反映される）。
- * - 候補条件: その目的地が範囲内 / 路線種別・サービス（旅客・貨物）に対応 / 空港評価の要件を満たす /
- *   契約機種と同じサイズ区分の機材を保有（スポットサイズ互換を壊さない）。
- * - 決定は決定的（RNG なし）: 契約機種そのものを持つ会社を最優先し、同点は会社 ID 順。
+ * - 候補条件と順序は reassignmentCandidatesFor（架空会社の持ち替えと共通）。
  * - 候補がなければ元の会社のまま維持する（契約は破棄しない）。
  * - 冪等: 付け替え後の契約は範囲内になるため、再実行しても何も変わらない。
  */
 export function reassignOutOfScopeContracts(c: CompanyState): NetworkReassignment[] {
   const changes: NetworkReassignment[] = [];
-  const pool = airlinesFor(c);
-  const caps = { originCountryId: HOME_COUNTRY_ID, internationalPassengerProcessing: true };
   for (const k of Object.values(c.contracts)) {
     if (k.status !== 'active') continue;
     const current = findAirline(k.airlineId);
     const dest = findDestination(k.destinationId);
     if (!current?.networkDestinations || !dest) continue;
     if (airlineNetworkAllows(current, dest)) continue;
-    const isCargo = k.kind === 'cargo';
-    const wantSize = resolveType(AIRCRAFT_TYPES, k.typeId).size;
-    const fleetTypesOf = (a: (typeof pool)[number]): AircraftTypeId[] =>
-      isCargo
-        ? [...new Set([...(c.fleets[a.id] ?? a.fleet).map((e) => e.typeId), ...(a.cargoFleet ?? [])])].filter((t) => cargoHoldM3(t) !== null)
-        : (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId);
-    const candidates = pool.filter((a) => {
-      if (a.id === current.id) return false;
-      if (!airlineNetworkAllows(a, dest)) return false;
-      if (c.rating < (a.minimumAirportRating ?? 0)) return false;
-      if (isCargo && !airlineCargoEligible(a.id)) return false;
-      if (routeAvailability(a, dest, caps, isCargo ? 'cargo' : 'passenger') !== 'available') return false;
-      return fleetTypesOf(a).some((t) => resolveType(AIRCRAFT_TYPES, t).size === wantSize);
-    });
-    if (candidates.length === 0) continue;
-    candidates.sort((x, y) => {
-      const ex = fleetTypesOf(x).includes(k.typeId) ? 0 : 1;
-      const ey = fleetTypesOf(y).includes(k.typeId) ? 0 : 1;
-      return ex - ey || compareIds(x.id, y.id);
-    });
-    const to = candidates[0]!;
+    const to = reassignmentCandidatesFor(c, k, () => true)[0];
+    if (!to) continue;
     changes.push({ contractId: k.id, destinationId: k.destinationId, fromAirlineId: k.airlineId, toAirlineId: to.id });
     k.airlineId = to.id;
   }
   return changes;
+}
+
+/**
+ * 架空会社の有効契約の持ち替え候補（機能F）。就航制限が効いている（格が閾値以上）間だけ候補を返す。
+ * 候補は実在会社で、共通の付け替え条件に加えて、付け替え先の解放（unlock.minTier）と
+ * 拠点契約の canBase を満たすもの。順序は reassignmentCandidatesFor と同じ決定的順序。
+ */
+export function fictionalReassignmentCandidates(c: CompanyState, k: Contract): AirlineDef[] {
+  if (k.status !== 'active') return [];
+  if (!findAirline(k.airlineId)?.fictional) return [];
+  if (!fictionalRestrictionActive(c)) return [];
+  return reassignmentCandidatesFor(c, k, (a) => {
+    if (a.fictional) return false;
+    // 付け替え先の解放（格）: 目標のある会社では unlock.minTier を現在格と比べる（提案生成の判定と同じ形）
+    if (c.game?.goals && c.goals && a.unlock.minTier !== undefined && c.goals.tier < a.unlock.minTier) return false;
+    // 拠点契約の付け替え先は拠点化できる会社に限る（架空会社は全社 canBase を持たないため現行データでは防御的な条件）
+    if (k.kind === 'based' && !a.canBase) return false;
+    return true;
+  });
+}
+
+/** 持ち替え対象になる架空会社の有効契約の数（機能F。契約パネルの案内表示用。状態から決定的に導出する派生値で、保存はしない） */
+export function fictionalActiveContractCount(c: CompanyState): number {
+  if (!fictionalRestrictionActive(c)) return 0;
+  return contractsOf(c, 'active').filter((k) => findAirline(k.airlineId)?.fictional).length;
+}
+
+/**
+ * 架空会社の有効契約を実在会社へ付け替える（機能F）。変えるのは airlineId だけで、
+ * 目的地・機種・便数・時間帯・割引・期間などの契約条件はすべて不変（付け替えによる損得は発生しない）。
+ * 付け替え先の保有機材（c.fleets）へ契約機種は補完しない: 読み込み時の付け替え
+ * reassignOutOfScopeContracts と同じ扱いで、座席数は seatsFor が機種の既定値へフォールバックする。
+ * 適用直前に候補条件を再チェックし、外れたら理由を返して何もしない。
+ */
+export function applyAirlineReassignment(c: CompanyState, contractId: string, toAirlineId: string): ContractActionResult {
+  const k = c.contracts[contractId];
+  if (!k) return { ok: false, reason: 'NOT_FOUND' };
+  if (k.status !== 'active') return { ok: false, reason: 'NOT_ACTIVE' };
+  if (toAirlineId === k.airlineId) return { ok: false, reason: 'NO_CHANGE' };
+  if (!fictionalReassignmentCandidates(c, k).some((a) => a.id === toAirlineId)) return { ok: false, reason: 'NOT_REASSIGNABLE' };
+  k.airlineId = toAirlineId;
+  return { ok: true };
 }
 
 /** 保存データの読み込み（形式が合わなければ null） */
