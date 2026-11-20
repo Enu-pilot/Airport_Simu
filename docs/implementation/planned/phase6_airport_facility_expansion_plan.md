@@ -574,3 +574,8 @@ docs/45 §8 受入チェックリスト #2（10 段階それぞれの適用要�
 
 - **F6-04 閉鎖・故障・資源不足の状態生成**: `capability.ts` に `operationalStateReadings(state, layout)` を追加。有効な障害（sim/disruptions: runwayClosed/taxiwayClosed/standClosed → closed、gateFailure/baggageFailure/vehicleFailure → failed、staffAbsence → resourceShortage）、滑走路モード closed（Work Order 実施中・障害）、閉鎖理由台帳（sim/closureState）から状態を生成する。能力値は facilityCapability の正本がある場合のみ写し、それ以外は推定で埋めない。テスト `capabilityStatesF6.test.ts` 5/5。
 - supplyShortage は F6-13（供給インフラ、PO 指示で保留中）の領域のため生成しない（テストで固定）。表示への統合（CapacityPanel / 要確認リストへの接続）は UI 担当へ引き継ぎ（HANDOFF_PROMPT.md）。
+
+### 2026-11-20 追記（F6-04 状態生成の第三弾: 設備故障台帳）
+
+- **障害に由来しない設備故障の生成**: `operationalStateReadings` が設備故障台帳（sim/baggage の `state.equipment`）も読むように拡張。ランダム故障（sim/ground の MTBF 故障）・運航画面からの手動停止で止まった仕分け設備が failed として生成される（第二弾では障害由来分のみで、旧 UI 側導出だけが拾っていた不足。UI 側は現行挙動をテストで固定し、生成拡張をバックエンド側の判断事項として切り分けていたもの）。行の形は障害由来の baggageFailure と同一（domain 'baggage'・有効能力 0）とし、理由は basis で区別する（自動復旧予定の有無 = repairUntil の有無でランダム故障／手動停止を判別）。障害由来と併存する場合は障害側の生成が優先され二重に出ない。`belt:` キー（受取所ベルト）と車両・作業員ユニットのキーは施設の行にしない（旧 UI 導出と同じ範囲。ユニットの障害由来分は従来どおり障害側で生成）。生成は読み取り専用で運航状態の変更・乱数消費なし。テスト `capabilityEquipmentF6.test.ts` 8/8。
+- UI 側への申し送り: UI 側で「既知の不足」として固定したテスト（backendFollowup65 の設備故障ケース）は前提が変わるため、failed が出る前提への書き換えが必要（書き換えは UI 担当の領分）。
