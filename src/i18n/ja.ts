@@ -18,6 +18,7 @@ import type { PlanIssueCode } from '../core/economy/planning';
 import type { AirlineScore, ScoreComponent, ScoreKey, ScoreLevel } from '../core/economy/airlineScore';
 import type { ReviewMetric } from '../core/analytics/review';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
+import { floorDisplayLabel } from '../core/model/levels';
 import { HEAT_BAND_HIGH_MIN, HEAT_BAND_MID_MIN } from '../core/access/heatmap';
 import { BALANCE } from '../core/economy/balance';
 import { CITY_NIGHT_CURFEW, NIGHT_OPS_DEFAULTS, NIGHT_OPS_RANGES } from '../core/economy/city';
@@ -407,10 +408,10 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   GATE_ROUTE_PENDING: (n) => `${n[0]} は建設中の連絡通路が完成すれば旅客が到達できるようになります（現在は未接続）`,
   FACILITY_UNDERGROUND_KIND: (n) => `${n[0]} は地下に置けない種類の施設です（地下に置けるのは駐車場・従業員駐車場・鉄道駅だけです）`,
   INTERIOR_FACILITY_UNLINKED: (n) => `${n[0]} は建物内の設備のため、地上サービス網に接続されず能力に数えられません`,
-  FACILITY_INTERIOR_INVALID: (n, p) => `${n[0]} の建物内配置が無効です（階 ${p.floor ?? '不明'} または親建物・階層を確認してください）`,
+  FACILITY_INTERIOR_INVALID: (n, p) => `${n[0]} の建物内配置が無効です（階 ${p.floorLabel ?? p.floor ?? '不明'} または親建物・階層を確認してください）`,
   FACILITY_INTERIOR_OUTSIDE: (n) => `${n[0]} が親建物 ${n[1]} の範囲外にあります`,
   TERMINAL_LINK_CLEARANCE: (n, p) => `${n[0]} の連絡通路下の航空機クリアランスが不足しています（${p.clearance}m、必要 ${p.required}m）`,
-  PORTAL_LEVEL_MISMATCH: (n, p) => `${n[0]} の歩行ポータルの階が接続先と一致しません（ポータル ${p.floorIndex} 階、エリア ${p.areaLevel} 階）`,
+  PORTAL_LEVEL_MISMATCH: (n, p) => `${n[0]} の歩行ポータルの階が接続先と一致しません（ポータル ${p.portalFloorLabel ?? `${p.floorIndex} 階`}、エリア ${p.areaFloorLabel ?? `${p.areaLevel} 階`}）`,
   PORTAL_CONNECTION_PENDING: (n, p) => `${n[0]} は建設中のポータルが完成すればターミナルと接続します（入口方向: ${portalStatusJa(p.toEntrance)}、出口方向: ${portalStatusJa(p.fromExit)}）`,
   PORTAL_UNREACHABLE: (n, p) => `${n[0]} のポータルからはターミナルの入口/出口へ到達できません（入口方向: ${portalStatusJa(p.toEntrance)}、出口方向: ${portalStatusJa(p.fromExit)}）`,
   NO_RUNWAY: () => '滑走路がありません',
@@ -1559,7 +1560,7 @@ export const PORTAL_UI = {
   addLabel: '接続先エリア',
   add: 'ポータルを作成',
   remove: '削除',
-  floor: (floorIndex: number, mapLevel: number) => `エリア ${floorIndex < 0 ? `地下${-floorIndex}階` : `${floorIndex + 1}F`} ・ 地図階層 ${mapLevel}`,
+  floor: (effectiveAreaLevel: number, mapLevel: number) => `エリア ${floorDisplayLabel(effectiveAreaLevel)} ・ 交通施設の地図階層 ${mapLevel >= 0 ? `+${mapLevel}` : `${mapLevel}`}`,
   access: '到達性（入口/出口）',
   accessValue: (toEntrance: string, fromExit: string) => `入口方向: ${toEntrance} ／ 出口方向: ${fromExit}`,
   statusOperational: '接続済み',

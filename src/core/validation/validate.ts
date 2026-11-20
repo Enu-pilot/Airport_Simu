@@ -31,11 +31,11 @@ import type { NetNode, TerminalAreaKind } from '../model/types';
 import { CONNECTOR_DETOUR, DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
 import { verifyPortalAccess } from '../terminal/networkGraph';
 import { terminalServiceComplexes } from '../terminal/serviceComplex';
-import { requiredAircraftClearanceM } from '../sim/aircraftTypes';
+import { deckElevationForCode, requiredAircraftClearanceM, requiredClearanceForCode } from '../sim/aircraftTypes';
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { findPaxRoute } from '../terminal/route';
 import { ACCESS_MAX_WALK_TILES, PARKING_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTilesAtLevel } from '../access/landside';
-import { connectorFits, facilityLevel, roadEdgeLevelValid, DEFAULT_LEVEL_HEIGHT_M } from '../model/levels';
+import { connectorFits, facilityLevel, floorDisplayLabel, roadEdgeLevelValid, DEFAULT_LEVEL_HEIGHT_M } from '../model/levels';
 import { findStationTerminalAccess } from '../access/verticalWalk';
 import { busGateStatus } from '../terminal/busGateAssignment';
 import { featureOn } from '../economy/unlocks';
@@ -1155,10 +1155,13 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
 
   for (const link of Object.values(layout.terminalLinks ?? {})) {
     if (link.kind !== 'elevatedWalkway') continue;
-    const required = requiredAircraftClearanceM();
-    const clearance = link.aircraftClearanceM ?? DEFAULT_TERMINAL_LINK_CLEARANCE_M;
-    const elevation = link.elevationM ?? DEFAULT_TERMINAL_LINK_ELEVATION_M;
-    if (clearance < required || elevation < clearance) {
+    // J-1: 下を通る最大コードの宣言があるリンクは全体基準ではなく宣言基準で判定する。
+    // 宣言なしリンクの required・既定値・条件は従来と完全一致。
+    const declared = link.crossingMaxCode !== undefined ? link.crossingMaxCode : undefined;
+    const required = declared ? requiredClearanceForCode(declared) : requiredAircraftClearanceM();
+    const clearance = link.aircraftClearanceM ?? (declared ? required : DEFAULT_TERMINAL_LINK_CLEARANCE_M);
+    const elevation = link.elevationM ?? (declared ? deckElevationForCode(declared) : DEFAULT_TERMINAL_LINK_ELEVATION_M);
+    if (clearance < required || elevation < clearance || (declared !== undefined && elevation < deckElevationForCode(declared))) {
       const area = layout.terminalAreas[link.fromAreaId];
       sink.add('TERMINAL_LINK_CLEARANCE', [link.id], { clearance, required, elevation }, area?.origin);
     }
@@ -1170,7 +1173,14 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     const area = layout.terminalAreas[portal.areaId];
     if (!facility || !area) continue;
     if (portal.floorIndex !== area.level || portal.mapLevel !== facilityLevel(facility)) {
-      sink.add('PORTAL_LEVEL_MISMATCH', [portal.id], { floorIndex: portal.floorIndex, areaLevel: area.level }, facility.origin);
+      // J-1: 階の併記ラベル（エリア側ターミナルを基点にした実効階）も渡し、メッセージで統一表記にする
+      const areaBase = layout.facilities[area.terminalId] ? facilityLevel(layout.facilities[area.terminalId]!) : 0;
+      sink.add('PORTAL_LEVEL_MISMATCH', [portal.id], {
+        floorIndex: portal.floorIndex,
+        areaLevel: area.level,
+        portalFloorLabel: floorDisplayLabel(areaBase + portal.floorIndex),
+        areaFloorLabel: floorDisplayLabel(areaBase + area.level),
+      }, facility.origin);
     }
   }
 
@@ -1338,7 +1348,7 @@ function checkFacilityHierarchy(layout: AirportLayout, sink: IssueSink): void {
     }
     const floor = facility.floorIndex ?? 0;
     if (floor < -5 || floor >= Number(parent.props.levels ?? 1) || facilityLevel(facility) !== facilityLevel(parent)) {
-      sink.add('FACILITY_INTERIOR_INVALID', [facility.id, parent.id], { floor }, facility.origin);
+      sink.add('FACILITY_INTERIOR_INVALID', [facility.id, parent.id], { floor, floorLabel: floorDisplayLabel(facilityLevel(parent) + floor) }, facility.origin);
       continue;
     }
     const parentTiles = new Set(facilityTiles(parent).map((tile) => tileKey(tile.x, tile.y)));

@@ -115,6 +115,7 @@ export function checkRunwayFields(layout: AirportLayout, where: string): string[
     if (link.widthM !== undefined && (!isFin(link.widthM) || link.widthM <= 0)) errors.push(`${where}: ターミナル連絡設備 ${id} の widthM が不正です`);
     if (link.elevationM !== undefined && (!isFin(link.elevationM) || link.elevationM <= 0)) errors.push(`${where}: ターミナル連絡設備 ${id} の elevationM が不正です`);
     if (link.aircraftClearanceM !== undefined && (!isFin(link.aircraftClearanceM) || link.aircraftClearanceM <= 0)) errors.push(`${where}: ターミナル連絡設備 ${id} の aircraftClearanceM が不正です`);
+    if (link.crossingMaxCode !== undefined && !['C', 'E', 'F'].includes(String(link.crossingMaxCode))) errors.push(`${where}: ターミナル連絡設備 ${id} の crossingMaxCode が不正です`);
     if (typeof link.bidirectional !== 'boolean' || !['operational', 'underConstruction', 'planned'].includes(String(link.buildState))) errors.push(`${where}: ターミナル連絡設備 ${id} の状態が不正です`);
     if (!Array.isArray(link.allowedZones) || !link.allowedZones.length || link.allowedZones.some((zone) => zone !== 'landside' && zone !== 'departure' && zone !== 'arrival')) errors.push(`${where}: ターミナル連絡設備 ${id} の利用区域が不正です`);
   }
