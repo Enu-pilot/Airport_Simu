@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
-import { contractsOf, seatsFor, sortContracts, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type ContractSortKey, type DailyKpi, type DailyReport, type WorkOrderAssetKind, type WorkOrderKind } from '../core/economy/company';
+import { contractsOf, seatsFor, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type DailyKpi, type DailyReport, type WorkOrderAssetKind, type WorkOrderKind } from '../core/economy/company';
 import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
 import { airlineDef, airlinesFor, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
@@ -144,86 +144,6 @@ export function WorkOrdersPanel() {
   );
 }
 
-/**
- * 航空会社の使用ターミナル制限（運用ポリシー）: 会社ごとに国内線・国際線それぞれ、
- * 使ってよいターミナルを選ぶ。未設定（チェックなしで保存された状態）= 制限なし。
- * 制限がある場合、スポット割当は許可ターミナル内に限られ、空きがあっても他ターミナルへは回らない。
- * 契約の専用スポットと運航中のスポット指定は、より具体的な指示として制限より優先する。
- */
-export function AirlineTerminalsPanel({ company: c }: { company: CompanyState }) {
-  const layout = useLayout();
-  const terminals = Object.values(layout.facilities)
-    .filter((f) => f.kind === 'terminal')
-    .sort((a, b) => (a.id < b.id ? -1 : 1));
-  const airlineIds = [...new Set([
-    ...Object.values(c.contracts).filter((k) => k.status === 'active' || k.status === 'offered').map((k) => k.airlineId),
-    ...Object.keys(c.airlineTerminals ?? {}),
-  ])].sort((a, b) => airlineDef(a).name.localeCompare(airlineDef(b).name, 'ja') || (a < b ? -1 : 1));
-  const toggle = (airlineId: string, rt: 'domestic' | 'international', terminalId: string, checked: boolean) => {
-    const current = c.airlineTerminals?.[airlineId]?.[rt];
-    const next = checked ? [...(current ?? []), terminalId] : (current ?? []).filter((id) => id !== terminalId);
-    companyActions.setAirlineTerminals(airlineId, rt, next.length > 0 ? next : null);
-  };
-  const cell = (airlineId: string, rt: 'domestic' | 'international') => {
-    const current = c.airlineTerminals?.[airlineId]?.[rt];
-    return (
-      <td>
-        {terminals.map((t) => (
-          <label key={t.id} className="small" style={{ display: 'block' }}>
-            <input
-              type="checkbox"
-              checked={!!current?.includes(t.id)}
-              onChange={(e) => toggle(airlineId, rt, t.id, e.target.checked)}
-              data-testid={`terminal-policy-${airlineId}-${rt}-${t.id}`}
-            />{' '}
-            {displayName(layout, t.id)}
-          </label>
-        ))}
-        {current && current.length > 0 ? (
-          <button type="button" onClick={() => companyActions.setAirlineTerminals(airlineId, rt, null)} data-testid={`terminal-policy-clear-${airlineId}-${rt}`}>
-            制限なしに戻す
-          </button>
-        ) : (
-          <span className="muted small">制限なし</span>
-        )}
-      </td>
-    );
-  };
-  return (
-    <section data-testid="airline-terminals-panel">
-      <h4>航空会社の使用ターミナル</h4>
-      <p className="muted small">
-        チェックしたターミナルだけを、その航空会社の便が使えます（国内線・国際線は別々に設定できます）。制限なしの会社はどのターミナルでも使えます。
-        制限のせいで許可ターミナル内にスポットがない便は、他のターミナルへは回らず待機します。設定は次のスポット割当から効き、運航中の機体のスポットは変わりません。貨物便は対象外です。
-      </p>
-      {terminals.length === 0 ? (
-        <div className="empty">ターミナルがありません</div>
-      ) : airlineIds.length === 0 ? (
-        <div className="empty">契約のある航空会社がありません</div>
-      ) : (
-        <table className="board" data-testid="airline-terminals">
-          <thead>
-            <tr>
-              <th>航空会社</th>
-              <th>国内線で使えるターミナル</th>
-              <th>国際線で使えるターミナル</th>
-            </tr>
-          </thead>
-          <tbody>
-            {airlineIds.map((id) => (
-              <tr key={id} data-testid={`airline-terminals-${id}`}>
-                <td>{airlineDef(id).name}</td>
-                {cell(id, 'domestic')}
-                {cell(id, 'international')}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
-  );
-}
-
 // ---------------------------------------------------------------- 運航計画
 
 export function PlanPanel() {
@@ -239,13 +159,11 @@ export function PlanPanel() {
   const analysis = analyzeDayPlan(plan, ctx);
   const issueKeys = new Map<string, string[]>();
   for (const i of analysis.issues) for (const k of i.keys) issueKeys.set(k, [...(issueKeys.get(k) ?? []), PLAN_ISSUE_LABEL[i.code]]);
-  const [contractSort, setContractSort] = useState<ContractSortKey>('airline');
-  const active = sortContracts(contractsOf(c, 'active'), contractSort);
-  const offers = sortContracts(contractsOf(c, 'offered'), contractSort);
-  const past = sortContracts(
-    contractsOf(c).filter((k) => k.status !== 'active' && k.status !== 'offered'),
-    contractSort,
-  ).slice(-8);
+  const active = contractsOf(c, 'active');
+  const offers = contractsOf(c, 'offered');
+  const past = contractsOf(c)
+    .filter((k) => k.status !== 'active' && k.status !== 'offered')
+    .slice(-8);
   const name = (id: string | null) => (id ? displayName(layout, id).replace(/^(スポット|搭乗ゲート) /, '') : '—');
 
   return (
@@ -264,23 +182,8 @@ export function PlanPanel() {
         <CityEventPlanner company={c} />
         {c.city && <NightOpsSettings city={c.city} readOnly={mode === 'operate'} onChange={(next) => { const { nightOps: _n, ...rest } = c.city!; void _n; setCompanyCity(next ? { ...rest, nightOps: next } : rest); }} />}
         <WorkOrdersPanel />
-        <AirlineTerminalsPanel company={c} />
         <section>
           <h4>契約中の路線</h4>
-          <div className="small">
-            <label>
-              並び替え{' '}
-              <select value={contractSort} onChange={(e) => setContractSort(e.target.value as ContractSortKey)} data-testid="contract-sort">
-                <option value="airline">航空会社</option>
-                <option value="destination">行き先</option>
-                <option value="window">時間帯</option>
-                <option value="status">状態</option>
-                <option value="perDay">便数</option>
-                <option value="startDay">開始日</option>
-              </select>
-            </label>
-            <span className="muted">（契約中・提案・終了分すべてに適用されます）</span>
-          </div>
           <table className="board" data-testid="contracts">
             <thead>
               <tr>

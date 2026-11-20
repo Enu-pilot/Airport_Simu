@@ -291,18 +291,6 @@ export interface CompanyState {
   hub?: HubSettings;
   /** 夜間整備・工事の Work Order（5-25）。欠落 = 機能オフ（旧セーブ互換） */
   workOrders?: Record<string, WorkOrder>;
-  /**
-   * 航空会社ごとの使用ターミナル制限（プレイヤーが設定する運用ポリシー。カタログの静的データではない）。
-   * 航空会社 ID → 路線種別ごとの許可ターミナル（ターミナル施設 ID）の集合。
-   * 欠落・空 = その種別は無制限（どのターミナルでもよい）。旧セーブ互換の任意項目で、保存形式の版は上げない。
-   */
-  airlineTerminals?: Record<string, AirlineTerminalPolicy>;
-}
-
-/** 航空会社の使用ターミナル制限（路線種別ごと。欠落・空配列 = 無制限） */
-export interface AirlineTerminalPolicy {
-  domestic?: string[];
-  international?: string[];
 }
 
 /** Work Order の対象資産 */
@@ -601,69 +589,6 @@ export function setDedicatedStand(c: CompanyState, id: string, standId: string |
   if (standId) k.dedicatedStandId = standId;
   else delete k.dedicatedStandId;
   return { ok: true };
-}
-
-/**
- * 航空会社の使用ターミナル制限の設定・解除。terminalIds が null または空なら
- * その路線種別は無制限に戻す（キー自体を消す）。許可リストは重複を除き ID 順に正規化する
- * （決定的な形で保存し、比較・往復を安定させる）。
- */
-export function setAirlineTerminals(
-  c: CompanyState,
-  airlineId: string,
-  routeType: 'domestic' | 'international',
-  terminalIds: readonly string[] | null,
-): void {
-  const ids = [...new Set((terminalIds ?? []).filter((id) => typeof id === 'string' && id.length > 0))].sort(compareIds);
-  const policies = (c.airlineTerminals ??= {});
-  const policy: AirlineTerminalPolicy = { ...(policies[airlineId] ?? {}) };
-  if (ids.length === 0) delete policy[routeType];
-  else policy[routeType] = ids;
-  if (policy.domestic === undefined && policy.international === undefined) delete policies[airlineId];
-  else policies[airlineId] = policy;
-  if (Object.keys(policies).length === 0) delete c.airlineTerminals;
-}
-
-/**
- * その航空会社・路線種別に許可されたターミナルの集合。未設定（欠落・空）なら null = 無制限。
- * スポット割当（運航・計画）が参照する唯一の判定入口。
- */
-export function allowedTerminalsFor(
-  c: Pick<CompanyState, 'airlineTerminals'> | null | undefined,
-  airlineId: string | null | undefined,
-  routeType: 'domestic' | 'international',
-): ReadonlySet<string> | null {
-  if (!c || !airlineId) return null;
-  const list = c.airlineTerminals?.[airlineId]?.[routeType];
-  if (!list || list.length === 0) return null;
-  return new Set(list);
-}
-
-/** 契約一覧のソートキー（航空会社・行き先は登録データの名称順、時間帯は朝→昼→夕→終日） */
-export type ContractSortKey = 'airline' | 'destination' | 'window' | 'status' | 'perDay' | 'startDay';
-
-const CONTRACT_WINDOW_ORDER: Record<TimeWindow, number> = { morning: 0, daytime: 1, evening: 2, any: 3 };
-const CONTRACT_STATUS_ORDER: Record<Contract['status'], number> = { active: 0, offered: 1, ended: 2, expired: 3, withdrawn: 4, rejected: 5 };
-
-/** 契約をキー順に並べ替える（決定的：同順位は契約 ID 順。元の配列は変更しない） */
-export function sortContracts(contracts: readonly Contract[], key: ContractSortKey): Contract[] {
-  const by = (a: Contract, b: Contract): number => {
-    switch (key) {
-      case 'airline':
-        return airlineDef(a.airlineId).name.localeCompare(airlineDef(b.airlineId).name, 'ja') || compareIds(a.airlineId, b.airlineId);
-      case 'destination':
-        return destinationDef(a.destinationId).name.localeCompare(destinationDef(b.destinationId).name, 'ja') || compareIds(a.destinationId, b.destinationId);
-      case 'window':
-        return CONTRACT_WINDOW_ORDER[a.window] - CONTRACT_WINDOW_ORDER[b.window] || a.startDay - b.startDay;
-      case 'status':
-        return CONTRACT_STATUS_ORDER[a.status] - CONTRACT_STATUS_ORDER[b.status] || a.startDay - b.startDay;
-      case 'perDay':
-        return b.perDay - a.perDay || a.startDay - b.startDay;
-      case 'startDay':
-        return a.startDay - b.startDay || a.endDay - b.endDay;
-    }
-  };
-  return [...contracts].sort((a, b) => by(a, b) || compareIds(a.id, b.id));
 }
 
 export function setFees(c: CompanyState, fees: Partial<FeeSettings>): void {
@@ -1135,26 +1060,6 @@ export function importCompany(json: string): CompanyState | null {
         const f = (c.fleets[k.airlineId] ??= []);
         if (!f.some((e) => e.typeId === k.typeId)) f.push({ typeId: k.typeId, seats: resolveType(AIRCRAFT_TYPES, k.typeId).seats });
       }
-    }
-    // 使用ターミナル制限（airlineTerminals）: 形が不正な項目は捨てる（寛容読み込み。他の任意項目と同じ扱い）
-    if (c.airlineTerminals !== undefined) {
-      const clean: Record<string, AirlineTerminalPolicy> = {};
-      if (c.airlineTerminals && typeof c.airlineTerminals === 'object' && !Array.isArray(c.airlineTerminals)) {
-        for (const [airlineId, policy] of Object.entries(c.airlineTerminals)) {
-          if (!policy || typeof policy !== 'object' || Array.isArray(policy)) continue;
-          const out: AirlineTerminalPolicy = {};
-          for (const rt of ['domestic', 'international'] as const) {
-            const list = (policy as AirlineTerminalPolicy)[rt];
-            if (Array.isArray(list)) {
-              const ids = [...new Set(list.filter((id): id is string => typeof id === 'string' && id.length > 0))].sort(compareIds);
-              if (ids.length > 0) out[rt] = ids;
-            }
-          }
-          if (out.domestic || out.international) clean[resolveAirlineId(airlineId)] = out;
-        }
-      }
-      if (Object.keys(clean).length > 0) c.airlineTerminals = clean;
-      else delete c.airlineTerminals;
     }
     // 就航範囲外の既存契約を範囲内の会社へ付け替える（冪等。形式バージョンは上げない）
     reassignOutOfScopeContracts(c);
