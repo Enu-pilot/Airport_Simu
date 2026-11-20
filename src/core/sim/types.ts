@@ -58,7 +58,6 @@ export type HoldReason =
   | 'noStand' // 空きスポットがない
   | 'standTooSmall' // 空きスポットはあるが機体区分（サイズ/コードF）に適合しない
   | 'gateRouteMismatch' // 適合する空きスポットはあるがゲートの国内/国際区分が便と合わない
-  | 'terminalRestricted' // 適合する空きスポットはあるが、その航空会社に許可されたターミナルの範囲外で使えない
   | 'noDepartureRoute' // スポットはあるが折り返し出発の経路（離陸距離を満たす滑走路入口までの経路）が確保できない
   | 'noRunway' // 使用できる滑走路がない
   | 'noRoute' // ネットワーク上に経路がない

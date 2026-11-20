@@ -68,8 +68,7 @@ import { createAccessRuntime, refreshAccess, stepAccess } from '../access/runtim
 import { stepDisruptions, weatherEffects, type ResponseResult } from './disruptions';
 import { createWx, rollWeatherGoAround, disruptionScaleFor, stepWeather } from './weatherStep';
 import { createAnalytics, stepAnalytics } from '../analytics/records';
-import { allowedTerminalsFor, type CompanyState } from '../economy/company';
-import { standTerminalId } from '../terminal/standTerminal';
+import type { CompanyState } from '../economy/company';
 import { companyDayOf, createEconomy, onFlightLost, onLanding, onTakeoff, stepEconomy } from '../economy/ops';
 import { stepWorkOrders } from './workOrders';
 import { analyzeDayPlan, planDayWithDemand } from '../economy/planning';
@@ -286,7 +285,6 @@ const HOLD_TO_DELAY: Partial<Record<HoldReason, DelayCause>> = {
   noStand: 'noStand',
   standTooSmall: 'noStand',
   gateRouteMismatch: 'noStand',
-  terminalRestricted: 'noStand',
   noDepartureRoute: 'noRoute',
   separation: 'runwayQueue',
   runwayBusy: 'runwayQueue',
@@ -747,20 +745,6 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
   const dedicatedOthers = new Set(
     Object.values(sim.company?.contracts ?? {}).filter((k) => k.status === 'active' && k.dedicatedStandId && k.id !== arrival.contractId).map((k) => k.dedicatedStandId!),
   );
-  // 航空会社の使用ターミナル制限（旅客便のみ。貨物便は対象外）。未設定 = 無制限。
-  // 許可ターミナル内に適合スポットがなければ、他ターミナルへは回さず terminalRestricted として待機する。
-  // 運航者が指定したスポット（reassignStand）と契約の専用スポットは、より具体的な指示として制限より優先する。
-  const isCargoFlight = !!arrival.cargo || myContract?.kind === 'cargo';
-  const allowedTerminals = isCargoFlight ? null : allowedTerminalsFor(sim.company, airlineId, flightRt);
-  const terminalOfCache = new Map<string, string | null>();
-  const policyAllows = (standId: string): boolean => {
-    if (!allowedTerminals) return true;
-    if (standId === ac.requestedStandId || standId === dedicatedMine) return true;
-    if (!terminalOfCache.has(standId)) terminalOfCache.set(standId, standTerminalId(ctx, standId, state.closures.gates));
-    const t = terminalOfCache.get(standId);
-    return t != null && allowedTerminals.has(t);
-  };
-  if (allowedTerminals && !sizeOkStands.some((s) => gateRouteCompatible(sim, s.id, flightRt) && policyAllows(s.id))) return 'terminalRestricted';
   const baseCandidates = Object.values(ctx.stands)
     .filter(
       (s) =>
@@ -768,8 +752,7 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
         !state.standAssignments[s.id] &&
         !state.closures.stands.includes(s.id) &&
         checkStand(type, ctx.layout.stands[s.id]!).status === 'ok' &&
-        gateRouteCompatible(sim, s.id, flightRt) &&
-        policyAllows(s.id),
+        gateRouteCompatible(sim, s.id, flightRt),
     );
   const nonDedicated = baseCandidates.filter((s) => !dedicatedOthers.has(s.id));
   const candidates = (nonDedicated.length > 0 ? nonDedicated : baseCandidates)
