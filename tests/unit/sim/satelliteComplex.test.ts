@@ -42,21 +42,21 @@ function satelliteAirport(linkState: LinkState): { layout: AirportLayout; main: 
   const mainDep = areaOf(main, 'departureLobby');
   const mainArr = areaOf(main, 'arrivalCorridor');
 
-  // サテライト: 本体の東に離れた建物。出発ロビー・到着通路・待合だけを持ち、
+  // サテライト: 本体の東に離れた建物（本体エリアとは辺を共有しない位置。隣接すると自動接続の対象になる）出発ロビー・到着通路・待合だけを持ち、
   // 入口・チェックイン・保安・手荷物受取・出口は持たない
-  apply(placeFacility(layout, 'terminal', { x: 94, y: 49 }, { w: 36, h: 8, name: 'サテライト', props: { levels: 2 } }));
+  apply(placeFacility(layout, 'terminal', { x: 96, y: 49 }, { w: 36, h: 8, name: 'サテライト', props: { levels: 2 } }));
   const sat = Object.values(layout.facilities).filter((f) => f.kind === 'terminal').at(-1)!.id;
-  const satDep = apply(placeTerminalArea(layout, sat, 1, 'departureLobby', { x: 94, y: 49 }, { w: 36, h: 2, name: 'サテライト出発ロビー' }))[0]!;
-  const satArr = apply(placeTerminalArea(layout, sat, 0, 'arrivalCorridor', { x: 94, y: 49 }, { w: 36, h: 2, name: 'サテライト到着通路' }))[0]!;
-  apply(placeTerminalArea(layout, sat, 1, 'waiting', { x: 110, y: 51 }, { w: 10, h: 2, name: 'サテライト待合' }));
+  const satDep = apply(placeTerminalArea(layout, sat, 1, 'departureLobby', { x: 96, y: 49 }, { w: 36, h: 2, name: 'サテライト出発ロビー' }))[0]!;
+  const satArr = apply(placeTerminalArea(layout, sat, 0, 'arrivalCorridor', { x: 96, y: 49 }, { w: 36, h: 2, name: 'サテライト到着通路' }))[0]!;
+  apply(placeTerminalArea(layout, sat, 1, 'waiting', { x: 112, y: 51 }, { w: 10, h: 2, name: 'サテライト待合' }));
 
   // 東端のゲート（Lスポット std_9）をサテライト北辺へ移す。スポットとの距離は
   // 従来範囲内に収まる（ゲート所属はサテライトになる）
   const gate = Object.values(layout.facilities).filter((f) => f.kind === 'gate')
     .find((f) => f.props.standId === 'std_9')!;
   const standId = String(gate.props.standId);
-  // moveEntity は移動量指定: ゲートの原点からサテライト北辺 (94,48) への差分で移す
-  apply(moveEntity(layout, gate.id, { x: 94 - gate.origin.x, y: 48 - gate.origin.y }));
+  // moveEntity は移動量指定: ゲートの原点からサテライト北辺 (96,48) への差分で移す
+  apply(moveEntity(layout, gate.id, { x: 96 - gate.origin.x, y: 48 - gate.origin.y }));
 
   if (linkState) {
     apply(addTerminalTransitLink(layout, {

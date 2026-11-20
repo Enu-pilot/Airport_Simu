@@ -1,4 +1,5 @@
 import type { AirportLayout } from '../model/types';
+import { rectsShareEdge } from './model';
 
 /**
  * ターミナル「サービス複合体」: 運用中ターミナルリンクで結ばれたターミナル建物の集合。
@@ -8,8 +9,10 @@ import type { AirportLayout } from '../model/types';
  * 使える。この関数はその「候補集合」を返すだけで、実際に通れるかどうかはエリアグラフの
  * 経路探索（findPaxRoute: リンクの allowedZones・双方向・buildState を反映済み）が決める。
  *
- * 建物間の旅客移動は明示リンク必須（5-15 T6 の検証済み仕様）: リンクが無い建物同士は
- * 同じ複合体にならない。建設中リンクは既定では数えず（opts.includeUnderConstruction で
+ * 建物間の旅客移動は、明示リンク、または同レベルでエリア同士が辺を共有する隣接の
+ * どちらかで結ばれていれば可能で、その建物同士は同じ複合体になる（隣り合う建物は
+ * 1 つの建物とみなす）。リンクも隣接も無い建物同士は同じ複合体にならない。
+ * 建設中リンクは既定では数えず（opts.includeUnderConstruction で
  * 検証側の「完成待ち」判定用に含められる）、計画中リンクは常に対象外。
  */
 export interface ServiceComplexOptions {
@@ -53,6 +56,24 @@ export function terminalServiceComplexes(
     if (!fromTerminal || !toTerminal || fromTerminal === toTerminal) continue;
     if (!parent.has(fromTerminal) || !parent.has(toTerminal)) continue;
     union(fromTerminal, toTerminal);
+  }
+
+  // 隣接: 異なるターミナルのエリア同士が同レベルで辺を共有していれば同じ複合体にする
+  const areasByTerminal = new Map<string, { level: number; x: number; y: number; w: number; h: number }[]>();
+  for (const a of Object.values(layout.terminalAreas)) {
+    if (!parent.has(a.terminalId)) continue;
+    const rect = { level: a.level, x: a.origin.x, y: a.origin.y, w: a.w, h: a.h };
+    (areasByTerminal.get(a.terminalId) ?? areasByTerminal.set(a.terminalId, []).get(a.terminalId)!).push(rect);
+  }
+  const complexIds = [...areasByTerminal.keys()].sort();
+  for (let i = 0; i < complexIds.length; i++) {
+    for (let j = i + 1; j < complexIds.length; j++) {
+      const as = areasByTerminal.get(complexIds[i]!)!;
+      const bs = areasByTerminal.get(complexIds[j]!)!;
+      if (as.some((a) => bs.some((b) => a.level === b.level && rectsShareEdge(a, b)))) {
+        union(complexIds[i]!, complexIds[j]!);
+      }
+    }
   }
 
   const byRoot = new Map<string, string[]>();

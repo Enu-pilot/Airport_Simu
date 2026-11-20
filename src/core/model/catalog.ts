@@ -240,11 +240,11 @@ export const DEFAULT_PROPS: Record<FacilityKind, Record<string, PropValue>> = {
   hotel: { rooms: 200 },
 };
 
-/** スポットの寸法（幅 = 機首と直交方向、奥行き = 機首方向）。幅は入口を中央に置くため奇数 */
+/** スポットの寸法（幅 = 機首と直交方向、奥行き = 機首方向）。入口は中央に最も近いタイルに置くため偶数幅も可 */
 export const STAND_DIMS: Record<SizeClass, { w: number; d: number }> = {
-  S: { w: 3, d: 3 },
-  M: { w: 3, d: 4 },
-  L: { w: 5, d: 5 },
+  S: { w: 2, d: 2 },
+  M: { w: 3, d: 2 },
+  L: { w: 4, d: 4 },
 };
 
 /** 滑走路: 舗装幅による対応区分 */
@@ -263,8 +263,9 @@ export const RUNWAY_HALF_WIDTH = 1.5;
 export const STRIP_HALF_WIDTH = 3.5;
 export const STRIP_END_EXTENSION = 2.5;
 
-/** ゲートと紐付けスポットの最大距離（チェビシェフ距離、タイル） */
-export const GATE_MAX_STAND_DISTANCE = 3;
+/** ゲートと紐付けスポットの最大距離（チェビシェフ距離、タイル）。
+ * スポット寸法改定（奥行き縮小）で既存配置の距離が最大 2 タイル増えるため 3 → 5 に緩和 */
+export const GATE_MAX_STAND_DISTANCE = 5;
 /** 独立ゲートの連絡通路の長さの警告しきい値（タイル。1.5 km） */
 export const GATE_CONNECTOR_MAX_TILES = 60;
 

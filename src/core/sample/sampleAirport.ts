@@ -59,16 +59,17 @@ export function createSampleAirport(seed = 'skyport', sizeId?: string): AirportL
 
   // エプロンとエプロン誘導路 B
   fac('apron', { x: 40, y: 39 }, { w: 61, h: 10 });
-  run(addTaxiwayPath(layout, [{ x: 45, y: 38 }, { x: 45, y: 41 }], { widthClass: 'L', name: 'B1' }));
-  run(addTaxiwayPath(layout, [{ x: 95, y: 38 }, { x: 95, y: 41 }], { widthClass: 'L', name: 'B2' }));
+  run(addTaxiwayPath(layout, [{ x: 45, y: 38 }, { x: 45, y: 43 }], { widthClass: 'L', name: 'B1' }));
+  run(addTaxiwayPath(layout, [{ x: 95, y: 38 }, { x: 95, y: 43 }], { widthClass: 'L', name: 'B2' }));
   run(addTaxiwayPath(layout, [{ x: 45, y: 41 }, { x: 95, y: 41 }], { widthClass: 'L', name: 'B' }));
+  run(addTaxiwayPath(layout, [{ x: 45, y: 43 }, { x: 95, y: 43 }], { widthClass: 'L', name: 'B' }));
 
   // スポット（機首は南 = ターミナル側、入口は北のエプロン誘導路）
   const standIds: string[] = [];
   for (let i = 0; i < 8; i++) {
-    standIds.push(run(placeStand(layout, { x: 48 + i * 5, y: 42 }, 'M', 180, 'operational', String(i + 1)))[0]!);
+    standIds.push(run(placeStand(layout, { x: 48 + i * 5, y: 44 }, 'M', 180, 'operational', String(i + 1)))[0]!);
   }
-  standIds.push(run(placeStand(layout, { x: 88, y: 42 }, 'L', 180, 'operational', 'L1'))[0]!);
+  standIds.push(run(placeStand(layout, { x: 88, y: 44 }, 'L', 180, 'operational', 'L1'))[0]!);
 
   // ターミナルとゲート
   const terminal = fac('terminal', { x: 46, y: 49 }, { w: 48, h: 8, name: '旅客ターミナル', props: { levels: 2 } });

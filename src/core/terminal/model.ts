@@ -178,6 +178,18 @@ export function buildTerminalModel(
       }
     }
   }
+  // ターミナルをまたぐ隣接: 異なるターミナルのエリア同士でも、同レベルで辺を共有していれば
+  // 接続する（隣り合う建物は 1 つの建物とみなす。明示リンクが無くても旅客は行き来できる）。
+  const allAreaIds = Object.values(byTerminal).flat();
+  for (let i = 0; i < allAreaIds.length; i++) {
+    for (let j = i + 1; j < allAreaIds.length; j++) {
+      const a = areas[allAreaIds[i]!]!;
+      const b = areas[allAreaIds[j]!]!;
+      if (a.terminalId === b.terminalId || a.level !== b.level) continue;
+      const via = sharedEdgeMidpoint(a, b);
+      if (via) addLink(links, a, b, via, 0);
+    }
+  }
   for (const link of sortedValues(layout.terminalLinks ?? {})) {
     // 5-13: 建設完了後グラフでは underConstruction のリンクも含める（planned は含めない）。
     // 既定（現在グラフ）は operational のみで、従来の結果は変わらない。
@@ -373,7 +385,18 @@ function addLink(
 }
 
 /** 同じ階の2つの矩形が辺を共有していれば、共有部分の中点 */
-function sharedEdgeMidpoint(a: AreaNode, b: AreaNode): Vec2 | null {
+/** 2 つの矩形が辺を 1 タイル以上共有しているか（同レベルでの隣接判定。サービス複合体の判定でも使う） */
+export function rectsShareEdge(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+): boolean {
+  return sharedEdgeMidpoint(a, b) !== null;
+}
+
+function sharedEdgeMidpoint(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+): Vec2 | null {
   const ox0 = Math.max(a.x, b.x);
   const ox1 = Math.min(a.x + a.w, b.x + b.w);
   const oy0 = Math.max(a.y, b.y);

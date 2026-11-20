@@ -14,6 +14,7 @@ import { analyzeAccess, type AccessMode } from '../core/access/model';
 import { companyActions } from '../editor/simRunner';
 import { addCityEvent, setCompanyCity, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
 import { NightOpsSettings } from './NightOpsSettings';
+import { terminalCapacitySummaries } from '../core/terminal/terminalCapacitySummary';
 import { airMarketPopulationOf, CITY_EVENT_CONGESTED, CITY_EVENT_KINDS, cityEventCost, cityEventOutcome, cityEventRisk, type CityEventKind, type CityEventLocation } from '../core/economy/city';
 import {
   ACCESS_MODE_LABEL,
@@ -166,6 +167,8 @@ export function AirlineTerminalsPanel({ company: c }: { company: CompanyState })
   const terminals = Object.values(layout.facilities)
     .filter((f) => f.kind === 'terminal')
     .sort((a, b) => (a.id < b.id ? -1 : 1));
+  // ターミナル別の余裕（スポット数・保安検査の能力と直近の使用率）。制限先を選ぶ判断材料
+  const capacity = terminalCapacitySummaries(layout, c.reports[c.reports.length - 1]);
   const airlineIds = [...new Set([
     ...Object.values(c.contracts).filter((k) => k.status === 'active' || k.status === 'offered').map((k) => k.airlineId),
     ...Object.keys(c.airlineTerminals ?? {}),
@@ -189,6 +192,16 @@ export function AirlineTerminalsPanel({ company: c }: { company: CompanyState })
               data-testid={`terminal-policy-${airlineId}-${rt}-${t.id}`}
             />{' '}
             {displayName(layout, t.id)}
+            {(() => {
+              const s = capacity.get(t.id);
+              if (!s) return null;
+              return (
+                <span className="muted" data-testid={`terminal-capacity-${t.id}`}>
+                  {' '}（スポット {s.stands}・保安 {s.securityPerHour.toLocaleString()}/時
+                  {s.securityUtilization !== null ? `・使用率 ${Math.round(s.securityUtilization * 100)}%` : ''}）
+                </span>
+              );
+            })()}
           </label>
         ))}
         {current && current.length > 0 ? (

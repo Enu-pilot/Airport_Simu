@@ -1243,13 +1243,13 @@ export function codeLetterOf(wingspanM: number): CodeLetter | null {
 }
 
 /**
- * ゲームのサイズ区分（S/M/L）: コード C 以下 = M、D・E = L、F = L（＋コード F 対応施設が必要）。
+ * ゲームのサイズ区分（S/M/L）: コード A・B = S、C = M、D・E = L、F = L（＋コード F 対応施設が必要）。
  * 旧形式の汎用機材は Phase 2 以来の区分（regional70 = S, narrow180 = M, wide300 = L）をそのまま使う。
  */
 export function sizeClassOf(m: AircraftModel): { size: SizeClass; codeF: boolean } {
   if (m.generic) return { size: m.id === 'regional70' ? 'S' : m.id === 'narrow180' ? 'M' : 'L', codeF: false };
   const code = codeLetterOf(m.wingspanM.value ?? NaN);
-  return { size: code === 'A' || code === 'B' || code === 'C' ? 'M' : 'L', codeF: code === 'F' || code === null };
+  return { size: code === 'A' || code === 'B' ? 'S' : code === 'C' ? 'M' : 'L', codeF: code === 'F' || code === null };
 }
 
 export function modelOf(id: string): AircraftModel | undefined {

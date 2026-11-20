@@ -69,8 +69,8 @@ describe('施設の配置・回転・移動・削除・複製', () => {
   it('スポットの回転で入口の向きが変わる', () => {
     const { layout, created } = must(placeStand(emptyLayout(), { x: 10, y: 10 }, 'M', 0));
     const s0 = layout.stands[created[0]!]!;
-    expect(standTiles(s0)).toHaveLength(12);
-    expect(standEntry(s0)).toEqual({ x: 11, y: 14 }); // 機首北 → 入口南
+    expect(standTiles(s0)).toHaveLength(6); // M = 3×2
+    expect(standEntry(s0)).toEqual({ x: 11, y: 12 }); // 機首北 → 入口南
     const s90 = must(rotateEntity(layout, s0.id)).layout.stands[s0.id]!;
     expect(s90.rotation).toBe(90);
     const e = standEntry(s90);

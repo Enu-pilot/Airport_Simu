@@ -104,17 +104,17 @@ describe('誘導路の描画と接続', () => {
 
 describe('スポットの接続', () => {
   it('スポット入口が誘導路上にあれば自動的にノードが作られ接続される', () => {
-    let l = must(addTaxiwayPath(emptyLayout(), [{ x: 0, y: 14 }, { x: 20, y: 14 }])).layout;
-    l = must(placeStand(l, { x: 10, y: 10 }, 'M', 0)).layout; // 入口 (11, 14)
+    let l = must(addTaxiwayPath(emptyLayout(), [{ x: 0, y: 12 }, { x: 20, y: 12 }])).layout;
+    l = must(placeStand(l, { x: 10, y: 10 }, 'M', 0)).layout; // 入口 (11, 12)
     const net = buildAirsideNetwork(l);
-    expect(net.standLinks.std_1).toBe(nodeAt(l, 11, 14));
+    expect(net.standLinks.std_1).toBe(nodeAt(l, 11, 12));
     expect(net.edges['std_1:L']).toMatchObject({ kind: 'standLink', maxSize: 'M' });
   });
 
   it('後から誘導路を引いても接続される / 移動で外れる', () => {
-    let l = must(placeStand(emptyLayout(), { x: 10, y: 10 }, 'S', 0)).layout; // 入口 (11, 13)
+    let l = must(placeStand(emptyLayout(), { x: 10, y: 10 }, 'S', 0)).layout; // 入口 (10, 12)
     expect(buildAirsideNetwork(l).standLinks.std_1).toBeUndefined();
-    l = must(addTaxiwayPath(l, [{ x: 0, y: 13 }, { x: 20, y: 13 }])).layout;
+    l = must(addTaxiwayPath(l, [{ x: 0, y: 12 }, { x: 20, y: 12 }])).layout;
     expect(buildAirsideNetwork(l).standLinks.std_1).toBeDefined();
     l = must(moveEntity(l, 'std_1', { x: 0, y: -5 })).layout;
     expect(buildAirsideNetwork(l).standLinks.std_1).toBeUndefined();
