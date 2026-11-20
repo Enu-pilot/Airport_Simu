@@ -131,6 +131,15 @@ function frame(ts: number): void {
   if (ui) lastUi = ts;
   // 性能計測: このフレームで進めた tick 数と dropped を記録する（計測のみ。進行には影響しない）
   recordFrame(r.ticks, r.dropped);
+  // 一時停止中で何も進まなかったフレームは、画面に出る状態が前回から変わっていない。
+  // store を更新すると購読側（地図の再描画・パネルの再描画）が毎フレーム走ってしまうため、
+  // ここで打ち止めにする。再開・速度変更・各種操作はいずれも自前の経路で store を更新するので、
+  // その時点で確実に描き直される。dropped の表示が残っている場合は 1 回だけ通常どおり
+  // 更新して表示を落としてから止める（性能改善計画 第3弾-1）。
+  if (r.ticks === 0 && clock.speed === 0 && !ops.dropped) {
+    raf = requestAnimationFrame(frame);
+    return;
+  }
   patchOps({ clock, frame: ops.frame + 1, dropped: r.dropped, uiVersion: ui ? ops.uiVersion + 1 : ops.uiVersion });
   raf = requestAnimationFrame(frame);
 }

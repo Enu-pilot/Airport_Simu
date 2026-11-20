@@ -646,12 +646,20 @@ export function departurePath(sim: Simulation, ac: Aircraft, avoidTraffic: boole
   if (!stand) return null;
   const goals = new Map<string, number>();
   const goalRunway = new Map<string, string>();
+  // 滑走路ごとの離陸待ち機数はこの呼び出しの間は変わらない（経路探索は状態を変更しない）。
+  // 入口候補ごとに全機体を数え直さず、1 回だけ数えて使い回す（数える対象・条件は従来と同一）。
+  const queueByRunway = new Map<string, number>();
+  for (const a of Object.values(sim.state.aircraft)) {
+    if (a.runwayId && (a.state === 'holdShort' || a.state === 'taxiOut')) {
+      queueByRunway.set(a.runwayId, (queueByRunway.get(a.runwayId) ?? 0) + 1);
+    }
+  }
   for (const id of Object.keys(sim.ctx.runways).sort(compareIds)) {
     if (!runwayUsable(sim, id, type, 'dep')) continue;
     const rw = runwayFor(sim, id);
     if (!rw) continue;
     for (const [node, cost] of entryCandidates(sim, rw, type)) {
-      const queue = Object.values(sim.state.aircraft).filter((a) => a.runwayId === id && (a.state === 'holdShort' || a.state === 'taxiOut')).length;
+      const queue = queueByRunway.get(id) ?? 0;
       if (!goals.has(node) || cost + queue * 60 < goals.get(node)!) {
         goals.set(node, cost + queue * 60);
         goalRunway.set(node, id);
@@ -791,10 +799,18 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
     );
   if (candidates.length === 0) return 'noStand';
   let anyRoute = false;
+  // 滑走路ごとの到着待ち機数は候補ループの間は変わらない（経路探索は状態を変更せず、
+  // 割当に成功したら即 return する）。候補 × 滑走路ごとに全機体を数え直さず、
+  // 1 回だけ数えて使い回す（数える対象・条件は従来と同一）。
+  const arrivalQueueByRunway = new Map<string, number>();
+  for (const a of Object.values(state.aircraft)) {
+    if (a.runwayId && (a.state === 'inbound' || a.state === 'holding' || a.state === 'approach')) {
+      arrivalQueueByRunway.set(a.runwayId, (arrivalQueueByRunway.get(a.runwayId) ?? 0) + 1);
+    }
+  }
+  const queueLen = (id: string) => arrivalQueueByRunway.get(id) ?? 0;
   for (const s of candidates) {
     // 到着経路があり、出発もできるスポット
-    const queueLen = (id: string) =>
-      Object.values(state.aircraft).filter((a) => a.runwayId === id && ['inbound', 'holding', 'approach'].includes(a.state)).length;
     let best: { runwayId: string; cost: number } | null = null;
     for (const r of runways) {
       const p = arrivalPath(sim, ac, r, s.id, false);
@@ -882,9 +898,13 @@ export function stepSimulation(sim: Simulation): void {
   stepDisruptions(sim);
   if (state.wx) stepWeather(sim, cancelTurnaround);
   perf.mark('disruptions');
-  runwayControl(sim);
+  // `all` はこの tick の後段（runwayControl / taxiBlockControl / detectConflicts）と共有する。
+  // `all` の算出後に機体レコードの追加・削除は起きない（追加は日次スケジュール生成＝この前段まで、
+  // 削除はスナップショットの間引きのみ）ため、各所が個別に sortedValues を作るのと結果は同一。
+  // 各関数は同じオブジェクト参照をその時点の状態で読む（性能改善計画 第3弾-3）。
+  runwayControl(sim, all);
   if (state.taxiBlocks) {
-    taxiBlockControl(sim);
+    taxiBlockControl(sim, all);
     // 規則 4: 停止の検出と解消（5 秒ごと。待機機だけ）
     if (state.now % RETRY_SEC === 0) {
       for (const r of detectTaxiStall(sim)) {
@@ -904,7 +924,7 @@ export function stepSimulation(sim: Simulation): void {
   perf.mark('baggage');
   stepGround(sim);
   perf.mark('ground');
-  detectConflicts(sim);
+  detectConflicts(sim, all);
   perf.mark('conflicts');
   stepAnalytics(sim);
   state.now += TICK_SEC;
@@ -923,10 +943,9 @@ export function departureQueue(sim: Simulation, rid: string, aircraft: Aircraft[
   return queue;
 }
 
-/** 滑走路ごとの出発・横断の許可（到着の進入許可は到着機側の処理で行う） */
-function runwayControl(sim: Simulation): void {
+/** 滑走路ごとの出発・横断の許可（到着の進入許可は到着機側の処理で行う）。aircraft は呼び出し側が用意した ID 順の一覧 */
+function runwayControl(sim: Simulation, aircraft: Aircraft[]): void {
   const { state } = sim;
-  const aircraft = sortedValues(state.aircraft);
   for (const rid of Object.keys(state.runways).sort(compareIds)) {
     const rs = state.runways[rid]!;
     // 出発: 離陸待ちの先頭（到着順）
@@ -981,10 +1000,10 @@ function runwayControl(sim: Simulation): void {
  * 区間ごとの走行（taxiMode 'block'）: 停止位置が近づいた機体の次のチェーンの確保を、待ち始めた順（同じなら ID 順）にまとめて試す。
  * 確保できない機体は、止まっているときだけ待機の理由（blockFull）を付ける。
  */
-function taxiBlockControl(sim: Simulation): void {
+function taxiBlockControl(sim: Simulation, all: Aircraft[]): void {
   const { state } = sim;
   const reqs: Aircraft[] = [];
-  for (const ac of sortedValues(state.aircraft)) {
+  for (const ac of all) {
     if (!ac.route || !['taxiOut', 'taxiIn', 'vacating', 'landing'].includes(ac.state)) continue;
     const d = pendingChainDistance(sim, ac);
     if (d === null) continue;
@@ -1814,10 +1833,10 @@ function placeAirborne(sim: Simulation, ac: Aircraft): void {
 
 // ---------------------------------------------------------------- 競合の検知
 
-/** 地上で動いている機体同士が近づきすぎていないか（予約制御が正しければ常に 0 件） */
-function detectConflicts(sim: Simulation): void {
+/** 地上で動いている機体同士が近づきすぎていないか（予約制御が正しければ常に 0 件）。all は呼び出し側が用意した ID 順の一覧 */
+function detectConflicts(sim: Simulation, all: Aircraft[]): void {
   const { state } = sim;
-  const moving = sortedValues(state.aircraft).filter((a) => GROUND_MOVING_STATES.includes(a.state) && a.state !== 'takeoff');
+  const moving = all.filter((a) => GROUND_MOVING_STATES.includes(a.state) && a.state !== 'takeoff');
   for (let i = 0; i < moving.length; i++) {
     for (let j = i + 1; j < moving.length; j++) {
       const a = moving[i]!;
