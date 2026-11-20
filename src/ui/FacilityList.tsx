@@ -30,7 +30,7 @@ function groups(layout: AirportLayout, analysis: LayoutAnalysis): { title: strin
       }),
     },
     { title: '駐機スポット', rows: sortedValues(layout.stands) },
-    { title: 'ターミナル・ゲート', rows: facilities.filter((f) => f.kind === 'terminal' || f.kind === 'gate') },
+    { title: 'ターミナル・ゲート', rows: facilities.filter((f) => f.kind === 'terminal' || f.kind === 'gate' || f.kind === 'boardingBridge') },
     {
       title: '支援施設',
       rows: facilities.filter((f) => FACILITY_SPECS[f.kind].layer === 'building' && f.kind !== 'terminal'),

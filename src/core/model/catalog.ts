@@ -22,7 +22,7 @@ export const ROAD_DRAW_WIDTH_M = { road: 12, rail: 8, walkway: 5, fuel: 2 } as c
 /** Vertical occupancy used by layout validation and 3D rendering (game display dimensions). */
 export const FACILITY_HEIGHT_M: Partial<Record<FacilityKind, number>> = {
   terminal: 18, tower: 45, hangar: 24, maintenance: 14, fuelFarm: 10, fireStation: 9,
-  gseBase: 6, baggageSort: 10, serviceArea: 6, parking: 3, gate: 6, apron: 0.2,
+  gseBase: 6, baggageSort: 10, serviceArea: 6, parking: 3, gate: 6, apron: 0.2, boardingBridge: 6,
   railStation: 8, taxiStand: 2, busStop: 3, busTerminal: 6, cargoTerminal: 9, staffParking: 1, hotel: 18,
   shoppingMall: 12, culturalHall: 10, park: 1,
 };
@@ -63,6 +63,9 @@ export const FACILITY_SPECS: Record<FacilityKind, FacilitySpec> = {
   apron: { layer: 'apron', defaultW: 12, defaultH: 8, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
   terminal: { layer: 'building', defaultW: 20, defaultH: 8, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
   gate: { layer: 'gate', defaultW: 1, defaultH: 1, resizable: false, minW: 1, minH: 1, dragPlace: false, needsAirsideAccess: false },
+  // 機能H: 搭乗橋（PBB）。ロタンダ基部 1×1、回転可。占有レイヤーはゲートと同じ 'gate'、
+  // 垂直区間は地上 3〜6m の帯（model/levels の facilityVerticalRange で特例）
+  boardingBridge: { layer: 'gate', defaultW: 1, defaultH: 1, resizable: false, minW: 1, minH: 1, dragPlace: false, needsAirsideAccess: false },
   hangar: { layer: 'building', defaultW: 6, defaultH: 5, resizable: true, minW: 4, minH: 4, dragPlace: false, needsAirsideAccess: true },
   tower: { layer: 'building', defaultW: 2, defaultH: 2, resizable: false, minW: 2, minH: 2, dragPlace: false, needsAirsideAccess: false },
   maintenance: { layer: 'building', defaultW: 4, defaultH: 3, resizable: false, minW: 4, minH: 3, dragPlace: false, needsAirsideAccess: true },
@@ -103,6 +106,8 @@ export const FACILITY_SIM_EFFECT: Partial<Record<FacilityKind, FacilitySimEffect
   terminal: 'active',
   // standId / boardingMode / routeType を旅客搭乗とスポット割当が参照
   gate: 'active',
+  // 型式・デッキを旅客の搭乗/降機速度が参照（core/model/boardingBridge 経由で sim/passengers）
+  boardingBridge: 'active',
   // 夜間整備枠（1 棟 = 1 機。core/capability maintenanceReading、sim/overnight）
   hangar: 'active',
   // 管制能力 towerCapacityPerHour（core/safety）
@@ -173,7 +178,13 @@ export function propDefault(def: PropDef): PropValue {
 
 export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
   apron: [],
-  terminal: [{ key: 'levels', type: 'int', min: 1, max: 4 }],
+  terminal: [
+    { key: 'levels', type: 'int', min: 1, max: 4 },
+    /** エリアを置ける相対階の下限（機能G。欠落 = -3 = TERMINAL_AREA_MIN_LEVEL、従来どおり）。建物生成では 0 を書く */
+    { key: 'floorRangeMin', type: 'int', min: -3, max: 3 },
+    /** エリアを置ける相対階の上限（機能G。欠落 = levels − 1、従来どおり） */
+    { key: 'floorRangeMax', type: 'int', min: -3, max: 3 },
+  ],
   gate: [
     { key: 'standId', type: 'standRef' },
     { key: 'jetBridge', type: 'bool' },
@@ -183,6 +194,17 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
     { key: 'connectedTo', type: 'facilityRef', of: 'terminal' },
     /** 国内/国際の別（フェーズ 4。欠落 = 'domestic'）。'swing' は兼用 */
     { key: 'routeType', type: 'enum', options: ['domestic', 'international', 'swing'] },
+  ],
+  // 機能H: 搭乗橋（PBB）のインスタンス props。型式パラメータ自体は PBB_TYPES（下記）に持ち、ここには持たない
+  boardingBridge: [
+    /** 紐付く搭乗ゲート（必須） */
+    { key: 'gateId', type: 'facilityRef', of: 'gate' },
+    /** 紐付くスポット（必須。ゲートの standId と一致すること） */
+    { key: 'standId', type: 'standRef' },
+    /** 型式（= トンネル本数の設定: tunnel1 = 1本、tunnel2 / tunnel2Upper = 2本） */
+    { key: 'bridgeType', type: 'enum', options: ['tunnel1', 'tunnel2', 'tunnel2Upper'] },
+    /** この基が接続するデッキ（tunnel2Upper の2基目は 'upper'） */
+    { key: 'deck', type: 'enum', options: ['main', 'upper'] },
   ],
   hangar: [{ key: 'maxSize', type: 'enum', options: ['S', 'M', 'L'] }],
   tower: [{ key: 'level', type: 'int', min: 1, max: 3 }],
@@ -234,6 +256,7 @@ export const DEFAULT_PROPS: Record<FacilityKind, Record<string, PropValue>> = {
   apron: {},
   terminal: { levels: 2 },
   gate: { standId: null, jetBridge: true },
+  boardingBridge: { gateId: null, standId: null, bridgeType: 'tunnel1', deck: 'main' },
   hangar: { maxSize: 'M' },
   tower: { level: 1 },
   maintenance: { bays: 2, engineers: 3 },
@@ -283,6 +306,59 @@ export const STRIP_END_EXTENSION = 2.5;
 export const GATE_MAX_STAND_DISTANCE = 5;
 /** 独立ゲートの連絡通路の長さの警告しきい値（タイル。1.5 km） */
 export const GATE_CONNECTOR_MAX_TILES = 60;
+
+// ---------------------------------------------------------------- 搭乗橋（PBB、機能H）
+
+/** 搭乗橋の型式。ユーザー指定の「1本/2本」は型式で表す: tunnel1 = 1本、tunnel2 / tunnel2Upper = 2本 */
+export type PbbBridgeType = 'tunnel1' | 'tunnel2' | 'tunnel2Upper';
+
+/** 搭乗橋1基が接続するデッキ */
+export type PbbDeck = 'main' | 'upper';
+
+export interface PbbTypeSpec {
+  /** トンネル本数 */
+  tunnels: 1 | 2;
+  /** 主デッキのドアシル高の適合範囲（m） */
+  sillMain: { min: number; max: number };
+  /** 上デッキのドアシル高の適合範囲（m）。上デッキに接続できない型式は null */
+  sillUpper: { min: number; max: number } | null;
+  /** 搭乗速度（秒/人）。upper は上デッキ側の1基ぶん */
+  boardSecPerPax: { main: number; upper?: number };
+  /** 降機速度（人/分）。upper は上デッキ側の1基ぶん */
+  deplanePerMin: { main: number; upper?: number };
+  /** 建設費（cr）。tunnel1 は従来の jetBridge 上乗せ（economy/balance の jetBridge）と同額 */
+  cost: number;
+}
+
+/**
+ * 搭乗橋の型式パラメータ（インスタンス props には持たず、型式で引く）。
+ * tunnel1 の搭乗 3.0 秒/人・降機 20 人/分は、従来の橋の定数（sim/passengers の
+ * BOARD_SEC_PER_PAX.bridge / DEPLANE_PAX_PER_MIN.bridge）と一致させること
+ * （互換合成の等価性 = ゴールデン不変の根拠。design-GHIJ-detail.md §H.2）。
+ */
+export const PBB_TYPES: Record<PbbBridgeType, PbbTypeSpec> = {
+  tunnel1: {
+    tunnels: 1, sillMain: { min: 2.0, max: 4.6 }, sillUpper: null,
+    boardSecPerPax: { main: 3.0 }, deplanePerMin: { main: 20 }, cost: 150_000,
+  },
+  tunnel2: {
+    tunnels: 2, sillMain: { min: 2.0, max: 5.4 }, sillUpper: null,
+    boardSecPerPax: { main: 2.4 }, deplanePerMin: { main: 24 }, cost: 260_000,
+  },
+  tunnel2Upper: {
+    tunnels: 2, sillMain: { min: 2.0, max: 5.4 }, sillUpper: { min: 6.8, max: 8.6 },
+    boardSecPerPax: { main: 2.2, upper: 3.0 }, deplanePerMin: { main: 26, upper: 26 }, cost: 420_000,
+  },
+};
+
+/**
+ * 機体ドアシル高（m）。機種カタログに実値が無いため SizeClass からのゲーム値
+ * （status: game。UI ではゲーム値と分かるように出すこと。H-U4）。
+ * 判定はこの表で行い、機体全高（heightM）では行わない。
+ */
+export const DOOR_SILL_M: Record<SizeClass, number> = { S: 2.6, M: 3.4, L: 4.7 };
+/** 2階建て機の上デッキのドアシル高（m、ゲーム値） */
+export const DOOR_SILL_UPPER_M = 7.9;
 
 // ---------------------------------------------------------------- ターミナル内部
 

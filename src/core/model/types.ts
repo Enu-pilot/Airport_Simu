@@ -203,6 +203,7 @@ export type FacilityKind =
   | 'apron'
   | 'terminal'
   | 'gate'
+  | 'boardingBridge'
   | 'hangar'
   | 'tower'
   | 'maintenance'

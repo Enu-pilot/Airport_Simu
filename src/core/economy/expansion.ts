@@ -33,6 +33,7 @@ const FACILITY_DAYS: Partial<Record<FacilityKind, number>> = {
   gseBase: 2,
   baggageSort: 3,
   gate: 1,
+  boardingBridge: 1,
   apron: 2,
   serviceArea: 1,
   parking: 1,

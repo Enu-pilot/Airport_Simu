@@ -2,9 +2,9 @@
 
 実装: `src/core/io/project.ts`（形式・検証・復元）、`src/editor/project.ts`（保存先・操作）、`src/ui/ProjectPanel.tsx`（画面）。
 
-## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜8）
+## プロジェクトファイル（`format: "skyport-project"`, `formatVersion: 1`〜9）
 
-**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・階層施設／建物内設備・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜8 を読み（`PROJECT_FORMAT_MAX_READABLE = 8`）、9 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`、`PROJECT_FORMAT_VERSION_4 = 4`（フェーズ 2）、`PROJECT_FORMAT_VERSION_5 = 5`、`PROJECT_FORMAT_VERSION_6 = 6`、`PROJECT_FORMAT_VERSION_7 = 7`、`PROJECT_FORMAT_VERSION_8 = 8`。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
+**版の書き方**: バス搭乗・ゲーム/天候・日次履歴など既存の任意項目は `formatVersion 2`。多層道路・階層接続・階層施設／建物内設備・ターミナル間連絡リンクを含むときは `formatVersion 3`。該当する新項目がなければ 1 または 2 のまま書く。`versions.format` も同じ値。現在は 1〜9 を読み（`PROJECT_FORMAT_MAX_READABLE = 9`）、10 以上は拒否する。版 1/2 を名乗るファイルに版 3 の項目がある場合も拒否し、旧アプリが未知の設備を誤読しないようにする。`PROJECT_FORMAT_VERSION` は基本の版 1、`PROJECT_FORMAT_VERSION_2 = 2`、`PROJECT_FORMAT_VERSION_3 = 3`、`PROJECT_FORMAT_VERSION_4 = 4`（フェーズ 2）、`PROJECT_FORMAT_VERSION_5 = 5`、`PROJECT_FORMAT_VERSION_6 = 6`、`PROJECT_FORMAT_VERSION_7 = 7`、`PROJECT_FORMAT_VERSION_8 = 8`、`PROJECT_FORMAT_VERSION_9 = 9`（機能H、搭乗橋）。新項目は任意で、旧セーブの不足項目は従来どおり読める。厳格な形の検査は `checkLayout`、`checkSim`、`checkJournal` で行う。旧運航状態の閉鎖理由台帳は閉鎖配列と発生中の障害から再構築し、外部遅延は運航に実際に加えた秒数だけを保存する。
 
 `Flight.externalDelaySec` と分析記録の `arrivalExternalDelaySec` は任意の追加メタデータとして保存する。便の実績時刻やシミュレーションの進行条件は変えないため、この項目だけでは `formatVersion` を上げない。旧保存で項目がない場合は 0 秒として扱う。`FlightRecord` の形式は変更しない。便別レビューの締め時点の原因・実時刻・機体状態・作業・施設名、航空会社評価要素・EMA/満足度前後・不満/要望は `DayReview` に集約し、日ごとの IndexedDB 履歴の `review` に保存する。会社状態やプロジェクトJSONには追加しないため、プロジェクト保存形式・シミュレーションモデルの版は上げない。古い保存済みレビューにない項目は推測せず欠落として表示する。
 
@@ -27,7 +27,7 @@
 
 | 版 | 定数 | 変わるとき |
 |---|---|---|
-| 保存形式 | `PROJECT_FORMAT_VERSION = 1` 〜 `PROJECT_FORMAT_VERSION_8 = 8`（読込上限 `PROJECT_FORMAT_MAX_READABLE = 8`） | 新しい任意データを含むファイルだけ版を上げ、旧アプリが誤読しないようにする |
+| 保存形式 | `PROJECT_FORMAT_VERSION = 1` 〜 `PROJECT_FORMAT_VERSION_9 = 9`（読込上限 `PROJECT_FORMAT_MAX_READABLE = 9`） | 新しい任意データを含むファイルだけ版を上げ、旧アプリが誤読しないようにする |
 | 機種カタログ | `CATALOG_VERSION`（現在 2026.11.1） | 収録機種・値を変えたとき |
 | 3D アセット | `ASSET_VERSION`（現在 2026.11.0） | 3D の形を変えたとき（表示だけに影響） |
 | シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.10` | 運航の計算を変えたとき |
@@ -98,11 +98,21 @@
 
 レイアウト（シナリオのレイアウトを含む）にエリア種別 `lounge`（ラウンジ、`layoutUsesFormat8`）を含むときだけ `formatVersion 8`（`versions.format` も 8）で書く。含まないプロジェクトは従来の版（1〜7）のまま書く。ラウンジは席数（`props.seats`）を持つターミナル内エリアで、保存形式以外の版（`SCHEMA_VERSION` 等）は上げない。
 
+### 版 9（搭乗橋 PBB。機能H）
+
+レイアウト（シナリオのレイアウトを含む）に施設種別 `boardingBridge`（搭乗橋、`layoutUsesFormat9`）を含むときだけ `formatVersion 9`（`versions.format` も 9）で書く。含まないプロジェクトは従来の版（1〜8）のまま書く。`SCHEMA_VERSION` は 3 を維持し、`SIM_MODEL_VERSION` も上げない（明示 PBB の無いゲートは従来の `jetBridge` から tunnel1 相当を読み取り時に合成し、搭乗/降機速度が従来定数と一致するため運航結果が変わらない）。版 8 以下を名乗るのに `boardingBridge` を含むファイルは拒否する。
+
 ### 架空会社の就航制限・持ち替え（機能F。版上げなし）
 
 カタログの航空会社・目的地に `fictional`（実在しない会社・都市）フラグを追加し、空港の格が閾値（格 3）以上のとき架空会社の新規提案を架空の目的地だけに制限した。また、既存の架空会社の有効契約は契約パネルから実在会社へ付け替えできる（変えるのは契約の `airlineId` だけで、条件はすべて不変）。
 - `formatVersion` は上げない: `fictional` はカタログ（コード側データ）の属性でセーブには入らず、付け替え結果も既存フィールドの値変更にすぎない。持ち替え可能かどうかの案内表示は会社の状態から決定的に導出する派生表示で、保存項目は追加しない。
 - `SIM_MODEL_VERSION` も上げない: 制限は提案生成（運航結果ではない）にのみ効き、目標のない会社・格が閾値未満の会社では提案列も従来と変わらない。
+
+### 地下だけの建物（機能G。版上げなし）
+
+ターミナルの任意項目 `floorRangeMin` / `floorRangeMax`（エリアを置ける相対階の範囲）を追加し、地下（mapLevel < 0）へのターミナル単独配置を解禁した（CDG 型の地下コンコース再現）。
+- `formatVersion` は上げない: 追加は props の任意項目と配置・検証規則の変更だけで、項目が無いプロジェクトのバイト列・解釈は従来と変わらない（floorRange 欠落 = 従来範囲 [-3, 階数 − 1]）。旧アプリで地下ターミナルを含むセーブを開くと配置検証で弾かれるが、読み込み自体は可能。
+- `SIM_MODEL_VERSION` も上げない: 地下ターミナルは旧版では作れなかったレイアウトであり、既存レイアウトの到達可能性・能力は変わらない。高さ区間（`facilityVerticalRange`）の変更も地下ターミナルに限られる。
 
 ## 機種データの固定（カタログ更新との互換性）
 

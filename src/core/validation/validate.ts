@@ -15,24 +15,25 @@ import {
   type Vec2,
 } from '../geometry/vec';
 import { buildAirsideNetwork, reachableNodes, type AirsideNetwork } from '../airside/network';
-import { collectFootprints, facilityTiles, standTiles, type FootprintPart } from '../layout/footprint';
+import { collectFootprints, facilityTiles, standEntry, standTiles, type FootprintPart } from '../layout/footprint';
 import { edgesOfNode, type AnyEdge } from '../layout/network';
-import { undergroundFacilityProblem } from '../layout/levelRules';
+import { terminalFloorRange, undergroundFacilityProblem } from '../layout/levelRules';
 import { positionOnRunway, runwayAxis, runwayEnd, runwayMaxSize } from '../layout/runway';
 import { designatorsOf } from '../layout/designators';
 import { holdWalkLimitM, walkToClear, type HoldRunway } from '../layout/holdShort';
-import { TERMINAL_AREA_MIN_LEVEL } from '../layout/levelRules';
 import { resolveRunwayDims } from '../layout/runwayAreas';
 import { classifySegmentIntersection } from '../geometry/segment';
 import { rasterizeSegment } from '../geometry/vec';
 import { satOverlapConvex } from '../geometry/polygon';
 import { TILE_M } from '../model/catalog';
-import type { NetNode, TerminalAreaKind } from '../model/types';
+import type { NetNode, TerminalArea, TerminalAreaKind } from '../model/types';
 import { CONNECTOR_DETOUR, DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
 import { verifyPortalAccess } from '../terminal/networkGraph';
 import { terminalServiceComplexes } from '../terminal/serviceComplex';
 import { deckElevationForCode, requiredAircraftClearanceM, requiredClearanceForCode } from '../sim/aircraftTypes';
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
+import { DOOR_SILL_M, DOOR_SILL_UPPER_M, PBB_TYPES, type PbbDeck } from '../model/catalog';
+import { PBB_ENTRY_RANGE, hasExplicitPbb, pbbDeckOf, pbbGateIdOf, pbbStandIdOf, pbbTypeOf } from '../model/boardingBridge';
 import { findPaxRoute } from '../terminal/route';
 import { ACCESS_MAX_WALK_TILES, PARKING_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTilesAtLevel } from '../access/landside';
 import { connectorFits, facilityLevel, floorDisplayLabel, roadEdgeLevelValid, DEFAULT_LEVEL_HEIGHT_M } from '../model/levels';
@@ -135,6 +136,14 @@ export type IssueCode =
   | 'FACILITY_INTERIOR_INVALID'
   | 'FACILITY_INTERIOR_OUTSIDE'
   | 'FACILITY_UNDERGROUND_KIND'
+  | 'TERMINAL_UNDERGROUND_ISOLATED'
+  | 'GATE_UNDERGROUND_BRIDGE'
+  // 搭乗橋（PBB、機能H）
+  | 'PBB_GATE_MISMATCH'
+  | 'PBB_NOT_ADJACENT'
+  | 'PBB_DECK_DUPLICATE'
+  | 'PBB_SILL_RANGE'
+  | 'PBB_LEGACY_OVERRIDDEN'
   | 'INTERIOR_FACILITY_UNLINKED'
   | 'TERMINAL_LINK_CLEARANCE'
   | 'PORTAL_LEVEL_MISMATCH'
@@ -229,6 +238,13 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   FACILITY_INTERIOR_INVALID: 'error',
   FACILITY_INTERIOR_OUTSIDE: 'error',
   FACILITY_UNDERGROUND_KIND: 'warning',
+  TERMINAL_UNDERGROUND_ISOLATED: 'warning',
+  GATE_UNDERGROUND_BRIDGE: 'warning',
+  PBB_GATE_MISMATCH: 'error',
+  PBB_NOT_ADJACENT: 'error',
+  PBB_DECK_DUPLICATE: 'error',
+  PBB_SILL_RANGE: 'warning',
+  PBB_LEGACY_OVERRIDDEN: 'info',
   INTERIOR_FACILITY_UNLINKED: 'info',
   TERMINAL_LINK_CLEARANCE: 'error',
   PORTAL_LEVEL_MISMATCH: 'warning',
@@ -897,6 +913,11 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
   const gatesByStand = new Map<string, string[]>();
   const facilities = sortedValues(layout.facilities);
   const roadComplexes = terminalServiceComplexes(layout);
+  const areasByTerminal = new Map<string, TerminalArea[]>();
+  for (const a of Object.values(layout.terminalAreas)) {
+    (areasByTerminal.get(a.terminalId) ?? areasByTerminal.set(a.terminalId, []).get(a.terminalId)!).push(a);
+  }
+  const portalAreaIds = new Set(Object.values(layout.portals ?? {}).map((p) => p.areaId));
   for (const f of facilities) {
     const tiles = facilityTiles(f);
     const spec = FACILITY_SPECS[f.kind];
@@ -917,9 +938,33 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
         (g) => g.kind === 'gate' && (neighborTiles(facilityTiles(g)).some((t) => own.has(tileKey(t.x, t.y))) || connectedTerminal(g, layout) === f.id),
       );
       if (!hasGate) sink.add('TERMINAL_NO_GATE', [f.id], {}, f.origin);
+      // 機能G: 地下棟が地上階（実効地図階層 >= 0）のエリアを持たず、サービス複合体も単独で、
+      // ランドサイド入口（入口/出口エリア、またはポータル接続）も無い場合は到達不能として警告する。
+      // ランドサイド接続の必須化はしない（警告のみ。G-U1）
+      // 「地下棟」の判定は基底階だけでなく、基底が地上でも全エリアが地下にしか無い棟も含む。
+      // エリアの無い地上の空棟は対象にしない（通常の未接続ターミナルの扱いに任せる）
+      const ownAreas = areasByTerminal.get(f.id) ?? [];
+      const hasGroundArea = ownAreas.some((a) => facilityLevel(f) + a.level >= 0);
+      const isUndergroundBuilding = facilityLevel(f) < 0 || (ownAreas.length > 0 && !hasGroundArea);
+      if (isUndergroundBuilding && !hasGroundArea) {
+        const complex = roadComplexes.get(f.id) ?? [f.id];
+        if (complex.length === 1) {
+          const complexAreas = complex.flatMap((tid) => areasByTerminal.get(tid) ?? []);
+          const hasLandsideEntry =
+            complexAreas.some((a) => a.kind === 'entrance' || a.kind === 'exit') ||
+            complexAreas.some((a) => portalAreaIds.has(a.id));
+          if (!hasLandsideEntry) sink.add('TERMINAL_UNDERGROUND_ISOLATED', [f.id], {}, f.origin);
+        }
+      }
     }
     if (f.kind === 'parking' && !touches(tiles, anyRoad, true)) sink.add('PARKING_NO_ROAD', [f.id], {}, f.origin);
     if (f.kind === 'gate') {
+      // 機能G/H: 地下の搭乗口はバスゲート扱いが原則。実効地図階層 < 0 のゲートで
+      // ブリッジ（従来の jetBridge、または明示の搭乗橋 PBB）が有効な場合は警告する。
+      // sim 側は boardingProfile が橋なし（タラップ値）に確定させる（G-U4 は機能Hで解消）
+      const gateParent = f.parentFacilityId ? layout.facilities[f.parentFacilityId] : undefined;
+      const gateLevel = gateParent ? facilityLevel(gateParent) + (f.floorIndex ?? 0) : facilityLevel(f);
+      if (gateLevel < 0 && gateMode(f) !== 'bus' && (f.props.jetBridge || hasExplicitPbb(layout, f.id))) sink.add('GATE_UNDERGROUND_BRIDGE', [f.id], {}, f.origin);
       const connected = connectedTerminal(f, layout);
       if (typeof f.props.connectedTo === 'string' && !connected) sink.add('GATE_CONNECTION_INVALID', [f.id], {}, f.origin);
       if (!connected && !touches(tiles, terminalTiles)) sink.add('GATE_NOT_AT_TERMINAL', [f.id], {}, f.origin);
@@ -951,6 +996,63 @@ function checkFacilities(layout: AirportLayout, parts: FootprintPart[], sink: Is
     const buses = facilities.filter((f) => f.kind === 'gseBase' && f.buildState === 'operational' && !f.parentFacilityId).reduce((n, f) => n + apronBusesOf(f), 0);
     if (buses === 0) for (const g of busGates) sink.add('GATE_BUS_NO_VEHICLES', [g.id], {}, g.origin);
     if (remote === 0) sink.add('BUS_GATE_NO_REMOTE_STAND', [busGates[0]!.id], {}, busGates[0]!.origin);
+  }
+}
+
+/**
+ * 搭乗橋（PBB、機能H）の検証。読み取り・速度の正は core/model/boardingBridge。
+ * ここでは「配置と紐付けの正しさ」だけを見る（シル高の範囲外は警告: 1本でも
+ * 大型機は運用でき、速度ペナルティで表すため。design-GHIJ-detail.md §H.3）。
+ */
+function checkBoardingBridges(layout: AirportLayout, sink: IssueSink): void {
+  const pbbs = sortedValues(layout.facilities).filter((f) => f.kind === 'boardingBridge');
+  if (pbbs.length === 0) return;
+  const decksByGate = new Map<string, Map<PbbDeck, string[]>>();
+  const gatesWithPbb = new Set<string>();
+  for (const f of pbbs) {
+    const gateId = pbbGateIdOf(f);
+    const standId = pbbStandIdOf(f);
+    const gate = gateId ? layout.facilities[gateId] : undefined;
+    const stand = standId ? layout.stands[standId] : undefined;
+    // 紐付けの検証: ゲート・スポットが存在し、ゲートの standId と一致すること
+    const gateStandId = gate && typeof gate.props.standId === 'string' ? gate.props.standId : null;
+    if (!gate || gate.kind !== 'gate' || !stand || gateStandId !== standId) {
+      sink.add('PBB_GATE_MISMATCH', [f.id], {}, f.origin);
+    }
+    // 配置の検証: 紐付くスポットの入口（standEntry）の近傍にあること
+    if (stand) {
+      const d = chebyshevDistance([f.origin], [standEntry(stand)]);
+      if (d > PBB_ENTRY_RANGE) sink.add('PBB_NOT_ADJACENT', [f.id], { distance: d }, f.origin, [stand.id]);
+    }
+    if (gate && gate.kind === 'gate') {
+      gatesWithPbb.add(gate.id);
+      const byDeck = decksByGate.get(gate.id) ?? new Map<PbbDeck, string[]>();
+      const list = byDeck.get(pbbDeckOf(f)) ?? [];
+      list.push(f.id);
+      byDeck.set(pbbDeckOf(f), list);
+      decksByGate.set(gate.id, byDeck);
+    }
+    // シル高の警告: 紐付くスポットに就航しうる最大区分（= スポットの size）の
+    // ドアシル高（ゲーム値）が型式の適合範囲を超える場合
+    if (stand) {
+      const spec = PBB_TYPES[pbbTypeOf(f)];
+      if (pbbDeckOf(f) === 'main' && DOOR_SILL_M[stand.size] > spec.sillMain.max) {
+        sink.add('PBB_SILL_RANGE', [f.id], { size: stand.size }, f.origin, [stand.id]);
+      }
+      if (pbbDeckOf(f) === 'upper' && (!spec.sillUpper || DOOR_SILL_UPPER_M < spec.sillUpper.min || DOOR_SILL_UPPER_M > spec.sillUpper.max)) {
+        sink.add('PBB_SILL_RANGE', [f.id], { deck: 'upper' }, f.origin, [stand.id]);
+      }
+    }
+  }
+  for (const [gateId, byDeck] of decksByGate) {
+    for (const [deck, ids] of byDeck) {
+      if (ids.length > 1) sink.add('PBB_DECK_DUPLICATE', [gateId, ...ids], { deck }, layout.facilities[gateId]?.origin);
+    }
+  }
+  // 明示 PBB があるのに従来の jetBridge が残っている（読み取りでは無視される）
+  for (const gateId of gatesWithPbb) {
+    const gate = layout.facilities[gateId];
+    if (gate && gate.props.jetBridge) sink.add('PBB_LEGACY_OVERRIDDEN', [gateId], {}, gate.origin);
   }
 }
 
@@ -1050,11 +1152,13 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
   const areas = sortedValues(layout.terminalAreas);
   for (const a of areas) {
     const t = layout.facilities[a.terminalId];
+    const range = t && t.kind === 'terminal' ? terminalFloorRange(layout, a.terminalId) : null;
     const inside =
       !!t &&
       t.kind === 'terminal' &&
-      a.level >= TERMINAL_AREA_MIN_LEVEL &&
-      a.level < Number(t.props.levels ?? 1) &&
+      range !== null &&
+      a.level >= range.min &&
+      a.level <= range.max &&
       (() => {
         const own = new Set(facilityTiles(t).map((p) => tileKey(p.x, p.y)));
         return areaRectTiles(a).every((p) => own.has(tileKey(p.x, p.y)));
@@ -1384,6 +1488,7 @@ export function analyzeLayout(layout: AirportLayout): LayoutAnalysis {
   checkRunwayRules(layout, sink);
   checkHoldShort(layout, network, sink);
   checkFacilities(layout, parts, sink);
+  checkBoardingBridges(layout, sink);
   checkFacilityHierarchy(layout, sink);
   checkRoads(layout, parts, sink);
   checkAccess(layout, sink);

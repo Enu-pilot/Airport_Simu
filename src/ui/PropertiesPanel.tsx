@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { DecimalInput, Field, Info, NumberInput, Section, TextInput } from './fields';
 import { EASA_OMGWS_BANDS, FAA_TDG_PAVEMENT_WIDTH_M, assessTaxiwayWidth, requiredPavementWidthM } from '../core/airside/taxiwayDesign';
 import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
+import { GatePbbSection } from './PbbSection';
 import { FACILITY_SIM_EFFECT, FACILITY_SPECS, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
 import { blockCapacity } from '../core/sim/taxiBlocks';
 import { blockGraphOf } from '../core/layout/blockGraph';
@@ -24,8 +25,8 @@ import {
 import { deckElevationForCode, requiredClearanceForCode } from '../core/sim/aircraftTypes';
 import { distance } from '../core/geometry/vec';
 import { facilityDims, standEntry } from '../core/layout/footprint';
-import { DEFAULT_LEVEL_HEIGHT_M, facilityLevel, floorDisplayLabel, roadEdgeLevelValid } from '../core/model/levels';
-import { INTERIOR_MIN_FLOOR, TERMINAL_AREA_MIN_LEVEL, levelsInUse } from '../core/layout/levelRules';
+import { DEFAULT_LEVEL_HEIGHT_M, facilityLevel, floorDisplay, floorDisplayLabel, roadEdgeLevelValid } from '../core/model/levels';
+import { INTERIOR_MIN_FLOOR, TERMINAL_AREA_MIN_LEVEL, floorRangeInUse, levelsInUse, terminalFloorRange } from '../core/layout/levelRules';
 import { edgesOfNode } from '../core/layout/network';
 import {
   deleteEntity,
@@ -75,6 +76,8 @@ import {
   OPERABILITY_LABEL,
   propLabel,
   PROJECT_KIND_LABEL,
+  PBB_DECK_LABEL,
+  PBB_TYPE_LABEL,
   RAIL_SERVICE_LABEL,
   ROAD_CLASS_LABEL,
   CONNECTOR_KIND_LABEL,
@@ -1222,7 +1225,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
     const a = layout.terminalAreas[id]!;
     const spec = TERMINAL_AREA_SPECS[a.kind];
     const terminal = layout.facilities[a.terminalId];
-    const levels = Number(terminal?.props.levels ?? 1);
+    const areaRange = terminalFloorRange(layout, a.terminalId);
     const node = analysis.terminal.areas[id];
     const links = (analysis.terminal.links[id] ?? []).map((l) => l.to);
     const areaTiles = a.w * a.h;
@@ -1233,7 +1236,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         <Info label="種類">{AREA_KIND_LABEL[a.kind]}</Info>
         <Field label="階">
           <select value={a.level} onChange={(e) => update(layout, id, { level: Number(e.target.value) })} data-testid="prop-level">
-            {Array.from({ length: levels - TERMINAL_AREA_MIN_LEVEL }, (_, i) => i + TERMINAL_AREA_MIN_LEVEL).map((l) => (
+            {Array.from({ length: areaRange.max - areaRange.min + 1 }, (_, i) => i + areaRange.min).map((l) => (
               <option key={l} value={l}>
                 {floorDisplayLabel((terminal ? facilityLevel(terminal) : 0) + l)}
               </option>
@@ -1319,6 +1322,59 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             内部設計を開く
           </button>
         )}
+        {f.kind === 'terminal' && (
+          <>
+            <Info label="建物の階範囲">
+              {`${floorDisplay(facilityLevel(f)).building}〜${floorDisplay(facilityLevel(f) + Math.max(1, Number(f.props.levels ?? 1)) - 1).building}（地図階層 ${floorDisplay(facilityLevel(f)).map}〜${floorDisplay(facilityLevel(f) + Math.max(1, Number(f.props.levels ?? 1)) - 1).map}）`}
+            </Info>
+            {!readOnly && (
+              <>
+                <Field label="エリアの最下階">
+                  <select
+                    value={terminalFloorRange(layout, id).min}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      const range = terminalFloorRange(layout, id);
+                      if (floorRangeInUse(layout, id, v, range.max)) {
+                        showToast(PLACEMENT_PROBLEM_LABEL.floorRangeInUse, 'error');
+                        return;
+                      }
+                      update(layout, id, { props: { floorRangeMin: v } });
+                    }}
+                    data-testid="prop-floorRangeMin"
+                  >
+                    {Array.from({ length: Math.max(1, Number(f.props.levels ?? 1)) - TERMINAL_AREA_MIN_LEVEL }, (_, i) => i + TERMINAL_AREA_MIN_LEVEL).map((v) => (
+                      <option key={v} value={v}>
+                        {floorDisplayLabel(facilityLevel(f) + v)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="エリアの最上階">
+                  <select
+                    value={terminalFloorRange(layout, id).max}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      const range = terminalFloorRange(layout, id);
+                      if (floorRangeInUse(layout, id, range.min, v)) {
+                        showToast(PLACEMENT_PROBLEM_LABEL.floorRangeInUse, 'error');
+                        return;
+                      }
+                      update(layout, id, { props: { floorRangeMax: v } });
+                    }}
+                    data-testid="prop-floorRangeMax"
+                  >
+                    {Array.from({ length: Math.max(1, Number(f.props.levels ?? 1)) - terminalFloorRange(layout, id).min }, (_, i) => i + terminalFloorRange(layout, id).min).map((v) => (
+                      <option key={v} value={v}>
+                        {floorDisplayLabel(facilityLevel(f) + v)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </>
+            )}
+          </>
+        )}
         {f.parentFacilityId ? (
           <Field label={`建物内配置（${layout.facilities[f.parentFacilityId]?.name || f.parentFacilityId}）`}>
             <select
@@ -1368,6 +1424,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         {f.kind !== 'gate' && <RotationField value={f.rotation} onChange={(r) => update(layout, id, { rotation: r })} label="向き" />}
         {PROP_SCHEMAS[f.kind]
           .filter((def) => !(f.kind === 'gate' && busGate && (def.key === 'standId' || def.key === 'jetBridge')))
+          .filter((def) => !(f.kind === 'terminal' && (def.key === 'floorRangeMin' || def.key === 'floorRangeMax')))
           .map((def) => (
           <Field key={def.key} label={propLabel(f.kind, def.key)}>
             {def.type === 'int' && (
@@ -1404,14 +1461,14 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
               <select value={String((f.props[def.key] as string | undefined) ?? propDefault(def))} onChange={(e) => update(layout, id, { props: { [def.key]: e.target.value } })}>
                 {def.options.map((o) => (
                   <option key={o} value={o}>
-                    {RAIL_SERVICE_LABEL[o as keyof typeof RAIL_SERVICE_LABEL] ?? o}
+                    {PBB_TYPE_LABEL[o] ?? PBB_DECK_LABEL[o] ?? RAIL_SERVICE_LABEL[o as keyof typeof RAIL_SERVICE_LABEL] ?? o}
                   </option>
                 ))}
               </select>
             )}
             {def.type === 'facilityRef' && (
               <select
-                value={connectedTerminal(f, layout) ?? ''}
+                value={def.key === 'connectedTo' ? (connectedTerminal(f, layout) ?? '') : ((f.props[def.key] as string | null) ?? '')}
                 onChange={(e) => update(layout, id, { props: { [def.key]: e.target.value || null } })}
                 data-testid={`prop-${def.key}`}
               >
@@ -1456,6 +1513,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             {`${sim.state.swingGates[f.id]!.routeType === 'domestic' ? '国内線' : '国際線'}として使用中`}
           </Info>
         )}
+        {f.kind === 'gate' && <GatePbbSection layout={layout} gate={f} />}
         {(f.kind === 'gseBase' || f.kind === 'maintenance') && <GroundCapacityInfo layout={layout} />}
         {f.kind === 'baggageSort' && (
           <Info label="処理上限" title="仕分け機1施設あたりの処理上限。合計は運用中の全仕分け施設の合算（空港全体の仕分け能力）">

@@ -55,16 +55,31 @@ export const facilityLevel = (facility: Facility): number =>
       : 0;
 
 export function facilityVerticalRange(facility: Facility): { minM: number; maxM: number } {
+  const level = facilityLevel(facility);
+  // 機能H: 搭乗橋（PBB）はトンネルが通る地上 3〜6m の帯を占有する。サービス道路・
+  // 誘導路（地上 0〜0.4m）やエプロン（0.2m）とは垂直に重ならないため、その上を
+  // またいで置ける。ターミナル建物・ゲートとは重なる（design-GHIJ-detail.md §H.3）
+  if (!facility.parentFacilityId && facility.kind === 'boardingBridge') {
+    return { minM: level * DEFAULT_LEVEL_HEIGHT_M + 3, maxM: level * DEFAULT_LEVEL_HEIGHT_M + 6 };
+  }
+  // 機能G: 地下ターミナル（単独施設）は基底階から levels 層ぶんの高さ区間を持つ。
+  // 旧分岐は「自階層帯の天井」で丸めていたため、複数階の地下棟や地上へ跨ぐ棟で
+  // 実際の占有とずれ、真上の配置判定が誤っていた。地上ターミナルと地下の単独施設
+  // （駐車場等）は従来の計算のまま変えない。
+  if (!facility.parentFacilityId && facility.kind === 'terminal' && level < 0) {
+    const levels = Math.max(1, Number(facility.props.levels ?? 1) || 1);
+    return { minM: level * DEFAULT_LEVEL_HEIGHT_M, maxM: (level + levels) * DEFAULT_LEVEL_HEIGHT_M - 0.2 };
+  }
   const floorOffset = facility.parentFacilityId ? (facility.floorIndex ?? 0) * DEFAULT_LEVEL_HEIGHT_M : 0;
-  const minM = facilityLevel(facility) * DEFAULT_LEVEL_HEIGHT_M + floorOffset;
+  const minM = level * DEFAULT_LEVEL_HEIGHT_M + floorOffset;
   const heightM = facility.parentFacilityId
     ? Math.min(FACILITY_HEIGHT_M[facility.kind] ?? 5, DEFAULT_LEVEL_HEIGHT_M * 0.6)
     : facility.kind === 'terminal'
     ? (FACILITY_HEIGHT_M.terminal ?? 18) * Math.max(1, Number(facility.props.levels ?? 1) * 0.6)
     : FACILITY_HEIGHT_M[facility.kind] ?? 5;
-  const maxM = facility.parentFacilityId || facilityLevel(facility) >= 0
+  const maxM = facility.parentFacilityId || level >= 0
     ? minM + heightM
-    : Math.min(minM + heightM, (facilityLevel(facility) + 1) * DEFAULT_LEVEL_HEIGHT_M - 0.2);
+    : Math.min(minM + heightM, (level + 1) * DEFAULT_LEVEL_HEIGHT_M - 0.2);
   return { minM, maxM };
 }
 
