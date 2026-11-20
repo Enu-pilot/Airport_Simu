@@ -60,8 +60,8 @@ export interface FacilitySpec {
 }
 
 export const FACILITY_SPECS: Record<FacilityKind, FacilitySpec> = {
-  apron: { layer: 'apron', defaultW: 12, defaultH: 8, resizable: true, minW: 3, minH: 3, dragPlace: true, needsAirsideAccess: false },
-  terminal: { layer: 'building', defaultW: 20, defaultH: 8, resizable: true, minW: 4, minH: 3, dragPlace: true, needsAirsideAccess: false },
+  apron: { layer: 'apron', defaultW: 12, defaultH: 8, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
+  terminal: { layer: 'building', defaultW: 20, defaultH: 8, resizable: true, minW: 2, minH: 2, dragPlace: true, needsAirsideAccess: false },
   gate: { layer: 'gate', defaultW: 1, defaultH: 1, resizable: false, minW: 1, minH: 1, dragPlace: false, needsAirsideAccess: false },
   hangar: { layer: 'building', defaultW: 6, defaultH: 5, resizable: true, minW: 4, minH: 4, dragPlace: false, needsAirsideAccess: true },
   tower: { layer: 'building', defaultW: 2, defaultH: 2, resizable: false, minW: 2, minH: 2, dragPlace: false, needsAirsideAccess: false },
