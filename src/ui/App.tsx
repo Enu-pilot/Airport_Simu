@@ -14,6 +14,7 @@ import { SkipDayOverlay } from './SkipDayOverlay';
 import { onKeyDown, onKeyUp } from '../editor/input';
 import { ProjectPanel } from './ProjectPanel';
 import { Toolbox } from './Toolbox';
+import { TerminalWorkspace } from './TerminalWorkspace';
 import { FacilityList } from './FacilityList';
 import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
@@ -150,9 +151,12 @@ export function App() {
  * 地図下端にステータスバー。下部タブは経営系のみ残る（配置チェックはインボックスへ移行済み）。
  */
 function BuildLayout({ readOnly = false, boardOpen = false }: { readOnly?: boolean; boardOpen?: boolean }) {
+  // ターミナル専用設計 Workspace（5-18）: 開いている間は左パネルだけを差し替える。
+  // 運航中（readOnly）は開かない（store 側でも運航中は開けない）
+  const workspace = useEditor((s) => s.terminalWorkspace);
   return (
     <>
-      <BuildLeftPanel readOnly={readOnly} />
+      {workspace && !readOnly ? <TerminalWorkspace /> : <BuildLeftPanel readOnly={readOnly} />}
       <main className="center">
         <Viewport />
         <StatusBar />

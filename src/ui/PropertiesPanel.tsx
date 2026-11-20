@@ -1299,6 +1299,11 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         {!readOnly && <FacilityCapabilityPreview layout={layout} f={f} />}
         {(PORTAL_FACILITY_KINDS as readonly string[]).includes(f.kind) && <FacilityPortalSection layout={layout} facilityId={id} readOnly={readOnly} />}
         {f.kind === 'terminal' && <TerminalComplexInfo layout={layout} terminalId={id} />}
+        {f.kind === 'terminal' && !readOnly && (
+          <button className="small" onClick={() => actions.openTerminalWorkspace(id)} data-testid="open-terminal-workspace">
+            内部設計を開く
+          </button>
+        )}
         {f.parentFacilityId ? (
           <Field label={`建物内配置（${layout.facilities[f.parentFacilityId]?.name || f.parentFacilityId}）`}>
             <select
