@@ -95,7 +95,7 @@
 .fids-table td { border-top: 1px solid #141c26; padding: 2px 6px; }
 .fids-table tbody tr:hover { background: #121b26; }
 .fids-table tr.selected { background: #1d3a4a; }
-.fids-table .fids-num { color: #ffb400; font-weight: 700; }
+.fids-table .fids-num { color: var(--fids-airline, #ffb400); font-weight: 700; }
 .fids-table .fids-place { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 .fids-table .col-type { max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
 .fids-dir { color: #6f7d8c; font-size: 10px; margin-right: 4px; }
