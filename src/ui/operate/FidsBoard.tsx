@@ -13,6 +13,7 @@ import {
 } from '../../i18n/ja';
 import { useOps } from '../OpsPanels';
 import { FlightMenu, paxCell, tone } from './FidsOverlay';
+import { fidsNumStyle } from './airlineColor';
 import { selectAircraftAndFocus } from './focus';
 import { opsUi, useOpsUi } from './opsUi';
 
@@ -86,7 +87,9 @@ export function FidsBoard() {
                   className={`tone-${tone(f, ac, delay)} ${ac.id === o.selectedAircraft ? 'selected' : ''}`}
                   data-testid={`flight-full-${f.number}`}
                 >
-                  <td className="fids-num">{f.number}</td>
+                  <td className="fids-num" style={fidsNumStyle(f.airlineId)}>
+                    {f.number}
+                  </td>
                   <td>{f.direction === 'arrival' ? '到着' : '出発'}</td>
                   <td>{type.shortLabel}</td>
                   <td>{formatClock(f.scheduled)}</td>

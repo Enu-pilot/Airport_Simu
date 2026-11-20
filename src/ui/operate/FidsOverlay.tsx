@@ -14,6 +14,7 @@ import {
   formatClock,
 } from '../../i18n/ja';
 import { useOps } from '../OpsPanels';
+import { fidsNumStyle } from './airlineColor';
 import { canReassignStand, compatibleStands, standOptionLabel } from './flightActions';
 import { selectAircraftAndFocus } from './focus';
 import { opsUi, saveFidsPrefs, useOpsUi } from './opsUi';
@@ -171,7 +172,9 @@ export function FidsOverlay() {
                       data-testid={`flight-${f.number}`}
                     >
                       <td>{formatClock(f.scheduled)}</td>
-                      <td className="fids-num">{f.number}</td>
+                      <td className="fids-num" style={fidsNumStyle(f.airlineId)}>
+                        {f.number}
+                      </td>
                       <td className="fids-place">
                         <span className="fids-dir">{f.direction === 'arrival' ? OPS_UI.fidsFrom : OPS_UI.fidsTo}</span>
                         {place}
