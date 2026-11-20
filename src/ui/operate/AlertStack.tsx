@@ -3,7 +3,7 @@ import { disruptionActions } from '../../editor/simRunner';
 import { OPS_UI } from '../../i18n/ja';
 import { useCompany } from '../ManagementPanels';
 import { useOps } from '../OpsPanels';
-import { ALERT_VISIBLE, deriveAlerts, type Alert, type AlertAction } from './alerts';
+import { ALERT_VISIBLE, deriveAlerts, partitionAlerts, type Alert, type AlertAction } from './alerts';
 import { focusTarget, selectAircraftAndFocus } from './focus';
 import { opsUi, useOpsUi } from './opsUi';
 
@@ -105,15 +105,22 @@ export function AlertStack() {
     if (staleCount > 0) opsUi.patch({ dismissed: dismissed.filter((k) => result.keys.includes(k)) });
   }, [staleCount, dismissed, result.keys]);
   if (!o) return null;
-  const shown = expanded ? result.alerts : result.alerts.slice(0, ALERT_VISIBLE);
-  const more = result.alerts.length - shown.length;
-  const critical = result.alerts.filter((a) => a.severity === 'critical').length;
-  const warnings = result.alerts.length - critical;
+  // 出し分け（決定C）: スタックに出すのは重大だけ。注意は要対応インボックスのみに出る
+  const parts = partitionAlerts(result.alerts);
+  const shown = expanded ? parts.stack : parts.stack.slice(0, ALERT_VISIBLE);
+  const more = parts.stack.length - shown.length;
+  const critical = parts.stack.length;
+  const warnings = parts.inbox.length;
   return (
     <div className="alert-stack" data-testid="alert-stack">
       <button className="alert-status" onClick={() => opsUi.patch({ alertsExpanded: !expanded })} aria-expanded={expanded} data-testid="alert-status">
         旅客動線・運用状況: {result.alerts.length === 0 ? '問題なし' : `重大 ${critical} · 警告 ${warnings}`}
       </button>
+      {warnings > 0 && (
+        <div className="alert-inbox-note muted small" data-testid="alert-inbox-note">
+          {OPS_UI.alertInboxNote(warnings)}
+        </div>
+      )}
       {shown.map((a) => (
         <div key={a.key} className={`alert ${a.severity}`} data-testid={`alert-${a.key}`}>
           <button className="alert-main" onClick={() => jump(a)} title={OPS_UI.jump} data-testid={`alert-focus-${a.key}`}>

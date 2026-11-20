@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { compareIds } from '../../core/model/ids';
-import { designatorsOf } from '../../core/layout/designators';
 import { destinationDef } from '../../core/economy/registry';
 import { resolveType } from '../../core/sim/aircraftTypes';
 import { flightDelayMin } from '../../core/sim/simulation';
@@ -9,8 +8,6 @@ import { disruptionActions } from '../../editor/simRunner';
 import {
   AIRCRAFT_STATE_LABEL,
   BOARDING_LABEL,
-  DELAY_CAUSE_LABEL,
-  FLIGHT_STATUS_LABEL,
   HOLD_REASON_LABEL,
   OPS_UI,
   displayName,
@@ -22,12 +19,11 @@ import { selectAircraftAndFocus } from './focus';
 import { opsUi, saveFidsPrefs, useOpsUi } from './opsUi';
 
 const STANDARD_ROWS = 40;
-const FULL_ROWS = 150;
 /** コンパクト表示で出す便数（直近の N 便） */
 const COMPACT_ROWS = 8;
 
 /** 運航表の旅客欄（全列表示）: 出発便 = 搭乗/予約（乗り遅れ）、到着便 = 退出/降機 */
-function paxCell(f: Flight): string {
+export function paxCell(f: Flight): string {
   const p = f.pax;
   if (!p.generated) return '';
   if (f.direction === 'departure') return `${BOARDING_LABEL[p.boarding]} ${p.boarded}/${p.booked}${p.missed ? `（乗遅${p.missed}）` : ''}`;
@@ -35,7 +31,7 @@ function paxCell(f: Flight): string {
 }
 
 /** 状態の色（表示のみの演出）: 定刻 = 白、遅延 = 琥珀、搭乗中 = 緑、欠航・ダイバート = 赤 */
-function tone(f: Flight, ac: Aircraft, delay: number | null): 'ok' | 'delay' | 'boarding' | 'bad' {
+export function tone(f: Flight, ac: Aircraft, delay: number | null): 'ok' | 'delay' | 'boarding' | 'bad' {
   if (ac.state === 'diverted' || ac.state === 'cannotOperate' || f.status === 'cancelled' || f.status === 'diverted') return 'bad';
   if (f.direction === 'departure' && f.pax.generated && f.pax.boarding === 'open') return 'boarding';
   if (delay !== null && delay >= 15) return 'delay';
@@ -44,7 +40,9 @@ function tone(f: Flight, ac: Aircraft, delay: number | null): 'ok' | 'delay' | '
 
 /**
  * マップ右上の運航表（空港の案内板風の演出。実在の案内板の再現ではない）。
- * 出発 / 到着 / すべて、完了を隠す、折りたたみ、全列表示（上部の「運航表（全列）」）。行クリックで機体を選択し、
+ * 出し分け（ユーザ決定C）: 浮動パネルは要約表示（時刻・便名・行先・機種・スポット・状態・遅延）だけにし、
+ * 全列表示は運航ボード（FidsBoard）に置く。浮動側の見出しボタンからボードへ辿れる。
+ * 出発 / 到着 / すべて、完了を隠す、折りたたみは従来どおり。行クリックで機体を選択し、
  * 行の ⋯ から直接操作（遅延・スポット変更・優先・移動）。操作は既存の disruptionActions（sim/disruptions.ts）を呼ぶ。
  */
 export function FidsOverlay() {
@@ -52,7 +50,6 @@ export function FidsOverlay() {
   const filter = useOpsUi((s) => s.fidsFilter);
   const hideDone = useOpsUi((s) => s.fidsHideDone);
   const collapsed = useOpsUi((s) => s.fidsCollapsed);
-  const full = useOpsUi((s) => s.fidsFull);
   const menu = useOpsUi((s) => s.fidsMenu);
   const compact = useOpsUi((s) => s.fidsCompact);
   const pos = useOpsUi((s) => s.fidsPos);
@@ -63,7 +60,7 @@ export function FidsOverlay() {
     .filter((f) => filter === 'all' || f.direction === filter)
     .filter((f) => !hideDone || f.status === 'scheduled' || f.status === 'active' || state.now - (f.actual ?? f.block ?? f.estimated) < 15 * 60)
     .sort((a, b) => a.scheduled - b.scheduled || compareIds(a.id, b.id))
-    .slice(0, full ? FULL_ROWS : compact ? COMPACT_ROWS : STANDARD_ROWS);
+    .slice(0, compact ? COMPACT_ROWS : STANDARD_ROWS);
   const menuFlight = menu ? state.flights[menu] : undefined;
 
   /** 見出しのドラッグで移動する（ボタン・入力の上では動かさない）。位置は親（マップ）の内側に収める */
@@ -94,7 +91,7 @@ export function FidsOverlay() {
   return (
     <div
       ref={boardRef}
-      className={`fids ${full ? 'full' : ''} ${collapsed ? 'collapsed' : ''} ${pos ? 'moved' : ''}`}
+      className={`fids ${collapsed ? 'collapsed' : ''} ${pos ? 'moved' : ''}`}
       style={pos ? { left: pos.x, top: pos.y, right: 'auto' } : undefined}
       data-testid="flight-board"
     >
@@ -112,24 +109,25 @@ export function FidsOverlay() {
                 </button>
               ))}
             </span>
-            {!full && (
-              <button
-                className={`small fids-compact ${compact ? 'on' : ''}`}
-                aria-pressed={compact}
-                onClick={() => {
-                  opsUi.patch({ fidsCompact: !compact });
-                  saveFidsPrefs();
-                }}
-                title={compact ? OPS_UI.fidsCompactOff : OPS_UI.fidsCompactOn(COMPACT_ROWS)}
-                data-testid="fids-compact"
-              >
-                {compact ? OPS_UI.fidsCompactLabel(COMPACT_ROWS) : OPS_UI.fidsAllLabel}
-              </button>
-            )}
+            <button
+              className={`small fids-compact ${compact ? 'on' : ''}`}
+              aria-pressed={compact}
+              onClick={() => {
+                opsUi.patch({ fidsCompact: !compact });
+                saveFidsPrefs();
+              }}
+              title={compact ? OPS_UI.fidsCompactOff : OPS_UI.fidsCompactOn(COMPACT_ROWS)}
+              data-testid="fids-compact"
+            >
+              {compact ? OPS_UI.fidsCompactLabel(COMPACT_ROWS) : OPS_UI.fidsAllLabel}
+            </button>
             <label className="fids-check">
               <input type="checkbox" checked={hideDone} onChange={(e) => opsUi.patch({ fidsHideDone: e.target.checked })} />
               {OPS_UI.fidsHideDone}
             </label>
+            <button className="small" onClick={() => opsUi.openOverlay('flights')} data-testid="fids-open-board">
+              {OPS_UI.fidsOpenBoard}
+            </button>
           </>
         )}
         <button className="fids-fold" onClick={() => opsUi.patch({ fidsCollapsed: !collapsed })} title={collapsed ? OPS_UI.fidsOpen : OPS_UI.fidsFold} data-testid="fids-fold">
@@ -142,8 +140,8 @@ export function FidsOverlay() {
             <table className="board fids-table">
               <thead>
                 <tr>
-                  {(full ? OPS_UI.fidsColsFull : OPS_UI.fidsCols).map((c, i) => (
-                    <th key={c} className={full ? '' : i === 3 ? 'col-type' : i === 6 ? 'col-delay' : ''}>
+                  {OPS_UI.fidsCols.map((c, i) => (
+                    <th key={c} className={i === 3 ? 'col-type' : i === 6 ? 'col-delay' : ''}>
                       {c}
                     </th>
                   ))}
@@ -165,7 +163,6 @@ export function FidsOverlay() {
                     </span>
                   ) : null;
                   const stateText = `${AIRCRAFT_STATE_LABEL[ac.state]}${ac.holdReason ? `（${HOLD_REASON_LABEL[ac.holdReason]}）` : ''}`;
-                  const rw = f.runwayId ? ctx.layout.runways[f.runwayId] : undefined;
                   return (
                     <tr
                       key={f.id}
@@ -173,41 +170,19 @@ export function FidsOverlay() {
                       className={`tone-${tone(f, ac, delay)} ${ac.id === o.selectedAircraft ? 'selected' : ''}`}
                       data-testid={`flight-${f.number}`}
                     >
-                      {full ? (
-                        <>
-                          <td className="fids-num">{f.number}</td>
-                          <td>{f.direction === 'arrival' ? '到着' : '出発'}</td>
-                          <td>{type.shortLabel}</td>
-                          <td>{formatClock(f.scheduled)}</td>
-                          <td>{f.actual !== null ? formatClock(f.actual) : f.status === 'scheduled' || f.status === 'active' ? formatClock(f.estimated) : '—'}</td>
-                          <td className={delay && delay >= 15 ? 'fids-late' : ''}>{delay ? `${delay}分` : ''}</td>
-                          <td>{rw ? designatorsOf(rw, ctx.layout).text.join('/') : ''}</td>
-                          <td>
-                            {stand}
-                            {busTag}
-                          </td>
-                          <td data-testid={`pax-${f.number}`}>{paxCell(f)}</td>
-                          <td>{FLIGHT_STATUS_LABEL[f.status]}</td>
-                          <td className="fids-state">{stateText}</td>
-                          <td className="muted">{f.delayCauses.map((c) => DELAY_CAUSE_LABEL[c]).join('、')}</td>
-                        </>
-                      ) : (
-                        <>
-                          <td>{formatClock(f.scheduled)}</td>
-                          <td className="fids-num">{f.number}</td>
-                          <td className="fids-place">
-                            <span className="fids-dir">{f.direction === 'arrival' ? OPS_UI.fidsFrom : OPS_UI.fidsTo}</span>
-                            {place}
-                          </td>
-                          <td className="col-type">{type.shortLabel}</td>
-                          <td>
-                            {stand}
-                            {busTag}
-                          </td>
-                          <td className="fids-state">{stateText}</td>
-                          <td className={`col-delay ${delay && delay >= 15 ? 'fids-late' : ''}`}>{delay ? `+${delay}分` : ''}</td>
-                        </>
-                      )}
+                      <td>{formatClock(f.scheduled)}</td>
+                      <td className="fids-num">{f.number}</td>
+                      <td className="fids-place">
+                        <span className="fids-dir">{f.direction === 'arrival' ? OPS_UI.fidsFrom : OPS_UI.fidsTo}</span>
+                        {place}
+                      </td>
+                      <td className="col-type">{type.shortLabel}</td>
+                      <td>
+                        {stand}
+                        {busTag}
+                      </td>
+                      <td className="fids-state">{stateText}</td>
+                      <td className={`col-delay ${delay && delay >= 15 ? 'fids-late' : ''}`}>{delay ? `+${delay}分` : ''}</td>
                       <td className="fids-act">
                         <button
                           className="small"
@@ -236,8 +211,8 @@ export function FidsOverlay() {
   );
 }
 
-/** 選んだ便への直接操作（行の ⋯ から開く）。遅延・スポット変更・優先・移動 */
-function FlightMenu({ flight }: { flight: Flight }) {
+/** 選んだ便への直接操作（行の ⋯ から開く）。遅延・スポット変更・優先・移動。運航ボードの全列表（FidsBoard）からも使う */
+export function FlightMenu({ flight }: { flight: Flight }) {
   const o = useOps();
   const [stand, setStand] = useState('');
   const close = () => opsUi.patch({ fidsMenu: null });

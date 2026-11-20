@@ -153,10 +153,13 @@ export function summarizeTransferOd(plan: DayPlan, hub: HubAnalysis): TransferOd
     .sort((x, y) => y.pax - x.pax || compareIds(x.from, y.from) || compareIds(x.to, y.to) || compareIds(x.kind, y.kind));
 }
 
+/** 接続の上限（分）の既定値（正本。company.hub 未設定のときに使う。表示側もこの値を読む） */
+export const DEFAULT_MAX_CONNECT_MIN = 240;
+
 export function planConnections(plan: DayPlan, c: CompanyState, hub: HubAnalysis): void {
   if (!featureOn(c, 'hub')) return;
   const contracts = new Map<string, Contract>(Object.values(c.contracts).map((k) => [k.id, k]));
-  const maxConnectSec = (c.hub?.maxConnectMin ?? 240) * 60;
+  const maxConnectSec = (c.hub?.maxConnectMin ?? DEFAULT_MAX_CONNECT_MIN) * 60;
   const intlOn = featureOn(c, 'international');
   const arrivals = [...plan.flights].sort((a, b) => a.arrivalAt - b.arrivalAt || compareIds(a.key, b.key));
   const departures = [...plan.flights].sort((a, b) => a.departureAt - b.departureAt || compareIds(a.key, b.key));

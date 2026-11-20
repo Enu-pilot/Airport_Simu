@@ -97,6 +97,8 @@ const UNCOMPUTED_REASON_BY_KIND: Partial<Record<FacilityKind, string>> = {
  * 施設 1 件の能力（F6-02 インスペクターの正本）。
  * 能力式が定義されている種別だけ理論能力を返し、それ以外は未算出として理由を返す。
  * 有効能力は稼働状態のみを反映する（接続・人員・供給の減額源が無い種別では理論と同値）。
+ * 運航中の閉鎖・故障の状態はここでは生成しない（operationalStateReadings が正本で、
+ * 画面側は composeCapabilityReadings で合成する）。
  */
 export function facilityCapability(f: Facility, opts?: { portalUnreachable?: boolean }): CapabilityReading {
   const base = { domain: 'facility', subjectId: f.id, label: f.name, demand: null, actual: null };
@@ -156,7 +158,10 @@ export function facilityCapability(f: Facility, opts?: { portalUnreachable?: boo
   }
 }
 
-/** レイアウト内の全施設の能力（未算出の施設も状態として含む）。ポータル接続の到達性も減額源として反映する */
+/**
+ * レイアウト内の全施設の能力（未算出の施設も状態として含む）。ポータル接続の到達性も減額源として反映する。
+ * 運航中の閉鎖・故障の状態は含まない（operationalStateReadings が正本。合成は composeCapabilityReadings）。
+ */
 export function layoutCapabilities(layout: AirportLayout): CapabilityReading[] {
   const portal = new Map(verifyPortalAccess(layout).map((s) => [s.facilityId, s]));
   return Object.values(layout.facilities).map((f) => {
@@ -164,6 +169,25 @@ export function layoutCapabilities(layout: AirportLayout): CapabilityReading[] {
     const portalUnreachable = s !== undefined && (s.toEntrance === 'unreachable' || s.fromExit === 'unreachable');
     return facilityCapability(f, { portalUnreachable });
   });
+}
+
+/**
+ * 画面側の合成規則（F6-04 統合。全画面で同一にする）: 静的な layoutCapabilities に
+ * 運航中状態の operationalStateReadings（正本）を subjectId でマージする。
+ * 同じ subjectId が両方にある場合は operationalStateReadings 側を採る
+ * （運航中状態が静的な稼働状態より優先）。運航していない（state が無い）ときは
+ * layoutCapabilities のみで、従来表示と完全同一になる。
+ */
+export function composeCapabilityReadings(layout: AirportLayout, state: SimState | null | undefined): CapabilityReading[] {
+  const base = layoutCapabilities(layout);
+  if (!state) return base;
+  const ops = operationalStateReadings(state, layout);
+  if (ops.length === 0) return base;
+  const opsById = new Map(ops.map((r) => [r.subjectId, r]));
+  const merged = base.map((r) => opsById.get(r.subjectId) ?? r);
+  const baseIds = new Set(base.map((r) => r.subjectId));
+  for (const r of ops) if (!baseIds.has(r.subjectId)) merged.push(r);
+  return merged;
 }
 
 /**
@@ -282,7 +306,8 @@ export function maintenanceReading(layout: AirportLayout): CapabilityReading {
  * resourceShortage 状態の読み取りを生成する。減額源は既存の正本だけを使い、
  * 能力値は正本（facilityCapability）がある場合のみ写す（推定で埋めない）。
  * supplyShortage は F6-13（供給インフラ、保留中）の領域なので生成しない。
- * 表示への統合は UI 担当の引き継ぎ事項（HANDOFF_PROMPT.md）。
+ * 表示への統合は composeCapabilityReadings（本ファイル）が正本の合成規則
+ * （同じ subjectId では本関数の生成が優先）。
  * 設備故障台帳の生成（2026-11-20 追加）: 障害に由来しない停止
  * （sim/ground のランダム故障、運航画面からの手動停止）も failed として拾う。
  * 障害由来の分は障害側の生成が優先され、二重には出さない。`belt:` キー

@@ -1,21 +1,25 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
 import { contractsOf, seatsFor, sortContracts, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type ContractSortKey, type DailyKpi, type DailyReport, type WorkOrderAssetKind, type WorkOrderKind } from '../core/economy/company';
 import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
-import { airlineDef, airlinesFor, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
+import { basedConditionDetails } from '../core/economy/basedConditions';
+import { airlineDef, airlinesFor, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport, type DestinationDef } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
 import { renewalOutlook, RENEWAL_LEVEL_LABEL } from '../core/economy/renewal';
-import { routeDemandSummary } from '../core/economy/demand';
+import { demandIndex, distanceFactor, essentialOf, monthOf, routeDemandSummary, seasonalWeekdayFactor } from '../core/economy/demand';
 import { BALANCE } from '../core/economy/balance';
 import { forecastForDay } from '../core/sim/weather';
 import { analyzeAccess, type AccessMode } from '../core/access/model';
 import { companyActions } from '../editor/simRunner';
 import { addCityEvent, setCompanyCity, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
 import { NightOpsSettings } from './NightOpsSettings';
-import { CITY_EVENT_KINDS, cityEventCost, cityEventOutcome, cityEventRisk, type CityEventKind, type CityEventLocation } from '../core/economy/city';
+import { airMarketPopulationOf, CITY_EVENT_CONGESTED, CITY_EVENT_KINDS, cityEventCost, cityEventOutcome, cityEventRisk, type CityEventKind, type CityEventLocation } from '../core/economy/city';
 import {
   ACCESS_MODE_LABEL,
+  DEMAND_UI,
+  FOLLOWUP_UI,
+  SEASONALITY_PROFILE_LABEL,
   GAME_UI,
   AIRLINE_TYPE_LABEL,
   CONTRACT_KIND_LABEL,
@@ -226,8 +230,109 @@ export function AirlineTerminalsPanel({ company: c }: { company: CompanyState })
 
 // ---------------------------------------------------------------- 運航計画
 
+/**
+ * 路線の需要根拠（docs/46。バックエンド追随 項目2）: 目的地の解決済み定義と需要式の正本
+ * （BALANCE.market / demand.ts の純関数）から組み立てる表示専用の読み取り。
+ * 月係数だけを分離する純関数は demand.ts に無いため、月別表は作らず、季節プロファイルと
+ * 「今日の季節・曜日係数」（seasonalWeekdayFactor の合成値そのもの）までを表示する。
+ */
+export interface RouteDemandBasisView {
+  destId: string;
+  /** 利用圏人口（未設定の目的地は都市人口で代用し、その旨を catchmentFallback で示す） */
+  catchment: number;
+  catchmentFallback: boolean;
+  /** 出発側の航空市場人口（自都市。未設定・不正値なら都市人口にフォールバック） */
+  originMarket: number;
+  originFallback: boolean;
+  aviationDependency: number;
+  essential: number;
+  leisure: number;
+  demandIndex: number;
+  distanceKm: number;
+  distanceFactor: number;
+  profile: DestinationDef['seasonalityProfile'];
+  /** 今日の季節・曜日係数（seasonalWeekdayFactor の合成値。月係数の分離表示はしない） */
+  todayFactor: number;
+  /** 今日の月（1〜12） */
+  month: number;
+  k: number;
+  alpha: number;
+  beta: number;
+}
+
+export function routeDemandBasis(c: CompanyState, destId: string): RouteDemandBasisView | null {
+  if (!c.city) return null;
+  const dest = destinationDef(destId);
+  if (!dest) return null; // 未知の行き先（destinationDef は非 null 宣言だが実行時は undefined を返しうる）
+  const M = BALANCE.market;
+  const rawMarket = c.city.airMarketPopulation;
+  const originMarket = airMarketPopulationOf(c.city);
+  return {
+    destId,
+    catchment: dest.catchmentPopulation ?? dest.population,
+    catchmentFallback: dest.catchmentPopulation === null,
+    originMarket,
+    // airMarketPopulationOf が生の値をそのまま採用したときだけ「設定値」。それ以外は都市人口へのフォールバック
+    originFallback: !(typeof rawMarket === 'number' && Number.isFinite(rawMarket) && originMarket === rawMarket),
+    aviationDependency: dest.aviationDependency,
+    essential: essentialOf(dest.demand),
+    leisure: dest.demand.leisure,
+    demandIndex: demandIndex(dest),
+    distanceKm: dest.distanceKm,
+    distanceFactor: distanceFactor(dest.distanceKm),
+    profile: dest.seasonalityProfile,
+    todayFactor: seasonalWeekdayFactor(dest, c.day),
+    month: monthOf(c.day) + 1,
+    k: M.K,
+    alpha: M.alpha,
+    beta: M.beta,
+  };
+}
+
+const basisNum = (v: number): string => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100));
+
+/** 需要根拠の展開行の中身（路線表の行の下に差し込む。表示のみ） */
+export function RouteBasisDetail({ basis }: { basis: RouteDemandBasisView }) {
+  return (
+    <div className="route-basis">
+      <div>
+        <b>{DEMAND_UI.basisTitle}</b>
+      </div>
+      <div>
+        {DEMAND_UI.catchment}: {basis.catchment.toLocaleString('ja-JP')} 人
+        {basis.catchmentFallback && <span className="muted">（{DEMAND_UI.catchmentFallback}）</span>}
+        {' / '}
+        {DEMAND_UI.originMarket}: {basis.originMarket.toLocaleString('ja-JP')} 人
+        {basis.originFallback && <span className="muted">（{DEMAND_UI.originFallback}）</span>}
+      </div>
+      <div>
+        {DEMAND_UI.aviationDependency}: {basisNum(basis.aviationDependency)}
+        {' / '}
+        {DEMAND_UI.essential}: {basisNum(basis.essential)}
+        {' / '}
+        {DEMAND_UI.leisure}: {basisNum(basis.leisure)}
+        {' / '}
+        {DEMAND_UI.demandIndex}: {basisNum(basis.demandIndex)}
+      </div>
+      <div>
+        {DEMAND_UI.distance(basis.distanceKm)}
+        {' / '}
+        {DEMAND_UI.distanceFactor}: {basis.distanceFactor.toFixed(2)}
+      </div>
+      <div className="muted small">{DEMAND_UI.formula(basis.k, basis.alpha, basis.beta)}</div>
+      <div data-testid={`traffic-route-seasonality-${basis.destId}`}>
+        <b>{DEMAND_UI.seasonalityTitle}</b>: {DEMAND_UI.profile}{' '}
+        {basis.profile ? SEASONALITY_PROFILE_LABEL[basis.profile] : DEMAND_UI.profileNone}
+        {' / '}
+        {DEMAND_UI.todayFactor}: ×{basis.todayFactor.toFixed(2)}（{DEMAND_UI.month(basis.month)}）
+      </div>
+    </div>
+  );
+}
+
 export function PlanPanel() {
   const c = useCompany();
+  const [basisDest, setBasisDest] = useState<string | null>(null);
   const mode = useEditor((s) => s.mode);
   const layout = useLayout();
   const ctx = useMemo(() => createContext(layout), [layout]);
@@ -378,6 +483,27 @@ export function PlanPanel() {
           </table>
           {active.length === 0 && <div className="empty">契約はありません。提案を受け入れてください</div>}
 
+          {active.some((k) => k.kind === 'based') && (
+            <section data-testid="plan-based-conditions">
+              <h4>拠点契約の条件（滞泊・整備・人員）</h4>
+              {active.filter((k) => k.kind === 'based').map((k) => {
+                const d = basedConditionDetails(c, ctx, k.id);
+                if (!d) return null;
+                return (
+                  <div key={k.id} className="based-summary" data-testid={`plan-based-${k.id}`}>
+                    <strong>{airlineDef(k.airlineId).name}</strong>
+                    {d.items.map((item) => (
+                      <span key={item.key} className={item.met ? 'ok-text' : 'ng-text'} data-testid={`plan-based-${k.id}-${item.key}`}>
+                        {item.name} {item.available}/{item.required} {item.unit}
+                      </span>
+                    ))}
+                    <span className="muted small">{d.allMet ? '条件を満たしています' : `未達: ${d.unmet.join('・')}（3 日連続で撤退）`}。内訳と常駐機は経営ボード「乗継・拠点」で見られます</span>
+                  </div>
+                );
+              })}
+            </section>
+          )}
+
           <h4>契約の提案</h4>
           <table className="board" data-testid="offers">
             <tbody>
@@ -456,16 +582,35 @@ export function PlanPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...(routeDemandSummary(c, c.day, accessFactor, ctx.types, routeCapabilities)?.values() ?? [])].map((info) => (
-                    <tr key={info.destinationId} data-testid={`traffic-route-${info.destinationId}`}>
-                      <td>{destinationDef(info.destinationId).name}</td>
-                      <td>{Math.round(info.demand)}</td>
-                      <td>{info.seats}</td>
-                      <td>{Math.round(info.baseLf * 100)}%</td>
-                    </tr>
-                  ))}
+                  {[...(routeDemandSummary(c, c.day, accessFactor, ctx.types, routeCapabilities)?.values() ?? [])].map((info) => {
+                    const basis = basisDest === info.destinationId ? routeDemandBasis(c, info.destinationId) : null;
+                    return (
+                      <Fragment key={info.destinationId}>
+                        <tr data-testid={`traffic-route-${info.destinationId}`}>
+                          <td>
+                            {destinationDef(info.destinationId).name}{' '}
+                            <button className="small" onClick={() => setBasisDest(basisDest === info.destinationId ? null : info.destinationId)} data-testid={`traffic-route-basis-toggle-${info.destinationId}`}>
+                              {DEMAND_UI.basisToggle}
+                            </button>
+                          </td>
+                          <td>{Math.round(info.demand)}</td>
+                          <td>{info.seats}</td>
+                          <td>{Math.round(info.baseLf * 100)}%</td>
+                        </tr>
+                        {basis && (
+                          <tr data-testid={`traffic-route-basis-${info.destinationId}`}>
+                            <td colSpan={4}>
+                              <RouteBasisDetail basis={basis} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
+              <p className="muted small" data-testid="traffic-lf-transfer-note">{FOLLOWUP_UI.trafficLfTransferNote}</p>
+              <p className="muted small" data-testid="traffic-demand-note">{DEMAND_UI.demandNote}</p>
             </>
           )}
 
@@ -660,7 +805,7 @@ function CityEventPlanner({ company }: { company: CompanyState }) {
   return (
     <section className="city-event-planner" data-testid="city-event-planner">
       <h4>都市イベント</h4>
-      <p className="muted small">イベント日は旅客需要と道路混雑が増えます。予定には協力費がかかり、規模が大きいほど混雑に転ぶリスクがあります（混雑時は需要の伸びが半分・交通が倍）。開催前に取り消せば協力費は全額戻ります。</p>
+      <p className="muted small">イベント日は旅客需要と道路混雑が増えます。予定には協力費がかかり、規模が大きいほど混雑に転ぶリスクがあります（混雑時は需要の伸びが ×{CITY_EVENT_CONGESTED.demandGrowthMul} に抑えられ、交通の増分が ×{CITY_EVENT_CONGESTED.trafficMul} になります）。開催前に取り消せば協力費は全額戻ります。</p>
       {events.length > 0 && <ul>{events.map((event) => (
         <li key={event.id}>
           {event.day + 1}日目〜{event.day + event.durationDays}日目 · {labels[event.kind]} · 規模{event.scale} · {event.location === 'cityCenter' ? '市街地' : '空港周辺'}

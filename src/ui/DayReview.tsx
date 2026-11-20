@@ -1,11 +1,19 @@
+import { useEffect, useRef } from 'react';
 import { ops } from '../editor/simRunner';
 import { goalText } from './operate/cards/GoalsCard';
 import { formatCr, useEditor } from '../editor/store';
-import { airlineDef } from '../core/economy/registry';
+import { focusEntity } from '../editor/input';
+import { useReviewUi } from './shell/reviewUi';
+import type { MissBreakdownEntry } from '../core/sim/missBreakdown';
+import { airlineDef, destinationDef } from '../core/economy/registry';
+import { hubChoiceShare, type TransferOdEntry } from '../core/economy/hub';
+import { CITY_NIGHT_CURFEW } from '../core/economy/city';
+import { FOLLOWUP_UI, PHASE7B_UI, PROCESS_STEP_LABEL, REPORT_FOLLOWUP_UI } from '../i18n/ja';
+import { PROCESS_STEPS } from '../core/sim/processStats';
 import type { DayReview, ReviewFlight, ReviewMetric } from '../core/analytics/review';
 import type { ScoreComponent, ScoreKey } from '../core/economy/airlineScore';
 import { COST_CATEGORIES, REVENUE_CATEGORIES } from '../core/economy/company';
-import { GAME_UI, AIRCRAFT_STATE_LABEL, AREA_KIND_LABEL, COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, MISS_BOTTLENECK_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL, SCORE_LEVEL_LABEL, TASK_LABEL, UNIT_KIND_LABEL, complaintDetailText, displayName, formatClock } from '../i18n/ja';
+import { GAME_UI, AIRCRAFT_STATE_LABEL, AREA_KIND_LABEL, COST_LABEL, DAY_LOOP, DELAY_CAUSE_LABEL, DISRUPTION_KIND_LABEL, HOLD_REASON_LABEL, MISS_BOTTLENECK_LABEL, PLAN_ISSUE_LABEL, REVENUE_LABEL, REVIEW_METRIC_LABEL, SCORE_LABEL, SCORE_LEVEL_LABEL, TASK_LABEL, UNIT_KIND_LABEL, complaintDetailText, displayName, formatClock, formatMinute } from '../i18n/ja';
 import type { DelayCause, HoldReason } from '../core/sim/types';
 import { DAY_SEC } from '../core/sim/rules';
 import { dayFlowActions } from '../editor/dayFlowActions';
@@ -33,12 +41,166 @@ const fmtMetric = (m: ReviewMetric, v: number | null): string => {
   return String(Math.round(v));
 };
 
-/** 振り返りの画面（上部バーを残した全画面）。運航の締めの直後・「前日の振り返り」・履歴からの読み取り専用で使う */
-export function DayReviewOverlay() {
+/** 乗継の接続成功率（日報 hub の既存フィールドからの表示専用の算出。発生 0 は null） */
+export function hubConnectionRate(hub: { spawned: number; connected: number }): number | null {
+  return hub.spawned > 0 ? hub.connected / hub.spawned : null;
+}
+
+/** 乗り遅れ内訳のうち乗継に起因する項目（乗継保安検査の待ち・乗継時間の不足）だけを取り出す */
+export function transferMissedEntries(entries: readonly MissBreakdownEntry[] | undefined): MissBreakdownEntry[] {
+  return (entries ?? []).filter((e) => e.category === 'transferSecurity' || e.category === 'transferLate');
+}
+
+const HUB_OD_KIND_LABEL: Record<TransferOdEntry['kind'], string> = {
+  DD: '国内→国内',
+  DI: '国内→国際',
+  ID: '国際→国内',
+  II: '国際→国際',
+};
+
+export interface HubOdRow {
+  key: string;
+  fromName: string;
+  toName: string;
+  kindLabel: string;
+  pax: number;
+  pairs: number;
+  appeal: number;
+  /** 直行競合の採用率（%）。appeal は適用前の値なので、同じ OD で表示側に hubChoiceShare を計算する */
+  choiceSharePct: number;
+  qualityPct: number;
+  gapMin: number;
+}
+
+/**
+ * 日報の hubOd（5A: その日の計画で配分された乗継の OD 集約記録）を表示行へ写す純関数。
+ * HubPanel の接続ペア見込み（当日の計画をその場で再計算した便ペア単位）とは別物で、
+ * こちらは締め時に記録された「計画配分」そのもの。並びは core の集計順（人数降順）を保つ。
+ */
+export function hubOdRows(entries: readonly TransferOdEntry[] | undefined): HubOdRow[] {
+  return (entries ?? []).map((e) => ({
+    key: `${e.from}|${e.to}|${e.kind}`,
+    fromName: destinationDef(e.from).name,
+    toName: destinationDef(e.to).name,
+    kindLabel: HUB_OD_KIND_LABEL[e.kind] ?? e.kind,
+    pax: e.pax,
+    pairs: e.pairs,
+    appeal: e.appeal,
+    choiceSharePct: Math.round(hubChoiceShare(destinationDef(e.from), destinationDef(e.to)) * 100),
+    qualityPct: Math.round(e.avgQuality * 100),
+    gapMin: Math.round(e.avgGapMin),
+  }));
+}
+
+const fmtM3 = (v: number): string => (Math.round(v * 10) / 10).toLocaleString('ja-JP', { maximumFractionDigits: 1 });
+
+/**
+ * 日報の積替貨物（CARGO-08 格 7・翌日便接続のみ）の表示文を返す純関数。
+ * 積替が無い日（0 / 未定義。旧日報を含む）は null を返し、従来表示と同一に保つ。
+ */
+export function cargoTransshipmentText(cargo: { transshipmentM3?: number } | undefined): string | null {
+  const v = cargo?.transshipmentM3;
+  if (v === undefined || !(v > 0)) return null;
+  return FOLLOWUP_UI.cargoTransshipmentValue(fmtM3(v));
+}
+
+export interface PortalUsageRow {
+  portalId: string;
+  facilityId: string;
+  enter: number;
+  exit: number;
+  total: number;
+}
+
+/** 日報の portalUsage（B4: ポータル通過実績）を表示行へ写す純関数（合計の降順） */
+export function portalUsageRows(entries: readonly { portalId: string; facilityId: string; enter: number; exit: number }[] | undefined): PortalUsageRow[] {
+  return (entries ?? [])
+    .map((u) => ({ portalId: u.portalId, facilityId: u.facilityId, enter: u.enter, exit: u.exit, total: u.enter + u.exit }))
+    .sort((a, b) => b.total - a.total || (a.portalId < b.portalId ? -1 : 1));
+}
+
+/** 0 時からの分（0〜1439）を HH:MM 表記にする */
+const minOfDayText = (min: number): string => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+
+/**
+ * 工程ピークの開始表記（5-21 ローリング化への追随）:
+ * peakStartMin（最も混んだ連続 60 分の開始分）があればそれを正とし、
+ * 持たない旧日報では従来の「{peakHour} 時台」にフォールバックする。
+ */
+export function processPeakStartText(p: { peakHour: number; peakStartMin?: number }): string {
+  return p.peakStartMin !== undefined ? REPORT_FOLLOWUP_UI.peakWindow(minOfDayText(p.peakStartMin)) : REPORT_FOLLOWUP_UI.peakHourBand(p.peakHour);
+}
+
+/** タイムライン連動のハイライト判定に使うピークの時（peakStartMin がある行は開始時刻の時で判定する） */
+export function processPeakHourOf(p: { peakHour: number; peakStartMin?: number }): number {
+  return p.peakStartMin !== undefined ? Math.floor(p.peakStartMin / 60) : p.peakHour;
+}
+
+export interface ProcessPeakLike {
+  step: string;
+  capacityPerHour: number;
+  demandPerHour?: number;
+  peakHour: number;
+  peakStartMin?: number;
+  peakProcessed: number;
+  utilization: number | null;
+  avgWaitSec: number;
+}
+
+/**
+ * 工程ピーク行の値文字列。能力を算出しない工程（apronBus / access は capacityPerHour = 0）では
+ * 「能力 0 人/時」と誤表示せず、能力・使用率を出さない（実績のみ）。需要は空港全体行だけが持つ。
+ */
+export function processPeakValue(p: ProcessPeakLike): string {
+  const parts: string[] = [];
+  if (p.capacityPerHour > 0) {
+    parts.push(`能力 ${p.capacityPerHour} 人/時`);
+    if (p.demandPerHour !== undefined) parts.push(`需要 ${p.demandPerHour} 人/時`);
+  } else {
+    parts.push(REPORT_FOLLOWUP_UI.noCapacity);
+  }
+  parts.push(`${processPeakStartText(p)} 実績 ${p.peakProcessed} 人`);
+  if (p.capacityPerHour > 0 && p.utilization !== null) parts.push(`使用率 ${Math.round(p.utilization * 100)}%`);
+  parts.push(`平均待ち ${Math.round((p.avgWaitSec / 60) * 10) / 10} 分`);
+  return parts.join('・');
+}
+
+export interface StepWaitRow {
+  step: string;
+  label: string;
+  p50Sec: number;
+  p95Sec: number;
+  pax: number;
+}
+
+/**
+ * 日報 doorToDoor.stepWaits（5-23: 工程別の待ち時間の分位点）を表示行へ写す純関数。
+ * 並びは工程の正規順（PROCESS_STEPS）。stepWaits を持たない旧日報では空（節ごと出さない）。
+ */
+export function stepWaitRows(stepWaits: Record<string, { p50Sec: number; p95Sec: number; pax: number }> | undefined): StepWaitRow[] {
+  if (!stepWaits) return [];
+  const order = new Map<string, number>(PROCESS_STEPS.map((s, i) => [s, i] as const));
+  return Object.entries(stepWaits)
+    .map(([step, w]) => ({ step, label: PROCESS_STEP_LABEL[step] ?? step, p50Sec: w.p50Sec, p95Sec: w.p95Sec, pax: w.pax }))
+    .sort((a, b) => (order.get(a.step) ?? 99) - (order.get(b.step) ?? 99) || (a.step < b.step ? -1 : 1));
+}
+
+/**
+ * 振り返りの画面（UIデザイン更新 第5段階で右ドロワーの中身になった）。
+ * 運航の締めの直後・「前日の振り返り」・履歴からの読み取り専用で使う。
+ * タイムラインで時間帯が指定されたら、工程ピークの節までスクロールする。
+ */
+export function DayReviewPanel() {
   const df = useEditor((s) => s.dayFlow);
   const mode = useEditor((s) => s.mode);
   const live = mode === 'operate' && df.phase === 'review';
   const review = live ? df.review : df.viewing;
+  const focusNonce = useReviewUi((s) => s.focusNonce);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focusNonce === 0) return;
+    bodyRef.current?.querySelector('[data-testid="review-process-peak"]')?.scrollIntoView({ block: 'start' });
+  }, [focusNonce]);
   if (!review) return null;
   return (
     <div className="day-review" data-testid="day-review" role="dialog" aria-label={DAY_LOOP.reviewTitle(review.day)}>
@@ -46,7 +208,7 @@ export function DayReviewOverlay() {
         <h2 data-testid="review-title">{DAY_LOOP.reviewTitle(review.day)}</h2>
         <span className="muted">{live ? DAY_LOOP.reviewSub : DAY_LOOP.reviewArchive}</span>
       </div>
-      <div className="day-review-body">
+      <div className="day-review-body" ref={bodyRef}>
         <ReviewBody review={review} />
       </div>
       <div className="day-review-foot">
@@ -81,9 +243,27 @@ function Section({ id, title, children }: { id: string; title: string; children:
   );
 }
 
-function Row({ label, value, tone }: { label: string; value: React.ReactNode; tone?: 'ok' | 'warn' | 'bad' }) {
+function Row({
+  label,
+  value,
+  tone,
+  onFocus,
+  highlighted,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: 'ok' | 'warn' | 'bad';
+  /** 指定すると行クリックで地図の該当箇所へフォーカスする（第5段階の地図連携） */
+  onFocus?: () => void;
+  /** タイムラインから指定された時間帯に一致する行の強調 */
+  highlighted?: boolean;
+}) {
   return (
-    <div className={`card-row ${tone ?? ''}`}>
+    <div
+      className={`card-row ${tone ?? ''}${onFocus ? ' focusable' : ''}${highlighted ? ' row-highlight' : ''}`}
+      onClick={onFocus}
+      title={onFocus ? '地図で該当箇所を表示' : undefined}
+    >
       <span className="card-label">{label}</span>
       <span className="card-value">{value}</span>
     </div>
@@ -94,10 +274,17 @@ export function ReviewBody({ review }: { review: DayReview }) {
   const { report: r, prev } = review;
   const k = r.kpi;
   const layout = useEditor((s) => s.history.present);
+  const focusHour = useReviewUi((s) => s.focusHour);
   const nameOf = (id: string): string => {
     const f = layout.facilities[id];
     return f?.name || id;
   };
+  // 第5段階の地図連携: 行クリックで該当箇所へフォーカスする（要対応リストと同じ focusEntity を再利用し、
+  // カメラ移動＋選択ハイライトで示す）。対象を特定できない行には付けない
+  const focusId = (id: string | null | undefined): (() => void) | undefined =>
+    id && (layout.facilities[id] || layout.terminalAreas[id]) ? () => focusEntity(id) : undefined;
+  const firstAreaOf = (step: string, terminalId?: string): string | null =>
+    Object.values(layout.terminalAreas).find((a) => a.kind === step && (terminalId === undefined || a.terminalId === terminalId))?.id ?? null;
   const revenue = REVENUE_CATEGORIES.filter((c) => r.revenue[c]);
   const cost = COST_CATEGORIES.filter((c) => r.cost[c]);
   return (
@@ -152,27 +339,91 @@ export function ReviewBody({ review }: { review: DayReview }) {
         {r.hub && (
           <div data-testid="review-hub">
             <Row label="乗継" value={`発生 ${r.hub.spawned} 人・接続成功 ${r.hub.connected} 人・乗り遅れ ${r.hub.missed} 人・現れず ${r.hub.noShow} 人`} />
+            {/* §6-2 後半: 日報ドロワーで接続成功率と乗り遅れの内訳まで追えるようにする（日報の既存フィールドのみで構成） */}
+            <Row label="接続成功率" value={hubConnectionRate(r.hub) === null ? '—' : `${(hubConnectionRate(r.hub)! * 100).toFixed(1)}%`} />
+            {transferMissedEntries(r.missedBreakdown).length > 0 && (
+              <div data-testid="review-hub-missed">
+                <b>乗継の乗り遅れ内訳</b>
+                {transferMissedEntries(r.missedBreakdown).map((e, i) => (
+                  <Row
+                    key={`${e.category}:${e.spotId ?? ''}:${i}`}
+                    label={`${MISS_BOTTLENECK_LABEL[e.category]}${e.spotId ? `（${displayName(layout, e.spotId)}）` : ''}`}
+                    value={`${e.count} 人`}
+                    onFocus={focusId(e.spotId)}
+                  />
+                ))}
+              </div>
+            )}
+            {r.doorToDoor?.transfer && <Row label="ゲート間所要時間（中央値 / 95%点）" value={`${Math.round(r.doorToDoor.transfer.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.transfer.p95Sec / 60)} 分（${r.doorToDoor.transfer.pax} 人）`} />}
+            {/* 第7段階b: hubOd（5A の OD 別計画配分記録）。上の実績（hub）とは別フェーズの計画値で、二重計上ではない */}
+            {hubOdRows(r.hubOd).length > 0 && (
+              <div data-testid="review-hub-od">
+                <b>{PHASE7B_UI.hubOdTitle}</b>
+                <div className="muted small">{PHASE7B_UI.hubOdExplain} {FOLLOWUP_UI.hubOdExplainFollowup}</div>
+                <table className="board">
+                  <thead>
+                    <tr><th>{PHASE7B_UI.hubOdFrom}</th><th>{PHASE7B_UI.hubOdTo}</th><th>種類</th><th>人数</th><th>ペア数</th><th>魅力</th><th>{FOLLOWUP_UI.hubChoiceColumn}</th><th>接続品質</th><th>平均接続時間</th></tr>
+                  </thead>
+                  <tbody>
+                    {hubOdRows(r.hubOd).map((row) => (
+                      <tr key={row.key} data-testid={`review-hub-od-row-${row.key}`}>
+                        <td>{row.fromName}</td>
+                        <td>{row.toName}</td>
+                        <td>{row.kindLabel}</td>
+                        <td>{row.pax} 人</td>
+                        <td>{row.pairs}</td>
+                        <td>{row.appeal.toFixed(2)}</td>
+                        <td>{row.choiceSharePct}%</td>
+                        <td>{row.qualityPct}%</td>
+                        <td>{row.gapMin} 分</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
         {r.cargo && (
           <div data-testid="review-cargo">
             <Row label="貨物" value={`取扱 ${r.cargo.carriedM3} m³（積み残し ${r.cargo.leftoverM3} m³）・収入 ${formatCr(r.cargo.revenue)}・荷役費 ${formatCr(r.cargo.handlingCost)}・トラック ${r.cargo.truckTrips} 台`} />
+            {/* 格 7 の積替（翌日便接続のみ）: 積替がある日だけ分けて出す。無い日は従来表示と同一 */}
+            {cargoTransshipmentText(r.cargo) !== null && (
+              <div data-testid="review-cargo-transshipment">
+                <Row label={FOLLOWUP_UI.cargoTransshipmentLabel} value={cargoTransshipmentText(r.cargo)!} />
+              </div>
+            )}
           </div>
         )}
         {r.doorToDoor && (r.doorToDoor.departure || r.doorToDoor.arrival || r.doorToDoor.transfer) && (
           <div data-testid="review-door-to-door">
             <b>Door-to-Door 所要時間（中央値 / 95%点）</b>
-            {r.doorToDoor.departure && <Row label="出発（入口→搭乗）" value={`${Math.round(r.doorToDoor.departure.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.departure.p95Sec / 60)} 分（${r.doorToDoor.departure.pax} 人）`} />}
+            {/* 5-23 外部境界: 出発の起点はアクセス移動を含む空港への到着時点（従来の入口起点から変更） */}
+            {r.doorToDoor.departure && <Row label={REPORT_FOLLOWUP_UI.doorDepartureLabel} value={`${Math.round(r.doorToDoor.departure.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.departure.p95Sec / 60)} 分（${r.doorToDoor.departure.pax} 人）`} />}
             {r.doorToDoor.arrival && <Row label="到着（降機→退出）" value={`${Math.round(r.doorToDoor.arrival.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.arrival.p95Sec / 60)} 分（${r.doorToDoor.arrival.pax} 人）`} />}
             {r.doorToDoor.transfer && <Row label="乗継（ゲート間）" value={`${Math.round(r.doorToDoor.transfer.p50Sec / 60)} 分 / ${Math.round(r.doorToDoor.transfer.p95Sec / 60)} 分（${r.doorToDoor.transfer.pax} 人）`} />}
             {r.doorToDoor.stepFree.rate !== null && <Row label="Step-free 完了率" value={`${Math.round(r.doorToDoor.stepFree.rate * 100)}%（完了 ${r.doorToDoor.stepFree.completed} 人・乗り遅れ ${r.doorToDoor.stepFree.missed} 人）`} />}
+            <div className="muted small">{REPORT_FOLLOWUP_UI.doorDepartureNote}</div>
+            {/* 5-23: 工程別の待ち時間（処理時間ではなく待ち時間）。stepWaits を持たない旧日報では節ごと出さない */}
+            {stepWaitRows(r.doorToDoor.stepWaits).length > 0 && (
+              <div data-testid="review-door-step-waits">
+                <b>{REPORT_FOLLOWUP_UI.stepWaitsTitle}</b>
+                <div className="muted small">{REPORT_FOLLOWUP_UI.stepWaitsNote}</div>
+                {stepWaitRows(r.doorToDoor.stepWaits).map((w) => (
+                  <div key={w.step} data-testid={`review-door-step-wait-${w.step}`}>
+                    <Row label={w.label} value={`中央値 ${duration(w.p50Sec)} / 95%点 ${duration(w.p95Sec)}（${w.pax} 人）`} />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {r.processPeak && r.processPeak.length > 0 && (
           <div data-testid="review-process-peak">
             <b>最混雑60分の工程別実績</b>
+            <div className="muted small">{REPORT_FOLLOWUP_UI.processPeakNote}</div>
             {r.processPeak.map((p) => (
-              <Row key={p.step} label={AREA_KIND_LABEL[p.step as keyof typeof AREA_KIND_LABEL] ?? p.step} value={`能力 ${p.capacityPerHour} 人/時・需要 ${p.demandPerHour} 人/時・ピーク ${p.peakHour} 時台 実績 ${p.peakProcessed} 人${p.utilization !== null ? `・使用率 ${Math.round(p.utilization * 100)}%` : ''}・平均待ち ${Math.round((p.avgWaitSec / 60) * 10) / 10} 分`} />
+              <Row key={p.step} label={PROCESS_STEP_LABEL[p.step] ?? p.step} value={processPeakValue(p)} onFocus={focusId(firstAreaOf(p.step))} highlighted={focusHour !== null && processPeakHourOf(p) === focusHour} />
             ))}
           </div>
         )}
@@ -180,7 +431,7 @@ export function ReviewBody({ review }: { review: DayReview }) {
           <div data-testid="review-process-peak-by-terminal">
             <b>工程別実績（ターミナル別）</b>
             {r.processPeakByTerminal.map((p) => (
-              <Row key={`${p.terminalId}:${p.step}`} label={`${p.terminalId} / ${AREA_KIND_LABEL[p.step as keyof typeof AREA_KIND_LABEL] ?? p.step}`} value={`能力 ${p.capacityPerHour} 人/時・ピーク ${p.peakHour} 時台 実績 ${p.peakProcessed} 人${p.utilization !== null ? `・使用率 ${Math.round(p.utilization * 100)}%` : ''}・平均待ち ${Math.round((p.avgWaitSec / 60) * 10) / 10} 分`} />
+              <Row key={`${p.terminalId}:${p.step}`} label={`${p.terminalId} / ${PROCESS_STEP_LABEL[p.step] ?? p.step}`} value={processPeakValue(p)} onFocus={focusId(firstAreaOf(p.step, p.terminalId))} highlighted={focusHour !== null && processPeakHourOf(p) === focusHour} />
             ))}
           </div>
         )}
@@ -188,7 +439,17 @@ export function ReviewBody({ review }: { review: DayReview }) {
           <div data-testid="review-link-usage">
             <b>連絡設備・上下移動の利用実績</b>
             {r.linkUsage.map((u) => (
-              <Row key={u.linkId} label={u.kind === 'vertical' && u.areaKind ? `${AREA_KIND_LABEL[u.areaKind as keyof typeof AREA_KIND_LABEL] ?? u.areaKind}（${u.linkId.slice('vertical:'.length)}）` : u.label} value={`合計 ${u.total} 人・ピーク ${u.peakHour} 時台 ${u.peakCount} 人${u.capacityPerHour ? `（能力 ${u.capacityPerHour} 人/時）` : ''}`} />
+              <Row key={u.linkId} label={u.kind === 'vertical' && u.areaKind ? `${AREA_KIND_LABEL[u.areaKind as keyof typeof AREA_KIND_LABEL] ?? u.areaKind}（${u.linkId.slice('vertical:'.length)}）` : u.label} value={`合計 ${u.total} 人・ピーク ${u.peakHour} 時台 ${u.peakCount} 人${u.capacityPerHour ? `（能力 ${u.capacityPerHour} 人/時）` : ''}`} onFocus={focusId(u.kind === 'vertical' ? u.linkId.slice('vertical:'.length) : layout.terminalLinks?.[u.linkId]?.fromAreaId)} highlighted={focusHour !== null && u.peakHour === focusHour} />
+            ))}
+          </div>
+        )}
+        {/* B4: 歩行ポータルの通過実績（portalUsage）。連絡設備（ターミナルリンク・上下移動）とは別集計なので節を分ける */}
+        {portalUsageRows(r.portalUsage).length > 0 && (
+          <div data-testid="review-portal-usage">
+            <b>{PHASE7B_UI.portalUsageTitle}</b>
+            <div className="muted small">{PHASE7B_UI.portalUsageExplain}</div>
+            {portalUsageRows(r.portalUsage).map((u) => (
+              <Row key={u.portalId} label={`${displayName(layout, u.facilityId)}（${u.portalId}）`} value={`入 ${u.enter} 人・出 ${u.exit} 人・合計 ${u.total} 人`} onFocus={focusId(u.facilityId)} />
             ))}
           </div>
         )}
@@ -253,6 +514,7 @@ export function ReviewBody({ review }: { review: DayReview }) {
               label="主なボトルネック"
               value={`${MISS_BOTTLENECK_LABEL[review.missedBreakdown.summary[0]!.category]} ${review.missedBreakdown.summary[0]!.count} 人${review.missedBreakdown.summary[0]!.topSpotId ? `（${displayName(layout, review.missedBreakdown.summary[0]!.topSpotId!)}）` : ''}`}
               tone="warn"
+              onFocus={focusId(review.missedBreakdown.summary[0]!.topSpotId)}
             />
             {review.missedBreakdown.advice.map((a) => (
               <div key={a.category} className="small">
@@ -302,7 +564,7 @@ export function ReviewBody({ review }: { review: DayReview }) {
           <Row label="都市係数" value={`×${r.city.cityFactor.toFixed(2)}`} />
           <Row label="道路 / 鉄道品質" value={`${r.city.roadQuality} / ${r.city.railQuality}`} />
           {r.city.noiseMovements !== undefined && <Row label="航空機の騒音ポイント" value={`${r.city.noisePoints ?? 0}（${r.city.noiseMovements} 動作）`} />}
-          {r.city.nightMovements !== undefined && <Row label="夜間運航（22:00〜06:00）" value={`${r.city.nightMovements} 回`} tone={r.city.nightMovements > 0 ? 'warn' : undefined} />}
+          {r.city.nightMovements !== undefined && <Row label={`夜間運航（${formatMinute(CITY_NIGHT_CURFEW.fromMin)}〜${formatMinute(CITY_NIGHT_CURFEW.toMin)}）`} value={`${r.city.nightMovements} 回`} tone={r.city.nightMovements > 0 ? 'warn' : undefined} />}
           {r.city.residentsStart !== undefined && r.city.residentsEnd !== undefined && <Row label="住民満足度" value={`${r.city.residentsStart.toFixed(1)} → ${r.city.residentsEnd.toFixed(1)}（${(r.city.residentDelta ?? 0) >= 0 ? '+' : ''}${(r.city.residentDelta ?? 0).toFixed(2)}）`} tone={(r.city.residentDelta ?? 0) < 0 ? 'warn' : undefined} />}
           {(r.city.events?.length ?? 0) > 0 && <Row label="開催イベント" value={r.city.events!.map((event) => `${({ festival: '祭り', sports: 'スポーツ大会', conference: '会議・展示会' } as const)[event.kind]}（規模${event.scale}・${event.location === 'cityCenter' ? '市街地' : '空港周辺'}）`).join('、')} />}
           {(r.city.eventDemandMultiplier ?? 1) > 1 && <Row label="イベント需要係数" value={`×${r.city.eventDemandMultiplier!.toFixed(2)} / 道路混雑 ×${(r.city.eventTrafficMultiplier ?? 1).toFixed(2)}`} />}
@@ -334,6 +596,7 @@ export function ReviewBody({ review }: { review: DayReview }) {
               key={d.id}
               label={`${hhmm(d.start)} ${DISRUPTION_KIND_LABEL[d.kind]}${d.target ? `（${nameOf(d.target)}）` : ''}`}
               value={d.resolvedBy === 'player' ? DAY_LOOP.resolvedByPlayer : d.resolvedBy === 'time' ? DAY_LOOP.resolvedByTime : DAY_LOOP.unresolved}
+              onFocus={focusId(d.target)}
             />
           ))
         )}
@@ -485,7 +748,13 @@ function ReviewFlightDetail({ flight: f, review }: { flight: ReviewFlight; revie
   const history = f.timeline;
   return (
     <details className="review-flight" data-testid={`review-flight-${f.aircraftId}`}>
-      <summary>
+      <summary
+        onClick={() => {
+          // 行選択で地図のスポット（なければゲート）へフォーカスする。開閉の既定動作は妨げない
+          const target = f.standId ?? f.gateId;
+          if (target) focusEntity(target);
+        }}
+      >
         <b>{f.arrNumber} → {f.depNumber}</b>
         <span>{f.result === 'completed' ? '完了' : f.result === 'diverted' ? 'ダイバート' : '欠航'}</span>
         <span>{f.airlineId ? airlineDef(f.airlineId).name : '航空会社記録なし'} · {f.typeName}</span>

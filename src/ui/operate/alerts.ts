@@ -1,4 +1,5 @@
 import type { CompanyState } from '../../core/economy/company';
+import type { OpsAlertAttentionInput } from '../../core/attention';
 import { ISSUE_SEVERITY, analyzeLayout, type Issue } from '../../core/validation/validate';
 import { passengerFlowIssues } from '../../core/terminal/flowDiagnostics';
 import { terminalTransitStatus } from '../../core/terminal/transitStatus';
@@ -84,6 +85,42 @@ export interface AlertResult {
   alerts: Alert[];
   /** 閉じたものを含む、現在成立しているアラートの key（閉じた key の掃除に使う） */
   keys: string[];
+}
+
+/**
+ * アラートの出し分け（ユーザ決定C）: 重大（critical = attention の high 帯相当）だけを
+ * 地図上のスタックに出し、注意（warning）は要対応インボックスのみに出す。
+ * 並び順は入力の順序（重大→注意、新しい順）をそのまま保つ。
+ */
+export function partitionAlerts(alerts: readonly Alert[]): { stack: Alert[]; inbox: Alert[] } {
+  const stack: Alert[] = [];
+  const inbox: Alert[] = [];
+  for (const a of alerts) (a.severity === 'critical' ? stack : inbox).push(a);
+  return { stack, inbox };
+}
+
+/**
+ * インボックス（buildAttentionItems）へ渡す「注意」分の写し。
+ * targetId は地図フォーカスできる対象（エリア・滑走路・スポット）だけを渡す
+ * （機体・車両・対象なしはインボックス側でジャンプ先にしない）。
+ */
+/** 運航中なら sim からインボックス分のアラート入力を作る（運航していなければ undefined = 従来どおり） */
+export function opsInboxAttentionFromSim(
+  sim: { state: SimState; ctx: SimContext } | undefined,
+  company: CompanyState,
+): OpsAlertAttentionInput[] | undefined {
+  if (!sim) return undefined;
+  return opsInboxAttention(deriveAlerts(sim, company).alerts);
+}
+
+export function opsInboxAttention(alerts: readonly Alert[]): OpsAlertAttentionInput[] {
+  return partitionAlerts(alerts).inbox.map((a) => ({
+    key: a.key,
+    title: a.title,
+    ...(a.detail ? { detail: a.detail } : {}),
+    count: a.count,
+    targetId: a.target.kind === 'area' || a.target.kind === 'runway' || a.target.kind === 'stand' ? a.target.id : null,
+  }));
 }
 
 export function deriveAlerts(sim: { state: SimState; ctx: SimContext }, company: CompanyState | null | undefined, dismissed: readonly string[] = []): AlertResult {

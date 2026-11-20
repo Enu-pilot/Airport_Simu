@@ -50,7 +50,10 @@ export interface AccessSegments {
 
 const ROAD_SPEED_MPS = 30_000 / 3600; // 時速 30 km
 
-export const roadEdgeCapacity = (e: RoadEdge): number => e.capacityPerHour ?? (e.lanes ?? 1) * 900;
+/** 道路1車線あたりの既定能力（台/時）。capacityPerHour 未設定の辺に使う */
+export const ROAD_LANE_CAPACITY_PER_HOUR = 900;
+
+export const roadEdgeCapacity = (e: RoadEdge): number => e.capacityPerHour ?? (e.lanes ?? 1) * ROAD_LANE_CAPACITY_PER_HOUR;
 export const railEdgeCapacity = (e: RoadEdge): number => e.capacityPerHour ?? ((e.tracks ?? 1) >= 2 ? 12 : 4);
 
 function edgeT0Min(layout: AirportLayout, e: RoadEdge): number {

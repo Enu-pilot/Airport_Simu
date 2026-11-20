@@ -380,6 +380,112 @@
   flex-wrap: wrap;
 }
 
+/* ---- UIデザイン更新 第6段階: ワークスペースの ATC レンズとしての配置 ----
+   .app-shell（高さ 100vh の縦フレックス）の中で、ヘッダー→本体（レール＋主領域）の
+   骨格に収める。下部のタイムラインの位置は通信ログ（.atc-comm）が担う。 */
+.atc-lens {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+.atc-lens-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.atc-lens-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.atc-lens-main .atc-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.atc-lens-main .atc-comm {
+  flex: none;
+}
+.atc-lens-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  padding: 24px;
+  text-align: center;
+}
+
+/* レンズ切替レール（経営側シェルのレールと同じ 58px 幅・縦並び） */
+.atc-rail {
+  flex: none;
+  width: 58px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 4px;
+  background: #111c2e;
+  border-right: 1px solid #334155;
+}
+.atc-rail-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 2px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.atc-rail-btn.active {
+  background: #0369a1;
+  border-color: #38bdf8;
+  font-weight: 700;
+  opacity: 1;
+}
+.atc-rail-badge {
+  background: #dc2626;
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+/* ボード（開始画面・保存データ）: 経営ボードと同じく背面を薄く残す右シート */
+.atc-board-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+}
+.atc-board-backdrop {
+  flex: 1;
+  background: rgba(2, 6, 12, 0.6);
+}
+.atc-board-sheet {
+  flex: none;
+  width: min(860px, 92%);
+  height: 100%;
+  overflow-y: auto;
+  background: #0d1522;
+  border-left: 1px solid #334155;
+  box-shadow: -10px 0 36px rgba(0, 0, 0, 0.55);
+  padding: 14px 16px 20px;
+}
+.atc-board-sheet .atc-start {
+  margin: 0 auto;
+}
+.atc-board-head {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
 /* 狭い画面: 1カラムに積み、主要操作（時間操作・キュー・詳細）を縦に辿れるようにする */
 @media (max-width: 980px) {
   .atc-main {
@@ -390,5 +496,23 @@
   }
   .atc-aircraft-list {
     overflow-x: auto;
+  }
+  /* レンズのレールは上端の横並びに畳む（レンズ切替と件数バッジは辿れるまま） */
+  .atc-lens-body {
+    flex-direction: column;
+  }
+  .atc-rail {
+    flex-direction: row;
+    width: auto;
+    border-right: none;
+    border-bottom: 1px solid #334155;
+  }
+  .atc-rail-btn {
+    flex-direction: row;
+    gap: 5px;
+    padding: 5px 10px;
+  }
+  .atc-board-sheet {
+    width: 100%;
   }
 }

@@ -194,7 +194,7 @@ export function applyCityNoiseImpact(city: CityConfig, noisePoints: number, nigh
 
 export const CITY_TYPES: readonly CityType[] = ['regional', 'core', 'metropolitan'];
 
-const CITY_PROFILE: Record<CityType, Omit<CityConfig, 'version' | 'residents'>> = {
+export const CITY_PROFILE: Record<CityType, Omit<CityConfig, 'version' | 'residents'>> = {
   // 2026-11-18 PO 判断（5-20 T8）: 旧人口では需要上限が上位の格の旅客要件を下回り到達不能だったため引き上げ。
   // growCity の閾値は基礎人口への相対値なので自動で追随する。既存セーブは人口を保持するため新規ゲームのみに効く
   regional: { type: 'regional', population: 600_000, distanceKm: 25, roadQuality: 2, railQuality: 0 },
@@ -247,6 +247,9 @@ const EVENT_EFFECTS: Record<CityEventKind, { demand: number; traffic: number }> 
   conference: { demand: 0.1, traffic: 0.07 },
 };
 
+/** 混雑に転んだイベントの倍率（正本。需要の伸びはこの割合に抑えられ、交通の増分はこの倍率になる）。表示文言もこの値から組み立てる */
+export const CITY_EVENT_CONGESTED = { demandGrowthMul: 0.5, trafficMul: 2 } as const;
+
 export function cityEventEffects(city: CityConfig | undefined, day: number): { events: CityEvent[]; demandMultiplier: number; trafficMultiplier: number } {
   const events = (city?.events ?? []).filter((event) => day >= event.day && day < event.day + event.durationDays);
   let demandMultiplier = 1;
@@ -254,8 +257,8 @@ export function cityEventEffects(city: CityConfig | undefined, day: number): { e
   for (const event of events) {
     const effect = EVENT_EFFECTS[event.kind];
     const congested = cityEventOutcome(event) === 'congested';
-    demandMultiplier *= 1 + effect.demand * event.scale * (congested ? 0.5 : 1);
-    trafficMultiplier += effect.traffic * event.scale * (event.location === 'airportDistrict' ? 1.5 : 1) * (congested ? 2 : 1);
+    demandMultiplier *= 1 + effect.demand * event.scale * (congested ? CITY_EVENT_CONGESTED.demandGrowthMul : 1);
+    trafficMultiplier += effect.traffic * event.scale * (event.location === 'airportDistrict' ? 1.5 : 1) * (congested ? CITY_EVENT_CONGESTED.trafficMul : 1);
   }
   return { events, demandMultiplier: Math.min(1.8, demandMultiplier), trafficMultiplier: Math.min(2.5, trafficMultiplier) };
 }

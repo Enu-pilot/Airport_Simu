@@ -36,6 +36,7 @@ import {
   type WorkOrderAssetKind,
   type WorkOrderKind,
 } from '../core/economy/company';
+import type { HubSettings } from '../core/economy/phase4Types';
 import { createContext, operableTypes } from '../core/sim/context';
 import { releaseWorkOrderClosure } from '../core/sim/workOrders';
 import { airlineDef, destinationDef, internationalProcessingFor, routeAvailability, routeCapabilitiesForAirport } from '../core/economy/registry';
@@ -224,7 +225,7 @@ export const ops = {
     const types = s.catalogPin ? buildTypeTable(effectiveModels(s.catalogPin)) : undefined;
     // ゲームのモデル（会社の game）がある会社は、運航を始める日ごとに運航のシードを変える（同じ日付の運航が毎回同じにならない）
     const runSeed = seed ?? (s.company.game ? `${s.history.present.site.seed}:ops:${s.company.day}` : undefined);
-    const sim = createSimulation(s.history.present, { ...(runSeed ? { seed: runSeed } : {}), company: structuredClone(s.company), ...(types ? { types } : {}) });
+    const sim = createSimulation(s.history.present, { ...(runSeed ? { seed: runSeed } : {}), company: structuredClone(s.company), ...(types ? { types } : {}), serviceGranularity: s.serviceGranularity });
     if (Object.keys(sim.ctx.runways).length === 0) {
       showToast('滑走路がないため運航できません', 'error');
       return;
@@ -469,7 +470,32 @@ function mutateCompany(fn: (c: CompanyState) => ContractActionResult | FleetResu
   return !r || r.ok;
 }
 
+/**
+ * ハブ設定（バンク窓・最大接続時間）の正規化（UIデザイン更新 第7段階b）。
+ * 保存先は company.hub（project の検証が受ける形に正規化してから書く: 0–1440 に丸め、from ≤ to に並べ替える）。
+ * 反映は既存経路: 接続計画は hub.maxConnectMin を、能力スナップショットは banks を読む。
+ */
+export function normalizeHubSettings(hub: HubSettings): HubSettings {
+  const clampMin = (v: number) => Math.max(0, Math.min(1440, Math.round(Number.isFinite(v) ? v : 0)));
+  const pair = (a: number, b: number): [number, number] => {
+    const x = clampMin(a);
+    const y = clampMin(b);
+    return x <= y ? [x, y] : [y, x];
+  };
+  return {
+    banks: (hub.banks ?? []).map((b, i) => {
+      const [arriveFromMin, arriveToMin] = pair(b.arriveFromMin, b.arriveToMin);
+      const [departFromMin, departToMin] = pair(b.departFromMin, b.departToMin);
+      return { id: b.id || `bank_${i + 1}`, arriveFromMin, arriveToMin, departFromMin, departToMin };
+    }),
+    maxConnectMin: Math.max(1, Math.min(1440, Math.round(Number.isFinite(hub.maxConnectMin) ? hub.maxConnectMin : 240))),
+  };
+}
+
 export const companyActions = {
+  setHubSettings(hub: HubSettings): void {
+    mutateCompany((c) => { c.hub = normalizeHubSettings(hub); });
+  },
   createWorkOrder(input: { assetKind: WorkOrderAssetKind; assetId: string; kind: WorkOrderKind; engineers: number; durationMin: number }): void {
     mutateCompany((c) => { addWorkOrder(c, { ...input, createdDay: c.day }); });
   },

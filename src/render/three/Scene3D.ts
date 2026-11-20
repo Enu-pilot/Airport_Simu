@@ -44,6 +44,36 @@ const UNIT_COLOR3D: Record<UnitKind, number> = {
   cleaningVan: 0x06b6d4,
 };
 
+/**
+ * footprint（タイル座標の直交リング）を持つ施設の 3D 建物ジオメトリ（UIデザイン更新 第7段階b / B10）。
+ * 従来は footprint があっても外接矩形の Box で描いていたため、複合形状のターミナルが矩形に見えていた。
+ * リングをそのまま THREE.Shape にして高さ h で押し出す。座標規約は既存の矩形描画と同じ
+ * （タイル座標 × TILE_M。平面は (x, −z) で作り rotateX(-90°) で立てる = flatWorld と同じ流儀）。
+ * 退化したリングでは null を返し、呼び出し側が矩形にフォールバックする。表示専用で sim には影響しない。
+ */
+export function footprintBuildingGeometry(f: Facility, heightM: number): THREE.BufferGeometry | null {
+  const fp = f.footprint;
+  if (!fp || fp.length < 3 || heightM <= 0) return null;
+  try {
+    const shape = new THREE.Shape();
+    fp.forEach((p, i) => {
+      const sx = w(p.x);
+      const sy = -w(p.y);
+      if (i === 0) shape.moveTo(sx, sy);
+      else shape.lineTo(sx, sy);
+    });
+    shape.closePath();
+    const g = new THREE.ExtrudeGeometry(shape, { depth: heightM, bevelEnabled: false });
+    g.rotateX(-Math.PI / 2);
+    g.computeBoundingBox();
+    const bb = g.boundingBox;
+    if (!bb || !Number.isFinite(bb.min.x) || !Number.isFinite(bb.max.x)) return null;
+    return g;
+  } catch {
+    return null;
+  }
+}
+
 export interface PerfStats {
   fps: number;
   frameMs: number;
@@ -347,14 +377,19 @@ export class Scene3D {
     const d = facilityDims(f);
     const vertical = facilityVerticalRange(f);
     const h = vertical.maxM - vertical.minM;
-    const g = new THREE.BoxGeometry(w(d.w) - 2, h, w(d.h) - 2);
+    // B10: footprint（非矩形の外形）がある施設はポリゴンを押し出して描く。無い/退化時は従来の矩形
+    const fpGeo = footprintBuildingGeometry(f, h);
+    const g = fpGeo ?? new THREE.BoxGeometry(w(d.w) - 2, h, w(d.h) - 2);
     const mat = new THREE.MeshLambertMaterial({
       color: FACILITY_COLOR[f.kind] ?? 0x999999,
       transparent: f.buildState !== 'operational' || hasInterior,
       opacity: f.buildState !== 'operational' ? 0.45 : hasInterior ? 0.28 : 1,
+      // リングの巻き方向に依存しないよう footprint 描画は両面にする
+      ...(fpGeo ? { side: THREE.DoubleSide } : {}),
     });
     const m = new THREE.Mesh(g, mat);
-    m.position.set(w(f.origin.x + d.w / 2), vertical.minM + h / 2, w(f.origin.y + d.h / 2));
+    if (fpGeo) m.position.set(0, vertical.minM, 0);
+    else m.position.set(w(f.origin.x + d.w / 2), vertical.minM + h / 2, w(f.origin.y + d.h / 2));
     m.userData.entityId = f.id;
     m.userData.layerLevels = [facilityLevel(f)];
     this.staticGroup.add(m);

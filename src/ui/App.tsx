@@ -1,60 +1,33 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Viewport } from '../render/MapView';
-import { actions, editorStore, formatCr, newGame, setOpsPrefs, useEditor, useLayout } from '../editor/store';
+import { actions, editorStore, useAnalysis, useEditor, useLayout, type BuildPanel } from '../editor/store';
+import { buildAttentionItems } from '../core/attention';
+import { composeCapabilityReadings } from '../core/capability';
+import { SHELL_UI } from '../i18n/ja';
 import { FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
 import { CatalogPanel } from './CatalogPanel';
 import { ScenarioPanel } from './AnalysisPanels';
-import { DAY_LOOP, GAME_UI, HEAT_LEGEND, MODE_LABEL } from '../i18n/ja';
-import { DayReviewOverlay } from './DayReview';
-import { GameSetupDialog, gameSetupUi } from './GameSetup';
-import { HistoryOverlay } from './HistoryPanel';
+import { GameSetupDialog } from './GameSetup';
+import { ReviewDrawer } from './shell/ReviewDrawer';
 import { SkipDayOverlay } from './SkipDayOverlay';
-import { dayFlowActions } from '../editor/dayFlowActions';
 import { onKeyDown, onKeyUp } from '../editor/input';
-import { projectActions } from '../editor/project';
-import { downloadText, ProjectPanel } from './ProjectPanel';
-import { setBuildState } from '../core/layout/operations';
-import { SITE_SIZES } from '../core/model/site';
-import { applyOp } from '../editor/store';
+import { ProjectPanel } from './ProjectPanel';
 import { Toolbox } from './Toolbox';
 import { FacilityList } from './FacilityList';
 import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
-import type { Overlays } from '../editor/store';
-import { ops } from '../editor/simRunner';
 import { OperateLayout } from './operate/OperateLayout';
-import { OpsNav } from './operate/OpsNav';
+import { opsInboxAttentionFromSim } from './operate/alerts';
+import { OpsBoard } from './operate/DetailOverlay';
 import { opsUi } from './operate/opsUi';
-import { useSecondly } from './operate/Card';
-import { LevelChip } from './operate/WxView';
-import { effectiveWx } from '../core/sim/weather';
 import { StatusBar, Toast } from './StatusBar';
 import { ManagementPage, type ManagementSection } from './ManagementPage';
 import { CapacityPanel } from './CapacityPanel';
 import { AtcApp } from './atc/AtcApp';
-
-/** 混雑マップの凡例（heat 3段階）。overlay 切替の近くに1か所だけ出す部品 */
-const HeatLegend = () => (
-  <div className="overlay-legend" data-testid="congestion-legend">
-    <span>{HEAT_LEGEND.title}</span>
-    <span><i style={{ background: '#3ccf6e' }} />{HEAT_LEGEND.low}</span>
-    <span><i style={{ background: '#ffc23d' }} />{HEAT_LEGEND.mid}</span>
-    <span><i style={{ background: '#ff4d4f' }} />{HEAT_LEGEND.high}</span>
-  </div>
-);
-
-const OVERLAY_LABEL: Record<keyof Overlays, string> = {
-  grid: 'グリッド',
-  interior: 'ターミナル内部',
-  buildable: '建設不可エリア',
-  network: '論理ネットワーク・予約',
-  issues: 'エラー表示',
-  labels: 'ラベル',
-  congestion: '混雑マップ',
-  daylight: '昼夜表現',
-};
-
+import { TopBar, type MainPage } from './shell/TopBar';
+import { Rail } from './shell/Rail';
+import { Timeline } from './shell/Timeline';
 export function App() {
   // ゲームモード選択（経営 / 管制官）。ATC は専用ストア・画面で完結し、
   // EditorState には混ぜない（計画書 air_traffic_control_mode_plan.md §3.1）
@@ -93,57 +66,158 @@ export function App() {
   const mode = useEditor((s) => s.mode);
   const [page, setPage] = useState<MainPage>(mode === 'operate' ? 'operations' : 'construction');
   const [managementSection, setManagementSection] = useState<ManagementSection>('plan');
+  // 経営ボードのスクロール位置（閉じても保持し、再び開いたら復元する。保存データには入れない）
+  const boardScroll = useRef(0);
   const previousMode = useRef(mode);
   useEffect(() => {
     if (mode === previousMode.current) return;
     previousMode.current = mode;
     setPage(mode === 'operate' ? 'operations' : 'construction');
   }, [mode]);
+  // レンズはページの別名として store に同期する（UIデザイン更新 第1段階）
+  useEffect(() => {
+    actions.setLens(page === 'construction' ? 'build' : page === 'management' ? 'manage' : 'operate');
+  }, [page]);
+  // 経営ボードは Esc で閉じて地図へ戻る（UIデザイン更新 第3段階。選択・セクション・スクロールは保持される）。
+  // capture 段階で拾い、編集系の Esc（ツール取消など）より先に処理する。入力要素と運航オーバーレイは従来どおり優先
+  useEffect(() => {
+    if (page !== 'management') return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target;
+      if (t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.tagName === 'SUMMARY')) return;
+      if (opsUi.get().overlay) return;
+      setPage('construction');
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('keydown', onEsc, true);
+    return () => window.removeEventListener('keydown', onEsc, true);
+  }, [page]);
   const openConstruction = (id?: string) => {
     if (id) actions.select(id);
     setPage('construction');
   };
   if (appMode === 'atc') {
-    return <AtcApp currentLayout={currentLayout} onExit={() => setAppMode('management')} />;
+    // ATC レンズ（UIデザイン更新 第6段階）: 経営と同じワークスペース骨格（.app-shell）の枠に収める。
+    // 中身は AtcApp が専用ヘッダー・レール・ボードで構成し、下部のタイムラインは通信ログが担う。
+    // ATC は EditorState の外という分離（第1段階）は変えない。
+    return (
+      <div className="app-shell">
+        <AtcApp
+          currentLayout={currentLayout}
+          onExit={() => setAppMode('management')}
+          onExitTo={(p) => {
+            setPage(p);
+            setAppMode('management');
+          }}
+        />
+      </div>
+    );
   }
   return (
-    <div className={`app mode-${mode} page-${page}`}>
+    <div className="app-shell">
       <TopBar page={page} setPage={setPage} onSavedProjects={() => { setManagementSection('project'); setPage('management'); }} onOpenAtc={() => setAppMode('atc')} />
-      {page === 'management' ? <ManagementPage onOpenConstruction={openConstruction} section={managementSection} onSectionChange={setManagementSection} /> : page === 'operations' ? <OperateLayout /> : <BuildLayout readOnly={mode === 'operate'} />}
-      <DayReviewOverlay />
+      <div className="shell-body">
+        <Rail page={page} setPage={setPage} onOpenAtc={() => setAppMode('atc')} />
+        {/* 経営はボードモード（第3段階）: 背景のワークスペース（地図）はそのまま残し、ボードを重ねる。
+            背景の下部タブはボードと内容が重なるため、ボード表示中は畳む */}
+        <div className={`app mode-${mode} page-${page === 'management' ? (mode === 'operate' ? 'operations' : 'construction') : page}${page === 'management' && mode !== 'operate' ? ' board-open' : ''}`}>
+          {mode === 'operate' && page !== 'construction' ? <OperateLayout /> : <BuildLayout readOnly={mode === 'operate'} boardOpen={page === 'management'} />}
+        </div>
+        {page === 'management' && (
+          <div className="board-overlay" data-testid="management-board">
+            <div className="board-backdrop" onClick={() => setPage('construction')} aria-hidden="true" />
+            <ManagementPage onOpenConstruction={openConstruction} section={managementSection} onSectionChange={setManagementSection} onClose={() => setPage('construction')} scrollRef={boardScroll} />
+          </div>
+        )}
+        {/* 運航ボード（第4段階）: 運航ナビの大きなパネル群を経営ボードと同じボードモードで開く */}
+        {mode === 'operate' && <OpsBoard />}
+        {/* 日報ドロワー（第5段階）: 振り返りと履歴を右ドロワーに同居させる。重なり順はボード類より上の 30 */}
+        <ReviewDrawer />
+      </div>
+      <Timeline />
       <SkipDayOverlay />
-      <HistoryOverlay />
       <GameSetupDialog />
     </div>
   );
 }
 
-type MainPage = 'construction' | 'management' | 'operations';
 
-/** 建設モードの画面（従来のまま: 左にツールボックスと一覧、右にプロパティ、下にタブ） */
-function BuildLayout({ readOnly = false }: { readOnly?: boolean }) {
+/**
+ * 建設レンズの画面（UIデザイン更新 第2段階）:
+ * 左パネル=ツールボックス／施設一覧／要対応インボックスのタブ切替、右=インスペクタ（プロパティ）、
+ * 地図下端にステータスバー。下部タブは経営系のみ残る（配置チェックはインボックスへ移行済み）。
+ */
+function BuildLayout({ readOnly = false, boardOpen = false }: { readOnly?: boolean; boardOpen?: boolean }) {
   return (
     <>
-      <aside className="left">
-        {readOnly ? <div className="build-readonly"><strong>建設・確認</strong><span>運航中は空港構造を変更できません。運航を終了すると編集できます。</span></div> : <Toolbox />}
-        <FacilityList />
-      </aside>
+      <BuildLeftPanel readOnly={readOnly} />
       <main className="center">
         <Viewport />
         <StatusBar />
         <Toast />
       </main>
-      <aside className="right">
+      <aside className="right inspector">
         <PropertiesPanel />
       </aside>
-      <footer className="bottom">
-        <BuildBottom />
-      </footer>
+      {/* 経営ボード表示中は、ボードと内容が重なる下部タブを畳む（閉じれば元に戻る） */}
+      {!boardOpen && (
+        <footer className="bottom">
+          <BuildBottom />
+        </footer>
+      )}
     </>
   );
 }
 
-type BottomTab = 'issues' | 'plan' | 'capacity' | 'finance' | 'access' | 'expansion' | 'catalog' | 'scenarios' | 'project';
+/** 建設レンズの左パネル: ツールボックス・施設一覧・要対応（配置チェック＋案1の要対応）をタブで同居させる */
+function BuildLeftPanel({ readOnly = false }: { readOnly?: boolean }) {
+  const panel = useEditor((s) => s.buildPanel);
+  const layout = useLayout();
+  const analysis = useAnalysis();
+  const company = useCompany();
+  const uiVersion = useEditor((s) => s.ops?.uiVersion ?? -1);
+  const attentionCount = useMemo(
+    () => buildAttentionItems({ layout, analysis, company, capabilities: composeCapabilityReadings(layout, editorStore.getState().ops?.sim.state), opsAlerts: opsInboxAttentionFromSim(editorStore.getState().ops?.sim, company) }).length,
+    // uiVersion は運航中の閉鎖・故障（F6-04）の変化をバッジへ反映するための購読
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layout, analysis, company, uiVersion],
+  );
+  const tabBtn = (target: BuildPanel, label: string, testid: string) => (
+    <button
+      className={panel === target ? 'active' : ''}
+      onClick={() => actions.setBuildPanel(target)}
+      data-testid={testid}
+      aria-pressed={panel === target}
+    >
+      {label}
+      {target === 'inbox' && attentionCount > 0 && <span className="rail-badge" data-testid="build-panel-inbox-count">{attentionCount}</span>}
+    </button>
+  );
+  return (
+    <aside className="left build-panel">
+      <div className="build-panel-tabs" role="tablist" aria-label="建設パネル">
+        {tabBtn('tools', SHELL_UI.buildPanelTools, 'build-panel-tools')}
+        {tabBtn('facilities', SHELL_UI.buildPanelFacilities, 'build-panel-facilities')}
+        {tabBtn('inbox', SHELL_UI.buildPanelInbox, 'build-panel-inbox')}
+      </div>
+      <div className="build-panel-body">
+        {panel === 'facilities' ? (
+          <FacilityList />
+        ) : panel === 'inbox' ? (
+          <IssuesPanel />
+        ) : readOnly ? (
+          <div className="build-readonly"><strong>建設・確認</strong><span>運航中は空港構造を変更できません。運航を終了すると編集できます。</span></div>
+        ) : (
+          <Toolbox />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+type BottomTab = 'plan' | 'capacity' | 'finance' | 'access' | 'expansion' | 'catalog' | 'scenarios' | 'project';
 
 function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
   return (
@@ -158,12 +232,11 @@ function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, stri
 }
 
 function BuildBottom() {
-  const [tab, setTab] = useState<BottomTab>('issues');
+  const [tab, setTab] = useState<BottomTab>('plan');
   return (
     <div className="tabbed">
       <Tabs
         tabs={[
-          ['issues', '配置チェック'],
           ['plan', '運航計画'],
           ['capacity', '空港能力'],
           ['finance', '経営'],
@@ -194,190 +267,9 @@ function BuildBottom() {
         ) : tab === 'project' ? (
           <ProjectPanel />
         ) : (
-          <IssuesPanel />
+          <PlanPanel />
         )}
       </div>
     </div>
-  );
-}
-
-function TopBar({ page, setPage, onSavedProjects, onOpenAtc }: { page: MainPage; setPage: (p: MainPage) => void; onSavedProjects: () => void; onOpenAtc: () => void }) {
-  const canUndo = useEditor((s) => s.history.past.length > 0);
-  const canRedo = useEditor((s) => s.history.future.length > 0);
-  const overlays = useEditor((s) => s.overlays);
-  const viewMode = useEditor((s) => s.viewMode);
-  const layout = useLayout();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const mode = useEditor((s) => s.mode);
-  const overlayKeys = (Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).filter((k) => mode === 'operate' || k !== 'daylight');
-  const career = useEditor((s) => s.company.mode === 'career');
-  const prefs = useEditor((s) => s.opsPrefs);
-  const hasReview = useEditor((s) => s.dayFlow.review !== null);
-  const skipping = useEditor((s) => s.dayFlow.phase === 'skipping');
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [emptySiteSize, setEmptySiteSize] = useState('standard');
-
-  // 書き出し・読み込みはプロジェクト単位（レイアウト・会社・機種データ・シナリオ）。旧形式のレイアウトファイルも読める
-  const download = () => {
-    const { fileName, json } = projectActions.exportJson();
-    downloadText(fileName, json);
-  };
-  const upload = async (file: File) => {
-    if (!window.confirm(mode === 'operate' ? '読み込みで現在の運航状態を置き換えます。続けますか？' : '読み込んだ空港・会社で現在の内容を置き換えます。続けますか？')) return;
-    projectActions.importJson(await file.text(), file.name);
-    setSettingsOpen(false);
-  };
-
-  return (
-    <header className="top">
-      <span className="brand">✈ SkyPort</span>
-      <span className="subtitle">{page === 'construction' ? '建設' : page === 'management' ? '経営' : '運行'} · {mode === 'build' ? '編集可能' : '運航中'}</span>
-      <CompanyBadge />
-      {mode === 'operate' && <WxBadge />}
-      <nav className="primary-nav" aria-label="ゲームページ">
-        <button className={page === 'construction' ? 'active' : ''} onClick={() => setPage('construction')} data-testid="page-construction">建設</button>
-        <button className={page === 'management' ? 'active' : ''} onClick={() => setPage('management')} data-testid="page-management">経営</button>
-        <button className={page === 'operations' ? 'active' : ''} onClick={() => mode === 'build' ? ops.start() : setPage('operations')} data-testid="page-operations">{mode === 'build' ? '運行開始' : '運行'}</button>
-        <button onClick={onOpenAtc} disabled={mode === 'operate'} title={mode === 'operate' ? '運航中は管制官モードへ移れません（モードを同時に進行させないため）。建設モードに戻ってから開いてください' : '管制官モード（ATC）を開きます。経営モードの状態は変更されません'} data-testid="page-atc">管制官</button>
-      </nav>
-      {mode === 'operate' && <div className="top-group">
-            <button onClick={() => ops.restart()} title="今日を締めて（結果を日報に記録して）次の日を 0:00 から始めます。同じ日をやり直すものではありません" data-testid="restart-ops">
-              今日を締めて次の日へ
-            </button>
-            <button
-              className="primary"
-              onClick={() => {
-                const closed = editorStore.getState().dayFlow.atClose;
-                if (window.confirm(closed ? '運航を終了して建設モードに戻りますか？（締めは済んでいます。運航の状態は破棄されます）' : '運航を終了して建設モードに戻りますか？（その日を途中で締め、運航の状態は破棄されます）')) ops.stop();
-              }}
-              data-testid="stop-ops"
-            >
-              ■ 建設モードに戻る
-            </button>
-      </div>}
-      {mode === 'build' && page === 'construction' && (
-        <>
-        <div className="top-group">
-          <button onClick={actions.undo} disabled={!canUndo} title="Ctrl+Z" data-testid="undo">
-            ↶ 元に戻す
-          </button>
-          <button onClick={actions.redo} disabled={!canRedo} title="Ctrl+Shift+Z" data-testid="redo">
-            ↷ やり直し
-          </button>
-        </div>
-          <button
-            onClick={() => applyOp(setBuildState(layout, 'operational'))}
-            title={career ? '計画中の施設をすべて着工する（工期を待って完成）' : '計画・建設中の施設をすべて運用中にする'}
-          >
-            {career ? '全施設を着工' : '全施設を完成'}
-          </button>
-        </>
-      )}
-      <div className="top-group">
-        <button data-testid="view-toggle" className={viewMode === '3d' ? 'active' : ''} onClick={() => actions.setViewMode(viewMode === '3d' ? '2d' : '3d')} title="2D マップと 3D ビューを切り替えます（運航は止まりません）">
-          {viewMode === '3d' ? '2D表示へ' : '3D表示へ'}
-        </button>
-      </div>
-      {mode === 'operate' ? (
-        <details className="overlays-pop" data-testid="overlays-pop">
-          <summary title="マップの表示切り替え">表示</summary>
-          <div className="overlays-menu">
-            {overlayKeys.map((k) => (
-              <label key={k}>
-                <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
-                {OVERLAY_LABEL[k]}
-              </label>
-            ))}
-            {overlays.congestion && <HeatLegend />}
-          </div>
-        </details>
-      ) : (
-        <div className="top-group overlays">
-          {overlayKeys.map((k) => (
-            <label key={k}>
-              <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
-              {OVERLAY_LABEL[k]}
-            </label>
-          ))}
-          {overlays.congestion && <HeatLegend />}
-        </div>
-      )}
-      <div className="top-group">
-        <button className="small day-btn" onClick={() => ops.skipDay()} disabled={skipping} title={DAY_LOOP.skipDayTitle} data-testid="skip-day">
-          {DAY_LOOP.skipDay}
-        </button>
-        {hasReview && (
-          <button className="small day-btn" onClick={() => ops.openReview()} data-testid="open-review">
-            {DAY_LOOP.openReview}
-          </button>
-        )}
-        <button className="small day-btn" onClick={() => dayFlowActions.openHistory(true)} data-testid="open-history">
-          {DAY_LOOP.openHistory}
-        </button>
-        <details className="day-prefs-pop">
-          <summary title="1 日のループの設定">⚙ 日の設定</summary>
-          <div className="day-prefs">
-          <label title={DAY_LOOP.prefPauseTitle}>
-            <input type="checkbox" checked={prefs.pauseAtDayClose} onChange={(e) => setOpsPrefs({ pauseAtDayClose: e.target.checked })} data-testid="pref-pause-at-close" />
-            {DAY_LOOP.prefPause}
-          </label>
-          <label title={DAY_LOOP.prefAutoStopTitle}>
-            <input type="checkbox" checked={prefs.skipAutoStop} onChange={(e) => setOpsPrefs({ skipAutoStop: e.target.checked })} data-testid="pref-skip-autostop" />
-            {DAY_LOOP.prefAutoStop}
-          </label>
-          </div>
-        </details>
-      </div>
-      {mode === 'operate' && page === 'operations' && <OpsNav />}
-      <details className="settings-pop" open={settingsOpen} onToggle={(e) => setSettingsOpen(e.currentTarget.open)} data-testid="settings-menu">
-        <summary>⚙ メニュー</summary>
-        <div className="settings-menu-body">
-          <strong>ゲーム設定・保存</strong>
-          <div className="settings-menu-actions">
-            <button onClick={() => { if (!window.confirm(mode === 'operate' ? '運航を停止して新しいゲームを始めますか？現在の運航状態は失われます。' : '新しいゲームを始めますか？現在の空港と経営データは置き換わります。')) return; if (mode === 'operate') ops.stop(); newGame('career'); setPage('construction'); setSettingsOpen(false); }} data-testid="new-career">新しいゲーム</button>
-            <button onClick={() => { if (!window.confirm(mode === 'operate' ? '運航を停止してサンドボックスを始めますか？現在の運航状態は失われます。' : 'サンドボックスを始めますか？現在の空港と経営データは置き換わります。')) return; if (mode === 'operate') ops.stop(); newGame('sandbox'); setPage('construction'); setSettingsOpen(false); }} data-testid="new-sandbox">サンドボックス</button>
-            <button disabled={mode === 'operate'} onClick={() => { if (window.confirm('サンプル空港で現在の配置を置き換えますか？')) { actions.loadSample(); setSettingsOpen(false); } }} data-testid="load-sample">サンプル空港</button>
-            <label className="small">空の敷地の大きさ
-              <select value={emptySiteSize} onChange={(e) => setEmptySiteSize(e.target.value)} data-testid="new-empty-size">
-                {SITE_SIZES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-              </select>
-            </label>
-            <button disabled={mode === 'operate'} onClick={() => { if (window.confirm('空の敷地で現在の空港を置き換えますか？')) { actions.newEmpty(emptySiteSize); setSettingsOpen(false); } }} data-testid="new-empty">空の敷地</button>
-            <button onClick={() => { gameSetupUi.open('new'); setSettingsOpen(false); }} title={GAME_UI.setupNewTitle} data-testid="new-game-setup">新規ゲーム設定</button>
-            <button onClick={() => { gameSetupUi.open('settings'); setSettingsOpen(false); }} title={GAME_UI.setupSettingsTitle} data-testid="tab-settings">難易度・ルール</button>
-            <button onClick={download} data-testid="export-project">空港を保存</button>
-            <button onClick={() => fileRef.current?.click()} data-testid="import-project">空港を読み込む</button>
-            <button onClick={() => { onSavedProjects(); setSettingsOpen(false); }} data-testid="saved-projects">セーブデータ管理へ</button>
-          </div>
-          <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ''; }} />
-          <p className="muted small">ゲーム全体を置き換える操作は確認後に実行します。保存済みスロットは「経営 → プロジェクト・保存」で管理できます。</p>
-        </div>
-      </details>
-    </header>
-  );
-}
-
-/** 運航中の天候の段階（天候 5 段階の運航だけ） */
-function WxBadge() {
-  const eff = useSecondly((o) => (o.sim.state.wx ? effectiveWx(o.sim.state.wx) : null));
-  if (!eff) return null;
-  return <LevelChip level={eff.level} type={eff.type} testId="weather-level-top" />;
-}
-
-/** 資金・日・評価 */
-function CompanyBadge() {
-  const c = useCompany();
-  return (
-    <span className={`company-badge ${c.cash < 0 ? 'negative' : ''}`} data-testid="company-badge">
-      <span>{MODE_LABEL[c.mode]}</span>
-      <b data-testid="cash">💴 {formatCr(c.cash)}</b>
-      <span data-testid="company-day">{c.day + 1}日目</span>
-      {c.goals && <span data-testid="airport-tier" title={GAME_UI.goalsTitle}>{GAME_UI.tier[c.goals.tier]}</span>}
-      <span className="muted" data-testid="game-difficulty" title={c.game ? GAME_UI.difficultyHint[c.game.difficulty] : GAME_UI.rulesLegacy}>
-        {c.game ? GAME_UI.difficultyBadge(GAME_UI.difficulty[c.game.difficulty]!) : GAME_UI.rulesLegacy}
-      </span>
-      <span title="空港評価（旅客満足度・航空会社満足度・定時率から）">評価 {c.rating.toFixed(1)}</span>
-      {c.bankrupt && <b className="ng-text">経営破綻</b>}
-    </span>
   );
 }

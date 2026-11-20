@@ -5,6 +5,7 @@ import { useSyncExternalStore } from 'react';
  * 表示だけの状態で、シミュレーションにも保存データにも関係しない。運航モードを離れると初期化する。
  */
 export type OverlayKey =
+  | 'flights'
   | 'terminal'
   | 'ground'
   | 'baggage'
@@ -26,11 +27,10 @@ export type OverlayKey =
 export interface OpsUiState {
   /** 開いている大きなオーバーレイ（なければ null） */
   overlay: OverlayKey | null;
-  /** 運航表: 出発 / 到着 / すべて、完了を隠す、折りたたみ、全列表示（tab-flights） */
+  /** 運航表: 出発 / 到着 / すべて、完了を隠す、折りたたみ（浮動パネルは要約表示のみ。全列表示は運航ボードの 'flights'） */
   fidsFilter: 'all' | 'arrival' | 'departure';
   fidsHideDone: boolean;
   fidsCollapsed: boolean;
-  fidsFull: boolean;
   /** 運航表: 直近の便だけ（コンパクト）/ 全件。位置はマップ左上からの px（null = 既定の右上）。閲覧環境の設定として localStorage に覚える */
   fidsCompact: boolean;
   fidsPos: { x: number; y: number } | null;
@@ -72,7 +72,6 @@ const initial = (): OpsUiState => ({
   fidsFilter: 'all',
   fidsHideDone: true,
   fidsCollapsed: false,
-  fidsFull: false,
   ...loadFidsPrefs(),
   fidsMenu: null,
   detailCollapsed: false,
@@ -115,5 +114,6 @@ export const opsUi = {
 };
 
 export function useOpsUi<T>(select: (s: OpsUiState) => T): T {
-  return useSyncExternalStore(opsUi.subscribe, () => select(state));
+  // 第3引数（サーバー側スナップショット）はブラウザ表示では使われない。SSR 描画（テスト含む）で警告なく読めるようにするための指定
+  return useSyncExternalStore(opsUi.subscribe, () => select(state), () => select(state));
 }
