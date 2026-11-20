@@ -1,7 +1,7 @@
 # Phase 5 / 5-18 実装計画: ターミナル専用の建設・設計ワークスペース
 
-> 管理状態: **active（接続マトリクスの核を実装済み。専用Workspace・詳細施設設計は未完了）**
-> 作成日・更新日: 2026-11-18 / 2026-11-19
+> 管理状態: **active（接続マトリクスの核に加え、専用 Workspace の核を 2026-11-20 に実装し PR #64 でマージ済み。詳細施設設計・曲線外形・AGT 等の後段は未完了）**
+> 作成日・更新日: 2026-11-18 / 2026-11-20
 > 根拠: PO依頼（2026-11-18）、docs/42 §3.4 要件5-18
 > 依存: 5-14（床階モデル・建物階層）、5-15（複雑形状・複合体。曲線外形の幾何モデル/占有/描画）、5-16（歩行グラフ・Portal）、5-19（詳細旅客Simulation）、5-21（工程別能力）。320×320空港規模の操作性能受入はPhase2.5完了後。
 > 正本: 本書は実装計画。現行建設画面・内部エリア仕様はdocs/34・35を参照。
@@ -98,11 +98,11 @@
 
 | ID | 状態 | 変更内容 | 主な対象 | テスト・受入条件 |
 |---|---|---|---|---|
-| T1 | 未着手 | 現行editor mode/route/overlay/historyを監査し、Workspaceの境界を決める | ui / editor / history / project | 現行建設画面との責務・状態・保存単位を文書化 |
-| T2 | 未着手 | ターミナル/複合体の選択から専用設計Workspaceへの導線を追加 | ui routes / editor state | 開く/戻るで編集中データ・Undo stack・selectionが失われない |
-| T3 | 未着手 | B3〜4Fフロアナビゲーションと平面/3D/断面表示 | render / UI / level data | 7階の切替・断面表示・選択レイヤが一致 |
-| T4 | 未着手 | 内部設備・経路・Portal・ゾーンを専用画面から編集 | terminal graph / operations / Toolbox | 画面上の接続とCore派生グラフ・validationが一致 |
-| T5 | 未着手 | ターミナル全館・フロア・メッシュの能力/時間設定UI | terminal profile / properties | 設定値の単位・範囲・集計が説明可能で保存往復に合格 |
+| T1 | 完了（2026-11-20） | 現行editor mode/route/overlay/historyを監査し、Workspaceの境界を決める | ui / editor / history / project | ルーター無し・単一 editor store・スナップショット Undo が正本で、Workspace は UI 状態のみ（新規保存形式なし）、既存ツール/PropertiesPanel/MapRenderer を再利用し不足はフロア別集計の純関数だけ、と確定 |
+| T2 | 完了（2026-11-20、核） | ターミナル/複合体の選択から専用設計Workspaceへの導線を追加 | ui routes / editor state | PropertiesPanel の「内部設計を開く」から開き、開閉で history・Undo・selection が不変であることをテストで確認。運航中は開けない。PR #64 でマージ済み |
+| T3 | 一部実装（2026-11-20） | B3〜4Fフロアナビゲーションと平面/3D/断面表示 | render / UI / level data | フロアタブ（B3〜4F、存在しない階は理由付きで無効表示）と複合体の他棟切替は実装済み（PR #64）。3D断面/プレビューは未着手 |
+| T4 | 一部実装（2026-11-20） | 内部設備・経路・Portal・ゾーンを専用画面から編集 | terminal graph / operations / Toolbox | 編集自体は既存ツール・PropertiesPanel の再利用で Workspace から行える。Workspace 専用の経路/Portal 編集 UI は未着手 |
+| T5 | 一部実装（2026-11-20） | ターミナル全館・フロア・メッシュの能力/時間設定UI | terminal profile / properties | 全館容量サマリ（スポット数・保安能力/使用率）とフロア別集計（純関数 `terminalFloorSummary`: 階ごとの種別件数・処理能力・席数）は実装済み（PR #64）。メッシュ単位の設定は未着手 |
 | T6 | 未着手 | 大規模施設・複雑形状・操作性能・E2Eを検証 | tests/e2e / render perf | 320×320空港・複数棟・7階で主要操作が固まらず完了 |
 | T7 | 一部実装 | 外部交通を含む動線監査パネル・経路ハイライトを完成 | workspace / validation / access / tests | 6手段の往路/復路をゲート単位で検査。未設置/未接続/工事中/サービス不足を区別。接続マトリクスの核は実装済み |
 | T8 | 未着手 | 5-15の正規形状モデルを利用した直線+円弧の外形作図/編集UIを追加 | geometry editor / Toolbox / renderer / properties | 円弧の作成・数値編集・接線接続・移動/回転/Undo/Redoが2D/3D・占有・保存後に一致。幾何モデル未対応なら未完了 |
@@ -215,3 +215,9 @@
 - 同一layoutからAirportDay用のカテゴリ集約profileとTerminalDetail用の個別施設一覧を生成し、施設数・能力等の集計が一致する。
 - Workspace編集操作自体がAirportDay/TerminalDetailのclock・state・seedを進めない。
 - 店舗数を増やしたときの設計画面/配置操作の応答時間も5-19のSimulation性能とは分けて測定する。
+
+## 進捗記録（2026-11-20、Workspace の核）
+
+- T1 監査で Workspace の境界を確定（UI 状態のみ・新規保存形式なし・既存部品の再利用）し、核を実装した。変更は7ファイル: `src/core/terminal/terminalFloorSummary.ts`（新規・純関数）、editor store の Workspace 状態（open/close アクション）、`src/ui/TerminalWorkspace.tsx`（新規: 複合体の他棟切替、B3〜4F タブ、全館容量＋フロア別集計、現在階のエリア一覧）、App の BuildLayout 差し替え、PropertiesPanel の「内部設計を開く」導線、テスト2ファイル。
+- 実装ベースは PR #63 マージ後の main。検証: tsc 通過、新規＋関連テスト 30 件全通過、ビルド成功、ESLint クリーン。PR #64（ブランチ `claude/terminal-design-workspace`）で push し、同日 main へマージ済み。
+- 後段として残るもの: 3D断面・void/吹抜け（T3残り）、Workspace 専用の経路/Portal 編集（T4残り）、メッシュ（T5残り）、曲線外形（T8、5-15 が前提。CDG 式の放射状ターミナル要望はここへ接続）、施設カタログ統合（T9）、AGT・動く歩道の供給設定（T10、2026-G〜J の計画と合流）、商業/ラウンジの診断（T11）、E2E（T12）。

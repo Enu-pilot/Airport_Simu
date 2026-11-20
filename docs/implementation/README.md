@@ -13,7 +13,7 @@
 | [docs/39](../39_comprehensive_test_audit_and_handover.md) | 監査を実施した時点の結果。現在の状態は再確認する |
 | [HANDOFF_PROMPT.md](../../HANDOFF_PROMPT.md) | セッション・担当者をまたぐ現在の作業と再開情報 |
 
-## フェーズ全体の実装状況（2026-11-19、正本: docs/42）
+## フェーズ全体の実装状況（2026-11-20、正本: docs/42）
 
 | フェーズ | 実装状況 | 詳細計画書の配置 | 状況 |
 |---|---|---|---|
@@ -42,7 +42,7 @@ Phase 6 は親計画です。5-18 / 5-19 / 5-20 / 5-21 / 5-25 と A6（Phase 5 5
 | Phase 5 / 5-15 複雑形状・ターミナル複合体 | active | [terminal_complex_geometry_plan.md](active/terminal_complex_geometry_plan.md) | 直交footprint/複合体判定に加え汎用Curve/Arc演算基盤は既存だが、Facility.footprintへの曲線統合は未実装。2D本体描画はポリゴン対応、選択輪郭/3D/E2Eは残件。T3・T5・T8は未完了 |
 | Phase 5 / 5-16 対外交通・階層歩行網とPaxGroup統合 | active | [passenger_network_unification_plan.md](active/passenger_network_unification_plan.md) | TerminalModel/Dijkstra/Portal/Step-free/上下接続と単一Portal区間のaccessWalkは既存。T4は検証接続済みだが診断表示残り、T6の複合経路進行・能力予約/待機・Step-free再探索は未完了。T7は全5施設種の往復検証済みだがゲート別/E2E残り |
 | Phase 5 / 5-17 誘導路実幅・高速離脱 | active | [taxiway_realism_plan.md](active/taxiway_realism_plan.md) | FAA TDG/EASA OMGWSのprofileを混同しない。T1・T3 基盤と T4・T5 の純幾何（フィレット/主脚オフトラック/RET経路/停止距離）を実施済み。T2・検証/UI接続・T6・T7 は残件 |
-| Phase 5 / 5-18 ターミナル専用設計Workspace | active（接続マトリクスの核を実装済み） | [terminal_design_workspace_plan.md](active/terminal_design_workspace_plan.md) | 個別施設をID単位で配置/編集する。詳細運営は店舗単位、空港運営はカテゴリ集約する案を5-19に記録。専用Workspace、断面/void、曲線UI、統合カタログ等は未完了 |
+| Phase 5 / 5-18 ターミナル専用設計Workspace | active（接続マトリクスの核＋専用Workspaceの核を実装済み） | [terminal_design_workspace_plan.md](active/terminal_design_workspace_plan.md) | 個別施設をID単位で配置/編集する。詳細運営は店舗単位、空港運営はカテゴリ集約する案を5-19に記録。専用Workspaceの核は2026-11-20にPR #64でマージ済み（導線・フロア切替・集計）。断面/void、曲線UI、統合カタログ等は未完了 |
 | Phase 5 / 5-19 空港全体1日運航・ターミナル単独詳細Simulation | planned | [terminal_simulation_modes_plan.md](planned/terminal_simulation_modes_plan.md) | 提案粒度: 詳細モードは個別店舗IDへの立寄り/待ち/売上、空港運営モードはカテゴリ×ターミナル/区域の集約計算。店舗数×旅客需要を段階増加させ、速度/メモリ/KPI正確性から対応規模と最適化方針を決める |
 | Phase 5 / 5-20 空港格の8段階化・成長判定の多軸化 | active | [airport_tier_progression_plan.md](active/airport_tier_progression_plan.md) | 既存格解放・契約提案・旧セーブ互換を含めて段階的に拡張。T2・T3・T5・T7 実施済み、T6・T8 は残件。planned/ に旧版コピーが残存（正本は active） |
 | Phase 5 / 5-21 最混雑時間帯・ターミナル別工程能力 | active（核実装済み・計画書はplanned配置のまま） | [peak_hour_passenger_capacity_plan.md](planned/peak_hour_passenger_capacity_plan.md) | 6工程の時刻バケット集計、processPeak/processPeakByTerminal、DayReviewのターミナル別表示まで実装。ローリング60分、アクセス/ランプバス/トイレ工程、根拠のある需要のターミナル別配分は残件 |
@@ -53,6 +53,18 @@ Phase 6 は親計画です。5-18 / 5-19 / 5-20 / 5-21 / 5-25 と A6（Phase 5 5
 
 
 | Overnight carry-over departure readiness | completed | [overnight_departure_readiness_fix_plan.md](completed/overnight_departure_readiness_fix_plan.md) | skip された地上作業と固定タスク数の不整合。修正・通しテストによる翌朝便の離陸検証まで実施済み |
+
+## 2026-11-20 PO 追加要望バッチの個別計画（docs/42 §3.11）
+
+| 要求 | 状態 | 正本の計画書 | 備考 |
+|---|---|---|---|
+| 2026-A〜C ターミナル隣接・使用ターミナル容量表示・スポット寸法 | 完了（PR #63 マージ済み） | 計画書は作成せず、確定仕様は docs/35・37・03・21 へ直接反映 | `SIM_MODEL_VERSION` 10.9 |
+| 2026-E 住民満足度施策 | active（PR #68 マージ待ち） | [resident_satisfaction_measures_plan.md](active/resident_satisfaction_measures_plan.md) | 防音工事・夜間割増・NoiseCard＋海上移転係数・住民向け施設・騒音対策費。10.10 |
+| 2026-F 架空会社の制限と持ち替え | active（PR #67 マージ済み、仕様反映のみ残件） | [fictional_airline_restriction_plan.md](active/fictional_airline_restriction_plan.md) | 提案生成への制限と契約パネルでの付け替え。版上げなし |
+| 2026-G〜J 地下ターミナル・PBB・AGT・階層統一 | planned（詳細設計完了・PO 承認済み） | [underground_terminal_pbb_agt_plan.md](planned/underground_terminal_pbb_agt_plan.md) | 5-18 の後段。推奨順 J-1 → G → H → J-2 → I。H に PBB 本数と既存ゲート置き換えの変更要望あり |
+| 2026-PERF 性能改善 | active（第1・2弾は PR #65 マージ済み、第3弾は実装完了・PR 化指示済み） | [performance_improvement_plan.md](active/performance_improvement_plan.md) | 計測→地図なし→結果不変の削減。簡略モードは保留 |
+| 2026-CARGO 国内貨物航空会社の拡充 | active（実装完了・PR 化指示済み） | [domestic_cargo_airlines_plan.md](active/domestic_cargo_airlines_plan.md) | 5-12 貨物基盤の上のカタログ拡充。国内貨物専用機の対象はスプリング・ジャパンのみ |
+| 2026-UI 日報・経営再編／2026-LV 階層同期／2026-FIDS 便名カラー | 完了（PR #61・#62・#66 マージ済み） | 計画書は作成せず、確定仕様は docs/36・37・34・06 へ直接反映 | — |
 
 ## 基盤完成後に再検討する個別計画
 
