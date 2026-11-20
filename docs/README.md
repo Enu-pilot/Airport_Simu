@@ -9,13 +9,14 @@
 | PO 承認済みの実装順序・受入条件・フェーズ全体の状態 | [42. 実装ロードマップ](42_implementation_roadmap.md) | 何を・どの順序で・何を満たせば完了か |
 | コード変更の詳細な実装方法・タスク進捗 | [implementation/](implementation/README.md) | どこを・どう変更し、どこまで検証したか |
 | Phase 6 空港施設・能力・運営機能の総合計画 | [Phase 6 実装計画](implementation/planned/phase6_airport_facility_expansion_plan.md)、[実装計画索引](implementation/README.md) | P0〜P4の優先順位、Phase 5既存計画との関係、F6-17都市間OD/乗継需要モデル。2026-11-19時点でP0を中心に実装中、F6-17は未着手。個別タスクの進捗は計画書を正本とする |
-| Phase 5 / 5-18 ターミナル専用設計Workspace | [5-18 実装計画](implementation/active/terminal_design_workspace_plan.md)、[5-15 複雑形状](implementation/active/terminal_complex_geometry_plan.md) | B3〜4Fの内部設計、曲線外形UI、施設カタログ、動く歩道/AGT、商業/ラウンジ/航空会社向け設備、動線・満足度診断。5-18は接続マトリクスの核を実装済みで、専用Workspace等は未完了 |
+| Phase 5 / 5-18 ターミナル専用設計Workspace | [5-18 実装計画](implementation/active/terminal_design_workspace_plan.md)、[5-15 複雑形状](implementation/active/terminal_complex_geometry_plan.md) | B3〜4Fの内部設計、曲線外形UI、施設カタログ、動く歩道/AGT、商業/ラウンジ/航空会社向け設備、動線・満足度診断。5-18は接続マトリクスの核に加え専用Workspaceの核も2026-11-20に実装済み（PR #64）。曲線外形UI・AGT等は未完了 |
+| 2026-11-20 PO 追加要望バッチ（2026-A〜J・UI・性能・貨物・乗客生成） | [42. 実装ロードマップ §3.11](42_implementation_roadmap.md)、[実装計画索引](implementation/README.md#2026-11-20-po-追加要望バッチの個別計画docs42-311) | 当日の要望と状態の一覧は docs/42 §3.11 が正本。E（住民施策）・F（架空会社）・性能・貨物は個別計画、G〜J（地下・PBB・AGT・階層）は planned の計画書を参照 |
 | 施設・構造物の共通実装基準 | [45. 施設・構造物のライフサイクル実装標準](45_facility_lifecycle_standard.md) | 解放→設置→接続→稼働準備→能力算出→Simulation反映→実績評価→保守までの共通基準 |
 | 現在の機能仕様 | [11〜37 の機能別仕様](#機能別仕様) | 現行実装で確認した挙動・判定基準 |
 | 個別の追加要求・受入条件 | [40. 出発時刻制限](40_departure_time_limit.md)、[41. 能力拡張計画](41_capacity_expansion_plan.md) | 要求・設計上の前提・実装記録 |
 | 季節性・空港特性を含む国内都市の航空需要パラメータ | [46. 国内就航都市の航空需要特性・初期パラメータ](46_domestic_air_demand_model.md) | 国内83都市の利用圏人口・航空依存度（鉄道競合を統合）・必須需要/観光需要・月別プロファイル。初期値と類似空港からの流用根拠。コード未実装の設計基準 |
 | 空港格の拡張計画・実装状況 | [Phase 5 / 5-20 実装計画](implementation/active/airport_tier_progression_plan.md)、[42. 実装ロードマップ](42_implementation_roadmap.md) | 8段階化・多軸昇格・機能解放は実装済み部分あり。T6・T8等の残件と受入状況はactive計画を参照。現行挙動はdocs/30・44とコードを正とする |
-| 管制官モードの独立実装計画 | [管制官モード実装計画](implementation/planned/air_traffic_control_mode_plan.md)、[42. 実装ロードマップ §3.9](42_implementation_roadmap.md) | 経営モードと独立したGROUND/TOWER管制ゲームの計画。既定ブランチでは未統合。別作業コピーの実装状況はHANDOFFを参照 |
+| 管制官モードの独立実装計画 | [管制官モード実装計画](implementation/active/air_traffic_control_mode_plan.md)、[42. 実装ロードマップ §3.9](42_implementation_roadmap.md) | 経営モードと独立したGROUND/TOWER管制ゲームの計画。既定ブランチでは未統合。別作業コピーの実装状況はHANDOFFを参照 |
 | Phase 5 / 貨物輸送 | [貨物実装計画](implementation/active/cargo_operations_plan.md)、[42. 実装ロードマップ](42_implementation_roadmap.md) | PO指示で基盤ゲートに先行して部分実装。sim実便化・日報・道路競合等の残件あり |
 | 基盤完成後の再検討計画 | [implementation/README.md](implementation/README.md#基盤完成後に再検討する個別計画)、[docs/42 §3.8](42_implementation_roadmap.md) | ブランド効果・自動最適化・風向運用・除雪/防除氷の計画と着手ゲート |
 | 未決事項・既知の制限 | [10. 未決事項一覧](10_open_issues.md) | 判断待ち・既知制限の台帳。全項目が未解決という意味ではない |
