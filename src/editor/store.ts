@@ -9,7 +9,9 @@ import type { OpResult } from '../core/layout/operations';
 import { createEmptyLayout } from '../core/layout/operations';
 import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass, TerminalAreaKind } from '../core/model/types';
 import { createSampleAirport } from '../core/sample/sampleAirport';
-import { facilityOutline } from '../core/layout/footprint';
+import { facilityOutline, facilityTiles } from '../core/layout/footprint';
+import { TERMINAL_AREA_MIN_LEVEL } from '../core/layout/levelRules';
+import { facilityLevel } from '../core/model/levels';
 import { createSite, siteSizeById } from '../core/model/site';
 import { analyzeLayout, intlLockedIssues, overnightStandIssues, type LayoutAnalysis } from '../core/validation/validate';
 import { exportLayout, importLayout } from '../core/io/serialize';
@@ -159,6 +161,11 @@ export interface EditorState {
   lens: Lens;
   /** 建設レンズの左パネルのタブ（ツールボックス／施設一覧／要対応インボックス。UI 状態のみ） */
   buildPanel: BuildPanel;
+  /**
+   * ターミナル専用設計 Workspace（5-18）を開いている対象ターミナル（UI 状態のみ。
+   * レイアウト・保存データには入れない。開閉で history / charges / tool には触らない）
+   */
+  terminalWorkspace: { terminalId: string } | null;
   /**
    * 外形（フットプリント）編集中の作業コピー（5-15 T3。UI 状態のみで、確定するまで
    * レイアウト・保存データには入れない。確定は setFacilityFootprint を applyOp で通す）
@@ -363,6 +370,7 @@ export const editorStore = createStore<EditorState>(() => ({
   viewMode: '2d',
   lens: 'build',
   buildPanel: 'tools',
+  terminalWorkspace: null,
   footprintEdit: null,
   dayFlow: initialDayFlow(),
   opsPrefs: loadPrefs(),
@@ -781,6 +789,50 @@ export const actions = {
   setBuildPanel(buildPanel: BuildPanel): void {
     if (get().buildPanel === buildPanel) return;
     set({ buildPanel });
+  },
+  /**
+   * ターミナル専用設計 Workspace を開く（5-18 T2。UI 状態のみ）。
+   * 対象をセットし、選択をそのターミナルに移し、内部表示を有効にして、表示階を
+   * そのターミナルの有効な階（既存エリアのある最小の建物内階、無ければ 1F = 0 を
+   * B3〜階数-1 でクランプ）へ合わせ、カメラをターミナル中心へ寄せる。
+   * history / charges / tool / draft には触らない。運航中は開かない。
+   */
+  openTerminalWorkspace(terminalId: string): void {
+    const s = get();
+    if (s.mode === 'operate') return;
+    const layout = s.history.present;
+    const f = layout.facilities[terminalId];
+    if (!f || f.kind !== 'terminal') return;
+    const levels = Math.max(1, Number(f.props.levels ?? 1));
+    const areaFloors = Object.values(layout.terminalAreas)
+      .filter((a) => a.terminalId === terminalId)
+      .map((a) => a.level);
+    const floor = Math.min(
+      Math.max(areaFloors.length > 0 ? Math.min(...areaFloors) : 0, TERMINAL_AREA_MIN_LEVEL),
+      levels - 1,
+    );
+    const displayLevel = facilityLevel(f) + floor;
+    const tiles = facilityTiles(f);
+    const center = tiles.length > 0
+      ? {
+          x: Math.round(tiles.reduce((sum, t) => sum + t.x, 0) / tiles.length),
+          y: Math.round(tiles.reduce((sum, t) => sum + t.y, 0) / tiles.length),
+        }
+      : { x: f.origin.x, y: f.origin.y };
+    set((st) => ({
+      terminalWorkspace: { terminalId },
+      selection: terminalId,
+      interiorLevel: displayLevel,
+      mapLevel: displayLevel,
+      options: { ...st.options, roadLevel: displayLevel },
+      overlays: { ...st.overlays, interior: true },
+      camera: centerOn(st.camera, center, st.viewSize.w, st.viewSize.h),
+    }));
+  },
+  /** ターミナル専用設計 Workspace を閉じる。対象を外すだけで、他の状態は一切触らない */
+  closeTerminalWorkspace(): void {
+    if (!get().terminalWorkspace) return;
+    set({ terminalWorkspace: null });
   },
   toggleOverlay(key: keyof Overlays): void {
     set((s) => ({ overlays: { ...s.overlays, [key]: !s.overlays[key] } }));
