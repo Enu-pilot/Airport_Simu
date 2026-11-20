@@ -29,6 +29,7 @@ export const FACILITY_LABEL: Record<FacilityKind, string> = {
   apron: 'エプロン',
   terminal: 'ターミナル',
   gate: '搭乗ゲート',
+  boardingBridge: '搭乗橋（PBB）',
   hangar: '格納庫',
   tower: '管制塔',
   maintenance: '整備施設',
@@ -84,6 +85,9 @@ export const PROP_LABEL: Record<string, string> = {
   checkInCounters: 'チェックインカウンター数',
   securityLanes: '保安検査レーン数',
   standId: '紐付けスポット',
+  gateId: '紐付けゲート',
+  bridgeType: '型式（トンネル本数）',
+  deck: '接続デッキ',
   jetBridge: 'ボーディングブリッジ',
   boardingMode: '搭乗方式',
   connectedTo: '接続先ターミナル',
@@ -138,6 +142,19 @@ export const BOARDING_MODE_LABEL = {
 
 export const RAIL_SERVICE_LABEL = { local: '各停', rapid: '快速', express: '特急' } as const;
 
+/** 搭乗橋（PBB、機能H）の型式。トンネル本数を併記する（ユーザー指定の 1本/2本 設定） */
+export const PBB_TYPE_LABEL: Record<string, string> = {
+  tunnel1: 'tunnel1（1本）',
+  tunnel2: 'tunnel2（2本）',
+  tunnel2Upper: 'tunnel2Upper（2本・上デッキ対応）',
+};
+
+/** 搭乗橋の接続デッキ */
+export const PBB_DECK_LABEL: Record<string, string> = {
+  main: '主デッキ',
+  upper: '上デッキ',
+};
+
 /** ゲートの国内/国際の別（フェーズ 4） */
 export const GATE_ROUTE_TYPE_LABEL = { domestic: '国内', international: '国際', swing: '兼用（国内・国際）' } as const;
 
@@ -178,6 +195,7 @@ export const PLACEMENT_PROBLEM_LABEL = {
   floorOutOfRange: '選んだ階はこの建物にありません（建物の階数の範囲外です）',
   outsideParent: '建物の範囲の外には置けません',
   levelsInUse: '上の階にエリアや設備があるため、階数を減らせません',
+  floorRangeInUse: '範囲外になる階にエリアがあるため、エリアの置ける階の範囲を変えられません',
 } as const;
 
 /** 空港全体の離発着能力カード（1-19） */
@@ -406,7 +424,16 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   GATE_ARRIVAL_NO_BAGGAGE_ROUTE: (n) => `${n[0]} の到着旅客が手荷物受取所を経由して出口へ行けません`,
   TERMINAL_DEPARTURE_ROUTE_PENDING: (n) => `${n[0]} は建設中の連絡通路が完成すれば、入口からチェックイン・保安検査まで移動できるようになります（現在は未接続）`,
   GATE_ROUTE_PENDING: (n) => `${n[0]} は建設中の連絡通路が完成すれば旅客が到達できるようになります（現在は未接続）`,
-  FACILITY_UNDERGROUND_KIND: (n) => `${n[0]} は地下に置けない種類の施設です（地下に置けるのは駐車場・従業員駐車場・鉄道駅だけです）`,
+  FACILITY_UNDERGROUND_KIND: (n) => `${n[0]} は地下に置けない種類の施設です（地下に置けるのは駐車場・従業員駐車場・鉄道駅・ターミナルだけです）`,
+  TERMINAL_UNDERGROUND_ISOLATED: (n) => `${n[0]} は地下だけで地上階がなく、他のターミナルや入口にもつながっていないため、旅客が到達できません（地下通路・連絡リンク・入口エリア・ポータルのいずれかで接続してください）`,
+  GATE_UNDERGROUND_BRIDGE: (n) => `${n[0]} は地下の搭乗口のためボーディングブリッジは使えません（バスゲート扱いになります。ブリッジを無効にするか、地上のゲートを使ってください）`,
+  PBB_GATE_MISMATCH: (n) => `${n[0]}（搭乗橋）の紐付けが正しくありません（ゲートが無い、スポットが無い、またはゲートの紐付けスポットと一致しません）`,
+  PBB_NOT_ADJACENT: (n, p) => `${n[0]}（搭乗橋）がスポット ${n[1]} の入口から離れすぎています（${p.distance} タイル。入口の近傍に置いてください）`,
+  PBB_DECK_DUPLICATE: (n, p) => `${n[0]} に ${p.deck === 'upper' ? '上' : '主'}デッキの搭乗橋が複数あります（1デッキにつき1基までです）`,
+  PBB_SILL_RANGE: (n, p) => p.deck === 'upper'
+    ? `${n[0]}（搭乗橋）は上デッキに接続できない型式です（2階建て機の上デッキには tunnel2Upper が必要です）`
+    : `${n[0]}（搭乗橋）の型式では ${p.size} 区分のドア高（ゲーム値）に届かず、大型機で搭乗・降機が遅くなります（2本の型式では届きます）`,
+  PBB_LEGACY_OVERRIDDEN: (n) => `${n[0]} には搭乗橋（PBB）が配置されているため、従来の「ボーディングブリッジ」設定は無視されます`,
   INTERIOR_FACILITY_UNLINKED: (n) => `${n[0]} は建物内の設備のため、地上サービス網に接続されず能力に数えられません`,
   FACILITY_INTERIOR_INVALID: (n, p) => `${n[0]} の建物内配置が無効です（階 ${p.floorLabel ?? p.floor ?? '不明'} または親建物・階層を確認してください）`,
   FACILITY_INTERIOR_OUTSIDE: (n) => `${n[0]} が親建物 ${n[1]} の範囲外にあります`,

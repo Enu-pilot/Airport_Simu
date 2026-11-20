@@ -1,6 +1,7 @@
 import { runwayDimsProblem } from '../model/runwayReference';
-import { DEFAULT_PROPS, FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TAXI_BLOCK_TILES_DEFAULT, TAXI_BLOCK_TILES_MAX, TAXI_BLOCK_TILES_MIN, TERMINAL_AREA_SPECS, TILE_M } from '../model/catalog';
-import { baseTerrainAt, createSite, inSite, terrainAt } from '../model/site';
+import { DEFAULT_PROPS, FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TAXI_BLOCK_TILES_DEFAULT, TAXI_BLOCK_TILES_MAX, TAXI_BLOCK_TILES_MIN, TERMINAL_AREA_SPECS, TILE_M, type PbbBridgeType, type PbbDeck } from '../model/catalog';
+import { PBB_ENTRY_RANGE, pbbDeckOf } from '../model/boardingBridge';
+import { baseTerrainAt, createSite, inSite, isBuildable, terrainAt } from '../model/site';
 import {
   BUILD_STATES,
   HEADINGS,
@@ -34,7 +35,7 @@ import { add, distance, sameTile, tileKey, type Tile } from '../geometry/vec';
 import { bearingToDir, dirToBearing, normalizeDeg } from '../geometry/angle';
 import type { WorldPoint } from '../geometry/frames';
 import { sortedValues } from '../model/ids';
-import { facilityDims, facilityTiles, originAfterRotation, standDims, standEntry } from './footprint';
+import { collectFootprints, facilityDims, facilityTiles, originAfterRotation, standDims, standEntry, type FootprintPart } from './footprint';
 import {
   addPath,
   allocId,
@@ -48,8 +49,8 @@ import {
   type NetKind,
 } from './network';
 import { headingVector, runwayAxis, runwayEnd, runwayMidpoint } from './runway';
-import { TERMINAL_AREA_MIN_LEVEL, undergroundFacilityProblem } from './levelRules';
-import { facilityLevel, roadEdgeLevelValid } from '../model/levels';
+import { floorRangeInUse, terminalFloorRange, terminalFloorRangeOf, undergroundFacilityProblem } from './levelRules';
+import { DEFAULT_LEVEL_HEIGHT_M, facilityLevel, roadEdgeLevelValid } from '../model/levels';
 import { orthogonalPolygonTiles, validateOrthogonalPolygon } from '../geometry/polygon';
 import { DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, DEFAULT_TERMINAL_LINK_WIDTH_M } from '../terminal/model';
 import { deckElevationForCode, requiredAircraftClearanceM, requiredClearanceForCode } from '../sim/aircraftTypes';
@@ -207,6 +208,90 @@ function nearestStandForGate(d: AirportLayout, gate: Facility): string | null {
     if (dist <= 3 && !taken && (!best || dist < best.dist)) best = { id: s.id, dist };
   }
   return best?.id ?? null;
+}
+
+/**
+ * PBB の占有帯（地上 3〜6m）と重なる既存の占有がタイルにあるか。
+ * validation の checkPlacement と同じ基準（セル占有 × 垂直区間の交差、apron とは両立）を
+ * このタイルぶんだけ判定する。多角形（自由形）の部分は対象外（検証側の警告に任せる）。
+ */
+function pbbTileBlocked(parts: readonly FootprintPart[], site: Site, tile: Tile): boolean {
+  if (!inSite(site, tile.x, tile.y) || !isBuildable(site, tile.x, tile.y)) return true;
+  const minBand = 3;
+  const maxBand = 6;
+  for (const p of parts) {
+    if (p.poly || p.layer === 'apron') continue;
+    const cells = p.occupancy ?? p.tiles.flatMap((t) =>
+      (p.levels ?? [p.level ?? 0]).map((level) => ({
+        tile: t,
+        minM: p.vertical?.minM ?? level * DEFAULT_LEVEL_HEIGHT_M,
+        maxM: p.vertical?.maxM ?? level * DEFAULT_LEVEL_HEIGHT_M + 0.4,
+      })),
+    );
+    for (const c of cells) {
+      if (c.tile.x === tile.x && c.tile.y === tile.y && c.minM < maxBand && minBand < c.maxM) return true;
+    }
+  }
+  return false;
+}
+
+export interface PlaceBoardingBridgeOptions {
+  bridgeType?: PbbBridgeType;
+  deck?: PbbDeck;
+  buildState?: BuildState;
+}
+
+/**
+ * 搭乗橋（PBB、機能H）をゲート×スポットの組に配置する。置き場所はスポット入口
+ * （standEntry）の近傍から自動で選ぶ（入口に近い輪 → 入口タイル → 外側の輪の順、
+ * 輪の中はゲートに近い順に試し、占有と重ならない最初のタイル）。検証
+ * （PBB_NOT_ADJACENT / OVERLAP）と同じ範囲・基準で選ぶため、この操作で置いた
+ * PBB は配置エラーにならない。向きは入口（機体側）を向ける。
+ */
+export function placeBoardingBridge(
+  layout: AirportLayout,
+  gateId: string,
+  standId: string,
+  opts: PlaceBoardingBridgeOptions = {},
+): OpResult {
+  const gate = layout.facilities[gateId];
+  const stand = layout.stands[standId];
+  if (!gate || gate.kind !== 'gate' || !stand) return fail('NOT_FOUND');
+  if (gate.props.standId !== standId) return fail('INVALID_VALUE');
+  const deck: PbbDeck = opts.deck ?? 'main';
+  const duplicated = Object.values(layout.facilities).some(
+    (f) => f.kind === 'boardingBridge' && f.props.gateId === gateId && pbbDeckOf(f) === deck,
+  );
+  if (duplicated) return fail('INVALID_VALUE');
+  const entry = standEntry(stand);
+  const dist2 = (t: Tile) => (t.x - gate.origin.x) ** 2 + (t.y - gate.origin.y) ** 2;
+  const ring = (r: number): Tile[] => {
+    const out: Tile[] = [];
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) === r) out.push({ x: entry.x + dx, y: entry.y + dy });
+      }
+    }
+    return out.sort((a, b) => dist2(a) - dist2(b));
+  };
+  const candidates = [...ring(1), entry, ...(PBB_ENTRY_RANGE >= 2 ? ring(2) : [])];
+  const parts = collectFootprints(layout);
+  for (const tile of candidates) {
+    if (pbbTileBlocked(parts, layout.site, tile)) continue;
+    const dx = entry.x - tile.x;
+    const dy = entry.y - tile.y;
+    const rotation: Rotation =
+      dx === 0 && dy === 0 ? stand.rotation
+        : Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 90 : 270)
+          : dy > 0 ? 180 : 0;
+    const placed = placeFacility(layout, 'boardingBridge', tile, {
+      rotation,
+      buildState: opts.buildState ?? 'operational',
+      props: { gateId, standId, bridgeType: opts.bridgeType ?? 'tunnel1', deck },
+    });
+    if (placed.ok) return placed;
+  }
+  return fail('INVALID_VALUE');
 }
 
 export function placeStand(
@@ -458,10 +543,10 @@ export function placeTerminalArea(
   const t = layout.facilities[terminalId];
   if (!t || t.kind !== 'terminal') return fail('NOT_FOUND');
   const spec = TERMINAL_AREA_SPECS[kind];
-  const levels = Number(t.props.levels ?? 1);
+  const range = terminalFloorRange(layout, terminalId);
   const w = opts.w ?? spec.defaultW;
   const h = opts.h ?? spec.defaultH;
-  if (!isInt(level, TERMINAL_AREA_MIN_LEVEL, levels - 1) || w < spec.minW || h < spec.minH) return fail('INVALID_VALUE');
+  if (!isInt(level, range.min, range.max) || w < spec.minW || h < spec.minH) return fail('INVALID_VALUE');
   if (opts.zone && !spec.zoneEditable && opts.zone !== spec.zone) return fail('INVALID_VALUE');
   const d = cloneLayout(layout);
   const id = allocId(d, 'ta');
@@ -1202,14 +1287,14 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
       const a = d.terminalAreas[id];
       if (!a) return fail('NOT_FOUND');
       const spec = TERMINAL_AREA_SPECS[a.kind];
-      const levels = Number(d.facilities[a.terminalId]?.props.levels ?? 1);
+      const areaRange = terminalFloorRange(d, a.terminalId);
       for (const [k, v] of entries) {
         if (k === 'name') {
           if (!str(v)) return fail('INVALID_VALUE');
         } else if (k === 'w' || k === 'h') {
           if (!isInt(v, k === 'w' ? spec.minW : spec.minH, 150)) return fail('INVALID_VALUE');
         } else if (k === 'level') {
-          if (!isInt(v, TERMINAL_AREA_MIN_LEVEL, levels - 1)) return fail('INVALID_VALUE');
+          if (!isInt(v, areaRange.min, areaRange.max)) return fail('INVALID_VALUE');
         } else if (k === 'zone') {
           if (!spec.zoneEditable || !['landside', 'departure', 'arrival'].includes(v as string)) return fail('INVALID_VALUE');
         } else if (k === 'props') {
@@ -1294,6 +1379,18 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
       if ('props' in patch && 'levels' in (patch.props as Record<string, unknown>)) {
         const levels = Number(f.props.levels ?? 1);
         if (Object.values(d.facilities).some((child) => child.parentFacilityId === id && (child.floorIndex ?? 0) >= levels)) return fail('INVALID_VALUE');
+      }
+      // 機能G: エリアの置ける階範囲（floorRange）の変更は、範囲の整合と既存エリアの収まりを満たすときだけ許可する
+      if (f.kind === 'terminal' && 'props' in patch && ('floorRangeMin' in (patch.props as Record<string, unknown>) || 'floorRangeMax' in (patch.props as Record<string, unknown>))) {
+        const levels = Number(f.props.levels ?? 1);
+        const range = terminalFloorRangeOf(f.props, levels);
+        const rawMin = f.props.floorRangeMin;
+        const rawMax = f.props.floorRangeMax;
+        if (
+          (typeof rawMin === 'number' && rawMin !== range.min) ||
+          (typeof rawMax === 'number' && rawMax !== range.max) ||
+          floorRangeInUse(d, id, range.min, range.max)
+        ) return fail('INVALID_VALUE');
       }
       err = null;
       break;

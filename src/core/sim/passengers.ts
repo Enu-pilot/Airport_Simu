@@ -13,6 +13,7 @@ import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './
 import { completeAggregateService, completeLoungeStay, noteLoungeStayStart, planAggregateLoungeVisit, planAggregateShopVisit } from './serviceAggregate';
 import { isLoungeEligible, loungeSeats } from '../terminal/serviceProfile';
 import { gateMode } from '../model/gates';
+import { boardingProfile } from '../model/boardingBridge';
 import { facilityTiles } from '../layout/footprint';
 import { TILE_M } from '../geometry/frames';
 import { sortedValues } from '../model/ids';
@@ -69,10 +70,9 @@ export const STUCK_ESTIMATE_SEC = 3 * 3600;
 export const DEADLINE_BEFORE_SEC = 10 * 60;
 /** 搭乗開始から締切までの最低時間（機体の到着が遅れた場合に締切を後ろへずらす） */
 export const MIN_BOARDING_WINDOW_SEC = 15 * 60;
-/** 1人あたりの搭乗時間（ボーディングブリッジあり / なし） */
-export const BOARD_SEC_PER_PAX = { bridge: 3, stairs: 5 };
-/** 降機速度（人/分） */
-export const DEPLANE_PAX_PER_MIN = { bridge: 20, stairs: 12 };
+/** 搭乗/降機速度は搭乗橋（PBB）の型式から決まる（core/model/boardingBridge の boardingProfile。
+ * 従来定数（橋 3 秒/人・20 人/分、タラップ 5 秒/人・12 人/分）は tunnel1 / タラップ値として
+ * PBB_TYPES と boardingBridge 側に移した。互換合成により既存レイアウトの結果は不変） */
 /** 手荷物の受け取り時間 */
 export const PICKUP_SEC = 90;
 export const PAX_RETRY_SEC = 30;
@@ -196,10 +196,9 @@ function boardingLeadSec(sim: Simulation, f: Flight): number {
   return BOARDING_LEAD_MIN[resolveType(sim.ctx.types, ac.typeId).size] * 60 + (f.pax.bus ? BUS_EXTRA_LEAD_MIN * 60 : 0) + (f.routeType === 'international' ? 15 * 60 : 0);
 }
 
-function hasBridge(sim: Simulation, gateId: string | null): boolean {
-  const g = gateId ? sim.ctx.layout.facilities[gateId] : undefined;
-  // バスゲートはボーディングブリッジを使わない（jetBridge は無視）
-  return !!g && !!g.props.jetBridge && gateMode(g) !== 'bus';
+/** ゲート×機体の搭乗プロファイル（機能H: PBB の型式・デッキ・シル高から決まる。従来の hasBridge の置き換え） */
+function gateProfile(sim: Simulation, gateId: string | null, typeId: string) {
+  return boardingProfile(sim.ctx.layout, gateId, resolveType(sim.ctx.types, typeId));
 }
 
 // ---------------------------------------------------------------- 1ティック
@@ -773,7 +772,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
     });
   }
   if (p.deplaneRemaining <= 0) return;
-  const rate = hasBridge(sim, gateId) ? DEPLANE_PAX_PER_MIN.bridge : DEPLANE_PAX_PER_MIN.stairs;
+  const rate = gateProfile(sim, gateId, ac.typeId).deplanePerMin;
   p.deplaneAcc += rate / 60;
   withRng(state, (rng) => {
     while (p.deplaneRemaining > 0) {
@@ -1639,7 +1638,8 @@ function stepFacility(sim: Simulation, key: string): void {
 function serviceSec(sim: Simulation, key: string, g: PaxGroup): number {
   if (key.startsWith('gate:')) {
     if (sim.state.flights[g.flightId]!.pax.bus) return Math.max(1, Math.round(BUS_GATE_SEC_PER_PAX * g.count));
-    const per = hasBridge(sim, key.slice('gate:'.length)) ? BOARD_SEC_PER_PAX.bridge : BOARD_SEC_PER_PAX.stairs;
+    const flight = sim.state.flights[g.flightId]!;
+    const per = gateProfile(sim, key.slice('gate:'.length), sim.state.aircraft[flight.aircraftId]?.typeId ?? '').boardSecPerPax;
     return Math.max(1, Math.round(per * g.count));
   }
   const a = sim.ctx.terminal.areas[key]!;

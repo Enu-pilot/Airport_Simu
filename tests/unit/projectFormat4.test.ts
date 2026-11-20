@@ -77,7 +77,7 @@ describe('フェーズ 2: 保存形式 4 は新しい項目を使うときだけ
     expect(p.formatVersion).toBe(4);
     expect(p.versions.format).toBe(4);
     expect(legacyReaderAccepts(p.formatVersion)).toBe(false);
-    expect(PROJECT_FORMAT_MAX_READABLE).toBe(8); // 保存形式 8（ラウンジエリア、5-19 2A）の項目まで読める
+    expect(PROJECT_FORMAT_MAX_READABLE).toBe(9); // 保存形式 9（搭乗橋 PBB、機能H）の項目まで読める
     const r = validateProject(serializeProject(p), opts);
     expect(r.errors).toEqual([]);
     expect(r.project!.formatVersion).toBe(4);

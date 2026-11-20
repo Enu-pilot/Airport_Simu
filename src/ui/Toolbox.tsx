@@ -5,7 +5,8 @@ import { actions, useEditor, type ToolId } from '../editor/store';
 import { facilityKindOf } from '../editor/tools';
 import { useLayout } from '../editor/store';
 import { RunwayToolOptions } from './RunwayPanels';
-import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, FLOOR_SELECTOR_LEVELS, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL, SIM_EFFECT_LABEL } from '../i18n/ja';
+import { AREA_KIND_LABEL, BUILD_STATE_LABEL, FACILITY_LABEL, FLOOR_NOT_IN_PARENT_LABEL, FLOOR_SELECTOR_LEVELS, PBB_DECK_LABEL, PBB_TYPE_LABEL, PLACEMENT_PROBLEM_LABEL, ROAD_CLASS_LABEL, SIM_EFFECT_LABEL } from '../i18n/ja';
+import type { PbbBridgeType, PbbDeck } from '../core/model/catalog';
 import { floorExistsInParent } from '../core/layout/levelRules';
 import { facilityLevel, floorDisplay, floorDisplayLabel } from '../core/model/levels';
 import { featureForAreaKind, lockLabel } from '../core/economy/unlocks';
@@ -42,7 +43,15 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
     title: 'エプロン・スポット',
     tools: [fac('apron'), { id: 'stand', label: '駐機スポット', hint: 'クリックで配置（R で機首の向きを回転）' }],
   },
-  { title: 'ターミナル', tools: [fac('terminal'), fac('gate', 'ターミナルに接して配置。近くのスポットに自動で紐付け')] },
+  {
+    title: 'ターミナル',
+    tools: [
+      fac('terminal'),
+      fac('gate', 'ターミナルに接して配置。近くのスポットに自動で紐付け'),
+      // 機能H: 搭乗橋（PBB）。スポット→ゲートの2クリックで紐付けて配置する専用ツール
+      { id: 'pbb', label: '搭乗橋（PBB）', hint: 'スポット→ゲート（またはゲート→スポット）の順にクリック。置き場所はスポット入口の近傍から自動で選ぶ' },
+    ],
+  },
   {
     title: '支援施設',
     tools: [fac('tower'), fac('hangar'), fac('maintenance'), fac('fuelFarm'), fac('fireStation'), fac('gseBase'), fac('baggageSort')],
@@ -87,6 +96,20 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
 ];
 
 const ALL_TOOLS = GROUPS.flatMap((g) => g.tools);
+
+/** ターミナル配置で選べる絶対階（B3F〜4F。総階数 1〜4 の制約は選択肢の無効化で表す） */
+const TERMINAL_FLOOR_CANDIDATES = [-3, -2, -1, 0, 1, 2, 3] as const;
+
+/** 階範囲のプリセット（[最下階, 最上階] の絶対階） */
+const TERMINAL_FLOOR_PRESETS: Record<string, readonly [number, number]> = {
+  ground: [0, 1],
+  under1: [-1, -1],
+  under2: [-2, -1],
+  straddle: [-1, 1],
+};
+
+const terminalFloorPreset = (min: number, max: number): string =>
+  Object.entries(TERMINAL_FLOOR_PRESETS).find(([, [a, b]]) => a === min && b === max)?.[0] ?? 'custom';
 
 export function toolHint(tool: ToolId): string {
   return ALL_TOOLS.find((t) => t.id === tool)?.hint ?? '';
@@ -174,6 +197,50 @@ export function Toolbox() {
             ))}
           </select>
         </label>
+        {kind === 'terminal' && !options.interiorParentId && (
+          <>
+            <label>
+              建物の階（プリセット）
+              <select
+                value={terminalFloorPreset(options.terminalFloorMin, options.terminalFloorMax)}
+                onChange={(e) => {
+                  const p = TERMINAL_FLOOR_PRESETS[e.target.value];
+                  if (!p) return;
+                  actions.setOption('terminalFloorMin', p[0]);
+                  actions.setOption('terminalFloorMax', p[1]);
+                }}
+                data-testid="terminal-floor-preset"
+              >
+                <option value="ground">地上のみ（1F〜2F）</option>
+                <option value="under1">地下のみ（B1F）</option>
+                <option value="under2">地下のみ（B2F〜B1F）</option>
+                <option value="straddle">跨ぎ（B1F〜2F）</option>
+                <option value="custom">カスタム</option>
+              </select>
+            </label>
+            <label>
+              最下階
+              <select value={options.terminalFloorMin} onChange={(e) => actions.setOption('terminalFloorMin', Number(e.target.value))} data-testid="terminal-floor-min">
+                {TERMINAL_FLOOR_CANDIDATES.map((v) => (
+                  <option key={v} value={v} disabled={v > options.terminalFloorMax || options.terminalFloorMax - v + 1 > 4}>
+                    {floorDisplayLabel(v)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              最上階
+              <select value={options.terminalFloorMax} onChange={(e) => actions.setOption('terminalFloorMax', Number(e.target.value))} data-testid="terminal-floor-max">
+                {TERMINAL_FLOOR_CANDIDATES.map((v) => (
+                  <option key={v} value={v} disabled={v < options.terminalFloorMin || v - options.terminalFloorMin + 1 > 4}>
+                    {floorDisplayLabel(v)}
+                  </option>
+                ))}
+              </select>
+              <span className="muted small">最下階が建物の基底階になります。地下だけの建物も置けます（真上にエプロン等を置けます）</span>
+            </label>
+          </>
+        )}
         {options.interiorParentId && (
           <label>
             建物内の階
@@ -267,6 +334,28 @@ export function Toolbox() {
             サイズ
             <SizeSelect value={options.standSize} onChange={(v) => actions.setOption('standSize', v)} />
           </label>
+        )}
+        {tool === 'pbb' && (
+          <>
+            <label>
+              型式（トンネル本数）
+              <select value={options.pbbType} onChange={(e) => actions.setOption('pbbType', e.target.value as PbbBridgeType)} data-testid="opt-pbbType">
+                {Object.entries(PBB_TYPE_LABEL).map(([v, label]) => (
+                  <option key={v} value={v}>{label}</option>
+                ))}
+              </select>
+              <span className="muted small">1本でも大型機は運用できますが、ドア高が合わず搭乗・降機が遅くなります。2本は大型機のドア高に届き、速くなります</span>
+            </label>
+            <label>
+              接続デッキ
+              <select value={options.pbbDeck} onChange={(e) => actions.setOption('pbbDeck', e.target.value as PbbDeck)} data-testid="opt-pbbDeck">
+                {Object.entries(PBB_DECK_LABEL).map(([v, label]) => (
+                  <option key={v} value={v}>{label}</option>
+                ))}
+              </select>
+              <span className="muted small">上デッキは tunnel2Upper の2基目用（2階建て機向け）</span>
+            </label>
+          </>
         )}
         {rotatable && (
           <label>

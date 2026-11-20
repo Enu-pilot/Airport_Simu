@@ -26,6 +26,8 @@ export const BALANCE = {
     stand: { S: 60_000, M: 100_000, L: 180_000 } as Record<SizeClass, number>,
     /** 面積型の施設（タイルあたり、ターミナルは階ごと） */
     perTile: { apron: 1_500, terminal: 20_000, serviceArea: 500, parking: 800, park: 400 } as Partial<Record<FacilityKind, number>>,
+    /** 地下ターミナルの掘削割高（機能G / G-U2）: 基底階が地下 1 階につきターミナル建設費にこの倍率を重ねる（B1 = ×1.5、B2 = ×2.25）。地上ターミナルは ×1 で不変 */
+    undergroundTerminalPerFloor: 1.5,
     facility: {
       gate: 50_000,
       hangar: 1_200_000,

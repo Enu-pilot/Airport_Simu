@@ -156,7 +156,7 @@ describe('2A: ラウンジの保存形式（形式 8）', () => {
     const { layout } = layoutWithLounge();
     expect(layoutUsesFormat8(layout)).toBe(true);
     expect(layoutUsesFormat8(createSampleAirport())).toBe(false);
-    expect(PROJECT_FORMAT_MAX_READABLE).toBe(8);
+    expect(PROJECT_FORMAT_MAX_READABLE).toBe(9); // 機能H で保存形式 9（搭乗橋 PBB）まで読めるようになった
     const project = buildProject({ name: 'lounge', savedAt: '2026-11-19T00:00:00Z', layout, company: createSandboxCompany(), pin: null, scenarios: [], sim: null });
     const raw = JSON.parse(serializeProject(project)) as { versions: { format: number } };
     expect(raw.versions.format).toBe(8);

@@ -3,11 +3,14 @@ import { actions, useEditor, useLayout, type ToolId } from '../editor/store';
 import { terminalServiceComplexes } from '../core/terminal/serviceComplex';
 import { terminalCapacitySummaries } from '../core/terminal/terminalCapacitySummary';
 import { terminalFloorSummary } from '../core/terminal/terminalFloorSummary';
-import { TERMINAL_AREA_MIN_LEVEL } from '../core/layout/levelRules';
+import { terminalFloorRange } from '../core/layout/levelRules';
 import { facilityLevel, floorDisplayLabel } from '../core/model/levels';
 import { featureForAreaKind, lockLabel } from '../core/economy/unlocks';
 import type { TerminalAreaKind } from '../core/model/types';
-import { AREA_KIND_LABEL, FACILITY_LABEL } from '../i18n/ja';
+import { AREA_KIND_LABEL, FACILITY_LABEL, PBB_DECK_LABEL, PBB_TYPE_LABEL } from '../i18n/ja';
+import { buildTerminalModel } from '../core/terminal/model';
+import { gateMode } from '../core/model/gates';
+import { pbbForGate } from '../core/model/boardingBridge';
 
 /**
  * ターミナル専用設計 Workspace（5-18 T2/T3/T5 の核）: 建設レンズの左パネルを差し替える。
@@ -54,6 +57,14 @@ export function TerminalWorkspace() {
     () => (terminalId ? terminalFloorSummary(layout, terminalId) : []),
     [layout, terminalId],
   );
+  /** 機能H: このターミナル（複合体）に属するゲートと、その搭乗橋（PBB）の状態（表示のみ。編集は PropertiesPanel の PBB 節） */
+  const complexGates = useMemo(() => {
+    if (!terminalId) return [];
+    const model = buildTerminalModel(layout);
+    return Object.values(layout.facilities)
+      .filter((f) => f.kind === 'gate' && complexMembers.includes(model.gates[f.id]?.terminalId ?? ''))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }, [layout, terminalId, complexMembers]);
 
   if (!terminalId || !terminal || terminal.kind !== 'terminal') {
     return (
@@ -76,7 +87,9 @@ export function TerminalWorkspace() {
   const floorLabel = (floor: number): string => floorDisplayLabel(baseLevel + floor);
   const currentFloor = interiorLevel - baseLevel;
   const levels = Math.max(1, Number(terminal.props.levels ?? 1));
-  const floorExists = (floor: number) => floor >= TERMINAL_AREA_MIN_LEVEL && floor < levels;
+  /** 機能G: エリアを置ける階の範囲（floorRange。欠落時は従来どおり B3〜階数−1）でタブの有無を決める */
+  const floorRange = terminalFloorRange(layout, terminalId);
+  const floorExists = (floor: number) => floor >= floorRange.min && floor <= floorRange.max;
   const currentAreas = Object.values(layout.terminalAreas)
     .filter((a) => a.terminalId === terminalId && a.level === currentFloor)
     .sort((a, b) => a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
@@ -125,12 +138,14 @@ export function TerminalWorkspace() {
             <div className="tool-buttons">
               {FLOOR_TABS.map((floor) => {
                 const exists = floorExists(floor);
+                // 地下棟で地上階のタブが無い場合は、その旨を無効理由として出す（機能G）
+                const missingReason = baseLevel < 0 && baseLevel + floor >= 0 ? '地下だけの建物のため、地上階はありません' : 'このターミナルには無い階です';
                 return (
                   <button
                     key={floor}
                     className={currentFloor === floor ? 'tool active' : 'tool'}
                     disabled={!exists}
-                    title={exists ? undefined : 'このターミナルには無い階です'}
+                    title={exists ? undefined : missingReason}
                     onClick={() => actions.setInteriorLevel(baseLevel + floor)}
                     data-testid={`workspace-floor-${floor}`}
                   >
@@ -218,6 +233,37 @@ export function TerminalWorkspace() {
                 </div>
               ))
             )}
+          </div>
+
+          <div className="tool-group" data-testid="workspace-gates">
+            <div className="tool-group-title">
+              <span>ゲートと搭乗橋（PBB）</span>
+              <span className="tool-group-count">{complexGates.length}</span>
+            </div>
+            {complexGates.length === 0 ? (
+              <div className="muted small">このターミナルに属するゲートはありません。</div>
+            ) : (
+              complexGates.map((g) => {
+                const units = pbbForGate(layout, g.id);
+                const pbbLabel =
+                  gateMode(g) === 'bus'
+                    ? 'バスゲート'
+                    : units.length === 0
+                      ? '橋なし（タラップ）'
+                      : units
+                          .map((u) => `${PBB_TYPE_LABEL[u.bridgeType]}・${PBB_DECK_LABEL[u.deck]}${u.synthesized ? '（従来の橋）' : ''}`)
+                          .join(' / ');
+                return (
+                  <div key={g.id} className="muted small" data-testid={`workspace-gate-${g.id}`}>
+                    <button className={selection === g.id ? 'small tool active' : 'small'} onClick={() => actions.select(g.id)}>
+                      {g.name || g.id}
+                    </button>{' '}
+                    {pbbLabel}
+                  </div>
+                );
+              })
+            )}
+            <div className="muted small">型式の変更・追加は、ゲートを選んでプロパティの「搭乗橋（PBB）」節から行います</div>
           </div>
 
           <div className="tool-group">

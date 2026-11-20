@@ -11,12 +11,13 @@ import {
   deleteEntity,
   duplicateEntity,
   moveEntity,
+  placeBoardingBridge,
   rotateEntity,
 } from '../core/layout/operations';
 import { pickCandidatesAt, type PickView } from '../core/layout/pick';
 import { actions, applyOp, editorStore, showToast, type EditorState } from './store';
 import { FOOTPRINT_UI, PLACEMENT_PROBLEM_LABEL } from '../i18n/ja';
-import { areaKindOf, computeOp, computePreview, deleteFootprintVertex, facilityKindOf, footprintEdgeInsert, footprintVertexAt, handleAt, moveFootprintVertex, nextPathPoint, nextTaxiPoint, snapPointW } from './tools';
+import { areaKindOf, computeOp, computePreview, deleteFootprintVertex, facilityKindOf, footprintEdgeInsert, footprintVertexAt, handleAt, moveFootprintVertex, nextPathPoint, nextTaxiPoint, pbbPickAt, snapPointW } from './tools';
 import { aircraftAt } from '../core/sim/query';
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { ops } from './simRunner';
@@ -188,6 +189,34 @@ export function onPointerDown(screen: Vec2, button: number, mods: { shift?: bool
     case 'land':
       actions.setDraft({ kind: 'rect', start: tile });
       return;
+    case 'pbb': {
+      // 搭乗橋（PBB、機能H）: スポット→ゲート（またはゲート→スポット）の2クリックで紐付けて配置する
+      const pick = pbbPickAt(s.history.present, tile);
+      if (!pick.standId && !pick.gateId) return;
+      const prev: { standId?: string; gateId?: string } = s.draft?.kind === 'pbb' ? s.draft : {};
+      const standId = pick.standId ?? prev.standId;
+      const gateId = pick.gateId ?? prev.gateId;
+      if (standId && gateId) {
+        const placed = applyOp(
+          placeBoardingBridge(s.history.present, gateId, standId, {
+            bridgeType: s.options.pbbType,
+            deck: s.options.pbbDeck,
+            buildState: s.options.buildState,
+          }),
+          { select: true },
+        );
+        if (placed) actions.setDraft(null);
+      } else {
+        actions.setDraft({ kind: 'pbb', ...(standId ? { standId } : {}), ...(gateId ? { gateId } : {}) });
+        showToast(
+          pick.standId
+            ? 'スポットを選びました。続けて、そのスポットのゲートをクリックしてください'
+            : 'ゲートを選びました。続けて、そのゲートのスポットをクリックしてください',
+          'info',
+        );
+      }
+      return;
+    }
     default: {
       const kind = facilityKindOf(s.tool);
       if (areaKindOf(s.tool)) {

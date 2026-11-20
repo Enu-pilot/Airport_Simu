@@ -47,7 +47,9 @@ export const PROJECT_FORMAT_VERSION_6 = 6;
 export const PROJECT_FORMAT_VERSION_7 = 7;
 /** ラウンジエリア（terminalArea kind 'lounge'）を使うファイルの版（5-19 2A。形式 7 の動く歩道と同じ扱い） */
 export const PROJECT_FORMAT_VERSION_8 = 8;
-export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_8;
+/** 搭乗橋（施設種別 'boardingBridge'、機能H）を使うファイルの版。PBB を含まないファイルは従来の版のまま */
+export const PROJECT_FORMAT_VERSION_9 = 9;
+export const PROJECT_FORMAT_MAX_READABLE = PROJECT_FORMAT_VERSION_9;
 
 const hasKey = (o: unknown, k: string): boolean => typeof o === 'object' && o !== null && k in (o as Record<string, unknown>);
 
@@ -162,7 +164,13 @@ export function layoutUsesFormat8(l: AirportLayout): boolean {
   return Object.values(l.terminalAreas ?? {}).some((a) => a.kind === 'lounge');
 }
 
+/** レイアウトが保存形式 9 の項目（搭乗橋 PBB）を使っているか */
+export function layoutUsesFormat9(l: AirportLayout): boolean {
+  return Object.values(l.facilities ?? {}).some((f) => f.kind === 'boardingBridge');
+}
+
 export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null; journal?: Journal }): number {
+  if (layoutUsesFormat9(p.layout) || p.scenarios.some((sc) => layoutUsesFormat9(sc.layout))) return PROJECT_FORMAT_VERSION_9;
   if (layoutUsesFormat8(p.layout) || p.scenarios.some((sc) => layoutUsesFormat8(sc.layout))) return PROJECT_FORMAT_VERSION_8;
   if (layoutUsesFormat7(p.layout) || companyUsesFormat7(p.company) || p.scenarios.some((sc) => layoutUsesFormat7(sc.layout) || companyUsesFormat7(sc.company)) || (p.sim && companyUsesFormat7(p.sim.company))) return PROJECT_FORMAT_VERSION_7;
   if (layoutUsesFormat6(p.layout) || companyUsesFormat6(p.company) || p.scenarios.some((sc) => layoutUsesFormat6(sc.layout) || companyUsesFormat6(sc.company)) || (p.sim && (simUsesFormat6(p.sim.state) || companyUsesFormat6(p.sim.company)))) return PROJECT_FORMAT_VERSION_6;
@@ -815,6 +823,11 @@ export function validateProject(json: string, opts: ValidateOptions): Validation
   const containsV5Input = companyUsesFormat5(company) || scenarios.some((s) => companyUsesFormat5(s.company)) || (!!sim && companyUsesFormat5(sim.company));
   const containsV6Input = layoutUsesFormat6(layout) || companyUsesFormat6(company) || scenarios.some((s) => layoutUsesFormat6(s.layout) || companyUsesFormat6(s.company)) ||
     (!!simInputState && simUsesFormat6(simInputState)) || (!!sim && companyUsesFormat6(sim.company));
+  const containsV9Input = layoutUsesFormat9(layout) || scenarios.some((s) => layoutUsesFormat9(s.layout));
+  if (typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_9 && containsV9Input) {
+    errors.push(`保存形式の版（formatVersion）が ${String(data.formatVersion)} ですが、搭乗橋（PBB、版 9 の項目）を含んでいます。ファイルが壊れているか、手で編集された可能性があります`);
+    return fail();
+  }
   if (typeof data.formatVersion === 'number' && data.formatVersion < PROJECT_FORMAT_VERSION_6 && containsV6Input) {
     errors.push(`保存形式の版（formatVersion）が ${String(data.formatVersion)} ですが、フェーズ 4 の項目（機能の設定・持ち越し・国際のエリアなど）を含んでいます。ファイルが壊れているか、手で編集された可能性があります`);
     return fail();

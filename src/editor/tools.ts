@@ -7,7 +7,7 @@ import { classifySegmentIntersection } from '../core/geometry/segment';
 import { FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, TILE_M } from '../core/model/catalog';
 import { isFreeRunway, type RunwayFree } from '../core/model/types';
 import { runwayAxis } from '../core/layout/runway';
-import { rotatedDims } from '../core/layout/footprint';
+import { facilityTiles, rotatedDims, standTiles } from '../core/layout/footprint';
 import { interiorPlacementProblem, terminalAreaLevelProblem, type PlacementProblem } from '../core/layout/levelRules';
 import { facilityLevel } from '../core/model/levels';
 import { validateOrthogonalPolygon } from '../core/geometry/polygon';
@@ -47,6 +47,34 @@ export function terminalAt(layout: AirportLayout, tile: Tile): string | null {
 
 export const facilityKindOf = (tool: ToolId): FacilityKind | null =>
   tool.startsWith('facility:') ? (tool.slice('facility:'.length) as FacilityKind) : null;
+
+/** 搭乗橋（PBB）ツールのクリック対象: そのタイルを含むスポット / ゲート（機能H） */
+export function pbbPickAt(layout: AirportLayout, tile: Tile): { standId?: string; gateId?: string } {
+  const out: { standId?: string; gateId?: string } = {};
+  for (const s of Object.values(layout.stands)) {
+    if (standTiles(s).some((t) => t.x === tile.x && t.y === tile.y)) {
+      out.standId = s.id;
+      break;
+    }
+  }
+  for (const f of Object.values(layout.facilities)) {
+    if (f.kind !== 'gate') continue;
+    if (facilityTiles(f).some((t) => t.x === tile.x && t.y === tile.y)) {
+      out.gateId = f.id;
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * ターミナル配置の変換規則（機能G、設計書 §G.2-3 が正）: 絶対階の最下階・最上階から
+ * 基底階（mapLevel）・階数・エリア階範囲（floorRange）を導く。総階数は検証上限の 4 に丸める。
+ */
+export function terminalPlacementOf(options: ToolOptions): { mapLevel: number; props: { levels: number; floorRangeMin: 0; floorRangeMax: number } } {
+  const levels = Math.min(4, Math.max(1, options.terminalFloorMax - options.terminalFloorMin + 1));
+  return { mapLevel: options.terminalFloorMin, props: { levels, floorRangeMin: 0, floorRangeMax: levels - 1 } };
+}
 
 const HEADING_BY_DIR: Record<string, Heading> = {
   '0,-1': 0,
@@ -337,6 +365,10 @@ export function computeOp(s: PreviewState): OpAttempt | null {
       const kind = facilityKindOf(tool);
       if (!kind) return null;
       const spec = FACILITY_SPECS[kind];
+      // 機能G: ターミナルは「最下階・最上階（絶対階）」の選択を変換規則で保存する:
+      // 基底階 = 最下階、階数 = 最上階 − 最下階 + 1、エリア範囲は基底より下を持たない [0, 階数 − 1]。
+      // 親建物の中に置く場合は従来どおり親の階に従うため変換しない
+      const terminalBase = kind === 'terminal' && !options.interiorParentId ? terminalPlacementOf(options) : null;
       if (spec.dragPlace && draft?.kind === 'rect') {
         const r = rectFromDrag(draft.start, hover);
         const w = Math.max(r.w, spec.minW);
@@ -346,9 +378,10 @@ export function computeOp(s: PreviewState): OpAttempt | null {
             w,
             h,
             buildState: options.buildState,
-            mapLevel: options.roadLevel,
+            mapLevel: terminalBase?.mapLevel ?? options.roadLevel,
             ...(options.interiorParentId ? { parentFacilityId: options.interiorParentId, floorIndex: options.interiorFloorIndex } : {}),
             ...(kind === 'railStation' ? { props: { level: options.roadLevel } } : {}),
+            ...(terminalBase ? { props: terminalBase.props } : {}),
           }),
           [],
           interiorProblem(layout, options, r.origin, w, h),
@@ -360,9 +393,10 @@ export function computeOp(s: PreviewState): OpAttempt | null {
         placeFacility(layout, kind, origin, {
           rotation: options.rotation,
           buildState: options.buildState,
-          mapLevel: options.roadLevel,
+          mapLevel: terminalBase?.mapLevel ?? options.roadLevel,
           ...(options.interiorParentId ? { parentFacilityId: options.interiorParentId, floorIndex: options.interiorFloorIndex } : {}),
           ...(kind === 'railStation' ? { props: { level: options.roadLevel } } : {}),
+          ...(terminalBase ? { props: terminalBase.props } : {}),
         }),
         [],
         interiorProblem(layout, options, origin, dims.w, dims.h),

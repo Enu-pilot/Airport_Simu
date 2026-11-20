@@ -8,9 +8,10 @@ import { commit, createHistory, redo, undo, type History } from '../core/editor/
 import type { OpResult } from '../core/layout/operations';
 import { createEmptyLayout } from '../core/layout/operations';
 import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass, TerminalAreaKind } from '../core/model/types';
+import type { PbbBridgeType, PbbDeck } from '../core/model/catalog';
 import { createSampleAirport } from '../core/sample/sampleAirport';
 import { facilityOutline, facilityTiles } from '../core/layout/footprint';
-import { TERMINAL_AREA_MIN_LEVEL } from '../core/layout/levelRules';
+import { terminalFloorRange } from '../core/layout/levelRules';
 import { facilityLevel } from '../core/model/levels';
 import { createSite, siteSizeById } from '../core/model/site';
 import { analyzeLayout, intlLockedIssues, overnightStandIssues, type LayoutAnalysis } from '../core/validation/validate';
@@ -42,7 +43,7 @@ import {
 import type { SimClock } from '../core/sim/clock';
 import type { ServiceGranularity } from '../core/sim/serviceAggregate';
 
-export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | 'land' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
+export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | 'land' | 'pbb' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
 
 export interface ToolOptions {
   rotation: Rotation;
@@ -54,6 +55,9 @@ export interface ToolOptions {
   roadCapacityPerHour: number;
   interiorParentId: string | null;
   interiorFloorIndex: number;
+  /** ターミナル配置時の絶対階の範囲（機能G）。最下階が基底階（mapLevel）になり、最上階 − 最下階 + 1 が階数になる */
+  terminalFloorMin: number;
+  terminalFloorMax: number;
   runwayWidth: 30 | 45 | 60;
   buildState: BuildState;
   /** 滑走路ツールの方式。既定は従来形（8 方向のグリッド）。自由形は任意方位・実寸（Phase 12） */
@@ -64,6 +68,9 @@ export interface ToolOptions {
   angleSnapDeg: 0 | 1 | 5 | 10 | 15 | 45;
   /** 自由形の長さの吸着（m）。0 = 吸着なし */
   lengthSnapM: 0 | 10 | 50 | 100;
+  /** 搭乗橋（PBB）ツールの型式とデッキ（機能H） */
+  pbbType: PbbBridgeType;
+  pbbDeck: PbbDeck;
   /** 自由形の配置方法: ドラッグ（始点→終点）/ 数値入力（方位・長さを入力してクリックで置く） */
   freeInput: 'drag' | 'numeric';
   /** 数値入力: 真方位（度）、長さ（m）、クリックした点が滑走路の始点 / 中点 */
@@ -84,6 +91,8 @@ export type Draft =
   | { kind: 'fpVertex'; index: number }
   | { kind: 'rect'; start: Tile }
   | { kind: 'move'; id: string; start: Tile }
+  /** 搭乗橋（PBB）ツールの2クリック配置: 先に選んだ側（スポットまたはゲート）を保持する */
+  | { kind: 'pbb'; standId?: string; gateId?: string }
   | null;
 
 export interface Overlays {
@@ -342,6 +351,8 @@ export const editorStore = createStore<EditorState>(() => ({
     roadCapacityPerHour: 0,
     interiorParentId: null,
     interiorFloorIndex: 0,
+    terminalFloorMin: 0,
+    terminalFloorMax: 1,
     runwayWidth: 45,
     buildState: 'operational',
     runwayAlignment: 'grid8',
@@ -352,6 +363,8 @@ export const editorStore = createStore<EditorState>(() => ({
     freeHeadingDeg: 90,
     freeLengthM: 2000,
     freeAnchor: 'start',
+    pbbType: 'tunnel1',
+    pbbDeck: 'main',
   },
   camera: { x: 10, y: 20, zoom: 9 },
   viewSize: { w: 800, h: 600 },
@@ -861,9 +874,10 @@ export const actions = {
     const areaFloors = Object.values(layout.terminalAreas)
       .filter((a) => a.terminalId === terminalId)
       .map((a) => a.level);
+    const floorRange = terminalFloorRange(layout, terminalId);
     const floor = Math.min(
-      Math.max(areaFloors.length > 0 ? Math.min(...areaFloors) : 0, TERMINAL_AREA_MIN_LEVEL),
-      levels - 1,
+      Math.max(areaFloors.length > 0 ? Math.min(...areaFloors) : 0, floorRange.min),
+      Math.min(levels - 1, floorRange.max),
     );
     const displayLevel = facilityLevel(f) + floor;
     const tiles = facilityTiles(f);

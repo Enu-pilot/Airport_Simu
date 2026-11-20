@@ -3,7 +3,8 @@ import type { Camera } from '../core/geometry/camera';
 import { worldToScreen } from '../core/geometry/camera';
 import { mToTiles, worldPolyToMap, worldToMap } from '../core/geometry/frames';
 import { distance, type Tile, type Vec2 } from '../core/geometry/vec';
-import { FACILITY_SPECS, STRIP_HALF_WIDTH } from '../core/model/catalog';
+import { FACILITY_SPECS, PBB_TYPES, STRIP_HALF_WIDTH } from '../core/model/catalog';
+import { pbbDeckOf, pbbTypeOf } from '../core/model/boardingBridge';
 import { isBuildable } from '../core/model/site';
 import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Runway, RunwayFree, Site, Stand, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, isFreeRunway } from '../core/model/types';
@@ -520,6 +521,21 @@ export class MapRenderer {
     if (f.kind === 'gate' && f.props.jetBridge) {
       const jb = worldToMap(f.origin);
       g.circle(jb.x, jb.y, 0.18).fill({ color: 0x333333, alpha });
+    }
+    if (f.kind === 'boardingBridge') {
+      // 機能H: 搭乗橋（PBB）を型式で描き分ける。トンネルは基部から向き（機体側）へ線を引き、
+      // 2本型式は平行2線、上デッキの基は中央に白丸を重ねる。互換合成だけのゲートは従来の印（上の丸）のまま
+      const base = worldToMap(f.origin);
+      const spec = PBB_TYPES[pbbTypeOf(f)];
+      const dir = { 0: [0, -1], 90: [1, 0], 180: [0, 1], 270: [-1, 0] }[f.rotation] as [number, number];
+      const cx = base.x + 0.5;
+      const cy = base.y + 0.5;
+      for (const o of spec.tunnels === 2 ? [-0.16, 0.16] : [0]) {
+        g.moveTo(cx - dir[0] * 0.3 - dir[1] * o, cy - dir[1] * 0.3 + dir[0] * o)
+          .lineTo(cx + dir[0] * 0.45 - dir[1] * o, cy + dir[1] * 0.45 + dir[0] * o);
+      }
+      g.stroke({ width: this.px(2), color: 0x222222, alpha });
+      if (pbbDeckOf(f) === 'upper') g.circle(cx, cy, 0.14).fill({ color: 0xffffff, alpha });
     }
     // 向き（入口側）を示す印: 回転の向きに小さな三角
     if (layer === 'building' && f.kind !== 'tower') {

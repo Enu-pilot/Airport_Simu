@@ -1,10 +1,11 @@
 import { distance } from '../geometry/vec';
-import { TILE_M } from '../model/catalog';
+import { PBB_TYPES, TILE_M } from '../model/catalog';
+import { hasExplicitPbb, pbbTypeOf } from '../model/boardingBridge';
 import { isFreeRunway, type AirportLayout, type Facility, type TerminalArea } from '../model/types';
 import type { UnitKind } from '../sim/types';
 import { BALANCE } from './balance';
 import { post, type CompanyState } from './company';
-import { elevationOf, levelOf } from '../model/levels';
+import { elevationOf, facilityLevel, levelOf } from '../model/levels';
 
 /**
  * 建設費（docs/14_management_rules.md §2）。
@@ -28,15 +29,25 @@ const VEHICLE_PROPS: [string, UnitKind][] = [
 
 const num = (v: unknown): number => Math.max(0, Number(v ?? 0) || 0);
 
-export function facilityValue(f: Facility): number {
+export function facilityValue(f: Facility, layout?: AirportLayout): number {
   if (f.buildState === 'planned') return 0;
+  // 機能H: 明示の搭乗橋（PBB）の建設費は型式表から（tunnel1 は従来の jetBridge 上乗せと同額）
+  if (f.kind === 'boardingBridge') return PBB_TYPES[pbbTypeOf(f)].cost;
   const tiles = f.w * f.h;
   const perTile = C.perTile[f.kind];
-  if (perTile !== undefined) return tiles * perTile * (f.kind === 'terminal' ? Math.max(1, num(f.props.levels)) : 1);
+  if (perTile !== undefined) {
+    if (f.kind !== 'terminal') return tiles * perTile;
+    // 機能G: 地下ターミナルは基底階の深さぶん掘削割高を掛ける（地上は ×1 で従来と同額）
+    const depth = Math.max(0, -facilityLevel(f));
+    const undergroundFactor = Math.pow(C.undergroundTerminalPerFloor, depth);
+    return Math.round(tiles * perTile * Math.max(1, num(f.props.levels)) * undergroundFactor);
+  }
   if (f.kind === 'staffParking') return tiles * C.access.staffParkingPerTile;
   if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'busTerminal' || f.kind === 'railStation' || f.kind === 'hotel') return C.access[f.kind];
   let v = C.facility[f.kind] ?? 0;
-  if (f.kind === 'gate' && f.props.jetBridge) v += C.jetBridge;
+  // 機能H: jetBridge 上乗せは互換合成のゲート（明示 PBB が無い）だけに取る。
+  // 明示 PBB があるゲートでは橋の費用を PBB 側で払う（二重取りしない）
+  if (f.kind === 'gate' && f.props.jetBridge && !(layout && hasExplicitPbb(layout, f.id))) v += C.jetBridge;
   if (f.kind === 'gseBase') for (const [prop, kind] of VEHICLE_PROPS) v += num(f.props[prop]) * (C.vehicle[kind] ?? 0);
   return v;
 }
@@ -91,7 +102,7 @@ export function layoutItems(layout: AirportLayout): Record<string, number> {
   if (layout.site.purchased) out['land'] = layout.site.purchased * C.landPerTile;
   for (const s of Object.values(layout.stands)) if (s.buildState !== 'planned') out[s.id] = C.stand[s.size];
   for (const f of Object.values(layout.facilities)) {
-    const v = facilityValue(f);
+    const v = facilityValue(f, layout);
     if (v > 0) out[f.id] = v;
   }
   for (const a of Object.values(layout.terminalAreas)) out[a.id] = areaValue(a);

@@ -1,4 +1,5 @@
 import { apronBusesOf, gateMode } from '../model/gates';
+import { explicitPbbForGate } from '../model/boardingBridge';
 import { sortedValues } from '../model/ids';
 import { sizeAtLeast, type AirportLayout, type Facility, type Runway, type Stand } from '../model/types';
 import { canAircraftUse, type AirsideNetwork } from '../airside/network';
@@ -34,7 +35,7 @@ export type CompatReason =
   | 'GATE_NO_STAND' // ゲートにスポットが紐付いていない（判定不能）
   | 'GATE_BUS' // バスゲート: スポットに固定せず、リモートスポットの便をランプバスで運ぶ（情報）
   | 'GATE_STAND_NG' // 紐付いたスポットが使えない
-  | 'GATE_UPPER_DECK' // 2階建て機の上階への搭乗橋はモデル化していない（情報）
+  | 'GATE_UPPER_DECK' // 2階建て機の上階への搭乗橋がない（情報。機能H: upper の PBB があれば付かない）
   | 'GSE_NONE' // 必要な車両・作業員が空港に1台もいない
   | 'GSE_FEWER' // 必要数より少ない（時間がかかる。使える）
   | 'NO_FUEL_FARM' // 燃料施設がない
@@ -101,8 +102,18 @@ export function checkGate(type: AircraftType, gate: Facility, layout: AirportLay
   if (gate.buildState !== 'operational') reasons.push('NOT_OPERATIONAL');
   if (checkStand(type, stand, net).status !== 'ok') reasons.push('GATE_STAND_NG');
   const status: CompatStatus = reasons.length ? 'ng' : 'ok';
-  // 情報（使用は可）: 上階への搭乗橋は扱わない
-  if (status === 'ok' && type.doubleDeck && gate.props.jetBridge) reasons.push('GATE_UPPER_DECK');
+  // 情報（使用は可）: 上階への搭乗橋は扱わない。
+  // 機能H: 明示の搭乗橋（PBB）があるゲートでは PBB 側の理由として読む —
+  // upper デッキの橋があれば上階も扱えるので理由は付けず、無ければ従来どおり付ける。
+  // 明示 PBB が無いゲート（互換合成）は従来の判定と完全一致させる
+  if (status === 'ok' && type.doubleDeck) {
+    const explicit = explicitPbbForGate(layout, gate.id);
+    if (explicit.length > 0) {
+      if (!explicit.some((u) => u.deck === 'upper')) reasons.push('GATE_UPPER_DECK');
+    } else if (gate.props.jetBridge) {
+      reasons.push('GATE_UPPER_DECK');
+    }
+  }
   return { id: gate.id, status, reasons };
 }
 
