@@ -21,6 +21,7 @@ import { previewContractCapacity, previewFrequencyCapacity } from '../core/econo
 import { analyzeAccess } from '../core/access/model';
 import {
   acceptOffer,
+  applyAirlineReassignment,
   changeContractAircraft,
   removeFleetEntry,
   setFleetEntry,
@@ -562,6 +563,10 @@ export const companyActions = {
   },
   setDedicatedStand(id: string, standId: string | null): void {
     mutateCompany((c) => setDedicatedStand(c, id, standId));
+  },
+  /** 架空会社の契約を実在会社へ付け替える（機能F。条件は core が適用直前に再検証する） */
+  reassignContractAirline(contractId: string, toAirlineId: string): void {
+    if (mutateCompany((c) => applyAirlineReassignment(c, contractId, toAirlineId))) showToast('航空会社を付け替えました（路線・便数・期間・料金などの条件はそのまま）');
   },
   setAirlineTerminals(airlineId: string, routeType: 'domestic' | 'international', terminalIds: string[] | null): void {
     mutateCompany((c) => setAirlineTerminals(c, airlineId, routeType, terminalIds));

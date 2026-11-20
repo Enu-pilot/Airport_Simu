@@ -43,6 +43,7 @@ defineDestination({ id: 'TST', name: '試験市', countryId: 'JP', distanceKm: 5
 | `passengerDemand` | legacy のみ必須 | 1.0 | 0.3〜2.0。旧モデルの需要係数 |
 | `legacy` | | — | フェーズ 3 以前の項目にだけ付ける。**新規項目には付けない**（付けると旧ルールの会社にも出て、旧ゲームの乱数列が変わる） |
 | `retired` | | — | 一覧と新規の提案から外すが、既存契約の参照は解決できる。削除の代わりに使う |
+| `fictional` | | 実在 | 実在しない都市にだけ付ける。空港の格が閾値（格 3）以上のとき、架空会社の新規提案は架空の目的地だけになる（機能F）。付けられる ID は検証の固定リスト（`FICTIONAL_DESTINATION_IDS`）と一致が必要で、新しい架空都市を足すときはリストも更新する。架空の国（ND/BH/LM）の都市には必須 |
 
 ## 3. 航空会社を足す
 
@@ -69,6 +70,7 @@ defineAirline({ id: 'ZZ', name: '試験航空', type: 'regional', services: ['do
 | `unlock.minRating` / `minTier` | | なし | 都市と同じ |
 | `livery` | | 既定塗装 | `{ body, tail, stripe, engine }`（各 0〜0xffffff）。省略すると既定塗装になる |
 | `legacy` / `retired` | | — | 都市と同じ |
+| `fictional` | | 実在 | 実在しない会社にだけ付ける。空港の格が閾値（格 3）以上のとき、新規提案は架空の目的地だけになる（機能F。判定は `airlineFictionalAllows`、提案生成だけに効き既存契約は不変）。付けられる ID は検証の固定リスト（`FICTIONAL_AIRLINE_IDS`）と一致が必要で、新しい架空会社を足すときはリストも更新する。`legacy` とは別概念（SK は legacy だが実在の SAS なので付けない）。既存の架空会社の有効契約は、契約パネルから実在会社へ付け替えできる（条件はそのまま） |
 
 種別値は `AIRLINE_TYPE_DEFAULTS`（`types.ts`）。`baseLoadFactor` の種別値は `BALANCE.demand.baseLoadFactor` と同値に保つ。
 

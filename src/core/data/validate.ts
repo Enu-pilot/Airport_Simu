@@ -28,6 +28,16 @@ export const LEGACY_DESTINATION_IDS = [
   'FUK', 'OKA', 'SEL', 'TPE', 'HKG', 'SIN', 'BKK', 'NDB', 'BNH', 'LUM',
 ];
 
+/**
+ * 架空の航空会社・目的地の固定リスト（機能F）。データ側の fictional 集合と完全一致を検証する。
+ * legacy と違い先頭に連続していない（TB/IL/OX、NDB/BNH/LUM）ため、順序ではなく集合で照合する。
+ * SK は legacy だが実在（SAS）なのでここには含めない。
+ */
+export const FICTIONAL_AIRLINE_IDS = ['NP', 'RJ', 'AQ', 'HB', 'AS', 'NW', 'ML', 'TB', 'IL', 'OX'];
+export const FICTIONAL_DESTINATION_IDS = ['KTA', 'TWN', 'MSK', 'YKH', 'KRG', 'AOS', 'NSH', 'HSM', 'NDB', 'BNH', 'LUM'];
+/** 架空の国（countries.ts）。この国の目的地は fictional 必須（逆向き: 実在国の架空都市 AOS 等は正当なので検査しない） */
+const FICTIONAL_COUNTRY_IDS = ['ND', 'BH', 'LM'];
+
 const DEST_ID = /^[A-Z][A-Z0-9]{2}$/;
 const AIRLINE_ID = /^[A-Z][A-Z0-9]$/;
 const SERVICES = ['domesticPassenger', 'internationalPassenger', 'cargo'];
@@ -109,6 +119,16 @@ export function validateCatalog(raw: CatalogRaw): CatalogIssue[] {
   if (raw.destinations.slice(0, legacyDestIds.length).some((d) => !d.legacy)) {
     push('就航都市', raw.destinations[0]?.id ?? '', 'legacy', 'legacy 項目は先頭に連続して置く必要があります', 'legacy は接頭辞');
   }
+  // fictional の ID 集合の固定（機能F。付け忘れ・付け過ぎを検出する）
+  const fictionalDestIds = raw.destinations.filter((d) => d.fictional).map((d) => d.id);
+  if (JSON.stringify([...fictionalDestIds].sort()) !== JSON.stringify([...FICTIONAL_DESTINATION_IDS].sort())) {
+    push('就航都市', fictionalDestIds.join(','), 'fictional', 'fictional 項目の ID 集合が固定リストと一致しません', FICTIONAL_DESTINATION_IDS.join(' '));
+  }
+  for (const d of raw.destinations) {
+    if (FICTIONAL_COUNTRY_IDS.includes(d.countryId) && !d.fictional) {
+      push('就航都市', d.id, 'fictional', `架空の国 "${d.countryId}" の目的地には必須です`, 'fictional: true');
+    }
+  }
 
   // 航空会社
   const seenAirline = new Set<string>();
@@ -165,6 +185,11 @@ export function validateCatalog(raw: CatalogRaw): CatalogIssue[] {
   }
   if (raw.airlines.slice(0, legacyAirlineIds.length).some((a) => !a.legacy)) {
     push('航空会社', raw.airlines[0]?.id ?? '', 'legacy', 'legacy 項目は先頭に連続して置く必要があります', 'legacy は接頭辞');
+  }
+  // fictional の ID 集合の固定（機能F。SK は legacy だが実在なので含めない）
+  const fictionalAirlineIds = raw.airlines.filter((a) => a.fictional).map((a) => a.id);
+  if (JSON.stringify([...fictionalAirlineIds].sort()) !== JSON.stringify([...FICTIONAL_AIRLINE_IDS].sort())) {
+    push('航空会社', fictionalAirlineIds.join(','), 'fictional', 'fictional 項目の ID 集合が固定リストと一致しません', FICTIONAL_AIRLINE_IDS.join(' '));
   }
 
   // 別名

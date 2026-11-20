@@ -60,6 +60,20 @@ export function airlineNetworkAllows(airline: AirlineDef, destination: Pick<Dest
   return !airline.networkDestinations || airline.networkDestinations.includes(destination.id);
 }
 
+/** 架空会社の就航制限（機能F）が効き始める空港の格（3 = 国内主要空港） */
+export const FICTIONAL_RESTRICTION_TIER = 3;
+
+/**
+ * 架空会社の就航制限: 格が FICTIONAL_RESTRICTION_TIER 以上のとき、架空会社の新規提案は
+ * 架空の目的地だけに限る。実在会社には一切影響しない。networkDestinations とは AND（積集合）。
+ * 使う場所は airlineNetworkAllows と同じく「新規の提案の生成」と「持ち替えの候補判定」だけ。
+ * routeAvailability 本体には入れない（理由は airlineNetworkAllows のコメントと同じ）。
+ * 格（tier）は呼び出し側が渡す: 目標（goals）のない会社では制限を掛けない（呼び出し側が 0 を渡す）。
+ */
+export function airlineFictionalAllows(airline: AirlineDef, destination: Pick<DestinationDef, 'fictional'>, tier: number): boolean {
+  return !airline.fictional || tier < FICTIONAL_RESTRICTION_TIER || destination.fictional;
+}
+
 export function routeAvailability(
   airline: AirlineDef,
   destination: DestinationDef,

@@ -6,7 +6,7 @@ import { CatalogError, validateCatalog, type CatalogRaw } from './validate';
 
 export * from './types';
 export { defineAirline, defineDestination } from './define';
-export { validateCatalog, CatalogError, LEGACY_AIRLINE_IDS, LEGACY_DESTINATION_IDS, type CatalogIssue, type CatalogRaw } from './validate';
+export { validateCatalog, CatalogError, LEGACY_AIRLINE_IDS, LEGACY_DESTINATION_IDS, FICTIONAL_AIRLINE_IDS, FICTIONAL_DESTINATION_IDS, type CatalogIssue, type CatalogRaw } from './validate';
 
 export const HOME_COUNTRY_ID = 'JP';
 
@@ -47,6 +47,7 @@ function buildDestination(input: DestinationInput, countries: Map<string, Countr
     scope: input.countryId === HOME_COUNTRY_ID ? 'domestic' : 'international',
     legacy: input.legacy === true,
     retired: input.retired === true,
+    fictional: input.fictional === true,
   };
 }
 
@@ -72,6 +73,7 @@ function buildAirline(input: AirlineInput): AirlineDef {
     ...(input.livery ? { livery: { ...input.livery } } : {}),
     legacy: input.legacy === true,
     retired: input.retired === true,
+    fictional: input.fictional === true,
   };
 }
 

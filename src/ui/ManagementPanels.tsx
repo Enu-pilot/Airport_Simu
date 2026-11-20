@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
-import { contractsOf, seatsFor, sortContracts, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type ContractSortKey, type DailyKpi, type DailyReport, type WorkOrderAssetKind, type WorkOrderKind } from '../core/economy/company';
+import { contractsOf, fictionalActiveContractCount, fictionalReassignmentCandidates, fictionalRestrictionActive, seatsFor, sortContracts, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type ContractSortKey, type DailyKpi, type DailyReport, type WorkOrderAssetKind, type WorkOrderKind } from '../core/economy/company';
 import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
 import { basedConditionDetails } from '../core/economy/basedConditions';
 import { airlineDef, airlinesFor, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport, type DestinationDef } from '../core/economy/registry';
@@ -608,6 +608,11 @@ export function ContractsPanel() {
   return (
     <div className="issues mgmt" data-testid="contracts-panel">
       {readOnly && <p className="muted small" data-testid="contracts-readonly">運航中は契約の変更・提案への回答はできません（建設モードで編集してください）。</p>}
+      {fictionalActiveContractCount(c) > 0 && (
+        <p className="muted small" data-testid="fictional-reassign-note">
+          架空会社の契約が {fictionalActiveContractCount(c)} 件あります。空港の格が上がったため、架空会社の新しい提案は架空の都市だけになりました。既存の契約は満期まで続きますが、各契約の「実在会社へ付け替え」から実在会社へ移せます（路線・便数・期間・料金はそのまま。付け替え先の会社に使用ターミナル制限の設定がなければ、移した契約は無制限になります）。
+        </p>
+      )}
       <div className="issues-list mgmt-grid">
         <section>
           <h4>契約中の便</h4>
@@ -729,6 +734,23 @@ export function ContractsPanel() {
                     <button disabled={readOnly} onClick={() => companyActions.changeFrequency(k.id, -1)} title="減便（満足度が下がる）">
                       減便
                     </button>
+                    {airlineDef(k.airlineId).fictional && fictionalRestrictionActive(c) && (() => {
+                      const candidates = fictionalReassignmentCandidates(c, k);
+                      return (
+                        <select
+                          value=""
+                          disabled={readOnly || candidates.length === 0}
+                          onChange={(e) => { if (e.target.value) companyActions.reassignContractAirline(k.id, e.target.value); }}
+                          title={candidates.length === 0 ? '同等の実在会社がありません' : '実在会社へ付け替え（路線・便数・期間・料金はそのまま。付け替え先に使用ターミナル制限の設定がなければ無制限になります）'}
+                          data-testid={`reassign-${k.id}`}
+                        >
+                          <option value="">実在会社へ付け替え</option>
+                          {candidates.map((a) => (
+                            <option key={a.id} value={a.id}>{a.name}</option>
+                          ))}
+                        </select>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}

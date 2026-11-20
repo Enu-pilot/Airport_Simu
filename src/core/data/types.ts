@@ -58,6 +58,8 @@ export interface DestinationInput {
   legacy?: true;
   /** 新規の提案・一覧に出さないが、既存契約の参照は解決できる（削除の代わり） */
   retired?: true;
+  /** 実在しない都市（機能F）。空港の格が閾値以上のとき、架空会社の新規提案は架空の目的地だけになる */
+  fictional?: true;
 }
 
 export interface AirlineInput {
@@ -98,6 +100,8 @@ export interface AirlineInput {
   livery?: { body: number; tail: number; stripe: number; engine: number };
   legacy?: true;
   retired?: true;
+  /** 実在しない会社（機能F）。空港の格が閾値以上のとき、新規提案は架空の目的地だけになる。legacy とは別概念（SK は legacy だが実在） */
+  fictional?: true;
 }
 
 /** 季節プロファイル（docs/46 §4.2）。月別指数の実値は BALANCE.market.seasonalityProfiles が持つ */
@@ -132,6 +136,8 @@ export interface DestinationDef {
   scope: 'domestic' | 'international';
   legacy: boolean;
   retired: boolean;
+  /** 実在しない都市か（機能F） */
+  fictional: boolean;
 }
 
 export interface FleetEntry {
@@ -161,6 +167,8 @@ export interface AirlineDef {
   livery?: { body: number; tail: number; stripe: number; engine: number };
   legacy: boolean;
   retired: boolean;
+  /** 実在しない会社か（機能F） */
+  fictional: boolean;
 }
 
 /** 種別ごとの既定値（計画 §1.2。BALANCE.demand.baseLoadFactor と同値に保つ） */
