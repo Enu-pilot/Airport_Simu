@@ -17,9 +17,9 @@ import { AIRCRAFT_TYPES } from '../../src/core/sim/aircraftTypes';
 const SUBSIDIARIES = ['XM', 'EH', 'FW', 'JC', 'NU', 'RA', 'HC', 'OC', 'MZ', 'BV'];
 
 describe('airlineNetworkSubsidiaries: 追加した会社と目的地', () => {
-  it('カタログ検証が issue 0 件で、会社 115 社・目的地 178 件', () => {
+  it('カタログ検証が issue 0 件で、会社 119 社・目的地 178 件', () => {
     expect(validateCatalog(CATALOG_RAW)).toEqual([]);
-    expect(CATALOG.airlines.length).toBe(115);
+    expect(CATALOG.airlines.length).toBe(119); // 115 社＋日本貨物航空（KZ）＋外国籍貨物専業 3 社（FX/UP/CV。2026-11-20）
     expect(CATALOG.destinations.length).toBe(178);
     for (const id of SUBSIDIARIES) {
       const a = airlineDef(id);
