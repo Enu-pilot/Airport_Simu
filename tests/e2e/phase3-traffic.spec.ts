@@ -38,6 +38,9 @@ test('新規ゲーム: 路線需要モデルを有効にすると、契約に座
   await openPlan(page);
   await expect(page.getByTestId('traffic-routes')).toBeVisible();
   await expect(page.getByTestId('traffic-route-KTA')).toBeVisible();
+  // 契約の座席・見込み搭乗率は「契約」タブの契約中の便に出る
+  await page.getByTestId('tab-contracts').click();
+  await expect(page.getByTestId('contracts-panel')).toBeVisible();
   const seats = page.locator('[data-testid^="contract-seats-"]').first();
   await expect(seats).toBeVisible();
   await expect(page.locator('[data-testid^="contract-lf-"]').first()).toContainText('%');
@@ -55,12 +58,14 @@ test('market のプロジェクト（保存形式 5）: 新規の就航先（名
   expect(project.formatVersion).toBe(5);
   await page.getByTestId('tab-project').click();
   await page.getByTestId('project-file').setInputFiles({ name: 'p.json', mimeType: 'application/json', buffer: Buffer.from(serializeProject(project)) });
-  await openPlan(page);
+  await page.getByTestId('tab-contracts').click();
+  await expect(page.getByTestId('contracts-panel')).toBeVisible();
   await expect(page.getByTestId(`contract-${k.id}`)).toContainText('名古屋');
   await expect(page.getByTestId(`contract-seats-${k.id}`)).toHaveText('1064'); // 266 席 × 2 便 × 2（往復）
   await expect(page.getByTestId(`contract-lf-${k.id}`)).toContainText('%');
   // 航空会社の一覧には market 専用の会社も出る
-  await expect(page.getByTestId('plan-panel')).toContainText('ツバメエア');
+  await page.getByTestId('tab-airlines').click();
+  await expect(page.getByTestId('airlines-panel')).toContainText('ツバメエア');
 });
 
 test('market なしでは需要の欄は出ない', async ({ page }) => {

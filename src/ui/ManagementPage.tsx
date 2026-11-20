@@ -5,18 +5,20 @@ import { CapacityPanel } from './CapacityPanel';
 import { CatalogPanel } from './CatalogPanel';
 import { HubPanel } from './HubPanel';
 import { IssuesPanel } from './IssuesPanel';
-import { FinancePanel, PlanPanel } from './ManagementPanels';
+import { AirlinesPanel, ContractsPanel, FinancePanel, PlanPanel } from './ManagementPanels';
 import { ProjectPanel } from './ProjectPanel';
 import { AirlineScoreTable } from './operate/cards/AirlineScoreTable';
 import { GoalsPanel } from './operate/cards/GoalsCard';
 import { JournalPanel } from './OpsPanels';
 import { dayFlowActions } from '../editor/dayFlowActions';
+import { useEditor } from '../editor/store';
 
 const sections = [
   ['plan', '需要・運航計画'],
   ['capacity', '空港能力'],
   ['hub', '乗継・拠点'],
-  ['contracts', '契約・航空会社'],
+  ['contracts', '契約'],
+  ['airlines', '航空会社'],
   ['access', 'アクセス'],
   ['finance', '収支・財務'],
   ['analysis', '分析・履歴'],
@@ -42,6 +44,8 @@ export function ManagementPage({ onOpenConstruction, section, onSectionChange, o
   onClose?: () => void;
   scrollRef?: { current: number };
 }) {
+  const mode = useEditor((s) => s.mode);
+  const operating = mode === 'operate';
   const contentRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (contentRef.current && scrollRef) contentRef.current.scrollTop = scrollRef.current;
@@ -52,7 +56,7 @@ export function ManagementPage({ onOpenConstruction, section, onSectionChange, o
     <header className="management-page-head">
       <div><h2>経営</h2><p>空港の需要・処理能力・契約・収支を確認し、計画を判断します。</p></div>
       <div className="management-page-actions">
-        <button onClick={() => onOpenConstruction()} data-testid="go-construction">建設画面へ</button>
+        <button onClick={() => onOpenConstruction()} data-testid="go-construction" title={operating ? '運航中は閲覧専用です。建設モードに戻るには運航を終了してください' : undefined}>{operating ? '建設画面へ（閲覧専用）' : '建設画面へ'}</button>
         {onClose && <button onClick={onClose} data-testid="board-close" title="Esc でも閉じます">閉じる</button>}
       </div>
     </header>
@@ -67,7 +71,8 @@ export function ManagementPage({ onOpenConstruction, section, onSectionChange, o
       {section === 'plan' ? <PlanPanel /> :
         section === 'capacity' ? <CapacityPanel onSelectFacility={onOpenConstruction} /> :
         section === 'hub' ? <HubPanel /> :
-        section === 'contracts' ? <div className="management-stack"><PlanPanel /><AirlineScoreTable /></div> :
+        section === 'contracts' ? <ContractsPanel /> :
+        section === 'airlines' ? <div className="management-stack"><AirlinesPanel /><AirlineScoreTable /></div> :
         section === 'access' ? <AccessPanel /> :
         section === 'finance' ? <FinancePanel /> :
         section === 'analysis' ? <div className="management-stack"><AnalyticsPanel /><JournalPanel /><button onClick={() => dayFlowActions.openHistory(true)}>日次振り返りの履歴を開く</button></div> :

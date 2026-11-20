@@ -94,7 +94,7 @@ export function OpsControls() {
             {l + 1}F
           </button>
         ))}
-        <button className={!interior ? 'tool active' : 'tool'} onClick={() => interior && actions.toggleOverlay('interior')}>
+        <button className={!interior ? 'tool active' : 'tool'} disabled={!interior} title={!interior ? '現在は外観表示です（階ボタンを押すとターミナル内部を表示します）' : '外観表示に戻します'} onClick={() => interior && actions.toggleOverlay('interior')}>
           外観
         </button>
       </div>
@@ -587,7 +587,7 @@ export function TerminalBoard() {
         </div>
       )}
       <div className="issues-list">
-        <table className="board">
+        <table className="board clickable-rows">
           <thead>
             <tr>
               <th>階</th>
@@ -850,7 +850,7 @@ export function GroundBoard() {
             })}
           </tbody>
         </table>
-        <table className="board">
+        <table className="board clickable-rows">
           <thead>
             <tr>
               <th>止まっている作業</th>
@@ -920,7 +920,7 @@ export function BaggageBoard() {
             ))}
           </div>
         )}
-        <table className="board">
+        <table className="board clickable-rows">
           <thead>
             <tr>
               <th>便名</th>

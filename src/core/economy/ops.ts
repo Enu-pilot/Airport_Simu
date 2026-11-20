@@ -560,7 +560,7 @@ function cityNoiseMetrics(state: SimState, ctx: SimContext, from: number, to: nu
  * 収支を日報に移し、航空会社の満足度・契約・評価・新しい提案を更新して、会社の日を進める。
  */
 /** 乗継統計の前回締め時点の累計（保存対象にしないため WeakMap で保持する） */
-const hubStatsPrev = new WeakMap<object, { spawned: number; connected: number; missed: number; noShow: number }>();
+const hubStatsPrev = new WeakMap<object, { spawned: number; connected: number; missed: number; noShow: number; byLink: Record<string, number> }>();
 /** 地上支援ユニットの稼働累計の前回締め時点（5-02。保存対象にしないため WeakMap で保持する） */
 const unitBusyPrev = new WeakMap<object, { at: number; busyById: Map<string, number> }>();
 
@@ -897,9 +897,14 @@ export function settleDay(sim: Simulation, partial: boolean): DailyReport | null
   // 乗継の当日分（フェーズ 4 §5.6）。累計ではなく当日の増分を記録する
   if (c.features?.hub && state.hubStats) {
     const h = state.hubStats;
-    const prev = hubStatsPrev.get(state) ?? { spawned: 0, connected: 0, missed: 0, noShow: 0 };
-    report.hub = { spawned: h.spawned - prev.spawned, connected: h.connected - prev.connected, missed: h.missed - prev.missed, noShow: h.noShow - prev.noShow };
-    hubStatsPrev.set(state, { spawned: h.spawned, connected: h.connected, missed: h.missed, noShow: h.noShow });
+    const prev = hubStatsPrev.get(state) ?? { spawned: 0, connected: 0, missed: 0, noShow: 0, byLink: {} };
+    const byLink: Record<string, number> = {};
+    for (const [linkId, n] of Object.entries(h.byLink)) {
+      const delta = n - (prev.byLink[linkId] ?? 0);
+      if (delta > 0) byLink[linkId] = delta;
+    }
+    report.hub = { spawned: h.spawned - prev.spawned, connected: h.connected - prev.connected, missed: h.missed - prev.missed, noShow: h.noShow - prev.noShow, ...(Object.keys(byLink).length > 0 ? { byLink } : {}) };
+    hubStatsPrev.set(state, { spawned: h.spawned, connected: h.connected, missed: h.missed, noShow: h.noShow, byLink: { ...h.byLink } });
   }
   // 乗継 OD 集計（5A）: その日の計画で配分した人数の OD 別内訳（表示用）。
   // report.hub（当日の実績）とは別フェーズの値で、二重計上ではない

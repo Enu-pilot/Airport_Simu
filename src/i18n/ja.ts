@@ -284,6 +284,11 @@ export const SHELL_UI = {
   drawerLabel: '振り返りと履歴',
   drawerReviewTab: '振り返り',
   drawerHistoryTab: '履歴',
+  drawerFinanceTab: '経理',
+  drawerGroundTab: '地上・サービス',
+  drawerOpsTab: '運行',
+  drawerAirlinesTab: '航空会社',
+  drawerLiveNote: '締め直後の振り返りは、「次の日へ」か「建設モードに戻る」を選ぶまで閉じられません',
 } as const;
 
 const portalStatusJa = (s: unknown): string =>

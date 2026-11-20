@@ -105,6 +105,28 @@ export function AnalyticsPanel() {
         </table>
         {groups.length === 0 && <div className="empty">まだ運航を終えた便がありません</div>}
 
+        {k.hotspots.length > 0 && (
+          <section data-testid="analytics-hotspots">
+            <h4>誘導路のホットスポット（待ち時間の大きいノード）</h4>
+            <table className="board">
+              <thead>
+                <tr>
+                  <th>ノード</th>
+                  <th>待ち時間</th>
+                </tr>
+              </thead>
+              <tbody>
+                {k.hotspots.map((h) => (
+                  <tr key={h.node}>
+                    <td>{h.node}</td>
+                    <td>{h.waitMin} 分</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
+
         <div className="mgmt-grid">
           <section>
             <h4>ボトルネック（推定。根拠の指標と規則つき）</h4>

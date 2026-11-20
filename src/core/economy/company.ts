@@ -186,7 +186,8 @@ export interface DailyReport {
   /** 翌朝の出発可能機数（F6-11。翌朝 06:00–10:00 に滞泊便の出発予定がある日だけ）: 予定・確定可能・リスクあり */
   morningReadiness?: { scheduled: number; ready: number; atRisk: number };
   /** 乗継の記録（フェーズ 4 §5.6。ハブが有効な日だけ） */
-  hub?: { spawned: number; connected: number; missed: number; noShow: number };
+  hub?: { spawned: number; connected: number; missed: number; noShow: number; /** 乗継リンク（ターミナル連絡設備）別の接続成功数。その日の増分のみ。持たない旧日報では未表示 */
+    byLink?: Record<string, number> };
   /**
    * 乗継 OD 集計（5A。ハブが有効で、その日の計画に乗継配分があった日だけ）:
    * 計画時に OD（到着路線 × 出発路線）ごとに配分した人数と魅力/品質の内訳。
@@ -640,7 +641,7 @@ export function allowedTerminalsFor(
 }
 
 /** 契約一覧のソートキー（航空会社・行き先は登録データの名称順、時間帯は朝→昼→夕→終日） */
-export type ContractSortKey = 'airline' | 'destination' | 'window' | 'status' | 'perDay' | 'startDay';
+export type ContractSortKey = 'airline' | 'destination' | 'window' | 'status' | 'perDay' | 'startDay' | 'endDay' | 'type';
 
 const CONTRACT_WINDOW_ORDER: Record<TimeWindow, number> = { morning: 0, daytime: 1, evening: 2, any: 3 };
 const CONTRACT_STATUS_ORDER: Record<Contract['status'], number> = { active: 0, offered: 1, ended: 2, expired: 3, withdrawn: 4, rejected: 5 };
@@ -661,6 +662,10 @@ export function sortContracts(contracts: readonly Contract[], key: ContractSortK
         return b.perDay - a.perDay || a.startDay - b.startDay;
       case 'startDay':
         return a.startDay - b.startDay || a.endDay - b.endDay;
+      case 'endDay':
+        return a.endDay - b.endDay || a.startDay - b.startDay;
+      case 'type':
+        return resolveType(AIRCRAFT_TYPES, a.typeId).label.localeCompare(resolveType(AIRCRAFT_TYPES, b.typeId).label, 'ja') || compareIds(a.typeId, b.typeId);
     }
   };
   return [...contracts].sort((a, b) => by(a, b) || compareIds(a.id, b.id));

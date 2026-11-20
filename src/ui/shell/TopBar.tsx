@@ -59,7 +59,7 @@ export function TopBar({ page, setPage, onSavedProjects, onOpenAtc }: { page: Ma
       <NextTierChip />
       {mode === 'operate' && <WxBadge />}
       <nav className="primary-nav" aria-label="ゲームページ">
-        <button className={page === 'construction' ? 'active' : ''} onClick={() => setPage('construction')} data-testid="page-construction">建設</button>
+        <button className={page === 'construction' ? 'active' : ''} onClick={() => setPage('construction')} data-testid="page-construction" title={mode === 'operate' ? '運航中は閲覧専用です。建設するには「建設モードに戻る」で運航を終了してください' : undefined}>{mode === 'operate' ? '建設（閲覧）' : '建設'}</button>
         <button className={page === 'management' ? 'active' : ''} onClick={() => setPage('management')} data-testid="page-management">経営</button>
         <button className={page === 'operations' ? 'active' : ''} onClick={() => mode === 'build' ? ops.start() : setPage('operations')} data-testid="page-operations">{mode === 'build' ? '運行開始' : '運行'}</button>
         <button onClick={onOpenAtc} disabled={mode === 'operate'} title={mode === 'operate' ? '運航中は管制官モードへ移れません（モードを同時に進行させないため）。建設モードに戻ってから開いてください' : '管制官モード（ATC）を開きます。経営モードの状態は変更されません'} data-testid="page-atc">管制官</button>
