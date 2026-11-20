@@ -13,7 +13,7 @@ import type { TaskKind, UnitKind } from '../sim/types';
  * - ゲーム内の性能・適合性は簡略化モデルであり、実際の航空機の運用・空港の設計に使える値ではない。
  */
 
-export const CATALOG_VERSION = '2026.11.1';
+export const CATALOG_VERSION = '2026.11.3';
 
 export type DataStatus = 'official' | 'game' | 'unset';
 
@@ -127,6 +127,27 @@ export const DATA_SOURCES: Record<string, DataSource> = {
     title: 'A321ceo（製品ページの主要諸元）',
     url: 'https://aircraft.airbus.com/en/aircraft/a320-family/a321ceo',
     accessed: '2026-11-10',
+  },
+  'airbus-a321p2f-web': {
+    id: 'airbus-a321p2f-web',
+    publisher: 'Airbus',
+    title: 'A321P2F（製品ページの Key figures: 寸法・最大離陸重量・最大ペイロード 28.10 t）',
+    url: 'https://www.aircraft.airbus.com/en/aircraft/freighters/a321p2f',
+    accessed: '2026-11-20',
+  },
+  'efw-a321p2f': {
+    id: 'efw-a321p2f',
+    publisher: 'Elbe Flugzeugwerke (EFW)',
+    title: 'A320P2F / A321P2F Freighter Conversion（A321P2F: Containerized volume 208 m³、主甲板 14 ポジション＋下部 10 ポジション）',
+    url: 'https://www.elbeflugzeugwerke.com/fileadmin/user_upload/pdf/solutions/freighter-conversion/EFW-DoubleBrochure-01-English.pdf',
+    accessed: '2026-11-20',
+  },
+  'wikipedia-md11': {
+    id: 'wikipedia-md11',
+    publisher: 'Wikipedia contributors',
+    title: 'McDonnell Douglas MD-11（Specifications 表: 全長 61.6 m・翼幅 51.97 m・全高 17.65 m・最大離陸重量 630,500 lb、MD-11F 主甲板＋下部貨物室の合計容積 21,530 cu ft = 609.7 m³）',
+    url: 'https://en.wikipedia.org/wiki/McDonnell_Douglas_MD-11',
+    accessed: '2026-11-20',
   },
   'airbus-a321neo-web': {
     id: 'airbus-a321neo-web',
@@ -301,6 +322,8 @@ const WIDE_NEEDS: GameProfile['unitNeeds'] = {
 };
 
 const D3 = '2026-11-18';
+/** 2026.11.2 で追加した機種の更新日 */
+const D4 = '2026-11-20';
 const D = '2026-10-27';
 /** 2026.11.0 で追加・更新した機種の更新日 */
 const D2 = '2026-11-10';
@@ -1220,6 +1243,56 @@ export const AIRCRAFT_MODELS: AircraftModel[] = [
     profile: { ...WIDE, turnaroundSec: 90 * 60, unitNeeds: WIDE_NEEDS, holdBags: 0, costPerBlockHour: 600_000, mtowT: 187 },
     assetId: 'proc-wide-767',
     updated: D3,
+  },
+  {
+    // A321ceo の旅客型（A321-200）を貨物専用機に改修した型。日本ではヤマト運輸が導入し、
+    // スプリング・ジャパン（IJ）が 2024-04-11 から国内貨物定期便で運航（成田・羽田－新千歳／北九州、成田－那覇等）。
+    id: 'A321P2F',
+    generic: false,
+    manufacturer: 'Airbus',
+    family: 'A320 Family',
+    variant: 'P2F',
+    name: 'Airbus A321P2F',
+    icao: 'A321',
+    lengthM: off(44.51, 'airbus-a321p2f-web', 'Length'),
+    wingspanM: off(35.8, 'airbus-a321p2f-web', 'Wing span (geometric)'),
+    heightM: off(11.76, 'airbus-a321p2f-web', 'Height'),
+    mtowKg: off(93_500, 'airbus-a321p2f-web', 'Max take-off weight 93.50 t'),
+    maxPax: unset('貨物専用機のため旅客定員なし'),
+    typicalSeats: unset('貨物専用機のため座席なし'),
+    cargoM3: off(208, 'efw-a321p2f', 'コンテナ容積（主甲板 AAY 14 台＋下部貨物室 LD3-45W 10 台）の合計'),
+    fuelL: unset('フレーターの出典表を確認していないため未設定'),
+    defaultSeats: 0,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...NARROW, turnaroundSec: 60 * 60, holdBags: 0, costPerBlockHour: 350_000, mtowT: 94 },
+    assetId: 'proc-narrow-airbus',
+    updated: D4,
+  },
+  {
+    // 三発ワイドボディ貨物専用機。フェデックスが最大の運航会社で、成田にも 777F と並んで飛来する。
+    // 翼幅 51.97 m はコード D（52 m 未満）のためサイズ区分は L・コード F 対応は不要。
+    id: 'MD-11F',
+    generic: false,
+    manufacturer: 'McDonnell Douglas',
+    family: 'MD-11',
+    variant: 'F',
+    name: 'McDonnell Douglas MD-11F',
+    icao: 'MD11',
+    lengthM: off(61.6, 'wikipedia-md11', '全長（GE エンジン機）'),
+    wingspanM: off(51.97, 'wikipedia-md11', '翼幅'),
+    heightM: off(17.65, 'wikipedia-md11', '全高'),
+    mtowKg: off(286_000, 'wikipedia-md11', '最大離陸重量 630,500 lb'),
+    maxPax: unset('貨物専用機のため旅客定員なし'),
+    typicalSeats: unset('貨物専用機のため座席なし'),
+    cargoM3: off(610, 'wikipedia-md11', '主甲板 15,530 cu ft＋下部貨物室の合計 21,530 cu ft = 609.7 m³ を四捨五入'),
+    fuelL: unset('フレーターの出典表を確認していないため未設定'),
+    defaultSeats: 0,
+    engines: 3,
+    doubleDeck: false,
+    profile: { ...WIDE, turnaroundSec: 120 * 60, unitNeeds: WIDE_NEEDS, holdBags: 0, costPerBlockHour: 850_000, mtowT: 286 },
+    assetId: 'proc-wide-777',
+    updated: D4,
   },
 ];
 

@@ -13,9 +13,9 @@ import { AIRCRAFT_TYPES } from '../../src/core/sim/aircraftTypes';
  */
 
 describe('airlineNetworkForeign: 追加した海外データ', () => {
-  it('カタログ検証が issue 0 件で、会社 105 社・目的地 171 都市', () => {
+  it('カタログ検証が issue 0 件で、会社 119 社・目的地 171 都市', () => {
     expect(validateCatalog(CATALOG_RAW)).toEqual([]);
-    expect(CATALOG.airlines.length).toBe(115);
+    expect(CATALOG.airlines.length).toBe(119); // 115 社＋日本貨物航空（KZ）＋外国籍貨物専業 3 社（FX/UP/CV。2026-11-20）
     expect(CATALOG.destinations.length).toBe(178); // 国内編 107 + 海外編 64 + 子会社編 7
   });
 

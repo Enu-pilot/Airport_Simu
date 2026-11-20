@@ -2,7 +2,7 @@ import { Rng, type RngState } from '../rng';
 import { compareIds } from '../model/ids';
 import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
-import { AIRLINES, FICTIONAL_RESTRICTION_TIER, HOME_COUNTRY_ID, airlineDef, airlineFictionalAllows, airlineNetworkAllows, airlinesFor, destinationDef, destinationsFor, findAirline, findDestination, resolveAirlineId, resolveDestinationId, routeAvailability, type AirlineDef, type DestinationDef, type FleetEntry } from './registry';
+import { AIRLINES, FICTIONAL_RESTRICTION_TIER, HOME_COUNTRY_ID, airlineDef, airlineFictionalAllows, airlineNetworkAllows, airlinesFor, destinationDef, destinationsFor, findAirline, findDestination, resolveAirlineId, resolveDestinationId, routeAvailability, type AirlineDef, type DestinationDef, type DestinationService, type FleetEntry } from './registry';
 import { routeDemand } from './demand';
 import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
 import { checkGameSettings, otpAddOf, type GameSettings } from './game';
@@ -895,7 +895,11 @@ export function generateCargoOffers(
       if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
       if (!airlineNetworkAllows(a, d)) return false;
       if (!airlineFictionalAllows(a, d, tier)) return false;
-      if (routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) !== 'available') return false;
+      // 貨物専業会社（旅客サービスを持たない会社。例: 日本貨物航空）は貨物サービスで路線判定する。
+      // 旅客サービスを持つ会社は従来どおり旅客判定のままにして、既存の提案プールを変えない。
+      // （読み込み時の付け替え判定は company.ts の reassignOutOfScopeContracts が契約種別で切り替えている）
+      const service: DestinationService = a.services.includes('domesticPassenger') || a.services.includes('internationalPassenger') ? 'passenger' : 'cargo';
+      if (routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }, service) !== 'available') return false;
       // 国際貨物は格 4（国際空港）が必要（CARGO-08）。国内貨物は貨物解放の格 3 で足りる
       if (d.countryId !== originCountryId && effectiveTier(c) < 4) return false;
       return (routeCargoDemandM3(c, d) ?? 0) >= BALANCE.cargo.minRouteDemandM3;
