@@ -6,6 +6,7 @@ import { resolveType, takeoffDistanceM, type AircraftType, type AircraftTypeId, 
 import { checkRunway, checkStand } from '../aircraft/compat';
 import { createContext, operableTypes, orderedRunway, type SimContext } from './context';
 import { findPath } from './pathfinding';
+import { perfChainStart } from './perfStats';
 import {
   edgeIndexAt,
   headingOf,
@@ -860,6 +861,8 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
 
 export function stepSimulation(sim: Simulation): void {
   const { state } = sim;
+  // 性能計測（perfStats）: サブステップ境界で時刻を読むだけ。状態・乱数・処理順は変えない
+  const perf = perfChainStart();
   const day = Math.floor(state.now / DAY_SEC);
   if (!state.airlineStandHomes || state.airlineStandHomes.day !== day) state.airlineStandHomes = { day, byAirline: {} };
   if (sim.company) {
@@ -867,6 +870,7 @@ export function stepSimulation(sim: Simulation): void {
     if (stepEconomy(sim, (key) => serversOf(sim, key)) && state.settings.autoSchedule) generateDaySchedule(sim, day);
     stepWorkOrders(sim);
   } else if (state.settings.autoSchedule && state.now % DAY_SEC >= 23 * 3600) generateDaySchedule(sim, day + 1);
+  perf.mark('economy');
 
   const all = sortedValues(state.aircraft);
   for (const ac of all) {
@@ -874,8 +878,10 @@ export function stepSimulation(sim: Simulation): void {
     ac.py = ac.y;
     ac.pheading = ac.heading;
   }
+  perf.mark('other');
   stepDisruptions(sim);
   if (state.wx) stepWeather(sim, cancelTurnaround);
+  perf.mark('disruptions');
   runwayControl(sim);
   if (state.taxiBlocks) {
     taxiBlockControl(sim);
@@ -886,15 +892,23 @@ export function stepSimulation(sim: Simulation): void {
       }
     }
   }
+  perf.mark('runwayTaxi');
   for (const ac of all) stepAircraft(sim, ac);
+  perf.mark('aircraft');
   stepPassengers(sim);
+  perf.mark('passengers');
   if (state.bus) stepApronBuses(sim);
   for (const g of stepAccess(sim)) completeExit(sim, g);
+  perf.mark('accessBus');
   stepBaggage(sim);
+  perf.mark('baggage');
   stepGround(sim);
+  perf.mark('ground');
   detectConflicts(sim);
+  perf.mark('conflicts');
   stepAnalytics(sim);
   state.now += TICK_SEC;
+  perf.finish('analytics', { paxGroups: state.activePax.length, aircraft: all.length, bags: state.activeBags.length });
 }
 
 /**

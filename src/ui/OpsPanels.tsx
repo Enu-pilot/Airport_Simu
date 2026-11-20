@@ -15,7 +15,8 @@ import { summarizeMissedBreakdown } from '../core/analytics/review';
 import type { BagState, BlockReason, DisruptionKind, Flight, RunwayMode, SimState, WeatherKind } from '../core/sim/types';
 import { designatorsOf } from '../core/layout/designators';
 import type { AirportLayout, Runway } from '../core/model/types';
-import { editorStore, useEditor, type OpsState } from '../editor/store';
+import { editorStore, setOpsPrefs, useEditor, type OpsState } from '../editor/store';
+import { PerfPanel } from './operate/PerfPanel';
 import { disruptionActions, ops } from '../editor/simRunner';
 import { compatibleStands, standOptionLabel } from './operate/flightActions';
 import { REPAIR_COST } from '../core/sim/disruptions';
@@ -63,6 +64,7 @@ export function OpsControls() {
   const [type, setType] = useState<AircraftTypeId>('narrow180');
   const level = useEditor((s) => s.interiorLevel);
   const interior = useEditor((s) => s.overlays.interior);
+  const noMap = useEditor((s) => s.opsPrefs.noMap);
   if (!o) return null;
   const { state, ctx } = o.sim;
   const st = state.stats;
@@ -157,6 +159,22 @@ export function OpsControls() {
           </label>
         )}
       </div>
+
+      <div className="tool-group-title">表示モード</div>
+      <div className="speed-buttons">
+        <button className={!noMap ? 'tool active' : 'tool'} aria-pressed={!noMap} onClick={() => setOpsPrefs({ noMap: false })} data-testid="display-map">
+          地図
+        </button>
+        <button className={noMap ? 'tool active' : 'tool'} aria-pressed={noMap} onClick={() => setOpsPrefs({ noMap: true })} data-testid="display-nomap">
+          地図なし（運行表）
+        </button>
+      </div>
+      {noMap && (
+        <div className="muted small" data-testid="nomap-note">
+          地図を描画せず、運行表だけで運航します（シミュレーションはそのまま進みます）。機体の選択は運行表の行クリックから。スポットの使用停止など地図起点の操作は「地図」に戻して行ってください。
+        </div>
+      )}
+      <PerfPanel />
     </div>
   );
 }

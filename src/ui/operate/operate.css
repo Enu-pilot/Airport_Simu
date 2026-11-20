@@ -20,6 +20,15 @@
 }
 
 .ops-left, .ops-right { display: block; overflow-y: auto; padding: 6px; min-height: 0; }
+
+/* 地図なしモード: 中央は運行表（全列表示）を主表示にする。盤面色は運航表の既存スタイルに合わせる */
+.ops-center-nomap { display: flex; flex-direction: column; padding: 8px; overflow: hidden; background: #070b10; }
+.ops-center-nomap .fids-board { flex: 1; min-height: 0; }
+.ops-center-nomap .status-bar { flex: none; }
+
+/* 性能計測パネル（左列・運航コントロール内） */
+.perf-panel { margin-top: 4px; }
+.perf-step { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 1px 0; font-variant-numeric: tabular-nums; }
 .ops-left .toolbox { padding: 0 0 6px; border-bottom: none; }
 .ops-right { background: var(--panel); border-left: 1px solid var(--border); }
 
