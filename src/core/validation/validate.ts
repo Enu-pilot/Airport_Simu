@@ -2,7 +2,7 @@ import { FACILITY_SPECS, GATE_CONNECTOR_MAX_TILES, GATE_MAX_STAND_DISTANCE, type
 import type { CompanyState } from '../economy/company';
 import { compareIds, sortedValues } from '../model/ids';
 import { inSite, isBuildable, isSiteEdge } from '../model/site';
-import { isFreeRunway, sizeAtLeast, type AirportLayout, type SizeClass } from '../model/types';
+import { isFreeRunway, sizeAtLeast, type AirportLayout, type Runway, type SizeClass } from '../model/types';
 import {
   chebyshevDistance,
   cross,
@@ -15,6 +15,8 @@ import {
   type Vec2,
 } from '../geometry/vec';
 import { buildAirsideNetwork, reachableNodes, type AirsideNetwork } from '../airside/network';
+import { departureReachableRunwayNodes, runwayEntryInfos, type RunwayEntryInfo } from '../airside/runwayEntries';
+import { checkRunway } from '../aircraft/compat';
 import { collectFootprints, facilityTiles, standEntry, standTiles, type FootprintPart } from '../layout/footprint';
 import { edgesOfNode, type AnyEdge } from '../layout/network';
 import { terminalFloorRange, undergroundFacilityProblem } from '../layout/levelRules';
@@ -31,7 +33,7 @@ import { connectionSegmentLevel, verticalGroupStairsOnly, verticalStepsCovered }
 import { CONNECTOR_DETOUR, DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
 import { verifyPortalAccess } from '../terminal/networkGraph';
 import { terminalServiceComplexes } from '../terminal/serviceComplex';
-import { deckElevationForCode, requiredAircraftClearanceM, requiredClearanceForCode } from '../sim/aircraftTypes';
+import { AIRCRAFT_TYPES, deckElevationForCode, requiredAircraftClearanceM, requiredClearanceForCode, takeoffDistanceM } from '../sim/aircraftTypes';
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { DOOR_SILL_M, DOOR_SILL_UPPER_M, PBB_TYPES, type PbbDeck } from '../model/catalog';
 import { PBB_ENTRY_RANGE, hasExplicitPbb, pbbDeckOf, pbbGateIdOf, pbbStandIdOf, pbbTypeOf } from '../model/boardingBridge';
@@ -66,6 +68,7 @@ export type IssueCode =
   | 'RUNWAY_PARALLEL_DEPENDENT'
   | 'RUNWAY_DESIGNATOR_CONFLICT'
   | 'HOLD_SHORT_TOO_CLOSE'
+  | 'RUNWAY_ENTRY_ALL_SHORT'
   // 誘導路
   | 'TAXIWAY_ON_RUNWAY'
   | 'TAXIWAY_CROSSES_RUNWAY_NO_ENTRY'
@@ -79,6 +82,7 @@ export type IssueCode =
   | 'STAND_NOT_CONNECTED'
   | 'OVERNIGHT_STAND_REMOVED'
   | 'STAND_NO_RUNWAY_ROUTE'
+  | 'STAND_NO_DEPARTURE_ENTRY'
   | 'STAND_ROUTE_SIZE_LIMITED'
   | 'STAND_ONE_WAY_TRAP'
   | 'STAND_REMOTE'
@@ -184,6 +188,7 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   RUNWAY_PARALLEL_DEPENDENT: 'info',
   RUNWAY_DESIGNATOR_CONFLICT: 'warning',
   HOLD_SHORT_TOO_CLOSE: 'warning',
+  RUNWAY_ENTRY_ALL_SHORT: 'warning',
   TAXIWAY_ON_RUNWAY: 'error',
   TAXIWAY_CROSSES_RUNWAY_NO_ENTRY: 'error',
   TAXIWAY_CROSSING_NO_JUNCTION: 'error',
@@ -194,6 +199,7 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   DUPLICATE_EDGE: 'warning',
   STAND_NOT_CONNECTED: 'error',
   STAND_NO_RUNWAY_ROUTE: 'error',
+  STAND_NO_DEPARTURE_ENTRY: 'warning',
   STAND_ROUTE_SIZE_LIMITED: 'warning',
   STAND_ONE_WAY_TRAP: 'warning',
   STAND_REMOTE: 'info',
@@ -825,6 +831,93 @@ function checkAirside(layout: AirportLayout, net: AirsideNetwork, sink: IssueSin
       else sink.add('STAND_NO_RUNWAY_ROUTE', [s.id], {}, s.origin);
     } else if (!dep || !arr) {
       sink.add('STAND_ONE_WAY_TRAP', [s.id], { direction: dep ? 'arrival' : 'departure' }, s.origin);
+    }
+  }
+
+  checkDepartureEntries(layout, net, sink);
+}
+
+/**
+ * その滑走路を使える機種の離陸滑走距離（takeoffDistanceM）の最大。
+ * standSize を渡すと、その区分に収まる機種だけを対象にする。使える機種が無ければ null。
+ * compat の requiredRunwayM が足す +100 m の余裕は含まない（余裕分だけ足りない境界ケースは
+ * 診断の対象にしない。docs/26 §3c）。
+ */
+function maxTakeoffNeedM(r: Runway, standSize: SizeClass | null): number | null {
+  let best: number | null = null;
+  for (const t of sortedValues(AIRCRAFT_TYPES)) {
+    if (standSize && !sizeAtLeast(standSize, t.size)) continue;
+    if (checkRunway(t, r).status !== 'ok') continue;
+    const need = takeoffDistanceM(t);
+    if (best === null || need > best) best = need;
+  }
+  return best;
+}
+
+/**
+ * 離陸入口の残り長さの診断（入口位置ベース制限の第 1 段。診断のみで、運航の判定には使わない）。
+ *
+ * 経営 sim は出発経路の入口候補を「残り距離 ≥ 離陸滑走距離 + 100 m」で既に絞っている
+ * （sim/simulation.ts の entryCandidates）。ここでは、その絞り込みで本当に困る構成だけを建設時点で知らせる。
+ * - RUNWAY_ENTRY_ALL_SHORT (warning): 方向ごとに、最大級の機種が離陸滑走そのものを開始できる入口が 1 つもない
+ * - STAND_NO_DEPARTURE_ENTRY (warning): スポットから到達できる入口がすべて残り不足で、その区分の機種が出発できない
+ *
+ * 「途中入口が最大級に使えない」だけの情報診断は作らない。通常のインターセクション運用でも
+ * 常に出てしまい、サンプル空港・スターター空港（検証ゴールデンの基準レイアウト）でも誤発火するため。
+ * 必要距離は +100 m の余裕を含まない離陸滑走距離そのものとし、余裕分だけ足りない境界ケースも出さない。
+ */
+function checkDepartureEntries(layout: AirportLayout, net: AirsideNetwork, sink: IssueSink): void {
+  const infosByRunway = new Map<string, RunwayEntryInfo[]>();
+  const infosOf = (runwayId: string): RunwayEntryInfo[] => {
+    let v = infosByRunway.get(runwayId);
+    if (!v) {
+      v = runwayEntryInfos(net, runwayId);
+      infosByRunway.set(runwayId, v);
+    }
+    return v;
+  };
+
+  for (const r of sortedValues(layout.runways)) {
+    const need = maxTakeoffNeedM(r, null);
+    if (need === null) continue; // 使える機種が無い滑走路は RUNWAY_TOO_SHORT 等が担当
+    const entries = infosOf(r.id).filter((i) => i.hasTaxiwayLink);
+    if (entries.length === 0) continue; // RUNWAY_NO_TAXIWAY が担当
+    for (const direction of ['forward', 'reverse'] as const) {
+      const remaining = (i: RunwayEntryInfo) => (direction === 'forward' ? i.remainingForwardM : i.remainingReverseM);
+      // その方向の終端ノード（残り 0）は離陸の開始点にならないので除く
+      const candidates = entries.filter((i) => remaining(i) > 0);
+      if (candidates.length === 0) continue;
+      const okCount = candidates.filter((i) => remaining(i) >= need).length;
+      if (okCount > 0) continue;
+      const best = candidates.reduce((a, b) => (remaining(b) > remaining(a) ? b : a));
+      sink.add(
+        'RUNWAY_ENTRY_ALL_SHORT',
+        [r.id],
+        { direction, maxRemainingM: Math.round(remaining(best)), requiredM: Math.round(need) },
+        net.nodes[best.nodeId]?.pos,
+      );
+    }
+  }
+
+  for (const s of sortedValues(layout.stands)) {
+    if (!net.standLinks[s.id]) continue; // STAND_NOT_CONNECTED が担当
+    const reach = departureReachableRunwayNodes(net, s.id, s.size, s.size === 'L' && !!s.codeF);
+    if (reach.size === 0) continue; // 到達できる滑走路が無い場合は STAND_NO_RUNWAY_ROUTE 等が担当
+    let minNeed: number | null = null;
+    let canDepart = false;
+    for (const r of sortedValues(layout.runways)) {
+      const infos = infosOf(r.id).filter((i) => reach.has(i.nodeId));
+      if (infos.length === 0) continue;
+      const need = maxTakeoffNeedM(r, s.size);
+      if (need === null) continue; // その区分の機種が使えない滑走路は対象外（STAND_ROUTE_SIZE_LIMITED 等が担当）
+      if (minNeed === null || need < minNeed) minNeed = need;
+      if (infos.some((i) => i.remainingForwardM >= need || i.remainingReverseM >= need)) {
+        canDepart = true;
+        break;
+      }
+    }
+    if (minNeed !== null && !canDepart) {
+      sink.add('STAND_NO_DEPARTURE_ENTRY', [s.id], { size: s.size, requiredM: Math.round(minNeed) }, s.origin);
     }
   }
 }

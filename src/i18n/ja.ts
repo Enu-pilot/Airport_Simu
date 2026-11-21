@@ -348,6 +348,10 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   RUNWAY_DESIGNATOR_CONFLICT: (n, p) => `滑走路番号 ${p.designator} が重複しています（${n.join(', ')}）。番号の接尾辞を設定してください`,
   HOLD_SHORT_TOO_CLOSE: (n, p) =>
     `${n[0]} の滑走路入口の停止位置に十分な距離がありません（誘導路に沿って中心線から ${p.achievedM}m までしか離れられません。停止位置 ${p.requiredM}m。ゲームの判定）。誘導路を長くするか、入る角度を大きくしてください`,
+  RUNWAY_ENTRY_ALL_SHORT: (n, p) =>
+    `${n[0]} の${p.direction === 'forward' ? '始点→終点' : '終点→始点'}方向では、どの入口からも、その滑走路を使える最大級の機種が離陸できません（最も長い入口で残り ${p.maxRemainingM}m、離陸滑走に必要 ${p.requiredM}m。ゲームの判定）。入口を滑走路端へ寄せるか、滑走路の方向を変えてください`,
+  STAND_NO_DEPARTURE_ENTRY: (n, p) =>
+    `${n[0]}（${p.size}級）から到達できる滑走路入口は、すべて残り長さが離陸滑走に必要な長さ（${p.requiredM}m）に足りません（ゲームの判定）。この区分の機種はこのスポットから出発できません`,
   TAXIWAY_ON_RUNWAY: (n) => `${n[0]} が ${n[1]} の上を走っています`,
   TAXIWAY_CROSSES_RUNWAY_NO_ENTRY: (n) => `${n[0]} が ${n[1]} を入口ノードなしで横切っています`,
   TAXIWAY_CROSSING_NO_JUNCTION: (n) => `${n[0]} と ${n[1]} が交差点なしで交差しています`,

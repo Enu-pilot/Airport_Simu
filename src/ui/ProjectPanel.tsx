@@ -5,7 +5,7 @@ import { ASSET_VERSION } from '../core/assets/registry';
 import { formatVersionOf, type ValidationReport } from '../core/io/project';
 import { catalogDiff, SIM_MODEL_VERSION } from '../core/scenario/scenario';
 import { listSlots, projectActions } from '../editor/project';
-import { useEditor } from '../editor/store';
+import { useEditor, bulkAttachBoardingBridges } from '../editor/store';
 
 /**
  * プロジェクト（docs/21_save_format.md）: 保存スロット・名前を付けて保存・読み込み・JSON の書き出し / 読み込み、
@@ -195,6 +195,24 @@ export function ProjectPanel() {
         <section data-testid="project-history">
           <h4>日ごとの履歴</h4>
           <HistoryList />
+        </section>
+        <section>
+          <h4>搭乗橋の一括付与</h4>
+          <div className="small">
+            合成の橋しかない全コンタクトゲートに、明示の搭乗橋（tunnel1）を一括で付けます。バスゲート・明示の橋があるゲート・スポット紐付けのないゲートは付きません。建設費はかかりません（ゲートのボーディングブリッジ上乗せと同額のため）。
+          </div>
+          <button
+            className="primary"
+            disabled={operating}
+            onClick={() => bulkAttachBoardingBridges()}
+            data-testid="project-bulk-pbb"
+            title="合成の橋しかない全コンタクトゲートに明示の搭乗橋（tunnel1）を付けます"
+          >
+            全コンタクトゲートに搭乗橋を付ける
+          </button>
+          <div className="muted small">
+            実データ化すると、大型機（ドアシル高 4.7m）は tunnel1 の上限 4.6m を超えるため搭乗・降機が遅くなります（明示の搭乗橋のみ対象）。
+          </div>
         </section>
         <section>
           <h4>読み込みの検証結果</h4>

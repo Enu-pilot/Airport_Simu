@@ -26,6 +26,13 @@
 .ops-center-nomap .fids-board { flex: 1; min-height: 0; }
 .ops-center-nomap .status-bar { flex: none; }
 
+/* 無描画運行モード（第5弾）: 中央は最小ステータスだけを置く */
+.ops-center-norender { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px; overflow: hidden; background: #070b10; }
+.headless-status { display: flex; flex-direction: column; gap: 10px; align-items: stretch; width: min(420px, 90%); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px 18px; }
+.headless-title { font-size: 15px; font-weight: 700; text-align: center; }
+.headless-grid { grid-template-columns: 1fr auto 1fr auto; }
+.headless-actions { display: flex; gap: 8px; justify-content: center; }
+
 /* 性能計測パネル（左列・運航コントロール内） */
 .perf-panel { margin-top: 4px; }
 .perf-step { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 1px 0; font-variant-numeric: tabular-nums; }

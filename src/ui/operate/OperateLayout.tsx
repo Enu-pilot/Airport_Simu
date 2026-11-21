@@ -16,6 +16,7 @@ import { TodayKpiCard } from './cards/TodayKpiCard';
 import { WeatherCard } from './cards/WeatherCard';
 import { AlertStack } from './AlertStack';
 import { FidsBoard } from './FidsBoard';
+import { HeadlessStatus } from './HeadlessStatus';
 import { FidsOverlay } from './FidsOverlay';
 import { OpsDetail } from './OpsDetail';
 import { opsUi } from './opsUi';
@@ -34,6 +35,23 @@ export function OperateLayout() {
   // 地図なしモード（opsPrefs.noMap）: 地図をアンマウントし、運行表（全列表示）を中央の主表示にする。
   // sim の進行は simRunner が担い描画と独立しているため、地図が無くても運航はそのまま進む
   const noMap = useEditor((s) => s.opsPrefs.noMap);
+  // 無描画運行モード（opsPrefs.noRender、性能改善計画 第5弾）: noMap より優先。
+  // 左列は運航コントロールだけ、中央は最小ステータスだけにし、右列のカード類は描画しない。
+  // 状態表示の更新も simRunner 側で約1秒間隔に間引かれる
+  const noRender = useEditor((s) => s.opsPrefs.noRender);
+  if (noRender) {
+    return (
+      <>
+        <aside className="left ops-left" data-testid="ops-left">
+          <OpsControls />
+        </aside>
+        <main className="center ops-center ops-center-norender" data-testid="ops-norender">
+          <HeadlessStatus />
+          <Toast />
+        </main>
+      </>
+    );
+  }
   return (
     <>
       <aside className="left ops-left" data-testid="ops-left">

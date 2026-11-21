@@ -6,7 +6,7 @@ import type { Tile, Vec2 } from '../core/geometry/vec';
 import type { WorldPoint } from '../core/geometry/frames';
 import { commit, createHistory, redo, undo, type History } from '../core/editor/history';
 import type { OpResult } from '../core/layout/operations';
-import { createEmptyLayout } from '../core/layout/operations';
+import { createEmptyLayout, bulkPlaceBoardingBridges } from '../core/layout/operations';
 import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass, TerminalAreaKind } from '../core/model/types';
 import type { PbbBridgeType, PbbDeck } from '../core/model/catalog';
 import { createSampleAirport } from '../core/sample/sampleAirport';
@@ -281,18 +281,23 @@ export interface OpsPrefs {
   skipAutoStop: boolean;
   /** 地図なしモード（運航画面で地図を描画せず運行表を主表示にする。表示だけの設定で、プロジェクトには保存しない） */
   noMap: boolean;
+  /**
+   * 無描画運行モード（性能改善計画 第5弾。地図・運行表・カードを描画せず、状態表示は約1秒間隔に間引く。
+   * 表示だけの設定で、プロジェクトには保存しない。ON の間は noMap より優先される）
+   */
+  noRender: boolean;
 }
 
 export const initialDayFlow = (): DayFlow => ({ phase: 'none', review: null, viewing: null, atClose: false, skip: null, historyOpen: false });
 
 const PREFS_KEY = 'skyport.opsPrefs.v1';
 function loadPrefs(): OpsPrefs {
-  const d: OpsPrefs = { pauseAtDayClose: true, skipAutoStop: true, noMap: false };
+  const d: OpsPrefs = { pauseAtDayClose: true, skipAutoStop: true, noMap: false, noRender: false };
   try {
     const raw = globalThis.localStorage?.getItem(PREFS_KEY);
     if (raw) {
       const p = JSON.parse(raw) as Partial<OpsPrefs>;
-      return { pauseAtDayClose: typeof p.pauseAtDayClose === 'boolean' ? p.pauseAtDayClose : d.pauseAtDayClose, skipAutoStop: typeof p.skipAutoStop === 'boolean' ? p.skipAutoStop : d.skipAutoStop, noMap: typeof p.noMap === 'boolean' ? p.noMap : d.noMap };
+      return { pauseAtDayClose: typeof p.pauseAtDayClose === 'boolean' ? p.pauseAtDayClose : d.pauseAtDayClose, skipAutoStop: typeof p.skipAutoStop === 'boolean' ? p.skipAutoStop : d.skipAutoStop, noMap: typeof p.noMap === 'boolean' ? p.noMap : d.noMap, noRender: typeof p.noRender === 'boolean' ? p.noRender : d.noRender };
     }
   } catch {
     // 既定値を使う
@@ -658,6 +663,40 @@ export function closeTemporarily(id: string, days: number): void {
   }
   commitCharged(layout, 0, company);
   showToast(`${days}日間の一時閉鎖を始めました（運航した日ごとに進みます）`);
+}
+
+/**
+ * 全コンタクトゲートに搭乗橋（PBB）を一括で付ける（合成の橋の実データ化）。
+ * 通常の applyOp は使わない: withProjects → prepareCareerEdit が新規 PBB を
+ * 全て「建設中」に変えてしまうため。applyFinishedProjects / closeTemporarily
+ * と同じく、履歴1件として直接コミットする。
+ *
+ * 建設費は中立（0）で精算する。constructionCost(before, after) は 0 には
+ * ならない: ゲート側の jetBridge 上乗せ 150,000cr が外れる分は「減った分」
+ * として払い戻し率 25% でしか戻らず、PBB 側の 150,000cr は全額かかるため、
+ * 1ゲートあたり 112,500cr × 規模係数が請求されてしまう。だが橋はゲート建設
+ * 時に上乗せとして既に支払い済みで、資産額の合計は変わらない（付け替えで
+ * あって新設ではない）ため、ここでは明示的に 0 で精算する。
+ */
+export function bulkAttachBoardingBridges(): void {
+  const s = get();
+  if (s.mode === 'operate') {
+    showToast('運航中はレイアウトを編集できません（建設モードに戻ってください）', 'error');
+    return;
+  }
+  const before = s.history.present;
+  const result = bulkPlaceBoardingBridges(before);
+  const attached = result.attachedGateIds.length;
+  const skipped = result.skipped.length;
+  if (attached === 0) {
+    showToast(`付ける搭乗橋がありませんでした（スキップ ${skipped}件）`, 'info');
+    return;
+  }
+  // 付け替えであって新設ではないため、建設費は 0 で精算する（上記コメント参照）
+  const charged = charge(before, result.layout, 0);
+  if (charged === false) return;
+  commitCharged(result.layout, charged.cost, charged.company);
+  showToast(`搭乗橋を ${attached}件付けました（スキップ ${skipped}件）`);
 }
 
 /**

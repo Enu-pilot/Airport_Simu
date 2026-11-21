@@ -1296,6 +1296,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             <select value={e.tracks ?? 1} onChange={(ev) => update(layout, id, { tracks: Number(ev.target.value) })} data-testid="prop-tracks">
               <option value={1}>単線（4 本/時）</option>
               <option value={2}>複線（12 本/時）</option>
+              <option value={4}>複々線（24 本/時）</option>
             </select>
           </Field>
         )}

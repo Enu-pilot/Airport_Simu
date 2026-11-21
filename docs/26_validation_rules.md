@@ -69,6 +69,15 @@ issue が出るのは、少なくとも一方が自由形の組、または `rul
 
 `TERMINAL_NO_GATE` は接続された独立ゲートも数える。`terminalId` を指定したスポットの `STAND_BUS_NO_VEHICLES` は、そのターミナルのゲートに絞った候補で判定する。決定規則は docs/29 §3.1。詳細は [docs/29](29_remote_stands_and_bus_boarding.md)。
 
+## 3c. 離陸入口の残り長さ（2026-TK 第 1 段。診断のみ）
+
+経営 sim は出発経路の入口候補を「その入口からの残り距離 ≥ その機種の離陸滑走距離 + 100 m」で既に絞っている（`sim/simulation.ts` の `entryCandidates`）。下記の 2 コードは、その絞り込みで本当に困る構成を建設時点で知らせる診断で、判定そのものは変えない。必要距離は、その滑走路を使える（`checkRunway` が ok の）機種の離陸滑走距離（`takeoffDistanceM`）の最大で、compat の `requiredRunwayM` が足す +100 m の余裕は含まない（余裕分だけ足りない境界ケースは出さない）。入口の残り長さは airside ネットワークの滑走路ノード列の先頭ノードからの直線距離で測る（`airside/runwayEntries.ts`）。いずれも warning なので運用は止めない。「途中入口が最大級に使えない」だけの情報診断は作らない（通常のインターセクション運用でも常に出るため）。
+
+| コード | 重大度 | 条件（ゲームの判定） |
+|---|---|---|
+| `RUNWAY_ENTRY_ALL_SHORT` | warning | 滑走路 × 方向ごと。誘導路につながる入口（その方向の終端ノードを除く）はあるが、残り長さが必要距離に達する入口が 1 つもない。`params: { direction, maxRemainingM, requiredM }`、位置は最も長い入口 |
+| `STAND_NO_DEPARTURE_ENTRY` | warning | スポットから到達できる滑走路入口がすべて残り不足で、そのスポットの区分に収まる機種（その滑走路を使えるもの）の必要距離を満たす入口が無い。`params: { size, requiredM }`（requiredM は候補滑走路のうち最小の必要距離）。滑走路へ到達できない場合や、その区分の機種が使える滑走路が無い場合は出ない（`STAND_NO_RUNWAY_ROUTE` / `STAND_ROUTE_SIZE_LIMITED` 等が担当） |
+
 ## 4. 運用可否
 
 `operability` は既存の仕組み。滑走路に error があると `HAS_ERRORS`（運用不可）。`RUNWAY_PARALLEL_*`・`RUNWAY_DESIGNATOR_CONFLICT` は警告・情報なので運用を止めない。

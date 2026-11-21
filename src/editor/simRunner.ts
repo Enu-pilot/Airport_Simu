@@ -4,7 +4,7 @@ import { buildDayReview, emptyResponses, type DayReview, type ReviewResponses } 
 import { recordDayClose } from './dayHistory';
 import { buildTypeTable } from '../core/sim/aircraftTypes';
 import { effectiveModels } from '../core/io/project';
-import { advanceClock, createClock } from '../core/sim/clock';
+import { advanceClock, createClock, type SimClock } from '../core/sim/clock';
 import { recordFrame, setPerfClock } from '../core/sim/perfStats';
 
 // 性能計測の時計は editor 層から注入する（core は実時間に依存しない）
@@ -68,6 +68,31 @@ let raf = 0;
 let lastTs = 0;
 let lastUi = 0;
 
+/**
+ * 無描画運行モード（性能改善計画 第5弾）中の store 公開間隔（ミリ秒）。
+ * モード中は地図・運行表・カードを描画しない代わりに、状態表示もこの間隔まで間引く。
+ */
+export const HEADLESS_PUBLISH_MS = 1000;
+
+/**
+ * 無描画運行モードで、このフレームの結果を store へ公開すべきかの判定（純粋関数）。
+ * 間隔が来たときに加え、日次締めで止まったとき（振り返りへ切り替わる）と
+ * 処理落ち（dropped）が新たに立ったとき（警告を早く出す）は即時に公開する。
+ */
+export function headlessShouldPublish(args: { elapsedMs: number; stoppedAtClose: boolean; droppedRose: boolean }): boolean {
+  return args.elapsedMs >= HEADLESS_PUBLISH_MS || args.stoppedAtClose || args.droppedRose;
+}
+
+/**
+ * 無描画運行モードで未公開のまま保持している最新の clock。
+ * advanceClock の端数（acc）は clock 側にしか無いので、公開を間引く間もここに保持し、
+ * 次フレームの入力に使う（保持しないと端数が毎フレーム消えて進行が遅れ、結果が通常モードとずれる）。
+ * clock を frame() の外から書き換える操作（速度変更・一時停止・スキップ・開始/終了）は
+ * 必ずこれを消して、store 側の clock を正にする。
+ */
+let pendingClock: SimClock | null = null;
+let lastPublishTs = 0;
+
 function patchOps(patch: Partial<OpsState>): void {
   const ops = get().ops;
   if (ops) set({ ops: { ...ops, ...patch } });
@@ -107,8 +132,10 @@ function frame(ts: number): void {
   if (!ops) return;
   const dt = lastTs ? (ts - lastTs) / 1000 : 0;
   lastTs = ts;
-  const r = advanceClock(ops.clock, dt);
+  const headless = get().opsPrefs.noRender;
+  const r = advanceClock(pendingClock ?? ops.clock, dt);
   let clock = r.clock;
+  let stoppedAtClose = false;
   let remaining = r.ticks;
   while (remaining > 0) {
     const res = stepTicks(ops.sim, remaining, { stopAtDayClose: true });
@@ -123,12 +150,11 @@ function frame(ts: number): void {
       // 設定が ON なら、締めの直後で一時停止して振り返りを出す（OFF なら続けて走る）
       if (get().opsPrefs.pauseAtDayClose) {
         clock = toReviewPhase(clock);
+        stoppedAtClose = true;
         break;
       }
     }
   }
-  const ui = ts - lastUi > 100 || r.ticks === 0;
-  if (ui) lastUi = ts;
   // 性能計測: このフレームで進めた tick 数と dropped を記録する（計測のみ。進行には影響しない）
   recordFrame(r.ticks, r.dropped);
   // 一時停止中で何も進まなかったフレームは、画面に出る状態が前回から変わっていない。
@@ -140,6 +166,24 @@ function frame(ts: number): void {
     raf = requestAnimationFrame(frame);
     return;
   }
+  // 無描画運行モード中は store への公開を約1秒に1回へ間引く（性能改善計画 第5弾）。
+  // tick の進め方・回数は通常モードと同一で、違うのは「いつ画面へ知らせるか」だけ。
+  // 未公開の clock は pendingClock に保持し、次フレームも同じ列の続きとして進める。
+  if (headless) {
+    if (!headlessShouldPublish({ elapsedMs: ts - lastPublishTs, stoppedAtClose, droppedRose: r.dropped && !ops.dropped })) {
+      pendingClock = clock;
+      raf = requestAnimationFrame(frame);
+      return;
+    }
+    lastPublishTs = ts;
+    pendingClock = null;
+    patchOps({ clock, frame: ops.frame + 1, dropped: r.dropped, uiVersion: ops.uiVersion + 1 });
+    raf = requestAnimationFrame(frame);
+    return;
+  }
+  pendingClock = null;
+  const ui = ts - lastUi > 100 || r.ticks === 0;
+  if (ui) lastUi = ts;
   patchOps({ clock, frame: ops.frame + 1, dropped: r.dropped, uiVersion: ui ? ops.uiVersion + 1 : ops.uiVersion });
   raf = requestAnimationFrame(frame);
 }
@@ -154,6 +198,7 @@ let skipCancelled = false;
 
 function resumeLoop(): void {
   cancelAnimationFrame(raf);
+  pendingClock = null;
   lastTs = 0;
   const o = get().ops;
   if (o) patchOps({ uiVersion: o.uiVersion + 1, frame: o.frame + 1 });
@@ -247,6 +292,8 @@ export const ops = {
       return;
     }
     cancelAnimationFrame(raf);
+    pendingClock = null;
+    lastPublishTs = 0;
     forgetCharges();
     set({
       mode: 'operate',
@@ -265,6 +312,8 @@ export const ops = {
   /** 保存した運航状態から再開する（一時停止の状態で始める） */
   resume(sim: Simulation): void {
     cancelAnimationFrame(raf);
+    pendingClock = null;
+    lastPublishTs = 0;
     forgetCharges();
     set({
       mode: 'operate',
@@ -290,13 +339,21 @@ export const ops = {
   setSpeed(speed: number): void {
     const o = get().ops;
     if (get().dayFlow.phase !== 'none') return;
-    if (o) patchOps({ clock: { ...o.clock, speed }, uiVersion: o.uiVersion + 1 });
+    // 未公開の clock（pendingClock）がある場合はそちらが最新の速度・端数を持つ。
+    // store 側の古い clock から作ると端数が巻き戻るため、保持側を優先して書き換える
+    if (o) {
+      const base = pendingClock ?? o.clock;
+      pendingClock = null;
+      patchOps({ clock: { ...base, speed }, uiVersion: o.uiVersion + 1 });
+    }
   },
   togglePause(): void {
     const o = get().ops;
     if (!o || get().dayFlow.phase !== 'none') return;
-    patchOps({ clock: { ...o.clock, speed: o.clock.speed > 0 ? 0 : (pausedSpeed ?? 60) }, uiVersion: o.uiVersion + 1 });
-    if (o.clock.speed > 0) pausedSpeed = o.clock.speed;
+    const base = pendingClock ?? o.clock;
+    pendingClock = null;
+    patchOps({ clock: { ...base, speed: base.speed > 0 ? 0 : (pausedSpeed ?? 60) }, uiVersion: o.uiVersion + 1 });
+    if (base.speed > 0) pausedSpeed = base.speed;
   },
   /** 残りの 1 日をヘッドレスで進めて、締めの振り返りを出す（建設モードからなら運航を始めてすぐ進める） */
   skipDay(): void {
@@ -323,6 +380,7 @@ export const ops = {
     if (!o || df.phase !== 'review') return;
     if (df.atClose) runHeadless('night');
     else {
+      pendingClock = null;
       set({ dayFlow: { ...df, phase: 'none' } });
       patchOps({ clock: { ...o.clock, speed: pausedSpeed ?? 60, acc: 0 } });
     }
@@ -334,8 +392,10 @@ export const ops = {
     const o = get().ops;
     if (o) {
       if (df.phase !== 'none') return;
-      if (o.clock.speed > 0) pausedSpeed = o.clock.speed;
-      patchOps({ clock: { ...o.clock, speed: 0, acc: 0 } });
+      const base = pendingClock ?? o.clock;
+      pendingClock = null;
+      if (base.speed > 0) pausedSpeed = base.speed;
+      patchOps({ clock: { ...base, speed: 0, acc: 0 } });
       set({ dayFlow: { ...df, phase: 'review', atClose: false } });
     } else set({ dayFlow: { ...df, viewing: df.review } });
   },
@@ -451,6 +511,7 @@ export const disruptionActions = {
 
 function endOps(): void {
   cancelAnimationFrame(raf);
+  pendingClock = null;
   skipToken++; // 実行中のスキップを無効にする
   const o = get().ops;
   const df = get().dayFlow;

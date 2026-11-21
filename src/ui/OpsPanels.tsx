@@ -65,6 +65,7 @@ export function OpsControls() {
   const level = useEditor((s) => s.interiorLevel);
   const interior = useEditor((s) => s.overlays.interior);
   const noMap = useEditor((s) => s.opsPrefs.noMap);
+  const noRender = useEditor((s) => s.opsPrefs.noRender);
   if (!o) return null;
   const { state, ctx } = o.sim;
   const st = state.stats;
@@ -162,18 +163,25 @@ export function OpsControls() {
 
       <div className="tool-group-title">表示モード</div>
       <div className="speed-buttons">
-        <button className={!noMap ? 'tool active' : 'tool'} aria-pressed={!noMap} onClick={() => setOpsPrefs({ noMap: false })} data-testid="display-map">
+        <button className={!noRender && !noMap ? 'tool active' : 'tool'} aria-pressed={!noRender && !noMap} onClick={() => setOpsPrefs({ noRender: false, noMap: false })} data-testid="display-map">
           地図
         </button>
-        <button className={noMap ? 'tool active' : 'tool'} aria-pressed={noMap} onClick={() => setOpsPrefs({ noMap: true })} data-testid="display-nomap">
+        <button className={!noRender && noMap ? 'tool active' : 'tool'} aria-pressed={!noRender && noMap} onClick={() => setOpsPrefs({ noRender: false, noMap: true })} data-testid="display-nomap">
           地図なし（運行表）
         </button>
+        <button className={noRender ? 'tool active' : 'tool'} aria-pressed={noRender} onClick={() => setOpsPrefs({ noRender: true })} data-testid="display-norender">
+          無描画
+        </button>
       </div>
-      {noMap && (
+      {noRender ? (
+        <div className="muted small" data-testid="norender-note">
+          地図・運行表・カードを描画せずに運航します（シミュレーションはそのまま進みます）。状態表示は約1秒ごとに更新され、アラートは表示されません。機体の選択やスポットの使用停止などは「地図」または「地図なし」に戻して行ってください。
+        </div>
+      ) : noMap ? (
         <div className="muted small" data-testid="nomap-note">
           地図を描画せず、運行表だけで運航します（シミュレーションはそのまま進みます）。機体の選択は運行表の行クリックから。スポットの使用停止など地図起点の操作は「地図」に戻して行ってください。
         </div>
-      )}
+      ) : null}
       <PerfPanel />
     </div>
   );

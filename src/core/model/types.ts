@@ -177,7 +177,7 @@ export interface RoadEdge {
   /** 車線数（一般・サービス道路。フェーズ 4 の区間能力の既定値に使う） */
   lanes?: number;
   /** 線路数（鉄道。1 = 単線、2 = 複線。フェーズ 4） */
-  tracks?: 1 | 2;
+  tracks?: 1 | 2 | 4;
 }
 
 export interface Stand {
