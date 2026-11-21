@@ -5,6 +5,7 @@ import { buildAttentionItems } from '../../core/attention';
 import { composeCapabilityReadings } from '../../core/capability';
 import { HEAT_LEGEND, SHELL_UI } from '../../i18n/ja';
 import { opsInboxAttentionFromSim } from '../operate/alerts';
+import { keyForOverlayToggle } from '../../editor/shortcuts';
 import type { MainPage } from './TopBar';
 
 /**
@@ -96,12 +97,16 @@ export function Rail({ page, setPage, onOpenAtc }: { page: MainPage; setPage: (p
       <details className="overlays-pop rail-layers" data-testid="overlays-pop">
         <summary title={SHELL_UI.railLayersTitle}>{SHELL_UI.railLayers}</summary>
         <div className="overlays-menu">
-          {overlayKeys.map((k) => (
-            <label key={k}>
-              <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
-              {OVERLAY_LABEL[k]}
-            </label>
-          ))}
+          {overlayKeys.map((k) => {
+            const shortcutKey = keyForOverlayToggle(mode, k);
+            return (
+              <label key={k}>
+                <input type="checkbox" checked={overlays[k]} onChange={() => actions.toggleOverlay(k)} data-testid={`overlay-${k}`} />
+                {OVERLAY_LABEL[k]}
+                {shortcutKey && <span className="muted small">（{shortcutKey.toUpperCase()} キー）</span>}
+              </label>
+            );
+          })}
           {overlays.congestion && <HeatLegend />}
         </div>
       </details>
