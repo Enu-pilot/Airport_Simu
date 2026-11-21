@@ -1,1 +1,80 @@
-aW1wb3J0IHsgZGVzY3JpYmUsIGV4cGVjdCwgaXQgfSBmcm9tICd2aXRlc3QnOwppbXBvcnQgeyBjcmVhdGVTdGFydGVyQWlyZmllbGQgfSBmcm9tICcuLi8uLi9zcmMvY29yZS9zYW1wbGUvc3RhcnRlckFpcmZpZWxkJzsKaW1wb3J0IHsgY3JlYXRlQ2FyZWVyQ29tcGFueSwgdHlwZSBEYWlseVJlcG9ydCB9IGZyb20gJy4uLy4uL3NyYy9jb3JlL2Vjb25vbXkvY29tcGFueSc7CmltcG9ydCB7IHNldHRsZURheSB9IGZyb20gJy4uLy4uL3NyYy9jb3JlL2Vjb25vbXkvb3BzJzsKaW1wb3J0IHsgY3JlYXRlU2ltdWxhdGlvbiwgdHlwZSBTaW11bGF0aW9uIH0gZnJvbSAnLi4vLi4vc3JjL2NvcmUvc2ltL3NpbXVsYXRpb24nOwoKLyoqCiAqIOS5l+e2meODquODs+OCr+WIpeWun+e4vu+8iGh1YlN0YXRzLmJ5TGlua++8ieOBruaXpeasoembhuioiOOAggogKiBTaW1TdGF0ZS5odWJTdGF0cyDjga/ntK/oqIjjgIFEYWlseVJlcG9ydC5odWIg44Gv5b2T5pel5YiG77yI5beu5YiG77yJ44Go44GE44GG5pei5a2Y44Gu5aWR57SE44KS44CBCiAqIOODquODs+OCr+WIpeOBp+OCguWQjOOBmOOBq+S/neOBpOOBk+OBqOOCkuWbuuWumuOBmeOCi+OAggogKi8KZnVuY3Rpb24gaHViU2ltKCk6IFNpbXVsYXRpb24gewogIGNvbnN0IGNvbXBhbnkgPSBjcmVhdGVDYXJlZXJDb21wYW55KCk7CiAgY29tcGFueS5mZWF0dXJlcyA9IHsgaHViOiB0cnVlIH07CiAgY29uc3Qgc2ltID0gY3JlYXRlU2ltdWxhdGlvbihjcmVhdGVTdGFydGVyQWlyZmllbGQoKSwgeyBjb21wYW55IH0pOwogIHNpbS5zdGF0ZS5odWJTdGF0cyA9IHsgc3Bhd25lZDogMCwgY29ubmVjdGVkOiAwLCBtaXNzZWQ6IDAsIG5vU2hvdzogMCwgYnlMaW5rOiB7fSB9OwogIHJldHVybiBzaW07Cn0KCi8qKiBEYXlSZXZpZXcg44Gu44Oq44Oz44Kv5Yil44OW44Ot44OD44Kv44Gu6KGo56S65p2h5Lu277yIc3JjL3VpL0RheVJldmlldy50c3gg44Go5ZCM44GY6L+w6Kqe77yJICovCmNvbnN0IGJ5TGlua1Zpc2libGUgPSAocjogRGFpbHlSZXBvcnQpOiBib29sZWFuID0+ICEhKHIuaHViPy5ieUxpbmsgJiYgT2JqZWN0LmtleXMoci5odWIuYnlMaW5rKS5sZW5ndGggPiAwKTsKCmRlc2NyaWJlKCfml6XloLHjga7kuZfntpnjg6rjg7Pjgq/liKXpm4boqIjvvIhodWIuYnlMaW5r77yJJywgKCkgPT4gewogIGl0KCcxLiDkuZfntpnjg6rjg7Pjgq/jgZTjgajjga7liKnnlKjlrp/nuL7jgYzml6XloLHjgavoqJjpjLLjgZXjgozjgovvvIjml6LlrZg06aCF55uu44Gu6ZuG6KiI44Gv5LiN5aSJ77yJJywgKCkgPT4gewogICAgY29uc3Qgc2ltID0gaHViU2ltKCk7CiAgICBzaW0uc3RhdGUuaHViU3RhdHMgPSB7IHNwYXduZWQ6IDQwLCBjb25uZWN0ZWQ6IDM1LCBtaXNzZWQ6IDMsIG5vU2hvdzogMiwgYnlMaW5rOiB7IGxpbmtBOiAxMiB9IH07CiAgICBjb25zdCByID0gc2V0dGxlRGF5KHNpbSwgdHJ1ZSkhOwogICAgZXhwZWN0KHIuaHViKS50b0VxdWFsKHsgc3Bhd25lZDogNDAsIGNvbm5lY3RlZDogMzUsIG1pc3NlZDogMywgbm9TaG93OiAyLCBieUxpbms6IHsgbGlua0E6IDEyIH0gfSk7CiAgICBleHBlY3QoYnlMaW5rVmlzaWJsZShyKSkudG9CZSh0cnVlKTsKICB9KTsKCiAgaXQoJzIuIOikh+aVsOODquODs+OCr+OBruWun+e4vuOBjOato+OBl+OBj+WIhumbouOBleOCjOOCiycsICgpID0+IHsKICAgIGNvbnN0IHNpbSA9IGh1YlNpbSgpOwogICAgc2ltLnN0YXRlLmh1YlN0YXRzIS5ieUxpbmsgPSB7IGxpbmtBOiAxMCwgbGlua0I6IDQsIGxpbmtDOiAyNyB9OwogICAgY29uc3QgciA9IHNldHRsZURheShzaW0sIHRydWUpITsKICAgIGV4cGVjdChyLmh1Yj8uYnlMaW5rKS50b0VxdWFsKHsgbGlua0E6IDEwLCBsaW5rQjogNCwgbGlua0M6IDI3IH0pOwogIH0pOwoKICBpdCgnMy4gMuaXpeebruOBrumbhuioiOOBp+WJjeaXpeOBrue0r+ioiOOCkuS6jOmHjeioiOS4iuOBl+OBquOBhCcsICgpID0+IHsKICAgIGNvbnN0IHNpbSA9IGh1YlNpbSgpOwogICAgc2ltLnN0YXRlLmh1YlN0YXRzIS5ieUxpbmsgPSB7IGxpbmtBOiAxMCB9OwogICAgY29uc3QgZGF5MSA9IHNldHRsZURheShzaW0sIHRydWUpITsKICAgIGV4cGVjdChkYXkxLmh1Yj8uYnlMaW5rKS50b0VxdWFsKHsgbGlua0E6IDEwIH0pOwogICAgc2ltLnN0YXRlLmh1YlN0YXRzIS5ieUxpbmsubGlua0EgPSAyNTsKICAgIGNvbnN0IGRheTIgPSBzZXR0bGVEYXkoc2ltLCB0cnVlKSE7CiAgICBleHBlY3QoZGF5Mi5odWI/LmJ5TGluaykudG9FcXVhbCh7IGxpbmtBOiAxNSB9KTsKICB9KTsKCiAgaXQoJzQuIOWJjeaXpeOBq+WtmOWcqOOBl+OBquOBi+OBo+OBn+ODquODs+OCr+OCgumbhuioiOOBp+OBjeOAgeWil+WIhuOBruOBquOBhOODquODs+OCr+OBr+WQq+OCgeOBquOBhCcsICgpID0+IHsKICAgIGNvbnN0IHNpbSA9IGh1YlNpbSgpOwogICAgc2ltLnN0YXRlLmh1YlN0YXRzIS5ieUxpbmsgPSB7IGxpbmtBOiAxMCB9OwogICAgc2V0dGxlRGF5KHNpbSwgdHJ1ZSk7CiAgICBzaW0uc3RhdGUuaHViU3RhdHMhLmJ5TGluayA9IHsgbGlua0E6IDEwLCBsaW5rQjogNyB9OwogICAgY29uc3QgZGF5MiA9IHNldHRsZURheShzaW0sIHRydWUpITsKICAgIGV4cGVjdChkYXkyLmh1Yj8uYnlMaW5rKS50b0VxdWFsKHsgbGlua0I6IDcgfSk7CiAgfSk7CgogIGl0KCc1LiDliKnnlKjlrp/nuL7jgYzjgarjgYTloLTlkIjjga8gYnlMaW5rIOOCkuaMgeOBn+OBmuOAgeihqOekuuadoeS7tuOCguWBveOBq+OBquOCiycsICgpID0+IHsKICAgIGNvbnN0IHNpbSA9IGh1YlNpbSgpOwogICAgc2ltLnN0YXRlLmh1YlN0YXRzID0geyBzcGF3bmVkOiA1LCBjb25uZWN0ZWQ6IDUsIG1pc3NlZDogMCwgbm9TaG93OiAwLCBieUxpbms6IHt9IH07CiAgICBjb25zdCByID0gc2V0dGxlRGF5KHNpbSwgdHJ1ZSkhOwogICAgZXhwZWN0KHIuaHViKS50b0VxdWFsKHsgc3Bhd25lZDogNSwgY29ubmVjdGVkOiA1LCBtaXNzZWQ6IDAsIG5vU2hvdzogMCB9KTsKICAgIGV4cGVjdChyLmh1Yj8uYnlMaW5rKS50b0JlVW5kZWZpbmVkKCk7CiAgICBleHBlY3QoYnlMaW5rVmlzaWJsZShyKSkudG9CZShmYWxzZSk7CiAgfSk7CgogIGl0KCc2LiDml6fjg4fjg7zjgr/kupLmj5s6IGJ5TGluayDjga7nhKHjgYQgaHViU3RhdHMg44Gn44KC57eg44KB44KJ44KM44CBYnlMaW5rIOOBrueEoeOBhOaXp+aXpeWgseOBr+ihqOekuuWvvuixoeOBq+OBquOCieOBquOBhCcsICgpID0+IHsKICAgIGNvbnN0IHNpbSA9IGh1YlNpbSgpOwogICAgLy8g5pen44K744O844OW44GuIGh1YlN0YXRzIOOBryBieUxpbmsg44KS5oyB44Gf44Gq44GE44GT44Go44GM44GC44KL77yI5a6f6KGM5pmC44Gu5b2i77yJCiAgICBzaW0uc3RhdGUuaHViU3RhdHMgPSB7IHNwYXduZWQ6IDUsIGNvbm5lY3RlZDogNSwgbWlzc2VkOiAwLCBub1Nob3c6IDAgfSBhcyBTaW11bGF0aW9uWydzdGF0ZSddWydodWJTdGF0cyddOwogICAgY29uc3QgciA9IHNldHRsZURheShzaW0sIHRydWUpITsKICAgIGV4cGVjdChyLmh1YikudG9FcXVhbCh7IHNwYXduZWQ6IDUsIGNvbm5lY3RlZDogNSwgbWlzc2VkOiAwLCBub1Nob3c6IDAgfSk7CiAgICBleHBlY3Qoci5odWI/LmJ5TGluaykudG9CZVVuZGVmaW5lZCgpOwoKICAgIC8vIOaXp+aXpeWgse+8iGh1YiDjgasgYnlMaW5rIOOBjOeEoeOBhO+8ieOBr+Wei+OBqOOBl+OBpuacieWKueOBp+OAgeihqOekuuOCrOODvOODieOBp+W8vuOBi+OCjOOCiwogICAgY29uc3QgbGVnYWN5ID0geyBodWI6IHsgc3Bhd25lZDogMSwgY29ubmVjdGVkOiAxLCBtaXNzZWQ6IDAsIG5vU2hvdzogMCB9IH0gYXMgdW5rbm93biBhcyBEYWlseVJlcG9ydDsKICAgIGV4cGVjdChsZWdhY3kuaHViPy5ieUxpbmspLnRvQmVVbmRlZmluZWQoKTsKICAgIGV4cGVjdChieUxpbmtWaXNpYmxlKGxlZ2FjeSkpLnRvQmUoZmFsc2UpOwogIH0pOwp9KTsK
+import { describe, expect, it } from 'vitest';
+import { createStarterAirfield } from '../../src/core/sample/starterAirfield';
+import { createCareerCompany, type DailyReport } from '../../src/core/economy/company';
+import { settleDay } from '../../src/core/economy/ops';
+import { createSimulation, type Simulation } from '../../src/core/sim/simulation';
+
+/**
+ * 乗継リンク別実績（hubStats.byLink）の日次集計。
+ * SimState.hubStats は累計、DailyReport.hub は当日分（差分）という既存の契約を、
+ * リンク別でも同じに保つことを固定する。
+ */
+function hubSim(): Simulation {
+  const company = createCareerCompany();
+  company.features = { hub: true };
+  const sim = createSimulation(createStarterAirfield(), { company });
+  sim.state.hubStats = { spawned: 0, connected: 0, missed: 0, noShow: 0, byLink: {} };
+  return sim;
+}
+
+/** DayReview のリンク別ブロックの表示条件（src/ui/DayReview.tsx と同じ述語） */
+const byLinkVisible = (r: DailyReport): boolean => !!(r.hub?.byLink && Object.keys(r.hub.byLink).length > 0);
+
+describe('日報の乗継リンク別集計（hub.byLink）', () => {
+  it('1. 乗継リンクごとの利用実績が日報に記録される（既存4項目の集計は不変）', () => {
+    const sim = hubSim();
+    sim.state.hubStats = { spawned: 40, connected: 35, missed: 3, noShow: 2, byLink: { linkA: 12 } };
+    const r = settleDay(sim, true)!;
+    expect(r.hub).toEqual({ spawned: 40, connected: 35, missed: 3, noShow: 2, byLink: { linkA: 12 } });
+    expect(byLinkVisible(r)).toBe(true);
+  });
+
+  it('2. 複数リンクの実績が正しく分離される', () => {
+    const sim = hubSim();
+    sim.state.hubStats!.byLink = { linkA: 10, linkB: 4, linkC: 27 };
+    const r = settleDay(sim, true)!;
+    expect(r.hub?.byLink).toEqual({ linkA: 10, linkB: 4, linkC: 27 });
+  });
+
+  it('3. 2日目の集計で前日の累計を二重計上しない', () => {
+    const sim = hubSim();
+    sim.state.hubStats!.byLink = { linkA: 10 };
+    const day1 = settleDay(sim, true)!;
+    expect(day1.hub?.byLink).toEqual({ linkA: 10 });
+    sim.state.hubStats!.byLink.linkA = 25;
+    const day2 = settleDay(sim, true)!;
+    expect(day2.hub?.byLink).toEqual({ linkA: 15 });
+  });
+
+  it('4. 前日に存在しなかったリンクも集計でき、増分のないリンクは含めない', () => {
+    const sim = hubSim();
+    sim.state.hubStats!.byLink = { linkA: 10 };
+    settleDay(sim, true);
+    sim.state.hubStats!.byLink = { linkA: 10, linkB: 7 };
+    const day2 = settleDay(sim, true)!;
+    expect(day2.hub?.byLink).toEqual({ linkB: 7 });
+  });
+
+  it('5. 利用実績がない場合は byLink を持たず、表示条件も偽になる', () => {
+    const sim = hubSim();
+    sim.state.hubStats = { spawned: 5, connected: 5, missed: 0, noShow: 0, byLink: {} };
+    const r = settleDay(sim, true)!;
+    expect(r.hub).toEqual({ spawned: 5, connected: 5, missed: 0, noShow: 0 });
+    expect(r.hub?.byLink).toBeUndefined();
+    expect(byLinkVisible(r)).toBe(false);
+  });
+
+  it('6. 旧データ互換: byLink の無い hubStats でも締められ、byLink の無い旧日報は表示対象にならない', () => {
+    const sim = hubSim();
+    // 旧セーブの hubStats は byLink を持たないことがある（実行時の形）
+    sim.state.hubStats = { spawned: 5, connected: 5, missed: 0, noShow: 0 } as Simulation['state']['hubStats'];
+    const r = settleDay(sim, true)!;
+    expect(r.hub).toEqual({ spawned: 5, connected: 5, missed: 0, noShow: 0 });
+    expect(r.hub?.byLink).toBeUndefined();
+
+    // 旧日報（hub に byLink が無い）は型として有効で、表示ガードで弾かれる
+    const legacy = { hub: { spawned: 1, connected: 1, missed: 0, noShow: 0 } } as unknown as DailyReport;
+    expect(legacy.hub?.byLink).toBeUndefined();
+    expect(byLinkVisible(legacy)).toBe(false);
+  });
+});
