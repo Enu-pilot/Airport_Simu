@@ -1254,6 +1254,9 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             <input type="checkbox" checked={!!s.codeF} onChange={(ev) => update(layout, id, { codeF: ev.target.checked })} data-testid="prop-codeF" title="翼幅 65〜80 m の機体（A380 など）が駐機できる（ゲームの適合ルール）" />
           </Field>
         )}
+        <Field label="貨物優先">
+          <input type="checkbox" checked={!!s.cargoPreferred} onChange={(ev) => update(layout, id, { cargoPreferred: ev.target.checked })} data-testid="prop-cargoPreferred" title="貨物便が優先して使うスポット（旅客便も使用できます）" />
+        </Field>
         <RotationField value={s.rotation} onChange={(r) => update(layout, id, { rotation: r })} label="機首の向き" />
         <Info label="位置">{`(${s.origin.x}, ${s.origin.y})`}</Info>
         <Info label="入口">{`(${entry.x}, ${entry.y})`}</Info>

@@ -363,6 +363,7 @@ function checkBusProps(layout: AirportLayout, where: string): string[] {
       if (typeof s.busGateId !== 'string' || gate?.kind !== 'gate' || gate.props.boardingMode !== 'bus') errors.push(`${where}: スポット ${s.id} の接続バスゲート（busGateId）が不正です`);
     }
     if (s.terminalId !== undefined && (typeof s.terminalId !== 'string' || layout.facilities[s.terminalId]?.kind !== 'terminal')) errors.push(`${where}: スポット ${s.id} の所属ターミナル（terminalId）が不正です`);
+    if (s.cargoPreferred !== undefined && typeof s.cargoPreferred !== 'boolean') errors.push(`${where}: スポット ${s.id} の貨物優先（cargoPreferred）が不正です`);
   }
   return errors;
 }

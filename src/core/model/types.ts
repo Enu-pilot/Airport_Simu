@@ -191,6 +191,8 @@ export interface Stand {
   buildState: BuildState;
   /** コード F（翼幅 65〜80 m）の機体を駐機できる（L 級のみ意味を持つ。Phase 7） */
   codeF?: boolean;
+  /** 貨物便が優先して使うスポット。旅客便の使用は妨げない（欠落 = 通常スポット） */
+  cargoPreferred?: boolean;
   /** リモートスポットのバス運用。欠落/auto は旧版と同じ自動選択、bus は個別ゲート指定、none はバスを使わない */
   remoteBoarding?: 'auto' | 'bus' | 'none';
   /** 所属ターミナル（K-1）。欠落 = 従来の自動選択 */
