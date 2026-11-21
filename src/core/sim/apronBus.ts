@@ -12,7 +12,7 @@ import {
   BUS_UNLOAD_SEC_PER_PAX,
 } from './busRules';
 import { basePos, sendUnit } from './ground';
-import { finishBusBoarded, groupsOfFlight, missGroups, releaseBusArrival, returnToBusQueue } from './passengers';
+import { finishBusBoarded, groupsOfFlight, missGroups, releaseBusArrival, returnToBusQueue, setGroupArea } from './passengers';
 import { recordSimpleProcess } from './processStats';
 import type { Simulation } from './simulation';
 import { EVENT_LOG_LIMIT, PAX_FINAL_STATES, type Aircraft, type ApronBusRuntime, type BusTrip, type Flight, type GroundUnit, type PaxGroup, type SimState } from './types';
@@ -351,7 +351,7 @@ function stepLoading(sim: Simulation, t: BusTrip, f: Flight, u: GroundUnit): voi
     }
     g.busTrip = t.id;
     g.state = 'onBus';
-    g.area = null;
+    setGroupArea(state, g, null);
     t.groups.push(g.id);
     t.pax += g.count;
   }

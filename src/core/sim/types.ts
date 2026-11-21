@@ -422,6 +422,12 @@ export interface PaxGroup {
    * kind は収支記録用（shop=retail科目 / restaurant=dining科目）、key は集約カウンタのキー。
    */
   aggService?: { kind: 'shop' | 'restaurant' | 'lounge'; key: string };
+  /**
+   * ラウンジ滞在の希望時間（秒、PAX-4）。ラウンジ利用が確定した時点で分布から1回だけ引き、
+   * 実際の滞在は min(希望, 搭乗開始までの余裕) で頭打ちになる。ラウンジを使わない
+   * グループ・旧セーブのグループでは欠落する（欠落時は従来どおり搭乗開始まで滞在）。
+   */
+  plannedDwellSec?: number;
   count: number;
   bags: number;
   state: PaxState;

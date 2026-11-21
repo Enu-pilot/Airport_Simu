@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.10",
+ "simModelVersion": "skyport-sim-10.11",
  "runs": {
   "sandbox": {
    "seconds": 21600,

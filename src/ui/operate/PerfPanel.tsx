@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { peekPerfSnapshot, takePerfSnapshot, type PerfStepKey } from '../../core/sim/perfStats';
+import { peekPerfSnapshot, setPaxDetailEnabled, takePerfSnapshot, type PaxDetailKey, type PerfStepKey } from '../../core/sim/perfStats';
 import { editorStore, useEditor } from '../../editor/store';
 
 const STEP_LABEL: Record<PerfStepKey, string> = {
@@ -14,6 +14,13 @@ const STEP_LABEL: Record<PerfStepKey, string> = {
   conflicts: '競合検知',
   analytics: '分析記録',
   other: 'その他',
+};
+
+const PAX_DETAIL_LABEL: Record<PaxDetailKey, string> = {
+  flight: '旅客: 便・生成',
+  occupancy: '旅客: 占有構築',
+  groups: '旅客: グループ処理',
+  facility: '旅客: 施設処理',
 };
 
 const fmtMs = (ms: number): string => (ms >= 10 ? ms.toFixed(1) : ms.toFixed(2));
@@ -32,9 +39,13 @@ export function PerfPanel() {
 
   useEffect(() => {
     if (!open) return;
+    setPaxDetailEnabled(true); // 旅客のサブフェーズ計測はパネルを開いている間だけ有効（PERF4-0）
     takePerfSnapshot(); // 開いた時点からウィンドウを始める
     const id = setInterval(() => takePerfSnapshot(), 5000);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      setPaxDetailEnabled(false);
+    };
   }, [open ]);
 
   if (!o) return null;
@@ -75,6 +86,25 @@ export function PerfPanel() {
               </b>
             </div>
           ))}
+          {snap.paxDetail.length > 0 && (
+            <>
+              <div className="tool-group-title">旅客の内訳</div>
+              {snap.paxDetail.map((d) => (
+                <div key={d.key} className="perf-step" data-testid={`perf-pax-${d.key}`}>
+                  <span>{PAX_DETAIL_LABEL[d.key]}</span>
+                  <b>{fmtMs(d.avgMs)} ms</b>
+                </div>
+              ))}
+              {snap.scale.paxSleeping !== undefined && (
+                <div className="perf-step" data-testid="perf-pax-sleeping">
+                  <span>睡眠中 / 覚醒中グループ</span>
+                  <b>
+                    {snap.scale.paxSleeping} / {snap.scale.paxAwake ?? 0}
+                  </b>
+                </div>
+              )}
+            </>
+          )}
           <div className="muted small">直近ウィンドウ（{snap.ticks} tick）の平均です。計測は運航結果に影響しません。</div>
         </div>
       )}

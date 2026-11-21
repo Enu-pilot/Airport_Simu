@@ -1,7 +1,7 @@
 {
- "simModelVersion": "skyport-sim-10.10",
+ "simModelVersion": "skyport-sim-10.11",
  "now": 28800,
  "length": 214901,
- "sha256": "6b09f92cf425c3a7d93947751473e51401b9f4223cc30f3264d2cb6569761220",
- "normalizedSha256": "898cd2be98f2c226dfb6a3e9751ecdfdc5669bf1f384b11006a3aa95e2216d80"
+ "sha256": "e935740a948df5401b17190b23b8512378b4ed806cd6bb2caf776d53e6c25e69",
+ "normalizedSha256": "c86c8a8abfeb67c77922b718a55c5927e85cc4bc7e40130328e7a3510978c088"
 }
