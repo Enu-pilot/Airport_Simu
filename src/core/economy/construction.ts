@@ -33,6 +33,8 @@ export function facilityValue(f: Facility, layout?: AirportLayout): number {
   if (f.buildState === 'planned') return 0;
   // 機能H: 明示の搭乗橋（PBB）の建設費は型式表から（tunnel1 は従来の jetBridge 上乗せと同額）
   if (f.kind === 'boardingBridge') return PBB_TYPES[pbbTypeOf(f)].cost;
+  // 機能I: AGT の駅は固定費（内部設備でも単独でも同額）
+  if (f.kind === 'agtStation') return C.agt.station;
   const tiles = f.w * f.h;
   const perTile = C.perTile[f.kind];
   if (perTile !== undefined) {
@@ -98,6 +100,12 @@ export function layoutItems(layout: AirportLayout): Record<string, number> {
     const perTile = link.kind === 'movingWalkway' ? C.movingWalkwayPerTile : C.terminalWalkwayPerTile;
     out[link.id] = Math.round((link.distanceM / TILE_M) * perTile);
   }
+  // 機能I: AGT セグメントは距離単価 × distanceM。高架は高架倍率、地下は掘削係数を深さぶん重ねる
+  for (const seg of Object.values(layout.agtSegments ?? {})) {
+    if (seg.buildState === 'planned') continue;
+    const factor = seg.level < 0 ? Math.pow(C.undergroundTerminalPerFloor, -seg.level) : seg.level > 0 ? C.elevatedMultiplier : 1;
+    out[seg.id] = Math.round(seg.distanceM * C.agt.segmentPerMeter * factor);
+  }
   // 購入した土地
   if (layout.site.purchased) out['land'] = layout.site.purchased * C.landPerTile;
   for (const s of Object.values(layout.stands)) if (s.buildState !== 'planned') out[s.id] = C.stand[s.size];
@@ -115,9 +123,8 @@ export function layoutValue(layout: AirportLayout): number {
 }
 
 /**
- * 複合連絡施設（J-2）の費用集計: 通路段（リンク）と両端の垂直エリアの
+ * 複合連絡施設（J-2）の費用集計: 通路段（リンク / AGT セグメント）と両端の垂直エリアの
  * 項目別費用（layoutItems）の合計を1施設単位で返す。存在しない施設は 0。
- * AGT セグメントは費用の正がまだ無いため、垂直エリア分だけを数える。
  */
 export function connectionFacilityCost(layout: AirportLayout, id: string): number {
   const cf = layout.connectionFacilities?.[id];
@@ -125,6 +132,7 @@ export function connectionFacilityCost(layout: AirportLayout, id: string): numbe
   const items = layoutItems(layout);
   let sum = 0;
   if (cf.segment.kind === 'link') sum += items[cf.segment.linkId] ?? 0;
+  if (cf.segment.kind === 'agt') sum += items[cf.segment.segmentId] ?? 0;
   for (const areaId of [...cf.aVerticalAreaIds, ...cf.bVerticalAreaIds]) sum += items[areaId] ?? 0;
   return sum;
 }

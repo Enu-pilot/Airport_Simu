@@ -1,6 +1,8 @@
 import { runwayDimsProblem } from '../model/runwayReference';
-import { DEFAULT_PROPS, FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TAXI_BLOCK_TILES_DEFAULT, TAXI_BLOCK_TILES_MAX, TAXI_BLOCK_TILES_MIN, TERMINAL_AREA_SPECS, TILE_M, type PbbBridgeType, type PbbDeck } from '../model/catalog';
+import { AGT_SEGMENT_DETOUR, DEFAULT_PROPS, FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TAXI_BLOCK_TILES_DEFAULT, TAXI_BLOCK_TILES_MAX, TAXI_BLOCK_TILES_MIN, TERMINAL_AREA_SPECS, TILE_M, type PbbBridgeType, type PbbDeck } from '../model/catalog';
 import { PBB_ENTRY_RANGE, pbbDeckOf } from '../model/boardingBridge';
+import { agtParamProblem, agtStationSystemId } from '../model/agt';
+import { agtStationConnectedAreas, agtStationMapLevel } from '../terminal/agt';
 import { baseTerrainAt, createSite, inSite, isBuildable, terrainAt } from '../model/site';
 import {
   BUILD_STATES,
@@ -8,6 +10,7 @@ import {
   SCHEMA_VERSION,
   entityTypeOf,
   isFreeRunway,
+  type AgtSystem,
   type AirportLayout,
   type BuildState,
   type Facility,
@@ -137,10 +140,19 @@ function finalize(d: AirportLayout): AirportLayout {
   for (const [id, portal] of Object.entries(d.portals ?? {})) {
     if (!d.facilities[portal.facilityId] || !d.terminalAreas[portal.areaId]) delete d.portals![id];
   }
+  // AGT（機能I）: 系統・駅が消えたセグメントは記録ごと落とす（リンク・ポータルの従来扱いに合わせる）
+  for (const [id, seg] of Object.entries(d.agtSegments ?? {})) {
+    const from = d.facilities[seg.fromStationId];
+    const to = d.facilities[seg.toStationId];
+    if (!d.agtSystems?.[seg.systemId] || from?.kind !== 'agtStation' || to?.kind !== 'agtStation') delete d.agtSegments![id];
+  }
   for (const [id, cf] of Object.entries(d.connectionFacilities ?? {})) {
-    // 通路段リンクが消えた複合連絡施設は記録ごと落とす（リンク・ポータルの従来扱いに合わせる）。
-    // AGT セグメント（機能I）は未実装のため剪定対象外（検証で DANGLING として報告される）
+    // 通路段（リンク / AGT セグメント）が消えた複合連絡施設は記録ごと落とす（リンク・ポータルの従来扱いに合わせる）
     if (cf.segment.kind === 'link' && !d.terminalLinks?.[cf.segment.linkId]) {
+      delete d.connectionFacilities![id];
+      continue;
+    }
+    if (cf.segment.kind === 'agt' && !d.agtSegments?.[cf.segment.segmentId]) {
       delete d.connectionFacilities![id];
       continue;
     }
@@ -882,6 +894,7 @@ export function deleteConnectionFacility(layout: AirportLayout, id: string): OpR
   const d = cloneLayout(layout);
   delete d.connectionFacilities![id];
   if (cf.segment.kind === 'link' && d.terminalLinks) delete d.terminalLinks[cf.segment.linkId];
+  if (cf.segment.kind === 'agt' && d.agtSegments) delete d.agtSegments[cf.segment.segmentId];
   for (const areaId of [...cf.aVerticalAreaIds, ...cf.bVerticalAreaIds]) delete d.terminalAreas[areaId];
   return ok(finalize(d));
 }
@@ -931,7 +944,7 @@ export function moveConnectionFacility(layout: AirportLayout, id: string, delta:
 }
 
 /** ポータルで接続できる交通施設の種別（5-16 T2） */
-export const PORTAL_FACILITY_KINDS: readonly Facility['kind'][] = ['railStation', 'busTerminal', 'busStop', 'taxiStand', 'parking'];
+export const PORTAL_FACILITY_KINDS: readonly Facility['kind'][] = ['railStation', 'busTerminal', 'busStop', 'taxiStand', 'parking', 'agtStation'];
 
 /** ポータル接続の健全性上限（タイル）。歩行時間のモデルではなく、無関係な遠隔接続を拒否するための上限 */
 export const PORTAL_MAX_DISTANCE_TILES = 64;
@@ -982,6 +995,244 @@ export function deletePortal(layout: AirportLayout, id: string): OpResult {
   const d = cloneLayout(layout);
   delete d.portals![id];
   return ok(finalize(d));
+}
+
+// ---------------------------------------------------------------- AGT（機能I）
+
+export interface AgtSystemOptions {
+  name?: string;
+  vehicleCapacity: number;
+  headwaySec: number;
+  dwellSec: number;
+  speedMps: number;
+  buildState?: BuildState;
+}
+
+/**
+ * AGT 系統を作成する（機能I）。パラメータ範囲（AGT_PARAM_RANGES）外は INVALID_VALUE。
+ * 駅は施設 'agtStation' を配置し、props.systemId でこの系統へ所属させる。
+ */
+export function addAgtSystem(layout: AirportLayout, opts: AgtSystemOptions): OpResult {
+  if (agtParamProblem(opts)) return fail('INVALID_VALUE');
+  if (opts.buildState !== undefined && !BUILD_STATES.includes(opts.buildState)) return fail('INVALID_VALUE');
+  const d = cloneLayout(layout);
+  d.agtSystems ??= {};
+  const id = allocId(d, 'ags');
+  d.agtSystems[id] = {
+    id,
+    name: opts.name ?? '',
+    vehicleCapacity: opts.vehicleCapacity,
+    headwaySec: opts.headwaySec,
+    dwellSec: opts.dwellSec,
+    speedMps: opts.speedMps,
+    buildState: opts.buildState ?? 'operational',
+  };
+  return ok(finalize(d), [id]);
+}
+
+/** AGT 系統の改名・パラメータ・状態の変更（機能I）。範囲外のパラメータは INVALID_VALUE */
+export function updateAgtSystem(
+  layout: AirportLayout,
+  id: string,
+  patch: Partial<Pick<AgtSystem, 'name' | 'vehicleCapacity' | 'headwaySec' | 'dwellSec' | 'speedMps' | 'buildState'>>,
+): OpResult {
+  const cur = layout.agtSystems?.[id];
+  if (!cur) return fail('NOT_FOUND');
+  const next: AgtSystem = { ...cur, ...patch };
+  if (patch.name !== undefined && typeof patch.name !== 'string') return fail('INVALID_VALUE');
+  if (patch.buildState !== undefined && !BUILD_STATES.includes(patch.buildState)) return fail('INVALID_VALUE');
+  if (agtParamProblem(next)) return fail('INVALID_VALUE');
+  const d = cloneLayout(layout);
+  d.agtSystems![id] = next;
+  return ok(finalize(d));
+}
+
+/**
+ * AGT 系統を削除する（機能I）。所属する駅・セグメントが残っている系統は削除できない
+ * （先に駅の所属変更・セグメント削除を行うこと）。
+ */
+export function deleteAgtSystem(layout: AirportLayout, id: string): OpResult {
+  if (!layout.agtSystems?.[id]) return fail('NOT_FOUND');
+  if (Object.values(layout.agtSegments ?? {}).some((s) => s.systemId === id)) return fail('INVALID_VALUE');
+  if (Object.values(layout.facilities).some((f) => f.kind === 'agtStation' && agtStationSystemId(f) === id)) return fail('INVALID_VALUE');
+  const d = cloneLayout(layout);
+  delete d.agtSystems![id];
+  return ok(finalize(d));
+}
+
+export interface AgtSegmentOptions {
+  fromStationId: string;
+  toStationId: string;
+  /** 軌道の地図階層。省略時は両駅の実効階層が一致すればその階、食い違えば INVALID_VALUE */
+  level?: number;
+  /** 下を通る最大の航空機コードの宣言（J-1 の宣言方式）。高架では宣言のデッキ床高を満たす階が必要 */
+  crossingMaxCode?: CrossingMaxCode;
+  buildState?: BuildState;
+}
+
+/**
+ * AGT セグメントを作成する（機能I）。距離は駅中心間の直線 × TILE_M × AGT_SEGMENT_DETOUR で
+ * 導出して記録に固定する（terminalLinks の distanceM が保存値であるのと同じ扱い）。
+ * 両駅が同じ系統に所属していない・重複セグメントは INVALID_VALUE。
+ */
+export function addAgtSegment(layout: AirportLayout, opts: AgtSegmentOptions): OpResult {
+  const from = layout.facilities[opts.fromStationId];
+  const to = layout.facilities[opts.toStationId];
+  if (!from || !to) return fail('NOT_FOUND');
+  if (from.kind !== 'agtStation' || to.kind !== 'agtStation' || from.id === to.id) return fail('INVALID_VALUE');
+  const systemId = agtStationSystemId(from);
+  if (!systemId || systemId !== agtStationSystemId(to)) return fail('INVALID_VALUE');
+  if (!layout.agtSystems?.[systemId]) return fail('NOT_FOUND');
+  if (opts.buildState !== undefined && !BUILD_STATES.includes(opts.buildState)) return fail('INVALID_VALUE');
+  const dup = Object.values(layout.agtSegments ?? {}).some(
+    (s) =>
+      s.systemId === systemId &&
+      ((s.fromStationId === from.id && s.toStationId === to.id) || (s.fromStationId === to.id && s.toStationId === from.id)),
+  );
+  if (dup) return fail('INVALID_VALUE');
+  const fromLevel = agtStationMapLevel(layout, from);
+  const toLevel = agtStationMapLevel(layout, to);
+  let level: number;
+  if (opts.level !== undefined) {
+    if (!Number.isInteger(opts.level) || opts.level < -5 || opts.level > 10) return fail('INVALID_VALUE');
+    level = opts.level;
+  } else if (fromLevel === toLevel) {
+    level = fromLevel;
+  } else {
+    return fail('INVALID_VALUE');
+  }
+  if (opts.crossingMaxCode !== undefined && !['C', 'E', 'F'].includes(opts.crossingMaxCode)) return fail('INVALID_VALUE');
+  // 高架セグメントで宣言がある場合は、J-1 の導出デッキ床高を満たす階でなければならない（検証 AGT_CLEARANCE と同じ判定）
+  if (level > 0 && opts.crossingMaxCode && level * DEFAULT_LEVEL_HEIGHT_M < deckElevationForCode(opts.crossingMaxCode)) {
+    return fail('INVALID_VALUE');
+  }
+  const center = (f: Facility) => ({ x: f.origin.x + f.w / 2, y: f.origin.y + f.h / 2 });
+  const cf = center(from);
+  const ct = center(to);
+  const distanceM = Math.max(1, Math.round(Math.hypot(cf.x - ct.x, cf.y - ct.y) * TILE_M * AGT_SEGMENT_DETOUR));
+  const d = cloneLayout(layout);
+  d.agtSegments ??= {};
+  const id = allocId(d, 'agseg');
+  d.agtSegments[id] = {
+    id,
+    systemId,
+    fromStationId: from.id,
+    toStationId: to.id,
+    distanceM,
+    level,
+    ...(opts.crossingMaxCode ? { crossingMaxCode: opts.crossingMaxCode } : {}),
+    buildState: opts.buildState ?? 'operational',
+  };
+  return ok(finalize(d), [id]);
+}
+
+/** AGT セグメントの階層・状態・宣言の変更（機能I） */
+export function updateAgtSegment(layout: AirportLayout, id: string, patch: { level?: number; buildState?: BuildState; crossingMaxCode?: CrossingMaxCode | null }): OpResult {
+  const cur = layout.agtSegments?.[id];
+  if (!cur) return fail('NOT_FOUND');
+  if (patch.level !== undefined && (!Number.isInteger(patch.level) || patch.level < -5 || patch.level > 10)) return fail('INVALID_VALUE');
+  if (patch.buildState !== undefined && !BUILD_STATES.includes(patch.buildState)) return fail('INVALID_VALUE');
+  if (patch.crossingMaxCode !== undefined && patch.crossingMaxCode !== null && !['C', 'E', 'F'].includes(patch.crossingMaxCode)) return fail('INVALID_VALUE');
+  const level = patch.level ?? cur.level;
+  const code = patch.crossingMaxCode === null ? undefined : (patch.crossingMaxCode ?? cur.crossingMaxCode);
+  if (level > 0 && code && level * DEFAULT_LEVEL_HEIGHT_M < deckElevationForCode(code)) return fail('INVALID_VALUE');
+  const d = cloneLayout(layout);
+  const next = d.agtSegments![id]!;
+  if (patch.level !== undefined) next.level = patch.level;
+  if (patch.buildState !== undefined) next.buildState = patch.buildState;
+  if (patch.crossingMaxCode !== undefined) {
+    if (patch.crossingMaxCode === null) delete next.crossingMaxCode;
+    else next.crossingMaxCode = patch.crossingMaxCode;
+  }
+  return ok(finalize(d));
+}
+
+export function deleteAgtSegment(layout: AirportLayout, id: string): OpResult {
+  if (!layout.agtSegments?.[id]) return fail('NOT_FOUND');
+  const d = cloneLayout(layout);
+  delete d.agtSegments![id];
+  return ok(finalize(d));
+}
+
+export interface GroupAgtConnectionFacilityOptions {
+  name?: string;
+  /** 束ねる既存の AGT セグメント */
+  segmentId: string;
+  /** 入口側（セグメントの fromStationId 側ターミナル）の既存の垂直エリア */
+  aVerticalAreaIds?: string[];
+  /** 出口側（セグメントの toStationId 側ターミナル）の既存の垂直エリア */
+  bVerticalAreaIds?: string[];
+  /** 段差なしの申告。省略時は既存エリアの種別と階移動の有無から導出する */
+  stepFree?: boolean;
+}
+
+/** AGT セグメントの端点ターミナル（建物内の駅は親ターミナル、単独駅は接続エリアのターミナル） */
+function agtEndpointTerminalId(layout: AirportLayout, station: Facility): string | null {
+  if (station.parentFacilityId) {
+    const parent = layout.facilities[station.parentFacilityId];
+    return parent && parent.kind === 'terminal' ? parent.id : null;
+  }
+  for (const portal of Object.values(layout.portals ?? {})) {
+    if (portal.facilityId !== station.id) continue;
+    const area = layout.terminalAreas[portal.areaId];
+    if (area) return area.terminalId;
+  }
+  return null;
+}
+
+/**
+ * 既存の AGT セグメントと垂直エリアを複合連絡施設として束ねる（機能I / J-2 の接続点）。
+ * 部品は生成せず、グルーピング記録だけを作る（groupConnectionFacility の AGT 版）。
+ */
+export function groupAgtConnectionFacility(layout: AirportLayout, opts: GroupAgtConnectionFacilityOptions): OpResult {
+  const seg = layout.agtSegments?.[opts.segmentId];
+  if (!seg) return fail('NOT_FOUND');
+  const from = layout.facilities[seg.fromStationId];
+  const to = layout.facilities[seg.toStationId];
+  if (!from || !to || from.kind !== 'agtStation' || to.kind !== 'agtStation') return fail('NOT_FOUND');
+  const termA = agtEndpointTerminalId(layout, from);
+  const termB = agtEndpointTerminalId(layout, to);
+  if (!termA || !termB) return fail('INVALID_VALUE');
+  const aIds = [...new Set(opts.aVerticalAreaIds ?? [])];
+  const bIds = [...new Set(opts.bVerticalAreaIds ?? [])];
+  if (aIds.some((x) => bIds.includes(x))) return fail('INVALID_VALUE');
+  for (const [ids, terminalId] of [[aIds, termA], [bIds, termB]] as const) {
+    for (const areaId of ids) {
+      const a = layout.terminalAreas[areaId];
+      if (!a) return fail('NOT_FOUND');
+      if (a.terminalId !== terminalId) return fail('INVALID_VALUE');
+    }
+  }
+  const d = cloneLayout(layout);
+  d.connectionFacilities ??= {};
+  const id = allocId(d, 'cf');
+  // 段差なしの導出: セグメントの階（端点ターミナルの建物内階に換算）と、駅が接続する
+  // エリアの階が食い違う側は階移動が必要とみなす
+  const segFloor = (terminalId: string) => seg.level - facilityLevel(layout.facilities[terminalId]!);
+  const firstAreaLevel = (station: Facility): number | null => {
+    const connected = agtStationConnectedAreas(layout, station);
+    const area = connected.length ? layout.terminalAreas[connected[0]!] : undefined;
+    return area ? area.level : null;
+  };
+  const aLevel = firstAreaLevel(from);
+  const bLevel = firstAreaLevel(to);
+  const stepFree =
+    opts.stepFree ??
+    deriveConnectionStepFree(
+      aIds.map((x) => d.terminalAreas[x]!),
+      bIds.map((x) => d.terminalAreas[x]!),
+      aLevel !== null && segFloor(termA) !== aLevel,
+      bLevel !== null && segFloor(termB) !== bLevel,
+    );
+  d.connectionFacilities[id] = {
+    id,
+    name: opts.name ?? '',
+    segment: { kind: 'agt', segmentId: seg.id },
+    aVerticalAreaIds: aIds,
+    bVerticalAreaIds: bIds,
+    stepFree,
+  };
+  return ok(finalize(d), [id]);
 }
 
 /** ターミナルに属するエリア（ID 順） */
@@ -1642,7 +1893,9 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
                     ? def.options.includes(pv as string)
                     : def.type === 'facilityRef'
                       ? pv === null || (typeof pv === 'string' && d.facilities[pv]?.kind === def.of)
-                      : pv === null || (typeof pv === 'string' && !!d.stands[pv]);
+                      : def.type === 'agtSystemRef'
+                        ? pv === null || (typeof pv === 'string' && !!d.agtSystems?.[pv])
+                        : pv === null || (typeof pv === 'string' && !!d.stands[pv]);
             if (!valid) return fail('INVALID_VALUE');
           }
         } else {

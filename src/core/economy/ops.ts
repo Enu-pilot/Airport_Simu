@@ -21,6 +21,7 @@ import {
 import { BALANCE, ON_TIME_SEC } from './balance';
 import { railServiceOf, RAIL_SERVICE } from '../access/rail';
 import { terminalLinkCapacityPerHour } from '../terminal/model';
+import { agtSystemStationCount, agtSystemTrainsets } from '../model/agt';
 import { runwaySystemCapacity } from '../runwayCapacity';
 import { takeLinkUsage } from '../sim/linkUsage';
 import { takeMissBreakdown } from '../sim/missBreakdown';
@@ -148,7 +149,14 @@ export function dailyFixedCosts(ctx: SimContext, access: AccessAnalysis = analyz
     if (f.kind === 'taxiStand' || f.kind === 'busStop' || f.kind === 'busTerminal' || f.kind === 'hotel') accessOps += D.access[f.kind];
     if (f.kind === 'railStation') accessOps += D.access.railStation * RAIL_SERVICE[railServiceOf(f.props.railService)].operatingCostMultiplier;
   }
-  return {
+  // 機能I: AGT の運営費（系統ごとの日額 = 編成数 × 180,000 + 駅数 × 20,000）。
+  // AGT の無い空港ではキーを含めない（固定費の形・締め結果を従来と完全一致させる）
+  let agtOps = 0;
+  for (const sys of Object.values(ctx.layout.agtSystems ?? {})) {
+    if ((sys.buildState ?? 'operational') !== 'operational') continue;
+    agtOps += agtSystemTrainsets(ctx.layout, sys) * D.agt.trainsetPerDay + agtSystemStationCount(ctx.layout, sys.id) * D.agt.stationPerDay;
+  }
+  const fixed: Partial<Record<CostCategory, number>> = {
     salary,
     counterStaff,
     vehicles: vehicles * D.vehicle,
@@ -157,6 +165,8 @@ export function dailyFixedCosts(ctx: SimContext, access: AccessAnalysis = analyz
     accessOps,
     staffCommute: Math.max(0, access.staffSpacesNeeded - access.staffSpaces) * D.staffCommutePerMissing,
   };
+  if (agtOps > 0) fixed.agtOps = agtOps;
+  return fixed;
 }
 
 /** 契約料（1日あたり）= 有効な契約の1日の便数の合計 × 3,000 */

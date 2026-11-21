@@ -164,10 +164,13 @@ export function layoutUsesFormat8(l: AirportLayout): boolean {
   return Object.values(l.terminalAreas ?? {}).some((a) => a.kind === 'lounge');
 }
 
-/** レイアウトが保存形式 9 の項目（搭乗橋 PBB・複合連絡施設）を使っているか */
+/** レイアウトが保存形式 9 の項目（搭乗橋 PBB・複合連絡施設・AGT）を使っているか */
 export function layoutUsesFormat9(l: AirportLayout): boolean {
   if (Object.keys(l.connectionFacilities ?? {}).length > 0) return true;
-  return Object.values(l.facilities ?? {}).some((f) => f.kind === 'boardingBridge');
+  // 機能I: AGT の系統・セグメント記録、または駅施設を含む場合も版 9
+  if (Object.keys(l.agtSystems ?? {}).length > 0) return true;
+  if (Object.keys(l.agtSegments ?? {}).length > 0) return true;
+  return Object.values(l.facilities ?? {}).some((f) => f.kind === 'boardingBridge' || f.kind === 'agtStation');
 }
 
 export function formatVersionOf(p: { layout: AirportLayout; company: CompanyState; scenarios: readonly Scenario[]; sim: SimSnapshot | null; journal?: Journal }): number {

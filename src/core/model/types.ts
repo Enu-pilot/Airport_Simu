@@ -204,6 +204,8 @@ export type FacilityKind =
   | 'terminal'
   | 'gate'
   | 'boardingBridge'
+  /** 機能I: AGT（新交通システム）の駅。系統への所属は props.systemId、軌道は AgtSegment 記録 */
+  | 'agtStation'
   | 'hangar'
   | 'tower'
   | 'maintenance'
@@ -354,6 +356,47 @@ export interface TerminalTransitLink {
 }
 
 /**
+ * AGT（新交通システム）の系統（機能I）。TerminalTransitLink とは別モデルで、
+ * 駅施設（'agtStation'）＋セグメント記録で構成する。運行は集約モデル（docs/52 §5、
+ * docs/18 T10）: 車両の位置は持たず、辺の所要時間と容量はパラメータから決まる。
+ * 駅の系統所属は駅施設の props.systemId が正（1 駅 = 1 系統）。
+ */
+export interface AgtSystem {
+  id: string;
+  name: string;
+  /** 1 編成の定員（人）。範囲 10〜600 */
+  vehicleCapacity: number;
+  /** 運転間隔（秒）。平均待ち時間は headwaySec / 2。範囲 30〜1800 */
+  headwaySec: number;
+  /** 駅での停車時間（秒）。範囲 5〜120 */
+  dwellSec: number;
+  /** 軌道の走行速度（m/s）。範囲 5〜25 */
+  speedMps: number;
+  buildState: BuildState;
+}
+
+/**
+ * AGT の軌道セグメント（機能I）: 駅と駅を結ぶ無向の辺。保存時に導出済みの
+ * distanceM（駅タイル直線 × TILE_M × 迂回係数）を固定して持ち、再計算しない。
+ * level は軌道の地図階層（地下 = −1、高架は J-1 の導出規則で決まる）。
+ */
+export interface AgtSegment {
+  id: string;
+  systemId: string;
+  fromStationId: string;
+  toStationId: string;
+  /** 導出済みの距離（m）。保存時に固定 */
+  distanceM: number;
+  /** 軌道の地図階層 */
+  level: number;
+  /** 下を通る最大の航空機コードの宣言（J-1 の宣言方式を AGT にも適用。欠落 = 全体基準） */
+  crossingMaxCode?: CrossingMaxCode;
+  buildState: BuildState;
+}
+
+/**
+
+/**
  * レイアウトの保存形式の版。
  * v3: 任意項目として階層/標高、交通エッジ、ターミナル間連絡設備を追加。
  * TerminalTransitLink の寸法・標高は任意項目として後方互換の既定値を持つ。
@@ -401,6 +444,10 @@ export interface AirportLayout {
   terminalLinks?: Record<string, TerminalTransitLink>;
   /** 複合連絡施設（J-2）のグルーピング記録。欠落 = 空 */
   connectionFacilities?: Record<string, ConnectionFacility>;
+  /** AGT の系統（機能I）。欠落 = 空 */
+  agtSystems?: Record<string, AgtSystem>;
+  /** AGT の軌道セグメント（機能I）。欠落 = 空 */
+  agtSegments?: Record<string, AgtSegment>;
   /** 歩行ポータル（5-16）。欠落 = ポータルなし（自動接続の推測はしない） */
   portals?: Record<string, PedestrianPortal>;
   /** 磁気偏角（度、東偏差を正、[-180, 180]）。欠落 = 0（手入力のみ） */

@@ -4,7 +4,9 @@ import { terminalServiceComplexes } from '../core/terminal/serviceComplex';
 import { terminalCapacitySummaries } from '../core/terminal/terminalCapacitySummary';
 import { terminalFloorSummary } from '../core/terminal/terminalFloorSummary';
 import { terminalFloorRange } from '../core/layout/levelRules';
-import { createConnectionFacility, deleteConnectionFacility, type ConnectionVerticalKind } from '../core/layout/operations';
+import { addAgtSystem, createConnectionFacility, deleteAgtSegment, deleteAgtSystem, deleteConnectionFacility, updateAgtSystem, type ConnectionVerticalKind } from '../core/layout/operations';
+import { AGT_PARAM_RANGES, AGT_SYSTEM_DEFAULTS } from '../core/model/catalog';
+import { agtSegmentsAtStation, agtStationSystemId } from '../core/model/agt';
 import { connectionFacilityCost } from '../core/economy/construction';
 import { TILE_M } from '../core/model/catalog';
 import { facilityLevel, floorDisplayLabel } from '../core/model/levels';
@@ -277,6 +279,8 @@ export function TerminalWorkspace() {
             floorLabel={floorLabel}
           />
 
+          <AgtTrafficGroup layout={layout} terminalId={terminalId} complexMembers={complexMembers} currentFloor={currentFloor} />
+
           <div className="tool-group">
             <div className="tool-group-title">
               <span>現在の階のエリア（{floorLabel(currentFloor)}）</span>
@@ -298,6 +302,155 @@ export function TerminalWorkspace() {
         </div>
       </div>
     </aside>
+  );
+}
+
+/**
+ * ターミナル内交通（機能I、AGT）: この複合体の駅の配置ツール、系統の作成・運行設定、
+ * セグメント接続ツールへの導線。運行は集約モデル（車両位置は持たない）。
+ */
+function AgtTrafficGroup({ layout, terminalId, complexMembers, currentFloor }: { layout: AirportLayout; terminalId: string; complexMembers: string[]; currentFloor: number }) {
+  const systems = useMemo(() => Object.values(layout.agtSystems ?? {}).sort((a, b) => a.id.localeCompare(b.id)), [layout]);
+  const stationsHere = useMemo(
+    () =>
+      Object.values(layout.facilities)
+        .filter((f) => f.kind === 'agtStation' && f.parentFacilityId && complexMembers.includes(f.parentFacilityId))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    [layout, complexMembers],
+  );
+  const [name, setName] = useState('');
+  const [vehicleCapacity, setVehicleCapacity] = useState<number>(AGT_SYSTEM_DEFAULTS.vehicleCapacity);
+  const [headwaySec, setHeadwaySec] = useState<number>(AGT_SYSTEM_DEFAULTS.headwaySec);
+  const [dwellSec, setDwellSec] = useState<number>(AGT_SYSTEM_DEFAULTS.dwellSec);
+  const [speedMps, setSpeedMps] = useState<number>(AGT_SYSTEM_DEFAULTS.speedMps);
+
+  const placeStationHere = () => {
+    actions.setOption('interiorParentId', terminalId);
+    actions.setOption('interiorFloorIndex', currentFloor);
+    actions.setTool('facility:agtStation');
+  };
+
+  return (
+    <div className="tool-group" data-testid="workspace-agt">
+      <div className="tool-group-title">
+        <span>ターミナル内交通（AGT）</span>
+        <span className="tool-group-count">{systems.length} 系統</span>
+      </div>
+      <div className="tool-buttons">
+        <button className="tool" onClick={placeStationHere} data-testid="agt-place-station">
+          駅を現在の階に配置
+        </button>
+        <button className="tool" onClick={() => actions.setTool('agt')} data-testid="agt-connect-tool">
+          セグメント接続（駅→駅をクリック）
+        </button>
+      </div>
+      {stationsHere.length === 0 ? (
+        <div className="muted small">このターミナルには AGT の駅がまだありません。</div>
+      ) : (
+        stationsHere.map((st) => {
+          const sysId = agtStationSystemId(st);
+          const sys = sysId ? layout.agtSystems?.[sysId] : undefined;
+          const segs = agtSegmentsAtStation(layout, st.id);
+          return (
+            <div key={st.id} className="muted small" data-testid={`workspace-agt-station-${st.id}`}>
+              <button className="small" onClick={() => actions.select(st.id)}>
+                {st.name || st.id}
+              </button>{' '}
+              {sys ? `系統: ${sys.name || sys.id}` : '系統未所属'}・セグメント {segs.length} 本
+              {segs.map((seg) => {
+                const other = layout.facilities[seg.fromStationId === st.id ? seg.toStationId : seg.fromStationId];
+                return (
+                  <span key={seg.id}>
+                    {' '}
+                    ⇔ {other?.name || other?.id}（{seg.distanceM} m）{' '}
+                    <button className="small danger" onClick={() => applyOp(deleteAgtSegment(layout, seg.id))}>
+                      削除
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          );
+        })
+      )}
+      {systems.map((sys) => (
+        <AgtSystemRow key={sys.id} layout={layout} systemId={sys.id} />
+      ))}
+      <div className="muted small">新しい系統を作成</div>
+      <label className="small">
+        名前 <input type="text" value={name} onChange={(e) => setName(e.target.value)} data-testid="agt-system-name" />
+      </label>
+      <label className="small">
+        定員（人）{' '}
+        <input type="number" min={AGT_PARAM_RANGES.vehicleCapacity.min} max={AGT_PARAM_RANGES.vehicleCapacity.max} value={vehicleCapacity} onChange={(e) => setVehicleCapacity(Number(e.target.value))} data-testid="agt-system-capacity" />
+      </label>
+      <label className="small">
+        運転間隔（秒）{' '}
+        <input type="number" min={AGT_PARAM_RANGES.headwaySec.min} max={AGT_PARAM_RANGES.headwaySec.max} value={headwaySec} onChange={(e) => setHeadwaySec(Number(e.target.value))} data-testid="agt-system-headway" />
+      </label>
+      <label className="small">
+        停車時間（秒）{' '}
+        <input type="number" min={AGT_PARAM_RANGES.dwellSec.min} max={AGT_PARAM_RANGES.dwellSec.max} value={dwellSec} onChange={(e) => setDwellSec(Number(e.target.value))} data-testid="agt-system-dwell" />
+      </label>
+      <label className="small">
+        速度（m/s）{' '}
+        <input type="number" min={AGT_PARAM_RANGES.speedMps.min} max={AGT_PARAM_RANGES.speedMps.max} value={speedMps} onChange={(e) => setSpeedMps(Number(e.target.value))} data-testid="agt-system-speed" />
+      </label>
+      <div className="tool-buttons">
+        <button
+          className="tool"
+          onClick={() => applyOp(addAgtSystem(layout, { name: name.trim() || undefined, vehicleCapacity, headwaySec, dwellSec, speedMps }), { select: true })}
+          data-testid="agt-system-create"
+        >
+          系統を作成
+        </button>
+      </div>
+      <div className="muted small">駅の所属系統は、駅を選んでプロパティの「所属する AGT 系統」で設定します。セグメントは同じ系統の駅同士でのみ結べます。</div>
+    </div>
+  );
+}
+
+/** 系統 1 件の運行設定の編集行（Workspace「ターミナル内交通」節） */
+function AgtSystemRow({ layout, systemId }: { layout: AirportLayout; systemId: string }) {
+  const sys = layout.agtSystems?.[systemId];
+  const [name, setName] = useState(sys?.name ?? '');
+  const [vehicleCapacity, setVehicleCapacity] = useState(sys?.vehicleCapacity ?? AGT_SYSTEM_DEFAULTS.vehicleCapacity);
+  const [headwaySec, setHeadwaySec] = useState(sys?.headwaySec ?? AGT_SYSTEM_DEFAULTS.headwaySec);
+  const [dwellSec, setDwellSec] = useState(sys?.dwellSec ?? AGT_SYSTEM_DEFAULTS.dwellSec);
+  const [speedMps, setSpeedMps] = useState(sys?.speedMps ?? AGT_SYSTEM_DEFAULTS.speedMps);
+  if (!sys) return null;
+  const stationCount = Object.values(layout.facilities).filter((f) => f.kind === 'agtStation' && agtStationSystemId(f) === sys.id).length;
+  const segmentCount = Object.values(layout.agtSegments ?? {}).filter((s) => s.systemId === sys.id).length;
+  return (
+    <div className="muted small" data-testid={`workspace-agt-system-${sys.id}`}>
+      <strong>{sys.name || sys.id}</strong>（駅 {stationCount}・セグメント {segmentCount} 本{sys.buildState !== 'operational' ? '・未稼働' : ''}）{' '}
+      <button className="small danger" onClick={() => applyOp(deleteAgtSystem(layout, sys.id))} data-testid={`agt-system-delete-${sys.id}`}>
+        系統を削除
+      </button>
+      <br />
+      <label>
+        名前 <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+      </label>{' '}
+      <label>
+        定員 <input type="number" style={{ width: 64 }} value={vehicleCapacity} onChange={(e) => setVehicleCapacity(Number(e.target.value))} />
+      </label>{' '}
+      <label>
+        間隔（秒） <input type="number" style={{ width: 64 }} value={headwaySec} onChange={(e) => setHeadwaySec(Number(e.target.value))} />
+      </label>{' '}
+      <label>
+        停車（秒） <input type="number" style={{ width: 56 }} value={dwellSec} onChange={(e) => setDwellSec(Number(e.target.value))} />
+      </label>{' '}
+      <label>
+        速度（m/s） <input type="number" style={{ width: 56 }} value={speedMps} onChange={(e) => setSpeedMps(Number(e.target.value))} />
+      </label>{' '}
+      <button
+        className="small"
+        onClick={() => applyOp(updateAgtSystem(layout, sys.id, { name, vehicleCapacity, headwaySec, dwellSec, speedMps }))}
+        data-testid={`agt-system-update-${sys.id}`}
+      >
+        運行設定を更新
+      </button>
+    </div>
   );
 }
 

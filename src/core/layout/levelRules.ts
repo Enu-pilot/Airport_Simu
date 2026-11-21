@@ -20,7 +20,7 @@ export const TERMINAL_AREA_MIN_LEVEL = -3;
  * 地下ターミナルの孤立（到達不能）は配置禁止ではなく検証警告 TERMINAL_UNDERGROUND_ISOLATED で知らせる。
  * 建物の中の内部設備（parentFacilityId あり）はこの制限の対象外（親の階として扱う）。
  */
-export const UNDERGROUND_FACILITY_KINDS: readonly string[] = ['parking', 'staffParking', 'railStation', 'terminal'];
+export const UNDERGROUND_FACILITY_KINDS: readonly string[] = ['parking', 'staffParking', 'railStation', 'terminal', 'agtStation'];
 
 /** 単独施設をその階に置けない理由（地下の種類制限）。置けるなら null */
 export function undergroundFacilityProblem(kind: string, mapLevel: number | undefined, hasParent: boolean): 'undergroundKind' | null {

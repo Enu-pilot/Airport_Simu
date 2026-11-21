@@ -22,7 +22,7 @@ export const ROAD_DRAW_WIDTH_M = { road: 12, rail: 8, walkway: 5, fuel: 2 } as c
 /** Vertical occupancy used by layout validation and 3D rendering (game display dimensions). */
 export const FACILITY_HEIGHT_M: Partial<Record<FacilityKind, number>> = {
   terminal: 18, tower: 45, hangar: 24, maintenance: 14, fuelFarm: 10, fireStation: 9,
-  gseBase: 6, baggageSort: 10, serviceArea: 6, parking: 3, gate: 6, apron: 0.2, boardingBridge: 6,
+  gseBase: 6, baggageSort: 10, serviceArea: 6, parking: 3, gate: 6, apron: 0.2, boardingBridge: 6, agtStation: 6,
   railStation: 8, taxiStand: 2, busStop: 3, busTerminal: 6, cargoTerminal: 9, staffParking: 1, hotel: 18,
   shoppingMall: 12, culturalHall: 10, park: 1,
 };
@@ -66,6 +66,8 @@ export const FACILITY_SPECS: Record<FacilityKind, FacilitySpec> = {
   // 機能H: 搭乗橋（PBB）。ロタンダ基部 1×1、回転可。占有レイヤーはゲートと同じ 'gate'、
   // 垂直区間は地上 3〜6m の帯（model/levels の facilityVerticalRange で特例）
   boardingBridge: { layer: 'gate', defaultW: 1, defaultH: 1, resizable: false, minW: 1, minH: 1, dragPlace: false, needsAirsideAccess: false },
+  // 機能I: AGT の駅。1×2 または 2×2（design-GHIJ-detail.md §I.2）。建物内にも単独にも置ける
+  agtStation: { layer: 'building', defaultW: 2, defaultH: 1, resizable: true, minW: 1, minH: 1, dragPlace: false, needsAirsideAccess: false },
   hangar: { layer: 'building', defaultW: 6, defaultH: 5, resizable: true, minW: 4, minH: 4, dragPlace: false, needsAirsideAccess: true },
   tower: { layer: 'building', defaultW: 2, defaultH: 2, resizable: false, minW: 2, minH: 2, dragPlace: false, needsAirsideAccess: false },
   maintenance: { layer: 'building', defaultW: 4, defaultH: 3, resizable: false, minW: 4, minH: 3, dragPlace: false, needsAirsideAccess: true },
@@ -108,6 +110,8 @@ export const FACILITY_SIM_EFFECT: Partial<Record<FacilityKind, FacilitySimEffect
   gate: 'active',
   // 型式・デッキを旅客の搭乗/降機速度が参照（core/model/boardingBridge 経由で sim/passengers）
   boardingBridge: 'active',
+  // 機能I: 経路探索（findTerminalTransferRoute）への辺の合成と容量予約が systemId / segments を参照
+  agtStation: 'active',
   // 夜間整備枠（1 棟 = 1 機。core/capability maintenanceReading、sim/overnight）
   hangar: 'active',
   // 管制能力 towerCapacityPerHour（core/safety）
@@ -160,7 +164,9 @@ export type PropDef =
   /** スポットIDへの参照 */
   | { key: string; type: 'standRef' }
   /** 施設（種類 of）への参照。null = 未指定（欠落と同じ） */
-  | { key: string; type: 'facilityRef'; of: FacilityKind };
+  | { key: string; type: 'facilityRef'; of: FacilityKind }
+  /** AGT 系統（AgtSystem）への参照。null = 未指定（欠落と同じ）。機能I */
+  | { key: string; type: 'agtSystemRef' };
 
 /** プロパティが欠落しているときの値（DEFAULT_PROPS には入れない: 新しく置いた施設の JSON を従来と同じに保つため）。読む側と UI が使う */
 export function propDefault(def: PropDef): PropValue {
@@ -205,6 +211,11 @@ export const PROP_SCHEMAS: Record<FacilityKind, readonly PropDef[]> = {
     { key: 'bridgeType', type: 'enum', options: ['tunnel1', 'tunnel2', 'tunnel2Upper'] },
     /** この基が接続するデッキ（tunnel2Upper の2基目は 'upper'） */
     { key: 'deck', type: 'enum', options: ['main', 'upper'] },
+  ],
+  // 機能I: AGT の駅。系統所属は systemId（1 駅 = 1 系統）、ホーム数は表示・将来拡張用（容量計算には入れない）
+  agtStation: [
+    { key: 'systemId', type: 'agtSystemRef' },
+    { key: 'platforms', type: 'int', min: 1, max: 4 },
   ],
   hangar: [{ key: 'maxSize', type: 'enum', options: ['S', 'M', 'L'] }],
   tower: [{ key: 'level', type: 'int', min: 1, max: 3 }],
@@ -257,6 +268,7 @@ export const DEFAULT_PROPS: Record<FacilityKind, Record<string, PropValue>> = {
   terminal: { levels: 2 },
   gate: { standId: null, jetBridge: true },
   boardingBridge: { gateId: null, standId: null, bridgeType: 'tunnel1', deck: 'main' },
+  agtStation: { systemId: null, platforms: 2 },
   hangar: { maxSize: 'M' },
   tower: { level: 1 },
   maintenance: { bays: 2, engineers: 3 },
@@ -359,6 +371,29 @@ export const PBB_TYPES: Record<PbbBridgeType, PbbTypeSpec> = {
 export const DOOR_SILL_M: Record<SizeClass, number> = { S: 2.6, M: 3.4, L: 4.7 };
 /** 2階建て機の上デッキのドアシル高（m、ゲーム値） */
 export const DOOR_SILL_UPPER_M = 7.9;
+
+// ---------------------------------------------------------------- AGT（機能I）
+
+/**
+ * AGT 系統パラメータの範囲（design-GHIJ-detail.md §I.2 / §I.4）。
+ * 操作（operations）と検証（validate）の両方がこの表で弾く。
+ */
+export const AGT_PARAM_RANGES = {
+  vehicleCapacity: { min: 10, max: 600 },
+  headwaySec: { min: 30, max: 1800 },
+  dwellSec: { min: 5, max: 120 },
+  speedMps: { min: 5, max: 25 },
+} as const;
+
+/** AGT 系統の既定パラメータ（UI の新規作成フォームの初期値） */
+export const AGT_SYSTEM_DEFAULTS = { vehicleCapacity: 100, headwaySec: 180, dwellSec: 20, speedMps: 12 } as const;
+
+/**
+ * セグメント距離の導出に使う迂回係数。terminal/model の独立ゲート接続路
+ * （CONNECTOR_DETOUR = 1.25、直線 × TILE_M × 1.25）と同じ流儀で、駅中心間の
+ * 直線距離に掛ける。導出値は AgtSegment.distanceM に固定して保存し、再計算しない。
+ */
+export const AGT_SEGMENT_DETOUR = 1.25;
 
 // ---------------------------------------------------------------- ターミナル内部
 

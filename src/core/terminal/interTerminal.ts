@@ -1,5 +1,7 @@
 import type { AirportLayout, PaxZone, TerminalTransitLink } from '../model/types';
 import { sortedValues } from '../model/ids';
+import { agtSegmentCapacityPerHour, agtSegmentTravelSec } from '../model/agt';
+import { agtSegmentUsability } from './agt';
 import { buildTerminalModel, canMove, terminalLinkCapacityPerHour, WALK_SPEED_MPS } from './model';
 
 export interface TerminalTransferQuery {
@@ -59,6 +61,35 @@ export function findTerminalTransferRoute(layout: AirportLayout, q: TerminalTran
     addConnection(link, from.id, to.id);
     if (link.bidirectional) addConnection(link, to.id, from.id);
   }
+  // 機能I: AGT セグメントを辺として合成する（buildTerminalModel は変更しない）。
+  // 端点は両駅が接続するエリア同士で、区域の扱いはリンクと同じ（両端とも q.zone）。
+  // セグメントは無向。所要時間 = 待ち headway/2 + 走行 + 停車（model/agt の集約モデル）。
+  for (const seg of sortedValues(layout.agtSegments ?? {})) {
+    if ((seg.buildState ?? 'operational') !== 'operational' || q.closedLinkIds?.has(seg.id)) continue;
+    const system = layout.agtSystems?.[seg.systemId];
+    if (!system) continue;
+    const usability = agtSegmentUsability(layout, seg);
+    if (!usability.usable) continue;
+    const travelSec = agtSegmentTravelSec(system, seg);
+    const addAgtHop = (from: string, to: string) => {
+      (outgoing.get(from) ?? (outgoing.set(from, []), outgoing.get(from)!)).push({
+        to,
+        travelSec,
+        distanceM: seg.distanceM,
+        connectionId: seg.id,
+      });
+    };
+    for (const fromId of usability.fromAreas) {
+      const from = model.areas[fromId];
+      if (!from || from.zone !== q.zone) continue;
+      for (const toId of usability.toAreas) {
+        const to = model.areas[toId];
+        if (!to || to.zone !== q.zone) continue;
+        addAgtHop(from.id, to.id);
+        addAgtHop(to.id, from.id);
+      }
+    }
+  }
 
   const distance = new Map<string, number>([[q.fromAreaId, 0]]);
   const previous = new Map<string, { from: string; hop: Hop }>();
@@ -101,8 +132,13 @@ export function findTerminalTransferRoute(layout: AirportLayout, q: TerminalTran
   }
   const connectionIds = hops.flatMap((hop) => hop.connectionId ? [hop.connectionId] : []);
   const capacityPerHour = connectionIds.length === 0 ? null : connectionIds.reduce<number | null>((capacity, id) => {
+    if (capacity === null) return null;
     const link = layout.terminalLinks?.[id];
-    return capacity === null || !link ? null : Math.min(capacity, terminalLinkCapacityPerHour(link));
+    if (link) return Math.min(capacity, terminalLinkCapacityPerHour(link));
+    // 機能I: AGT セグメントの容量は系統パラメータから決まる（リンクと同じ予約・集計の対象）
+    const seg = layout.agtSegments?.[id];
+    const system = seg ? layout.agtSystems?.[seg.systemId] : undefined;
+    return system ? Math.min(capacity, agtSegmentCapacityPerHour(system)) : null;
   }, Infinity);
   return {
     areas,
