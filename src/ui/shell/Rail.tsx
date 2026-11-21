@@ -30,9 +30,15 @@ const OVERLAY_LABEL: Record<keyof Overlays, string> = {
   network: '論理ネットワーク・予約',
   issues: 'エラー表示',
   labels: 'ラベル',
+  flightNames: '便名',
+  busPax: 'バスの人数',
+  cargoCounts: '貨物数',
   congestion: '混雑マップ',
   daylight: '昼夜表現',
 };
+
+/** 運航中の地図注記だけを切り替える項目（建設モードでは表示しない） */
+const OPERATE_ONLY_OVERLAYS: readonly (keyof Overlays)[] = ['daylight', 'flightNames', 'busPax', 'cargoCounts'];
 
 export function Rail({ page, setPage, onOpenAtc }: { page: MainPage; setPage: (p: MainPage) => void; onOpenAtc: () => void }) {
   const mode = useEditor((s) => s.mode);
@@ -47,7 +53,7 @@ export function Rail({ page, setPage, onOpenAtc }: { page: MainPage; setPage: (p
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [layout, analysis, company, uiVersion],
   );
-  const overlayKeys = (Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).filter((k) => mode === 'operate' || k !== 'daylight');
+  const overlayKeys = (Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).filter((k) => mode === 'operate' || !OPERATE_ONLY_OVERLAYS.includes(k));
   const lensBtn = (target: MainPage, label: string, testid: string) => (
     <button
       className={`rail-btn ${page === target ? 'active' : ''}`}

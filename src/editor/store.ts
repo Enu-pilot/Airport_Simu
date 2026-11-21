@@ -107,6 +107,65 @@ export interface Overlays {
   congestion: boolean;
   /** ゲーム時刻に応じた昼夜 tint（表示のみ） */
   daylight: boolean;
+  /** 便名（コールサイン）ラベル（運航中のみ。表示レイヤ復活で切替可能にした。従来はズーム条件だけで表示） */
+  flightNames: boolean;
+  /** ランプバスの乗車人数ラベル（運航中のみ。表示レイヤ復活で切替可能にした。従来はズーム条件だけで表示） */
+  busPax: boolean;
+  /** 貨物便の搭載量ラベル（運航中のみ。従来の地図には無かった表示のため、初期表示を変えないよう既定 OFF） */
+  cargoCounts: boolean;
+}
+
+/** 表示レイヤの既定値（従来の初期表示と同一: 便名・バス人数は表示、貨物数は従来表示が無いため OFF） */
+export const DEFAULT_OVERLAYS: Overlays = {
+  grid: true,
+  interior: false,
+  buildable: false,
+  network: false,
+  issues: true,
+  labels: true,
+  congestion: false,
+  daylight: true,
+  flightNames: true,
+  busPax: true,
+  cargoCounts: false,
+};
+
+const OVERLAYS_KEY = 'skyport.overlays.v1';
+/** 表示レイヤ設定の読み込み（localStorage。欠けた項目・壊れた値は既定値に寄せる後方互換つき） */
+export function loadOverlays(): Overlays {
+  const d = DEFAULT_OVERLAYS;
+  try {
+    const raw = globalThis.localStorage?.getItem(OVERLAYS_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<Overlays>;
+      const pick = (k: keyof Overlays) => (typeof p[k] === 'boolean' ? p[k] : d[k]);
+      return {
+        grid: pick('grid'),
+        interior: pick('interior'),
+        buildable: pick('buildable'),
+        network: pick('network'),
+        issues: pick('issues'),
+        labels: pick('labels'),
+        congestion: pick('congestion'),
+        daylight: pick('daylight'),
+        flightNames: pick('flightNames'),
+        busPax: pick('busPax'),
+        cargoCounts: pick('cargoCounts'),
+      };
+    }
+  } catch {
+    // 既定値を使う
+  }
+  return { ...d };
+}
+
+/** 表示レイヤ設定の保存（表示だけの設定で、プロジェクトには保存しない） */
+export function saveOverlays(overlays: Overlays): void {
+  try {
+    globalThis.localStorage?.setItem(OVERLAYS_KEY, JSON.stringify(overlays));
+  } catch {
+    // 保存できなくても設定は今の画面では有効
+  }
 }
 
 export interface Toast {
@@ -371,7 +430,7 @@ export const editorStore = createStore<EditorState>(() => ({
   hover: null,
   hoverW: null,
   draft: null,
-  overlays: { grid: true, interior: false, buildable: false, network: false, issues: true, labels: true, congestion: false, daylight: true },
+  overlays: loadOverlays(),
   interiorLevel: 0,
   mapLevel: 0,
   toast: null,
@@ -903,7 +962,9 @@ export const actions = {
     set({ terminalWorkspace: null });
   },
   toggleOverlay(key: keyof Overlays): void {
-    set((s) => ({ overlays: { ...s.overlays, [key]: !s.overlays[key] } }));
+    const next = { ...get().overlays, [key]: !get().overlays[key] };
+    set({ overlays: next });
+    saveOverlays(next);
   },
   focus(p: Vec2, select?: string): void {
     const s = get();

@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
 import { contractsOf, fictionalActiveContractCount, fictionalReassignmentCandidates, fictionalRestrictionActive, seatsFor, sortContracts, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type ContractSortKey, type DailyKpi, type DailyReport, type WorkOrderAssetKind, type WorkOrderKind } from '../core/economy/company';
@@ -588,12 +588,89 @@ function RouteTrafficSection({ c, accessFactor, ctx, routeCapabilities }: { c: C
   );
 }
 
+/** 契約パネルのサブタブ（ui-contracts-layout.md 案A: パネル内サブタブ分離＋件数バッジ） */
+export type ContractsTab = 'active' | 'offers' | 'past';
+
+export interface ContractsTabSummary {
+  active: number;
+  offers: number;
+  past: number;
+  /** 提案の最短期限（offerExpiresDay）。提案が無ければ null */
+  nearestOfferExpiresDay: number | null;
+}
+
+/**
+ * サブタブのバッジ件数と提案の最短期限。
+ * 件数はパネル内の検索フィルタに依存せず、会社の契約データそのものから数える
+ * （バッジは「開いていないタブに何件あるか」を常時示すためのもの）。
+ * 終了分は全件数（パネル内の表示は従来どおり直近8件に限る）。
+ */
+export function contractsTabSummary(c: CompanyState): ContractsTabSummary {
+  const offered = contractsOf(c, 'offered');
+  return {
+    active: contractsOf(c, 'active').length,
+    offers: offered.length,
+    past: contractsOf(c).filter((k) => k.status !== 'active' && k.status !== 'offered').length,
+    nearestOfferExpiresDay: offered.length ? Math.min(...offered.map((k) => k.offerExpiresDay)) : null,
+  };
+}
+
+/** 契約パネルのサブタブバー（案A）: 件数バッジと提案の最短期限は、開いていないタブの内容にも気づけるよう常時出す */
+export function ContractsTabBar({ tab, onTab, summary }: { tab: ContractsTab; onTab: (t: ContractsTab) => void; summary: ContractsTabSummary }) {
+  return (
+    <div className="tabs contracts-tabs" role="tablist" aria-label="契約の表示切替">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === 'active'}
+        className={tab === 'active' ? 'tab active' : 'tab'}
+        onClick={() => onTab('active')}
+        data-testid="contracts-tab-active"
+      >
+        契約中（<span data-testid="contracts-badge-active">{summary.active}</span>）
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === 'offers'}
+        className={tab === 'offers' ? 'tab active' : 'tab'}
+        onClick={() => onTab('offers')}
+        data-testid="contracts-tab-offers"
+      >
+        提案（<span data-testid="contracts-badge-offers">{summary.offers}</span>）
+        {summary.nearestOfferExpiresDay !== null && (
+          <span className="contracts-tab-deadline" data-testid="contracts-offers-deadline">
+            最短{summary.nearestOfferExpiresDay + 1}日目まで
+          </span>
+        )}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === 'past'}
+        className={tab === 'past' ? 'tab active' : 'tab'}
+        onClick={() => onTab('past')}
+        data-testid="contracts-tab-past"
+      >
+        終了分（<span data-testid="contracts-badge-past">{summary.past}</span>）
+      </button>
+    </div>
+  );
+}
+
 /** 契約セクション: 契約中の便・契約の提案・終了した契約／拠点契約の条件 */
-export function ContractsPanel() {
+export function ContractsPanel({ initialTab = 'active' }: { initialTab?: ContractsTab }) {
   const { c, mode, ctx, operable, routeCapabilities, accessFactor } = usePlanData();
   const readOnly = mode === 'operate';
+  const [tab, setTab] = useState<ContractsTab>(initialTab);
   const [contractSort, setContractSort] = useState<ContractSortKey>('airline');
   const [contractQuery, setContractQuery] = useState('');
+  const summary = contractsTabSummary(c);
+  const listRef = useRef<HTMLDivElement>(null);
+  // タブを切り替えたら、そのタブの先頭から見せる（スクロール位置はタブごとに持ち越さない）
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [tab]);
   const query = contractQuery.trim().toLowerCase();
   const matchQuery = (k: Contract) =>
     query === '' ||
@@ -614,9 +691,9 @@ export function ContractsPanel() {
           架空会社の契約が {fictionalActiveContractCount(c)} 件あります。空港の格が上がったため、架空会社の新しい提案は架空の都市だけになりました。既存の契約は満期まで続きますが、各契約の「実在会社へ付け替え」から実在会社へ移せます（路線・便数・期間・料金はそのまま。付け替え先の会社に使用ターミナル制限の設定がなければ、移した契約は無制限になります）。
         </p>
       )}
-      <div className="issues-list mgmt-grid">
-        <section>
-          <h4>契約中の便</h4>
+      <div className="issues-list mgmt-grid" ref={listRef}>
+        <section className="contracts-section">
+          <ContractsTabBar tab={tab} onTab={setTab} summary={summary} />
           <div className="small">
             <label>
               並び替え{' '}
@@ -643,6 +720,9 @@ export function ContractsPanel() {
             </label>
             <span className="muted">（並び替えは契約中・提案・終了分すべてに、検索は契約中の便に適用されます）</span>
           </div>
+          {tab === 'active' && (
+            <>
+              <h4>契約中の便</h4>
           <table className="board" data-testid="contracts">
             <thead>
               <tr>
@@ -779,8 +859,15 @@ export function ContractsPanel() {
               })}
             </section>
           )}
+            </>
+          )}
 
-          <h4>契約の提案</h4>
+          {tab === 'offers' && (
+            <>
+              <h4>
+                契約の提案
+                {summary.nearestOfferExpiresDay !== null && <span className="muted small">（最短 {summary.nearestOfferExpiresDay + 1}日目まで）</span>}
+              </h4>
           <table className="board" data-testid="offers">
             <tbody>
               {offers.map((k) => {
@@ -835,16 +922,22 @@ export function ContractsPanel() {
             </tbody>
           </table>
           {offers.length === 0 && <div className="empty">提案はありません（評価が上がると提案が増えます）</div>}
-
-          {past.length > 0 && (
-            <>
-              <h4>終了した契約・提案</h4>
-              <div className="muted small">
-                {past.map((k) => `${airlineDef(k.airlineId).name}・${destinationDef(k.destinationId).name}（${CONTRACT_STATUS_LABEL[k.status]}）`).join(' / ')}
-              </div>
             </>
           )}
 
+          {tab === 'past' && (
+            <>
+              <h4>終了した契約・提案</h4>
+              {past.length > 0 ? (
+                <div className="muted small">
+                  {past.map((k) => `${airlineDef(k.airlineId).name}・${destinationDef(k.destinationId).name}（${CONTRACT_STATUS_LABEL[k.status]}）`).join(' / ')}
+                </div>
+              ) : (
+                <div className="empty">終了した契約・提案はありません</div>
+              )}
+              {summary.past > past.length && <div className="muted small">直近{past.length}件を表示しています（全{summary.past}件）</div>}
+            </>
+          )}
         </section>
       </div>
     </div>
