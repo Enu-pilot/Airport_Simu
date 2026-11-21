@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { AIRCRAFT_TYPES, resolveType } from '../core/sim/aircraftTypes';
 import { createContext, operableTypes } from '../core/sim/context';
 import { contractsOf, fictionalActiveContractCount, fictionalReassignmentCandidates, fictionalRestrictionActive, seatsFor, sortContracts, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type ContractSortKey, type DailyKpi, type DailyReport, type WorkOrderAssetKind, type WorkOrderKind } from '../core/economy/company';
-import { analyzeDayPlan, planDayWithDemand } from '../core/economy/planning';
+import { analyzeDayPlan, planDay, planDayWithDemand } from '../core/economy/planning';
 import { basedConditionDetails } from '../core/economy/basedConditions';
 import { airlineDef, airlinesFor, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport, type DestinationDef } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
@@ -15,6 +15,7 @@ import { companyActions } from '../editor/simRunner';
 import { addCityEvent, contributeNoiseFund, purchaseSoundproofing, setCompanyCity, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
 import { NightOpsSettings } from './NightOpsSettings';
 import { terminalCapacitySummaries } from '../core/terminal/terminalCapacitySummary';
+import { airlineTerminalSpotWarnings } from '../core/terminal/terminalSpotWarnings';
 import { airMarketPopulationOf, canMakeNoiseContribution, CITY_EVENT_CONGESTED, CITY_EVENT_KINDS, cityEventCost, cityEventOutcome, cityEventRisk, nextSoundproofCost, offshoreNoiseFactor, residentFacilityBonus, soundproofLevelOf, soundproofNoiseFactor, type CityEventKind, type CityEventLocation } from '../core/economy/city';
 import {
   ACCESS_MODE_LABEL,
@@ -169,6 +170,22 @@ export function AirlineTerminalsPanel({ company: c }: { company: CompanyState })
     .sort((a, b) => (a.id < b.id ? -1 : 1));
   // ターミナル別の余裕（スポット数・保安検査の能力と直近の使用率）。制限先を選ぶ判断材料
   const capacity = terminalCapacitySummaries(layout, c.reports[c.reports.length - 1]);
+  // スポット容量の警告（表示のみ）: 当日の計画便（運航計画パネルと同じ planDay の
+  // 決定的な計画。旅客数のモデルは便数・時刻に影響しない）から、指定ターミナルの
+  // スポットが足りなくなる可能性を判定する。チェック操作はブロックしない
+  const spotWarnings = useMemo(() => {
+    const plan = planDay(c, c.day, 1, AIRCRAFT_TYPES, routeCapabilitiesForAirport(layout.countryId));
+    return airlineTerminalSpotWarnings({
+      summaries: capacity,
+      policies: c.airlineTerminals,
+      flights: plan.flights,
+      prevOvernight: plan.prevOvernight,
+    });
+    // capacity は layout と日報から決まる値なので、依存は c と layout で代表させる
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c, layout]);
+  const spotWarningFor = (airlineId: string, rt: 'domestic' | 'international') =>
+    spotWarnings.find((w) => w.airlineId === airlineId && w.routeType === rt);
   const airlineIds = [...new Set([
     ...Object.values(c.contracts).filter((k) => k.status === 'active' || k.status === 'offered').map((k) => k.airlineId),
     ...Object.keys(c.airlineTerminals ?? {}),
@@ -197,7 +214,7 @@ export function AirlineTerminalsPanel({ company: c }: { company: CompanyState })
               if (!s) return null;
               return (
                 <span className="muted" data-testid={`terminal-capacity-${t.id}`}>
-                  {' '}（スポット {s.stands}・保安 {s.securityPerHour.toLocaleString()}/時
+                  {' '}（スポット {s.stands}（S{s.standsBySize.S}・M{s.standsBySize.M}・L{s.standsBySize.L}）・保安 {s.securityPerHour.toLocaleString()}/時
                   {s.securityUtilization !== null ? `・使用率 ${Math.round(s.securityUtilization * 100)}%` : ''}）
                 </span>
               );
@@ -211,6 +228,25 @@ export function AirlineTerminalsPanel({ company: c }: { company: CompanyState })
         ) : (
           <span className="muted small">制限なし</span>
         )}
+        {(() => {
+          const w = spotWarningFor(airlineId, rt);
+          if (!w) return null;
+          return (
+            <>
+              {w.missingSizes.map((s) => (
+                <p key={`missing-${s}`} className="warn-text" data-testid={`terminal-spot-missing-${airlineId}-${rt}-${s}`}>
+                  ⚠ {s} サイズ以上のスポットが、指定したターミナルにありません
+                </p>
+              ))}
+              {w.pressures.map((p) => (
+                <p key={`pressure-${p.terminalId}`} className="warn-text" data-testid={`terminal-spot-pressure-${airlineId}-${rt}-${p.terminalId}`}>
+                  ⚠ {displayName(layout, p.terminalId)}: {p.sizeAtLeast === 'S' ? 'スポット' : `${p.sizeAtLeast} サイズ以上のスポット`}容量が
+                  {p.level === 'over' ? '不足する' : '逼迫する'}可能性があります（目安: ピーク需要 約{Math.ceil(p.demand)}機 / スポット {p.capacity}）
+                </p>
+              ))}
+            </>
+          );
+        })()}
       </td>
     );
   };
@@ -220,6 +256,7 @@ export function AirlineTerminalsPanel({ company: c }: { company: CompanyState })
       <p className="muted small">
         チェックしたターミナルだけを、その航空会社の便が使えます（国内線・国際線は別々に設定できます）。制限なしの会社はどのターミナルでも使えます。
         制限のせいで許可ターミナル内にスポットがない便は、他のターミナルへは回らず待機します。設定は次のスポット割当から効き、運航中の機体のスポットは変わりません。貨物便は対象外です。
+        ⚠ は当日の計画便から見積もったスポット容量の警告（目安）です。警告が出ていても指定はそのままできます。
       </p>
       {readOnly && <p className="muted small" data-testid="airline-terminals-readonly">運航中は変更できません（建設モードで編集してください）。</p>}
       {terminals.length === 0 ? (
