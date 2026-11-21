@@ -91,6 +91,40 @@ export function floorRangeInUse(layout: AirportLayout, terminalId: string, min: 
   return Object.values(layout.terminalAreas).some((a) => a.terminalId === terminalId && (a.level < min || a.level > max));
 }
 
+/** 建物の階範囲の総階数の上限（検証上限。配置時の変換規則 §G.2-3 と同じ） */
+export const TERMINAL_MAX_LEVELS = 4;
+
+/**
+ * ターミナルの建物の階範囲を絶対階 [absMin, absMax] に変えるための patch（階範囲のプルダウン一本化）。
+ * 配置時の変換規則（機能G §G.2-3）と同じ導出で、基底階（mapLevel）= absMin、階数（levels）=
+ * absMax − absMin + 1 とし、levels はこの patch からの従属値になる。エリア範囲は
+ * 上限を新しい最上階（levels − 1）に一致させ、下限は従来の相対下限を保持する
+ * （基底より下のエリア許可 = 旧データの地下エリアの意味を変えない。新しい階数 − 1 を
+ * 超える場合だけそこまで切り詰める）。
+ * 次の場合は null（変更不可）: 対象がターミナルでない／絶対範囲が不正（非整数・min > max・
+ * 総階数が 1〜4 の外・基底階が地図階層の範囲外）／範囲外になるエリアがある／
+ * 新しい階数以上に内包施設がある。呼び出し側は null のときに理由を出して止める。
+ */
+export function terminalSpanPatch(
+  layout: AirportLayout,
+  terminalId: string,
+  absMin: number,
+  absMax: number,
+): { mapLevel: number; levels: number; floorRangeMin: number; floorRangeMax: number } | null {
+  const t = layout.facilities[terminalId];
+  if (!t || t.kind !== 'terminal') return null;
+  if (!Number.isInteger(absMin) || !Number.isInteger(absMax) || absMin > absMax) return null;
+  const levels = absMax - absMin + 1;
+  if (levels < 1 || levels > TERMINAL_MAX_LEVELS) return null;
+  if (absMin < -5 || absMin > 10) return null;
+  const current = terminalFloorRange(layout, terminalId);
+  const floorRangeMin = Math.min(current.min, levels - 1);
+  const floorRangeMax = levels - 1;
+  if (floorRangeInUse(layout, terminalId, floorRangeMin, floorRangeMax)) return null;
+  if (Object.values(layout.facilities).some((f) => f.parentFacilityId === terminalId && (f.floorIndex ?? 0) >= levels)) return null;
+  return { mapLevel: absMin, levels, floorRangeMin, floorRangeMax };
+}
+
 /** 親の階数に対して、その階が存在するか（階の選択肢の注記用） */
 export function floorExistsInParent(layout: AirportLayout, parentId: string, floorIndex: number): boolean {
   return interiorPlacementProblem(layout, parentId, floorIndex, []) === null;
