@@ -49,6 +49,7 @@ import {
   netNodes,
   removeEdge,
   removeNode,
+  taxiwayRouteEdges,
   type NetKind,
 } from './network';
 import { headingVector, runwayAxis, runwayEnd, runwayMidpoint } from './runway';
@@ -1606,6 +1607,30 @@ export function reverseEdge(layout: AirportLayout, id: string): OpResult {
   const e = netEdges(d, net)[id];
   if (!e) return fail('NOT_FOUND');
   [e.from, e.to] = [e.to, e.from];
+  return ok(finalize(d));
+}
+
+/**
+ * 誘導路の経路全体（taxiwayRouteEdges: 分岐で止まる連結）の幅を一括で変更する。
+ * 変更するのは widthClass だけで、codeF には単一区間の更新（updateEntity）と同じく
+ * 一切触らない（L から下げても codeF の保存値は残る。プロパティパネルでは L のときだけ
+ * チェックボックスが出るが、値自体は保持されるのが従来の挙動）。
+ * 経路内の1区間でも変われば成功し、全区間が既に同じ幅なら NO_CHANGE。
+ */
+export function setTaxiwayRouteWidth(layout: AirportLayout, edgeId: string, widthClass: SizeClass): OpResult {
+  if (!SIZES.includes(widthClass)) return fail('INVALID_VALUE');
+  if (!layout.taxiways[edgeId]) return fail('NOT_FOUND');
+  const route = taxiwayRouteEdges(layout, edgeId);
+  const d = cloneLayout(layout);
+  let changed = 0;
+  for (const id of route) {
+    const e = d.taxiways[id];
+    if (e && e.widthClass !== widthClass) {
+      e.widthClass = widthClass;
+      changed++;
+    }
+  }
+  if (changed === 0) return fail('NO_CHANGE');
   return ok(finalize(d));
 }
 

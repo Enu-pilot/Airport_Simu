@@ -15,11 +15,13 @@ import {
   moveEntity,
   placeBoardingBridge,
   rotateEntity,
+  setTaxiwayRouteWidth,
 } from '../core/layout/operations';
+import { taxiwayRouteEdges } from '../core/layout/network';
 import { pickCandidatesAt, type PickView } from '../core/layout/pick';
 import { actions, applyOp, editorStore, showToast, type EditorState } from './store';
 import { FOOTPRINT_UI, PLACEMENT_PROBLEM_LABEL, SIZE_LABEL } from '../i18n/ja';
-import { ALL_LAYERS_KEY, levelForDigitKey, overlayToggleForKey, sizeKeyOf, sizeOptionForTool, toolForKey, type OverlayToggle, type SizeOptionTarget } from './shortcuts';
+import { ALL_LAYERS_KEY, levelForDigitKey, overlayToggleForKey, sizeClassForKey, sizeKeyOf, sizeOptionForTool, toolForKey, type OverlayToggle, type SizeOptionTarget } from './shortcuts';
 import { agtStationAt, areaKindOf, computeOp, computePreview, deleteFootprintVertex, facilityKindOf, footprintEdgeInsert, footprintVertexAt, handleAt, moveFootprintVertex, nextPathPoint, nextTaxiPoint, pbbPickAt, snapPointW } from './tools';
 import { aircraftAt } from '../core/sim/query';
 import { SPEED_LEVELS } from '../core/sim/clock';
@@ -403,6 +405,16 @@ export function onKeyDown(k: KeyInfo): boolean {
     const target = sizeOptionForTool(s.tool, sizeKey);
     if (target) {
       applySizeOption(target);
+      return true;
+    }
+    // 選択中の誘導路: その区間を含む経路全体（分岐で止まる連結）の幅を変更する。
+    // ツール選択中の「これから置く幅」と対になる動き（docs/06 §4.1.1）
+    if (s.tool === 'select' && s.selection && entityTypeOf(s.selection) === 'taxiway') {
+      const width = sizeClassForKey(sizeKey);
+      const count = taxiwayRouteEdges(layout, s.selection).length;
+      if (applyOp(setTaxiwayRouteWidth(layout, s.selection, width), { quietNoChange: true })) {
+        showToast(`誘導路の幅（経路全体 ${count} 区間）: ${SIZE_LABEL[width]}`);
+      }
       return true;
     }
   }
