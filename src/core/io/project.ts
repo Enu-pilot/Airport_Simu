@@ -164,8 +164,9 @@ export function layoutUsesFormat8(l: AirportLayout): boolean {
   return Object.values(l.terminalAreas ?? {}).some((a) => a.kind === 'lounge');
 }
 
-/** レイアウトが保存形式 9 の項目（搭乗橋 PBB）を使っているか */
+/** レイアウトが保存形式 9 の項目（搭乗橋 PBB・複合連絡施設）を使っているか */
 export function layoutUsesFormat9(l: AirportLayout): boolean {
+  if (Object.keys(l.connectionFacilities ?? {}).length > 0) return true;
   return Object.values(l.facilities ?? {}).some((f) => f.kind === 'boardingBridge');
 }
 
@@ -289,7 +290,7 @@ export interface ValidationReport {
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-const LAYOUT_RECORDS = ['runways', 'taxiNodes', 'taxiways', 'roadNodes', 'roads', 'stands', 'facilities', 'terminalAreas', 'terminalLinks'] as const;
+const LAYOUT_RECORDS = ['runways', 'taxiNodes', 'taxiways', 'roadNodes', 'roads', 'stands', 'facilities', 'terminalAreas', 'terminalLinks', 'connectionFacilities'] as const;
 
 /** レイアウトの内容の検証（必須項目・型・ID の重複・参照切れ） */
 export function checkLayout(l: unknown, where = 'レイアウト'): string[] {
@@ -299,6 +300,7 @@ export function checkLayout(l: unknown, where = 'レイアウト'): string[] {
   const seen = new Map<string, string>();
   for (const k of LAYOUT_RECORDS) {
     if (k === 'terminalLinks' && layout.terminalLinks === undefined) continue;
+    if (k === 'connectionFacilities' && layout.connectionFacilities === undefined) continue;
     for (const [key, e] of Object.entries((layout[k] ?? {}) as Record<string, { id?: unknown }>)) {
       if (!isObj(e)) {
         errors.push(`${where}: ${k} の ${key} が不正です`);

@@ -53,6 +53,7 @@ import { floorRangeInUse, terminalFloorRange, terminalFloorRangeOf, undergroundF
 import { DEFAULT_LEVEL_HEIGHT_M, facilityLevel, roadEdgeLevelValid } from '../model/levels';
 import { orthogonalPolygonTiles, validateOrthogonalPolygon } from '../geometry/polygon';
 import { DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, DEFAULT_TERMINAL_LINK_WIDTH_M } from '../terminal/model';
+import { connectionSegmentLevel, deriveConnectionStepFree } from '../terminal/connectionFacility';
 import { deckElevationForCode, requiredAircraftClearanceM, requiredClearanceForCode } from '../sim/aircraftTypes';
 
 /**
@@ -135,6 +136,17 @@ function finalize(d: AirportLayout): AirportLayout {
   }
   for (const [id, portal] of Object.entries(d.portals ?? {})) {
     if (!d.facilities[portal.facilityId] || !d.terminalAreas[portal.areaId]) delete d.portals![id];
+  }
+  for (const [id, cf] of Object.entries(d.connectionFacilities ?? {})) {
+    // 通路段リンクが消えた複合連絡施設は記録ごと落とす（リンク・ポータルの従来扱いに合わせる）。
+    // AGT セグメント（機能I）は未実装のため剪定対象外（検証で DANGLING として報告される）
+    if (cf.segment.kind === 'link' && !d.terminalLinks?.[cf.segment.linkId]) {
+      delete d.connectionFacilities![id];
+      continue;
+    }
+    // 削除された垂直エリアは束ねから外す（残りの不整合は検証 CONNECTION_FACILITY_* が扱う）
+    cf.aVerticalAreaIds = cf.aVerticalAreaIds.filter((a) => d.terminalAreas[a]);
+    cf.bVerticalAreaIds = cf.bVerticalAreaIds.filter((a) => d.terminalAreas[a]);
   }
   return d;
 }
@@ -634,6 +646,288 @@ export function deleteTerminalTransitLink(layout: AirportLayout, id: string): Op
   const d = cloneLayout(layout);
   delete d.terminalLinks![id];
   return ok(finalize(d));
+}
+
+// ---------------------------------------------------------------- 複合連絡施設（J-2）
+
+/** 複合連絡施設の垂直ノードとして生成できるエリア種別 */
+export type ConnectionVerticalKind = 'stairs' | 'escalator' | 'elevator';
+
+export interface CreateConnectionFacilityOptions {
+  name?: string;
+  /** 端点エリア（入口側）。リンクの fromAreaId になる */
+  fromAreaId: string;
+  /** 端点エリア（出口側）。リンクの toAreaId になる */
+  toAreaId: string;
+  /** 通路段（リンク）の生成パラメータ。addTerminalTransitLink と同じ検証を受ける */
+  link: {
+    kind: TerminalTransitKind;
+    distanceM: number;
+    travelSec: number;
+    widthM?: number;
+    capacityPerHour?: number;
+    elevationM?: number;
+    aircraftClearanceM?: number;
+    crossingMaxCode?: CrossingMaxCode;
+    bidirectional?: boolean;
+    buildState?: BuildState;
+    name?: string;
+  };
+  /** 両端の垂直ノード種別。null/省略 = その側は生成しない */
+  aVerticalKind?: ConnectionVerticalKind | null;
+  bVerticalKind?: ConnectionVerticalKind | null;
+  /** 垂直エリアの設置位置。省略時は端点エリアと同じ平面位置（origin）に積む */
+  aVerticalOrigin?: Tile;
+  bVerticalOrigin?: Tile;
+  /** 段差なしの申告。省略時は種別と階移動の有無から導出する */
+  stepFree?: boolean;
+}
+
+/** 端点階から通路段の階へ届くために垂直エリアを置く階（端点自身の階は端点エリアが占有するため除く） */
+function connectionShaftLevels(endpointLevel: number, segmentLevel: number): number[] {
+  const levels: number[] = [];
+  if (segmentLevel > endpointLevel) for (let l = endpointLevel + 1; l <= segmentLevel; l++) levels.push(l);
+  else if (segmentLevel < endpointLevel) for (let l = segmentLevel; l < endpointLevel; l++) levels.push(l);
+  return levels;
+}
+
+/** 同じターミナル・同じ階の既存エリアと矩形が重なるか（生成エリア同士の重なり判定にも使う） */
+function areaRectOverlaps(
+  rects: readonly { terminalId: string; level: number; origin: Tile; w: number; h: number }[],
+  terminalId: string,
+  level: number,
+  origin: Tile,
+  w: number,
+  h: number,
+): boolean {
+  return rects.some(
+    (a) =>
+      a.terminalId === terminalId &&
+      a.level === level &&
+      origin.x < a.origin.x + a.w &&
+      a.origin.x < origin.x + w &&
+      origin.y < a.origin.y + a.h &&
+      a.origin.y < origin.y + h,
+  );
+}
+
+/**
+ * 複合連絡施設を原子的に生成する（J-2 JT3）。
+ * 両端の垂直エリア群＋通路段（リンク）＋グルーピング記録を1つの操作で作り、
+ * 途中の検証に失敗したら全体が失敗する（部分生成は残らない。Undo も1回で戻せる）。
+ * 垂直エリアは端点エリアと同じ平面位置に、端点階から通路段の階までの各階へ積む。
+ * 通路段の階は connectionSegmentLevel の定義（高層通路は導出デッキ階、それ以外は端点階）に従うため、
+ * 高層通路以外では垂直エリアは生成されない（階移動が無い）。
+ */
+export function createConnectionFacility(layout: AirportLayout, opts: CreateConnectionFacilityOptions): OpResult {
+  const from = layout.terminalAreas[opts.fromAreaId];
+  const to = layout.terminalAreas[opts.toAreaId];
+  if (!from || !to) return fail('NOT_FOUND');
+  if (!layout.facilities[from.terminalId] || !layout.facilities[to.terminalId]) return fail('NOT_FOUND');
+  if (from.terminalId === to.terminalId) return fail('INVALID_VALUE');
+  const aSegLevel = connectionSegmentLevel(opts.link, from.level, facilityLevel(layout.facilities[from.terminalId]!));
+  const bSegLevel = connectionSegmentLevel(opts.link, to.level, facilityLevel(layout.facilities[to.terminalId]!));
+
+  interface ShaftPlan {
+    side: 'a' | 'b';
+    terminalId: string;
+    level: number;
+    kind: ConnectionVerticalKind;
+    origin: Tile;
+    zone: PaxZone;
+  }
+  const plans: ShaftPlan[] = [];
+  const plannedRects: { terminalId: string; level: number; origin: Tile; w: number; h: number }[] = [];
+  const existingRects = Object.values(layout.terminalAreas);
+  const planSide = (
+    side: 'a' | 'b',
+    endpoint: TerminalArea,
+    segLevel: number,
+    kind: ConnectionVerticalKind | null | undefined,
+    originOpt: Tile | undefined,
+  ): OpFailure | null => {
+    if (!kind) return null;
+    const spec = TERMINAL_AREA_SPECS[kind];
+    const origin = originOpt ?? endpoint.origin;
+    for (const level of connectionShaftLevels(endpoint.level, segLevel)) {
+      const range = terminalFloorRange(layout, endpoint.terminalId);
+      if (!isInt(level, range.min, range.max)) return 'INVALID_VALUE';
+      if (
+        areaRectOverlaps(existingRects, endpoint.terminalId, level, origin, spec.defaultW, spec.defaultH) ||
+        areaRectOverlaps(plannedRects, endpoint.terminalId, level, origin, spec.defaultW, spec.defaultH)
+      ) {
+        return 'INVALID_VALUE';
+      }
+      plans.push({ side, terminalId: endpoint.terminalId, level, kind, origin, zone: endpoint.zone });
+      plannedRects.push({ terminalId: endpoint.terminalId, level, origin, w: spec.defaultW, h: spec.defaultH });
+    }
+    return null;
+  };
+  const planError =
+    planSide('a', from, aSegLevel, opts.aVerticalKind, opts.aVerticalOrigin) ??
+    planSide('b', to, bSegLevel, opts.bVerticalKind, opts.bVerticalOrigin);
+  if (planError) return fail(planError);
+
+  // 部品の生成は既存の単体操作を合成する（どれか失敗したら全体が失敗し、入力は無変更）
+  let cur = layout;
+  const aIds: string[] = [];
+  const bIds: string[] = [];
+  for (const p of plans) {
+    const r = placeTerminalArea(cur, p.terminalId, p.level, p.kind, p.origin, {
+      zone: p.zone,
+      ...(opts.name ? { name: opts.name } : {}),
+    });
+    if (!r.ok) return r;
+    cur = r.layout;
+    (p.side === 'a' ? aIds : bIds).push(r.created[0]!);
+  }
+  const linkRes = addTerminalTransitLink(cur, {
+    ...opts.link,
+    fromAreaId: from.id,
+    toAreaId: to.id,
+    allowedZones: [from.zone],
+    name: opts.link.name ?? opts.name ?? '',
+  });
+  if (!linkRes.ok) return linkRes;
+  cur = linkRes.layout;
+  const linkId = linkRes.created[0]!;
+
+  const d = cloneLayout(cur);
+  d.connectionFacilities ??= {};
+  const id = allocId(d, 'cf');
+  const stepFree =
+    opts.stepFree ??
+    deriveConnectionStepFree(
+      aIds.map((x) => d.terminalAreas[x]!),
+      bIds.map((x) => d.terminalAreas[x]!),
+      aSegLevel !== from.level,
+      bSegLevel !== to.level,
+    );
+  d.connectionFacilities[id] = {
+    id,
+    name: opts.name ?? '',
+    segment: { kind: 'link', linkId },
+    aVerticalAreaIds: aIds,
+    bVerticalAreaIds: bIds,
+    stepFree,
+  };
+  return ok(finalize(d), [id, linkId, ...aIds, ...bIds]);
+}
+
+export interface GroupConnectionFacilityOptions {
+  name?: string;
+  /** 束ねる既存の通路段（リンク） */
+  linkId: string;
+  /** 入口側（リンクの fromAreaId 側ターミナル）の既存の垂直エリア */
+  aVerticalAreaIds?: string[];
+  /** 出口側（リンクの toAreaId 側ターミナル）の既存の垂直エリア */
+  bVerticalAreaIds?: string[];
+  /** 段差なしの申告。省略時は既存エリアの種別と階移動の有無から導出する */
+  stepFree?: boolean;
+}
+
+/**
+ * 既存のリンクと垂直エリアを複合連絡施設として束ねる（J-2）。
+ * 部品は生成せず、グルーピング記録だけを作る。既存セーブの連絡設備を
+ * 後から1施設として扱うための操作。
+ */
+export function groupConnectionFacility(layout: AirportLayout, opts: GroupConnectionFacilityOptions): OpResult {
+  const link = layout.terminalLinks?.[opts.linkId];
+  if (!link) return fail('NOT_FOUND');
+  const from = layout.terminalAreas[link.fromAreaId];
+  const to = layout.terminalAreas[link.toAreaId];
+  if (!from || !to) return fail('NOT_FOUND');
+  if (!layout.facilities[from.terminalId] || !layout.facilities[to.terminalId]) return fail('NOT_FOUND');
+  const aIds = [...new Set(opts.aVerticalAreaIds ?? [])];
+  const bIds = [...new Set(opts.bVerticalAreaIds ?? [])];
+  if (aIds.some((x) => bIds.includes(x))) return fail('INVALID_VALUE');
+  for (const [ids, terminalId] of [[aIds, from.terminalId], [bIds, to.terminalId]] as const) {
+    for (const areaId of ids) {
+      const a = layout.terminalAreas[areaId];
+      if (!a) return fail('NOT_FOUND');
+      if (a.terminalId !== terminalId) return fail('INVALID_VALUE');
+    }
+  }
+  const d = cloneLayout(layout);
+  d.connectionFacilities ??= {};
+  const id = allocId(d, 'cf');
+  const stepFree =
+    opts.stepFree ??
+    deriveConnectionStepFree(
+      aIds.map((x) => d.terminalAreas[x]!),
+      bIds.map((x) => d.terminalAreas[x]!),
+      connectionSegmentLevel(link, from.level, facilityLevel(layout.facilities[from.terminalId]!)) !== from.level,
+      connectionSegmentLevel(link, to.level, facilityLevel(layout.facilities[to.terminalId]!)) !== to.level,
+    );
+  d.connectionFacilities[id] = {
+    id,
+    name: opts.name ?? '',
+    segment: { kind: 'link', linkId: link.id },
+    aVerticalAreaIds: aIds,
+    bVerticalAreaIds: bIds,
+    stepFree,
+  };
+  return ok(finalize(d), [id]);
+}
+
+/**
+ * 複合連絡施設を1施設単位で削除する（J-2）。
+ * グルーピング記録・通路段（リンク）・両端の垂直エリアをまとめて取り除く。
+ * 端点エリアはターミナル側の部品なので残す。同じリンクを指す他の記録があれば、
+ * finalize がその記録も落とす（通路段はこの施設が所有する部品として扱う）。
+ */
+export function deleteConnectionFacility(layout: AirportLayout, id: string): OpResult {
+  const cf = layout.connectionFacilities?.[id];
+  if (!cf) return fail('NOT_FOUND');
+  const d = cloneLayout(layout);
+  delete d.connectionFacilities![id];
+  if (cf.segment.kind === 'link' && d.terminalLinks) delete d.terminalLinks[cf.segment.linkId];
+  for (const areaId of [...cf.aVerticalAreaIds, ...cf.bVerticalAreaIds]) delete d.terminalAreas[areaId];
+  return ok(finalize(d));
+}
+
+/** 複合連絡施設の改名・段差なし申告の変更（J-2） */
+export function updateConnectionFacility(
+  layout: AirportLayout,
+  id: string,
+  patch: { name?: string; stepFree?: boolean },
+): OpResult {
+  if (!layout.connectionFacilities?.[id]) return fail('NOT_FOUND');
+  const d = cloneLayout(layout);
+  const next = d.connectionFacilities![id]!;
+  let changed = false;
+  if (patch.name !== undefined && patch.name !== next.name) {
+    next.name = patch.name;
+    changed = true;
+  }
+  if (patch.stepFree !== undefined && patch.stepFree !== next.stepFree) {
+    next.stepFree = patch.stepFree;
+    changed = true;
+  }
+  if (!changed) return fail('NO_CHANGE');
+  return ok(finalize(d));
+}
+
+/**
+ * 複合連絡施設の垂直エリア群を1施設単位で移動する（J-2）。
+ * 通路段（リンク）は論理接続で幾何を持たないため動かさず、端点エリアも
+ * ターミナル側の部品として残す。垂直エリアが無い施設は移動できない。
+ */
+export function moveConnectionFacility(layout: AirportLayout, id: string, delta: Tile): OpResult {
+  const cf = layout.connectionFacilities?.[id];
+  if (!cf) return fail('NOT_FOUND');
+  if (delta.x === 0 && delta.y === 0) return fail('NO_CHANGE');
+  let cur = layout;
+  let moved = 0;
+  for (const areaId of [...cf.aVerticalAreaIds, ...cf.bVerticalAreaIds]) {
+    if (!cur.terminalAreas[areaId]) continue;
+    const r = moveEntity(cur, areaId, delta);
+    if (!r.ok) return r;
+    cur = r.layout;
+    moved++;
+  }
+  if (moved === 0) return fail('NO_CHANGE');
+  return ok(cur);
 }
 
 /** ポータルで接続できる交通施設の種別（5-16 T2） */

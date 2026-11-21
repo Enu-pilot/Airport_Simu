@@ -119,6 +119,25 @@ export function checkRunwayFields(layout: AirportLayout, where: string): string[
     if (typeof link.bidirectional !== 'boolean' || !['operational', 'underConstruction', 'planned'].includes(String(link.buildState))) errors.push(`${where}: ターミナル連絡設備 ${id} の状態が不正です`);
     if (!Array.isArray(link.allowedZones) || !link.allowedZones.length || link.allowedZones.some((zone) => zone !== 'landside' && zone !== 'departure' && zone !== 'arrival')) errors.push(`${where}: ターミナル連絡設備 ${id} の利用区域が不正です`);
   }
+  // 複合連絡施設（J-2）: グルーピング記録の形だけを検査する。参照先の存在は
+  // ゲーム側の検証（CONNECTION_FACILITY_DANGLING）が扱い、読み込みは拒否しない
+  // （欠落しても部品は従来どおり機能する編集メタデータのため）
+  const connectionFacilities = layout.connectionFacilities === undefined ? {} : isObj(layout.connectionFacilities) ? layout.connectionFacilities : {};
+  if (layout.connectionFacilities !== undefined && !isObj(layout.connectionFacilities)) errors.push(`${where}: connectionFacilities が不正です`);
+  for (const [id, raw] of Object.entries(connectionFacilities)) {
+    if (!isObj(raw)) { errors.push(`${where}: 複合連絡施設 ${id} が不正です`); continue; }
+    const cf = raw as Record<string, unknown>;
+    if (cf.id !== id) errors.push(`${where}: 複合連絡施設 ${id} の ID が一致しません`);
+    if (typeof cf.name !== 'string') errors.push(`${where}: 複合連絡施設 ${id} の名前が不正です`);
+    const seg = isObj(cf.segment) ? cf.segment : null;
+    if (!seg || (seg.kind === 'link' ? typeof seg.linkId !== 'string' : seg.kind === 'agt' ? typeof seg.segmentId !== 'string' : true)) {
+      errors.push(`${where}: 複合連絡施設 ${id} の通路段の参照が不正です`);
+    }
+    for (const key of ['aVerticalAreaIds', 'bVerticalAreaIds'] as const) {
+      if (!Array.isArray(cf[key]) || cf[key].some((v) => typeof v !== 'string')) errors.push(`${where}: 複合連絡施設 ${id} の垂直エリアの参照が不正です`);
+    }
+    if (typeof cf.stepFree !== 'boolean') errors.push(`${where}: 複合連絡施設 ${id} の stepFree が不正です`);
+  }
   return errors;
 }
 
