@@ -6,6 +6,7 @@ import { FACILITY_SPECS } from '../core/model/catalog';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import { entityTiles } from '../core/layout/footprint';
 import {
+  addAgtSegment,
   addRoadPath,
   addTaxiwayPath,
   deleteEntity,
@@ -17,7 +18,7 @@ import {
 import { pickCandidatesAt, type PickView } from '../core/layout/pick';
 import { actions, applyOp, editorStore, showToast, type EditorState } from './store';
 import { FOOTPRINT_UI, PLACEMENT_PROBLEM_LABEL } from '../i18n/ja';
-import { areaKindOf, computeOp, computePreview, deleteFootprintVertex, facilityKindOf, footprintEdgeInsert, footprintVertexAt, handleAt, moveFootprintVertex, nextPathPoint, nextTaxiPoint, pbbPickAt, snapPointW } from './tools';
+import { agtStationAt, areaKindOf, computeOp, computePreview, deleteFootprintVertex, facilityKindOf, footprintEdgeInsert, footprintVertexAt, handleAt, moveFootprintVertex, nextPathPoint, nextTaxiPoint, pbbPickAt, snapPointW } from './tools';
 import { aircraftAt } from '../core/sim/query';
 import { SPEED_LEVELS } from '../core/sim/clock';
 import { ops } from './simRunner';
@@ -214,6 +215,20 @@ export function onPointerDown(screen: Vec2, button: number, mods: { shift?: bool
             : 'ゲートを選びました。続けて、そのゲートのスポットをクリックしてください',
           'info',
         );
+      }
+      return;
+    }
+    case 'agt': {
+      // AGT セグメント接続（機能I）: 駅→駅の2クリックでセグメントを作成する
+      const stationId = agtStationAt(s.history.present, tile);
+      if (!stationId) return;
+      const prev = s.draft?.kind === 'agt' ? s.draft.fromStationId : undefined;
+      if (prev && prev !== stationId) {
+        const placed = applyOp(addAgtSegment(s.history.present, { fromStationId: prev, toStationId: stationId }), { select: true });
+        if (placed) actions.setDraft(null);
+      } else {
+        actions.setDraft({ kind: 'agt', fromStationId: stationId });
+        showToast('駅を選びました。続けて、接続先の駅（同じ系統）をクリックしてください', 'info');
       }
       return;
     }

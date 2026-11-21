@@ -42,6 +42,13 @@ export const BALANCE = {
       culturalHall: 1_500_000,
     } as Partial<Record<FacilityKind, number>>,
     jetBridge: 150_000,
+    /**
+     * AGT（機能I）: 駅は固定費（内部設備でも単独でも同額）。セグメントは距離単価 × distanceM で、
+     * 基本単価は動く歩道の m 換算（movingWalkwayPerTile / TILE_M = 480）と同水準。
+     * 高架（level > 0）は elevatedMultiplier、地下（level < 0）は掘削係数
+     * undergroundTerminalPerFloor を深さぶん重ねる（construction.ts の layoutItems）。
+     */
+    agt: { station: 3_000_000, segmentPerMeter: 480 },
     /** 車両の購入費（GSE基地のプロパティの台数分） */
     vehicle: { tug: 150_000, beltLoader: 80_000, baggageTractor: 60_000, fuelTruck: 200_000, cateringTruck: 120_000, cleaningVan: 50_000, apronBus: 250_000 } as Partial<Record<UnitKind, number>>,
     /** ターミナル内のエリア（設備1つあたり、またはタイルあたり） */
@@ -114,6 +121,12 @@ export const BALANCE = {
     access: { taxiStand: 300, busStop: 800, busTerminal: 2_400, railStation: 6_000, hotel: 2_000 },
     /** 職員用駐車場が足りない分の通勤対策費（1台分あたり） */
     staffCommutePerMissing: 600,
+    /**
+     * AGT（機能I）の運営費: 系統ごとの日額 = 編成数 × trainsetPerDay + 駅数 × stationPerDay。
+     * 編成数は集約式 ceil(総延長 × 2 / (speedMps × headwaySec))（model/agt）。
+     * 資産額連動の維持費（maintenanceRate）とは別枠で、費用区分 'agtOps' に計上する
+     */
+    agt: { trainsetPerDay: 180_000, stationPerDay: 20_000 },
   },
   /** 地上支援の作業ごとの運営費 */
   taskCost: { unload: 300, load: 300, fuel: 600, clean: 400, cater: 300, inspect: 600, pushback: 200, defect: 3_000, busTrip: 150 } as Record<string, number>,

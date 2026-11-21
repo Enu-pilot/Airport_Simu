@@ -1,5 +1,7 @@
 import type { AirportLayout } from '../model/types';
 import type { TerminalTransitRuntime } from '../sim/types';
+import { agtSegmentCapacityPerHour } from '../model/agt';
+import { agtStationConnectedAreas } from './agt';
 import { terminalLinkCapacityPerHour, type TerminalModel } from './model';
 
 export interface TerminalTransitStatus {
@@ -41,6 +43,40 @@ export function terminalTransitStatus(
       capacityPerHour: terminalLinkCapacityPerHour(link),
       reservedThisHour: runtime?.passengersByLink[link.id] ?? 0,
       waitingPax: waitingByLink[link.id] ?? 0,
+    });
+  }
+  // 機能I: AGT セグメントも同じ状態表示・同じ時間帯予約（passengersByLink）の対象。
+  // 端点名は両駅が接続するエリア（無ければ駅自身）で表す
+  for (const seg of Object.values(layout.agtSegments ?? {})) {
+    const system = layout.agtSystems?.[seg.systemId];
+    if (!system) continue;
+    const endpoint = (stationId: string): { areaId: string; areaName: string; terminalId: string } => {
+      const station = layout.facilities[stationId];
+      if (!station) return { areaId: '', areaName: stationId, terminalId: '' };
+      const connected = agtStationConnectedAreas(layout, station);
+      const area = connected.length ? layout.terminalAreas[connected[0]!] : undefined;
+      if (area) return { areaId: area.id, areaName: area.name ?? area.id, terminalId: area.terminalId };
+      return {
+        areaId: '',
+        areaName: station.name || station.id,
+        terminalId: station.parentFacilityId ?? '',
+      };
+    };
+    const from = endpoint(seg.fromStationId);
+    const to = endpoint(seg.toStationId);
+    statuses.set(seg.id, {
+      id: seg.id,
+      name: system.name || seg.id,
+      fromAreaId: from.areaId,
+      fromAreaName: from.areaName,
+      toAreaId: to.areaId,
+      toAreaName: to.areaName,
+      fromTerminalId: from.terminalId,
+      toTerminalId: to.terminalId,
+      buildState: seg.buildState ?? 'operational',
+      capacityPerHour: agtSegmentCapacityPerHour(system),
+      reservedThisHour: runtime?.passengersByLink[seg.id] ?? 0,
+      waitingPax: waitingByLink[seg.id] ?? 0,
     });
   }
   for (const [fromId, links] of Object.entries(model.links)) {

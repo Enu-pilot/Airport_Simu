@@ -3,6 +3,7 @@ import { DecimalInput, Field, Info, NumberInput, Section, TextInput } from './fi
 import { EASA_OMGWS_BANDS, FAA_TDG_PAVEMENT_WIDTH_M, assessTaxiwayWidth, requiredPavementWidthM } from '../core/airside/taxiwayDesign';
 import { AirportSettings, CriterionBadge, FreeRunwayFields, LegacyRunwayExtras, legacyHeadingLabel } from './RunwayPanels';
 import { GatePbbSection } from './PbbSection';
+import { AgtStationSection } from './AgtSection';
 import { FACILITY_SIM_EFFECT, FACILITY_SPECS, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TERMINAL_AREA_SPECS, TILE_M, propDefault } from '../core/model/catalog';
 import { blockCapacity } from '../core/sim/taxiBlocks';
 import { blockGraphOf } from '../core/layout/blockGraph';
@@ -1568,6 +1569,20 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
                   ))}
               </select>
             )}
+            {def.type === 'agtSystemRef' && (
+              <select
+                value={(f.props[def.key] as string | null) ?? ''}
+                onChange={(e) => update(layout, id, { props: { [def.key]: e.target.value || null } })}
+                data-testid={`prop-${def.key}`}
+              >
+                <option value="">（未所属）</option>
+                {sortedValues(layout.agtSystems ?? {}).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name || s.id}
+                  </option>
+                ))}
+              </select>
+            )}
             {def.type === 'standRef' && (
               <select
                 value={(f.props[def.key] as string | null) ?? ''}
@@ -1600,6 +1615,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
           </Info>
         )}
         {f.kind === 'gate' && <GatePbbSection layout={layout} gate={f} />}
+        {f.kind === 'agtStation' && <AgtStationSection layout={layout} station={f} />}
         {(f.kind === 'gseBase' || f.kind === 'maintenance') && <GroundCapacityInfo layout={layout} />}
         {f.kind === 'baggageSort' && (
           <Info label="処理上限" title="仕分け機1施設あたりの処理上限。合計は運用中の全仕分け施設の合算（空港全体の仕分け能力）">

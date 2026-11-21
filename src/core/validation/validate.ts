@@ -26,7 +26,7 @@ import { classifySegmentIntersection } from '../geometry/segment';
 import { rasterizeSegment } from '../geometry/vec';
 import { satOverlapConvex } from '../geometry/polygon';
 import { TILE_M } from '../model/catalog';
-import type { NetNode, TerminalArea, TerminalAreaKind, TerminalTransitLink } from '../model/types';
+import type { AgtSegment, NetNode, TerminalArea, TerminalAreaKind, TerminalTransitLink } from '../model/types';
 import { connectionSegmentLevel, verticalGroupStairsOnly, verticalStepsCovered } from '../terminal/connectionFacility';
 import { CONNECTOR_DETOUR, DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
 import { verifyPortalAccess } from '../terminal/networkGraph';
@@ -35,6 +35,8 @@ import { deckElevationForCode, requiredAircraftClearanceM, requiredClearanceForC
 import { apronBusesOf, connectedTerminal, gateMode } from '../model/gates';
 import { DOOR_SILL_M, DOOR_SILL_UPPER_M, PBB_TYPES, type PbbDeck } from '../model/catalog';
 import { PBB_ENTRY_RANGE, hasExplicitPbb, pbbDeckOf, pbbGateIdOf, pbbStandIdOf, pbbTypeOf } from '../model/boardingBridge';
+import { agtParamProblem, agtStationSystemId } from '../model/agt';
+import { agtStationConnectedAreas, agtStationMapLevel } from '../terminal/agt';
 import { findPaxRoute } from '../terminal/route';
 import { ACCESS_MAX_WALK_TILES, PARKING_MAX_WALK_TILES, buildLandsideNetwork, distanceToTerminal, touchesTilesAtLevel } from '../access/landside';
 import { connectorFits, facilityLevel, floorDisplayLabel, roadEdgeLevelValid, DEFAULT_LEVEL_HEIGHT_M } from '../model/levels';
@@ -147,6 +149,13 @@ export type IssueCode =
   | 'PBB_LEGACY_OVERRIDDEN'
   | 'INTERIOR_FACILITY_UNLINKED'
   | 'TERMINAL_LINK_CLEARANCE'
+  // AGT（機能I）
+  | 'AGT_STATION_ORPHAN'
+  | 'AGT_SEGMENT_ENDPOINT'
+  | 'AGT_STATION_ISOLATED'
+  | 'AGT_LEVEL_MISMATCH'
+  | 'AGT_CLEARANCE'
+  | 'AGT_PARAM_RANGE'
   // 複合連絡施設（J-2）
   | 'CONNECTION_FACILITY_DANGLING'
   | 'CONNECTION_FACILITY_FLOOR_GAP'
@@ -252,6 +261,12 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   PBB_LEGACY_OVERRIDDEN: 'info',
   INTERIOR_FACILITY_UNLINKED: 'info',
   TERMINAL_LINK_CLEARANCE: 'error',
+  AGT_STATION_ORPHAN: 'warning',
+  AGT_SEGMENT_ENDPOINT: 'error',
+  AGT_STATION_ISOLATED: 'warning',
+  AGT_LEVEL_MISMATCH: 'error',
+  AGT_CLEARANCE: 'error',
+  AGT_PARAM_RANGE: 'error',
   CONNECTION_FACILITY_DANGLING: 'error',
   CONNECTION_FACILITY_FLOOR_GAP: 'warning',
   CONNECTION_FACILITY_STEP_FREE: 'warning',
@@ -1284,6 +1299,7 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
   for (const cf of sortedValues(layout.connectionFacilities ?? {})) {
     const dangling: string[] = [];
     let link: TerminalTransitLink | undefined;
+    let agtSeg: AgtSegment | undefined;
     let from: TerminalArea | undefined;
     let to: TerminalArea | undefined;
     if (cf.segment.kind === 'link') {
@@ -1296,9 +1312,25 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
         if (!to) dangling.push(link.toAreaId);
       }
     } else {
-      // AGT セグメント（機能I）は未実装のため、現時点では解決不能な参照として
-      // DANGLING 扱いにする（型の union は I への接続点として用意してある）
-      dangling.push(cf.segment.segmentId);
+      // 機能I: AGT セグメントは layout.agtSegments で解決する。端点は両駅が接続する
+      // エリア（垂直エリアの所属ターミナル照合に使う）。駅が無い・接続エリアが無い
+      // 場合は端点を確定できず、参照切れとして扱う
+      agtSeg = layout.agtSegments?.[cf.segment.segmentId];
+      if (!agtSeg) dangling.push(cf.segment.segmentId);
+      else {
+        const endpointArea = (stationId: string): TerminalArea | undefined => {
+          const station = layout.facilities[stationId];
+          if (!station || station.kind !== 'agtStation') return undefined;
+          const connected = agtStationConnectedAreas(layout, station);
+          return connected.length ? layout.terminalAreas[connected[0]!] : undefined;
+        };
+        const fromStation = layout.facilities[agtSeg.fromStationId];
+        const toStation = layout.facilities[agtSeg.toStationId];
+        if (!fromStation || fromStation.kind !== 'agtStation') dangling.push(agtSeg.fromStationId);
+        if (!toStation || toStation.kind !== 'agtStation') dangling.push(agtSeg.toStationId);
+        from = endpointArea(agtSeg.fromStationId);
+        to = endpointArea(agtSeg.toStationId);
+      }
     }
     const sideAreas = (ids: string[], endpoint: TerminalArea | undefined): TerminalArea[] => {
       const out: TerminalArea[] = [];
@@ -1341,6 +1373,86 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
       if (cf.stepFree && (verticalGroupStairsOnly(aAreas) || verticalGroupStairsOnly(bAreas))) {
         const stairsIds = [...aAreas, ...bAreas].filter((a) => a.kind === 'stairs').map((a) => a.id);
         sink.add('CONNECTION_FACILITY_STEP_FREE', [cf.id, ...stairsIds], {}, from.origin);
+      }
+    }
+    if (agtSeg && from && to) {
+      // AGT セグメント側の階カバー: セグメントの階（端点ターミナルの建物内階に換算）と
+      // 端点エリア（駅が接続するエリア）の階の段差を、垂直エリア群がカバーするか
+      const sides = [
+        { side: 'a', endpoint: from, areas: aAreas },
+        { side: 'b', endpoint: to, areas: bAreas },
+      ] as const;
+      for (const s of sides) {
+        const base = layout.facilities[s.endpoint.terminalId] ? facilityLevel(layout.facilities[s.endpoint.terminalId]!) : 0;
+        const segFloor = agtSeg.level - base;
+        if (!verticalStepsCovered(s.areas, s.endpoint.level, segFloor)) {
+          sink.add(
+            'CONNECTION_FACILITY_FLOOR_GAP',
+            [cf.id],
+            {
+              side: s.side,
+              endpointFloorLabel: floorDisplayLabel(base + s.endpoint.level),
+              segmentFloorLabel: floorDisplayLabel(agtSeg.level),
+            },
+            s.endpoint.origin,
+          );
+        }
+      }
+      if (cf.stepFree && (verticalGroupStairsOnly(aAreas) || verticalGroupStairsOnly(bAreas))) {
+        const stairsIds = [...aAreas, ...bAreas].filter((a) => a.kind === 'stairs').map((a) => a.id);
+        sink.add('CONNECTION_FACILITY_STEP_FREE', [cf.id, ...stairsIds], {}, from.origin);
+      }
+    }
+  }
+
+  // AGT（機能I）: 駅の接続・系統パラメータ・セグメントの端点/階層/クリアランス（§I.4）
+  {
+    const systems = layout.agtSystems ?? {};
+    const segments = layout.agtSegments ?? {};
+    const segmentCountBySystem = new Map<string, number>();
+    for (const seg of Object.values(segments)) segmentCountBySystem.set(seg.systemId, (segmentCountBySystem.get(seg.systemId) ?? 0) + 1);
+    for (const sys of sortedValues(systems)) {
+      const problem = agtParamProblem(sys);
+      if (problem) sink.add('AGT_PARAM_RANGE', [sys.id], { param: problem, value: sys[problem] });
+    }
+    for (const st of sortedValues(layout.facilities).filter((f) => f.kind === 'agtStation')) {
+      if (agtStationConnectedAreas(layout, st).length === 0) {
+        sink.add('AGT_STATION_ORPHAN', [st.id], {}, st.origin);
+      }
+      const sysId = agtStationSystemId(st);
+      if (!sysId || !systems[sysId] || (segmentCountBySystem.get(sysId) ?? 0) === 0) {
+        sink.add('AGT_STATION_ISOLATED', [st.id], {}, st.origin);
+      }
+    }
+    for (const seg of sortedValues(segments)) {
+      const from = layout.facilities[seg.fromStationId];
+      const to = layout.facilities[seg.toStationId];
+      const endpointBad =
+        !from || from.kind !== 'agtStation' || agtStationSystemId(from) !== seg.systemId ||
+        !to || to.kind !== 'agtStation' || agtStationSystemId(to) !== seg.systemId;
+      if (endpointBad) {
+        sink.add('AGT_SEGMENT_ENDPOINT', [seg.id, seg.fromStationId, seg.toStationId], {}, from?.origin ?? to?.origin);
+      }
+      if (from?.kind === 'agtStation' && to?.kind === 'agtStation') {
+        const fromLevel = agtStationMapLevel(layout, from);
+        const toLevel = agtStationMapLevel(layout, to);
+        if (seg.level !== fromLevel || seg.level !== toLevel) {
+          sink.add('AGT_LEVEL_MISMATCH', [seg.id], {
+            segmentFloorLabel: floorDisplayLabel(seg.level),
+            fromFloorLabel: floorDisplayLabel(fromLevel),
+            toFloorLabel: floorDisplayLabel(toLevel),
+          }, from.origin);
+        }
+      }
+      if (seg.level > 0) {
+        // J-1 の宣言方式: 宣言があれば宣言基準、無ければ全体基準（従来の既定デッキ 36m）
+        const declared = seg.crossingMaxCode;
+        const required = declared ? requiredClearanceForCode(declared) : requiredAircraftClearanceM();
+        const requiredDeck = declared ? deckElevationForCode(declared) : DEFAULT_TERMINAL_LINK_ELEVATION_M;
+        const elevation = seg.level * DEFAULT_LEVEL_HEIGHT_M;
+        if (elevation < requiredDeck) {
+          sink.add('AGT_CLEARANCE', [seg.id], { clearance: elevation, required, elevation }, from?.origin ?? to?.origin);
+        }
       }
     }
   }

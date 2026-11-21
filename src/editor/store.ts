@@ -43,7 +43,7 @@ import {
 import type { SimClock } from '../core/sim/clock';
 import type { ServiceGranularity } from '../core/sim/serviceAggregate';
 
-export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | 'land' | 'pbb' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
+export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | 'land' | 'pbb' | 'agt' | `facility:${FacilityKind}` | `area:${TerminalAreaKind}`;
 
 export interface ToolOptions {
   rotation: Rotation;
@@ -93,6 +93,8 @@ export type Draft =
   | { kind: 'move'; id: string; start: Tile }
   /** 搭乗橋（PBB）ツールの2クリック配置: 先に選んだ側（スポットまたはゲート）を保持する */
   | { kind: 'pbb'; standId?: string; gateId?: string }
+  /** AGT セグメント接続ツール（機能I）の2クリック接続: 先に選んだ駅を保持する */
+  | { kind: 'agt'; fromStationId?: string }
   | null;
 
 export interface Overlays {

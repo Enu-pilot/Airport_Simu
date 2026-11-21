@@ -48,6 +48,15 @@ export function terminalAt(layout: AirportLayout, tile: Tile): string | null {
 export const facilityKindOf = (tool: ToolId): FacilityKind | null =>
   tool.startsWith('facility:') ? (tool.slice('facility:'.length) as FacilityKind) : null;
 
+/** AGT セグメント接続ツール（機能I）のクリック対象: そのタイルを含む AGT 駅の ID */
+export function agtStationAt(layout: AirportLayout, tile: Tile): string | null {
+  for (const f of Object.values(layout.facilities)) {
+    if (f.kind !== 'agtStation') continue;
+    if (facilityTiles(f).some((t) => t.x === tile.x && t.y === tile.y)) return f.id;
+  }
+  return null;
+}
+
 /** 搭乗橋（PBB）ツールのクリック対象: そのタイルを含むスポット / ゲート（機能H） */
 export function pbbPickAt(layout: AirportLayout, tile: Tile): { standId?: string; gateId?: string } {
   const out: { standId?: string; gateId?: string } = {};

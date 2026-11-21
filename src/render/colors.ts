@@ -15,6 +15,7 @@ export const FACILITY_COLOR: Record<FacilityKind, number> = {
   terminal: 0xb7c3cf,
   gate: 0xe8b23a,
   boardingBridge: 0x4a6fa5,
+  agtStation: 0x2e7d6b,
   hangar: 0x8d99a6,
   tower: 0xd2694a,
   maintenance: 0x9583b0,

@@ -138,6 +138,34 @@ export function checkRunwayFields(layout: AirportLayout, where: string): string[
     }
     if (typeof cf.stepFree !== 'boolean') errors.push(`${where}: 複合連絡施設 ${id} の stepFree が不正です`);
   }
+  // AGT（機能I）: 系統・セグメント記録の形だけを検査する。参照先の存在と
+  // パラメータ範囲はゲーム側の検証（AGT_*）が扱い、読み込みは拒否しない
+  const agtSystems = layout.agtSystems === undefined ? {} : isObj(layout.agtSystems) ? layout.agtSystems : {};
+  if (layout.agtSystems !== undefined && !isObj(layout.agtSystems)) errors.push(`${where}: agtSystems が不正です`);
+  for (const [id, raw] of Object.entries(agtSystems)) {
+    if (!isObj(raw)) { errors.push(`${where}: AGT 系統 ${id} が不正です`); continue; }
+    const sys = raw as Record<string, unknown>;
+    if (sys.id !== id) errors.push(`${where}: AGT 系統 ${id} の ID が一致しません`);
+    if (typeof sys.name !== 'string') errors.push(`${where}: AGT 系統 ${id} の名前が不正です`);
+    for (const key of ['vehicleCapacity', 'headwaySec', 'dwellSec', 'speedMps'] as const) {
+      if (!isFin(sys[key])) errors.push(`${where}: AGT 系統 ${id} の ${key} が不正です`);
+    }
+    if (!['operational', 'underConstruction', 'planned'].includes(String(sys.buildState))) errors.push(`${where}: AGT 系統 ${id} の状態が不正です`);
+  }
+  const agtSegments = layout.agtSegments === undefined ? {} : isObj(layout.agtSegments) ? layout.agtSegments : {};
+  if (layout.agtSegments !== undefined && !isObj(layout.agtSegments)) errors.push(`${where}: agtSegments が不正です`);
+  for (const [id, raw] of Object.entries(agtSegments)) {
+    if (!isObj(raw)) { errors.push(`${where}: AGT セグメント ${id} が不正です`); continue; }
+    const seg = raw as Record<string, unknown>;
+    if (seg.id !== id) errors.push(`${where}: AGT セグメント ${id} の ID が一致しません`);
+    if (typeof seg.systemId !== 'string' || typeof seg.fromStationId !== 'string' || typeof seg.toStationId !== 'string' || seg.fromStationId === seg.toStationId) {
+      errors.push(`${where}: AGT セグメント ${id} の接続が不正です`);
+    }
+    if (!isFin(seg.distanceM) || (seg.distanceM as number) <= 0) errors.push(`${where}: AGT セグメント ${id} の距離が不正です`);
+    if (seg.crossingMaxCode !== undefined && !['C', 'E', 'F'].includes(String(seg.crossingMaxCode))) errors.push(`${where}: AGT セグメント ${id} の crossingMaxCode が不正です`);
+    if (!Number.isInteger(seg.level) || (seg.level as number) < -5 || (seg.level as number) > 10) errors.push(`${where}: AGT セグメント ${id} の階層が不正です`);
+    if (!['operational', 'underConstruction', 'planned'].includes(String(seg.buildState))) errors.push(`${where}: AGT セグメント ${id} の状態が不正です`);
+  }
   return errors;
 }
 

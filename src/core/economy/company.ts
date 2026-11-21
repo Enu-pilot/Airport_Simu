@@ -36,7 +36,9 @@ export type CostCategory =
   | 'groundOps'
   | 'compensation'
   | 'disruption'
-  | 'cargoHandling';
+  | 'cargoHandling'
+  /** AGT の運営費（機能I。系統ごとの日額、資産額連動維持費とは別枠） */
+  | 'agtOps';
 export type LedgerCategory = RevenueCategory | CostCategory | 'construction';
 
 export const REVENUE_CATEGORIES: readonly RevenueCategory[] = [
@@ -64,6 +66,7 @@ export const COST_CATEGORIES: readonly CostCategory[] = [
   'compensation',
   'disruption',
   'cargoHandling',
+  'agtOps',
 ];
 
 export type TimeWindow = 'morning' | 'daytime' | 'evening' | 'any';
