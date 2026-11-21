@@ -257,3 +257,4 @@
 | R-03 | 地下単独建物の搭乗口の扱い（2026-G/H の未決事項） | 推奨案は「地下の搭乗口は原則バスゲート扱い。PBB を使う場合は地上の小規模ピアと組にする」で、PO 未確定。その他の未決事項 13 件は [地下ターミナル・PBB・AGT 計画](implementation/planned/underground_terminal_pbb_agt_plan.md) §8 の詳細設計書参照 |
 | R-04 | Vercel デプロイの Actions Secrets と初回実行の確認 | GitHub Actions 経由デプロイへの一本化（`vercel.json` で Git 連携デプロイ無効化＋workflow 2 点）は 2026-11-20 に main へ反映済み。Secrets（VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID）の設定有無と初回 workflow 実行の成否は未確認（PO 確認待ち）。あわせて PR #59（favicon）のマージ状況も未確認 |
 | R-05 | 乗客生成の見直し（2026-PAX）が未着手 | 巨大空港では乗客が早めに来ること・ラウンジ等の滞在時間を生成に反映する要望。5-19・5-21 と接続して設計する。計画書は着手時に作成 |
+| R-06 | 離陸入口制限の第 2 段（2026-TK）が未着手 | 第 1 段（診断のみ）は実施済み（検証に 3 コード追加、挙動変更なし）。経営 sim の入口候補の絞り込み自体は実装済みで、残る論点は (1) 候補ゼロ便の現在の実挙動の計測とフォールバック方針（「最も残りの長い入口から制限緩和で出発＋日報/ジャーナルに記録」が推奨案。延期・欠航は PO 判断）、(2) ATC コア側の holdShort 候補の絞り込み（lineUp / takeoff の経路形状の切り分けが前提）。実施時は `SIM_MODEL_VERSION` の版上げとゴールデン再採取が必要（docs/42 §5）。詳細は [離陸入口制限計画](implementation/active/takeoff_entry_restriction_plan.md) §10 |

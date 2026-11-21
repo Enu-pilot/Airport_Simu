@@ -1,6 +1,7 @@
 import { runwayDimsProblem } from '../model/runwayReference';
 import { AGT_SEGMENT_DETOUR, DEFAULT_PROPS, FACILITY_SPECS, FREE_RUNWAY_MAX_M, FREE_RUNWAY_MIN_M, PROP_SCHEMAS, TAXI_BLOCK_MAX_AIRCRAFT, TAXI_BLOCK_TILES_DEFAULT, TAXI_BLOCK_TILES_MAX, TAXI_BLOCK_TILES_MIN, TERMINAL_AREA_SPECS, TILE_M, type PbbBridgeType, type PbbDeck } from '../model/catalog';
-import { PBB_ENTRY_RANGE, pbbDeckOf } from '../model/boardingBridge';
+import { PBB_ENTRY_RANGE, explicitPbbForGate, pbbDeckOf } from '../model/boardingBridge';
+import { gateMode } from '../model/gates';
 import { agtParamProblem, agtStationSystemId } from '../model/agt';
 import { agtStationConnectedAreas, agtStationMapLevel } from '../terminal/agt';
 import { baseTerrainAt, createSite, inSite, isBuildable, terrainAt } from '../model/site';
@@ -236,12 +237,14 @@ function nearestStandForGate(d: AirportLayout, gate: Facility): string | null {
 }
 
 /**
- * PBB の占有帯（地上 3〜6m）と重なる既存の占有がタイルにあるか。
- * validation の checkPlacement と同じ基準（セル占有 × 垂直区間の交差、apron とは両立）を
- * このタイルぶんだけ判定する。多角形（自由形）の部分は対象外（検証側の警告に任せる）。
+ * PBB の占有帯（地上 3〜6m）と重なる既存占有のあるタイルの集合。
+ * 従来の pbbTileBlocked 相当の判定（セル占有 × 垂直区間の交差、apron とは両立、
+ * 多角形（自由形）の部分は対象外）を、候補タイルごとに全 parts を走査せず
+ * 一度だけ計算する。実セーブ規模では collectFootprints と並んで一括付与の
+ * 主コストのため、bulk 側で使い回す（判定そのものは不変）。
  */
-function pbbTileBlocked(parts: readonly FootprintPart[], site: Site, tile: Tile): boolean {
-  if (!inSite(site, tile.x, tile.y) || !isBuildable(site, tile.x, tile.y)) return true;
+function pbbBlockedTiles(parts: readonly FootprintPart[]): Set<string> {
+  const blocked = new Set<string>();
   const minBand = 3;
   const maxBand = 6;
   for (const p of parts) {
@@ -254,16 +257,23 @@ function pbbTileBlocked(parts: readonly FootprintPart[], site: Site, tile: Tile)
       })),
     );
     for (const c of cells) {
-      if (c.tile.x === tile.x && c.tile.y === tile.y && c.minM < maxBand && minBand < c.maxM) return true;
+      if (c.minM < maxBand && minBand < c.maxM) blocked.add(tileKey(c.tile.x, c.tile.y));
     }
   }
-  return false;
+  return blocked;
 }
 
 export interface PlaceBoardingBridgeOptions {
   bridgeType?: PbbBridgeType;
   deck?: PbbDeck;
   buildState?: BuildState;
+  /**
+   * 占有判定に使うブロック済みタイル集合（省略時は collectFootprints から計算）。
+   * bulkPlaceBoardingBridges が使い回すための内部フック。呼び出し側は配置のたびに
+   * 新設 PBB のタイル（1×1・地上 3〜6m 帯の占有）を追加すること（追加のみの
+   * 変更のため再計算と等価）。
+   */
+  blockedTiles?: ReadonlySet<string>;
 }
 
 /**
@@ -300,9 +310,9 @@ export function placeBoardingBridge(
     return out.sort((a, b) => dist2(a) - dist2(b));
   };
   const candidates = [...ring(1), entry, ...(PBB_ENTRY_RANGE >= 2 ? ring(2) : [])];
-  const parts = collectFootprints(layout);
+  const blocked = opts.blockedTiles ?? pbbBlockedTiles(collectFootprints(layout));
   for (const tile of candidates) {
-    if (pbbTileBlocked(parts, layout.site, tile)) continue;
+    if (!inSite(layout.site, tile.x, tile.y) || !isBuildable(layout.site, tile.x, tile.y) || blocked.has(tileKey(tile.x, tile.y))) continue;
     const dx = entry.x - tile.x;
     const dy = entry.y - tile.y;
     const rotation: Rotation =
@@ -317,6 +327,88 @@ export function placeBoardingBridge(
     if (placed.ok) return placed;
   }
   return fail('INVALID_VALUE');
+}
+
+/** 全コンタクトゲートへの PBB 一括付与で、付けなかったゲートの理由 */
+export type BulkBoardingBridgeSkipReason =
+  /** 明示の main デッキ PBB 済み（2本目を作らない） */
+  | 'alreadyAttached'
+  /** バスゲート（橋を使わない） */
+  | 'bus'
+  /** スポット紐付けなし */
+  | 'noStand'
+  /** jetBridge 無効（合成の橋が無いゲート。費用中立の対象外のため付けない） */
+  | 'noJetBridge'
+  /** 配置場所が見つからない等（placeBoardingBridge が失敗） */
+  | 'placementFailed';
+
+export interface BulkBoardingBridgeSkip {
+  gateId: string;
+  reason: BulkBoardingBridgeSkipReason;
+}
+
+export interface BulkBoardingBridgeResult {
+  layout: AirportLayout;
+  /** 明示 tunnel1（main / operational）を付けたゲート ID（ID 順） */
+  attachedGateIds: string[];
+  /** 新しく作った PBB 施設 ID（attachedGateIds と同じ順） */
+  created: string[];
+  /** 付けなかったゲートとその理由（ID 順） */
+  skipped: BulkBoardingBridgeSkip[];
+}
+
+/**
+ * 全コンタクトゲートに搭乗橋（PBB）を一括で付ける（実データ化）。
+ * コンタクトゲートを ID 順に走査し、合成のみのゲート（jetBridge 有効・明示 main
+ * デッキ PBB なし）に既存の placeBoardingBridge（tunnel1 / main / operational）
+ * で明示の橋を付ける。ゲート側の jetBridge 設定は変えない（明示 PBB を消せば
+ * 合成に戻る。残った jetBridge は PBB_LEGACY_OVERRIDDEN（info）で知らせる）。
+ * 費用は中立のはず: ゲート側の jetBridge 上乗せ 150,000cr が外れ、tunnel1
+ * 建設費 150,000cr が PBB 側に移る（constructionCost の差分 0）。
+ * 占有（ブロック済みタイル）は一度だけ集計し、配置のたびに新設 PBB のタイルだけ
+ * 追加する（追加のみの変更のため再計算と等価）。実セーブ規模では
+ * collectFootprints が 1 回 ~0.4s あり、112 回呼ぶと数十秒になるため。
+ */
+export function bulkPlaceBoardingBridges(layout: AirportLayout): BulkBoardingBridgeResult {
+  let current = layout;
+  const attachedGateIds: string[] = [];
+  const created: string[] = [];
+  const skipped: BulkBoardingBridgeSkip[] = [];
+  const blocked = pbbBlockedTiles(collectFootprints(layout));
+  for (const gate of sortedValues(layout.facilities)) {
+    if (gate.kind !== 'gate') continue;
+    if (gateMode(gate) === 'bus') {
+      skipped.push({ gateId: gate.id, reason: 'bus' });
+      continue;
+    }
+    if (explicitPbbForGate(current, gate.id).some((u) => u.deck === 'main')) {
+      skipped.push({ gateId: gate.id, reason: 'alreadyAttached' });
+      continue;
+    }
+    const standId = typeof gate.props.standId === 'string' ? gate.props.standId : null;
+    if (!standId || !current.stands[standId]) {
+      skipped.push({ gateId: gate.id, reason: 'noStand' });
+      continue;
+    }
+    if (!gate.props.jetBridge) {
+      skipped.push({ gateId: gate.id, reason: 'noJetBridge' });
+      continue;
+    }
+    const placed = placeBoardingBridge(current, gate.id, standId, { bridgeType: 'tunnel1', deck: 'main', buildState: 'operational', blockedTiles: blocked });
+    if (!placed.ok) {
+      skipped.push({ gateId: gate.id, reason: 'placementFailed' });
+      continue;
+    }
+    current = placed.layout;
+    attachedGateIds.push(gate.id);
+    created.push(...placed.created);
+    // 新設 PBB は 1×1・地上 3〜6m 帯の占有なので、そのタイルを blocked へ追加する
+    for (const id of placed.created) {
+      const f = current.facilities[id];
+      if (f) blocked.add(tileKey(f.origin.x, f.origin.y));
+    }
+  }
+  return { layout: current, attachedGateIds, created, skipped };
 }
 
 export function placeStand(
@@ -1566,15 +1658,32 @@ export function deleteEntity(layout: AirportLayout, id: string): OpResult {
     case 'stand':
       if (!d.stands[id]) return fail('NOT_FOUND');
       delete d.stands[id];
+      // PBB（機能H）: そのスポットに紐付く搭乗橋は、橋だけ残しても意味を持たないため一緒に落とす
+      for (const f of Object.values(d.facilities)) {
+        if (f.kind === 'boardingBridge' && f.props.standId === id) delete d.facilities[f.id];
+      }
       break;
-    case 'facility':
+    case 'facility': {
       if (!d.facilities[id]) return fail('NOT_FOUND');
+      const deletedIds = new Set<string>([id]);
       delete d.facilities[id];
       for (const child of Object.values(d.facilities)) {
-        if (child.parentFacilityId === id) delete d.facilities[child.id];
+        if (child.parentFacilityId === id) {
+          delete d.facilities[child.id];
+          deletedIds.add(child.id);
+        }
+      }
+      // PBB（機能H）: ゲートとの紐付けは PBB 側の props.gateId だけで、parentFacilityId の
+      // 連動削除では消えないため、削除されたゲート（ターミナル配下の子ゲートを含む）に
+      // 紐付く搭乗橋を一緒に落とす
+      for (const f of Object.values(d.facilities)) {
+        if (f.kind === 'boardingBridge' && typeof f.props.gateId === 'string' && deletedIds.has(f.props.gateId)) {
+          delete d.facilities[f.id];
+        }
       }
       for (const a of areasOf(d, id)) delete d.terminalAreas[a.id];
       break;
+    }
     case 'terminalArea':
       if (!d.terminalAreas[id]) return fail('NOT_FOUND');
       delete d.terminalAreas[id];
@@ -1825,7 +1934,7 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
         travelSec: (v) => Number.isFinite(v) && Number(v) > 0,
         // フェーズ 4: 区間能力の既定値に使う車線数・線路数
         lanes: (v) => Number.isInteger(v) && Number(v) >= 1 && Number(v) <= 8,
-        tracks: (v) => v === 1 || v === 2,
+        tracks: (v) => v === 1 || v === 2 || v === 4,
       });
       break;
     case 'stand': {

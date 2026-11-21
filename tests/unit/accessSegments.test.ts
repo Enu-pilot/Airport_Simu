@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { addRoadPath, connectRoadLevels, placeFacility, updateEntity } from '../../src/core/layout/operations';
 import { createStarterAirfield } from '../../src/core/sample/starterAirfield';
 import { analyzeAccess } from '../../src/core/access/model';
+import { buildLandsideNetwork } from '../../src/core/access/landside';
+import { analyzeSegments, railEdgeCapacity } from '../../src/core/access/segments';
+import { exportLayout, importLayout } from '../../src/core/io/serialize';
 import { accessDeparture } from '../../src/core/access/runtime';
 import { createSandboxCompany } from '../../src/core/economy/company';
 import { createSimulation } from '../../src/core/sim/simulation';
 import type { PaxGroup } from '../../src/core/sim/types';
-import type { AirportLayout } from '../../src/core/model/types';
+import type { AirportLayout, RoadEdge } from '../../src/core/model/types';
 import { must } from './helpers';
 
 const seg = (l: AirportLayout): AirportLayout => ({ ...l, accessCapacityModel: 'segment' });
@@ -83,6 +86,71 @@ describe('accessSegments: 区間能力の解析（4E / §6.2）', () => {
     const a = analyzeAccess(seg(dbl));
     expect(a.segments!.railPlatformCapacity).toBe(6);
     expect(a.trainsPerHour).toBe(6);
+  });
+});
+
+describe('accessSegments: 鉄道の複々線（2026-QT）', () => {
+  const edge = (patch: Partial<RoadEdge>): RoadEdge => ({ id: 'e', from: 'a', to: 'b', name: '', roadClass: 'rail', oneWay: false, buildState: 'operational', ...patch });
+
+  it('railEdgeCapacity: 単線 4・複線 12・複々線 24、明示能力が最優先', () => {
+    expect(railEdgeCapacity(edge({}))).toBe(4);
+    expect(railEdgeCapacity(edge({ tracks: 1 }))).toBe(4);
+    expect(railEdgeCapacity(edge({ tracks: 2 }))).toBe(12);
+    expect(railEdgeCapacity(edge({ tracks: 4 }))).toBe(24);
+    expect(railEdgeCapacity(edge({ tracks: 4, capacityPerHour: 30 }))).toBe(30);
+    expect(railEdgeCapacity(edge({ tracks: 1, capacityPerHour: 9 }))).toBe(9);
+  });
+
+  it('線路数は 4 を受理し、3 を拒否する', () => {
+    const base = withRail(createStarterAirfield());
+    const railEdge = railRoad(base);
+    const quad = must(updateEntity(base, railEdge, { tracks: 4 })).layout;
+    expect(quad.roads[railEdge]!.tracks).toBe(4);
+    expect(updateEntity(base, railEdge, { tracks: 3 })).toEqual({ ok: false, reason: 'INVALID_VALUE' });
+  });
+
+  /** 駅 2 つ（宣言 20 ずつ・ホームは引数）を同じ 1 本の線路に付けたレイアウト */
+  function withTwoStations(platforms: number): AirportLayout {
+    let layout = withRail(createStarterAirfield(), { trainsPerHour: 20, platforms });
+    layout = must(placeFacility(layout, 'railStation', { x: 71, y: 75 }, { props: { trainsPerHour: 20, platforms } })).layout;
+    return layout;
+  }
+
+  it('区間モデル: 複々線の入口ボトルネックは 24 本/時（複線は 12 で頭打ち）', () => {
+    const base = withTwoStations(4); // 宣言 40・ホーム能力 48 で線路側だけを律速にする
+    const railEdge = railRoad(base);
+    const dbl = must(updateEntity(base, railEdge, { tracks: 2 })).layout;
+    expect(analyzeSegments(dbl, buildLandsideNetwork(dbl)).railTrainsPerHour).toBe(12);
+    const quad = must(updateEntity(base, railEdge, { tracks: 4 })).layout;
+    const segs = analyzeSegments(quad, buildLandsideNetwork(quad));
+    expect(segs.railDeclaredTrainsPerHour).toBe(40);
+    expect(segs.railPlatformCapacity).toBe(48);
+    expect(segs.railTrainsPerHour).toBe(24);
+  });
+
+  it('区間モデル: ホームが細ければ複々線でも駅側が頭打ちになる', () => {
+    const base = withTwoStations(1); // ホーム能力 6 × 2 駅 = 12
+    const quad = must(updateEntity(base, railRoad(base), { tracks: 4 })).layout;
+    const segs = analyzeSegments(quad, buildLandsideNetwork(quad));
+    expect(segs.railPlatformCapacity).toBe(12);
+    expect(segs.railTrainsPerHour).toBe(12);
+  });
+
+  it('集約モデルでは線路数は効かず、宣言の合算のまま', () => {
+    const base = withRail(createStarterAirfield());
+    const quad = must(updateEntity(base, railRoad(base), { tracks: 4 })).layout;
+    expect(analyzeAccess(quad).trainsPerHour).toBe(10);
+    // 区間モデルでも宣言 10 が複々線 24 より細ければ宣言が上限のまま
+    expect(analyzeAccess(seg(quad)).trainsPerHour).toBe(10);
+  });
+
+  it('tracks = 4 は保存/読込で往復する', () => {
+    const base = withRail(createStarterAirfield());
+    const railEdge = railRoad(base);
+    const quad = must(updateEntity(base, railEdge, { tracks: 4 })).layout;
+    const restored = importLayout(exportLayout(quad));
+    expect(restored.roads[railEdge]!.tracks).toBe(4);
+    expect(railEdgeCapacity(restored.roads[railEdge]!)).toBe(24);
   });
 });
 

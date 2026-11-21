@@ -4,7 +4,7 @@ import { worldToScreen } from '../core/geometry/camera';
 import { mToTiles, worldPolyToMap, worldToMap } from '../core/geometry/frames';
 import { distance, type Tile, type Vec2 } from '../core/geometry/vec';
 import { FACILITY_SPECS, PBB_TYPES, STRIP_HALF_WIDTH } from '../core/model/catalog';
-import { pbbDeckOf, pbbTypeOf } from '../core/model/boardingBridge';
+import { pbbDeckOf, pbbStandIdOf, pbbTypeOf } from '../core/model/boardingBridge';
 import { isBuildable } from '../core/model/site';
 import type { AirportLayout, BuildState, Facility, NetNode, PaxZone, Runway, RunwayFree, Site, Stand, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, isFreeRunway } from '../core/model/types';
@@ -324,7 +324,7 @@ export class MapRenderer {
       g.poly(flat(worldPolyToMap(runwayStripSurface(r)))).stroke({ width: this.px(1), color: COLOR.strip, alpha: 0.25 });
     }
     // エリア
-    for (const f of [...byLayer('apron'), ...byLayer('area')]) this.drawFacility(f);
+    for (const f of [...byLayer('apron'), ...byLayer('area')]) this.drawFacility(f, s.ops);
 
     // 滑走路（従来形も自由形も同じ runwaySurfaces から描く。従来形の舗装は実寸の幅で、判定の範囲は薄い輪郭で示す）
     for (const r of Object.values(layout.runways)) this.drawRunway(r, layout);
@@ -421,7 +421,7 @@ export class MapRenderer {
     // スポット
     for (const st of Object.values(layout.stands)) this.drawStand(st, !!analysis.network.standLinks[st.id]);
     // 建物・ゲート
-    for (const f of [...byLayer('building'), ...byLayer('gate')]) this.drawFacility(f);
+    for (const f of [...byLayer('building'), ...byLayer('gate')]) this.drawFacility(f, s.ops);
 
     // ノード
     const showNodes = this.zoom >= 6 || s.overlays.network || s.tool === 'taxiway' || s.tool === 'road';
@@ -487,14 +487,16 @@ export class MapRenderer {
     g.stroke({ width: this.px(1), color, alpha: 0.35 });
   }
 
-  private drawFacility(f: Facility): void {
+  private drawFacility(f: Facility, ops: OpsState | null): void {
     const g = this.g;
     const d = facilityDims(f);
     // 画面外の施設は描かない（矩形施設は origin + 寸法、非矩形は footprint の外接矩形で判定。
-    // 内部の印・枠線はすべてその内側か縁に収まる）
+    // 内部の印・枠線はすべてその内側か縁に収まる）。PBB は紐付くスポットの機体まで
+    // トンネルが伸びるため、施設タイルが画面外でも先端が見えるよう余白を広げる
+    const margin = 0.3 + 3 / this.zoom + (f.kind === 'boardingBridge' ? 6 : 0);
     if (f.footprint && f.footprint.length >= 3) {
-      if (!this.flatPolyInView(flat(f.footprint.map((p) => ({ x: p.x, y: p.y }))), 0.3 + 3 / this.zoom)) return;
-    } else if (!this.boxInView(f.origin.x, f.origin.y, d.w, d.h, 0.3 + 3 / this.zoom)) return;
+      if (!this.flatPolyInView(flat(f.footprint.map((p) => ({ x: p.x, y: p.y }))), margin)) return;
+    } else if (!this.boxInView(f.origin.x, f.origin.y, d.w, d.h, margin)) return;
     const alpha = BUILD_ALPHA[f.buildState];
     const color = FACILITY_COLOR[f.kind];
     const layer = FACILITY_SPECS[f.kind].layer;
@@ -526,19 +528,8 @@ export class MapRenderer {
       g.circle(jb.x, jb.y, 0.18).fill({ color: 0x333333, alpha });
     }
     if (f.kind === 'boardingBridge') {
-      // 機能H: 搭乗橋（PBB）を型式で描き分ける。トンネルは基部から向き（機体側）へ線を引き、
-      // 2本型式は平行2線、上デッキの基は中央に白丸を重ねる。互換合成だけのゲートは従来の印（上の丸）のまま
-      const base = worldToMap(f.origin);
-      const spec = PBB_TYPES[pbbTypeOf(f)];
-      const dir = { 0: [0, -1], 90: [1, 0], 180: [0, 1], 270: [-1, 0] }[f.rotation] as [number, number];
-      const cx = base.x + 0.5;
-      const cy = base.y + 0.5;
-      for (const o of spec.tunnels === 2 ? [-0.16, 0.16] : [0]) {
-        g.moveTo(cx - dir[0] * 0.3 - dir[1] * o, cy - dir[1] * 0.3 + dir[0] * o)
-          .lineTo(cx + dir[0] * 0.45 - dir[1] * o, cy + dir[1] * 0.45 + dir[0] * o);
-      }
-      g.stroke({ width: this.px(2), color: 0x222222, alpha });
-      if (pbbDeckOf(f) === 'upper') g.circle(cx, cy, 0.14).fill({ color: 0xffffff, alpha });
+      // 機能H: 搭乗橋（PBB）。描画は drawBoardingBridge に分離（駐機中は機体の左前ドアまで伸ばす）
+      this.drawBoardingBridge(f, ops, alpha);
     }
     // 向き（入口側）を示す印: 回転の向きに小さな三角
     if (layer === 'building' && f.kind !== 'tower') {
@@ -553,6 +544,88 @@ export class MapRenderer {
       });
     }
     this.buildStateOutline(g, [x, y, x + w, y, x + w, y + h, x, y + h], f.buildState);
+  }
+
+  /**
+   * 搭乗橋（PBB、機能H）の描画。基部（ロタンダ）は施設タイルの中心に置く。
+   * 紐付くスポットに駐機中の機体がいれば、トンネルを基部から機体の左前ドアまで
+   * 実際に伸ばして描く（根元 = 基部、先端 = ドア。向きは基部→ドアのベクトルで決まる）。
+   * 2本型式は基部側を橋と直交方向に、先端を機軸方向に少しずらして、2本とも
+   * ドア脇に届く形にする（実機の2トンネル橋のキャブ形状）。
+   * 機体がいない間は従来どおり、基部から施設の向き（rotation。配置時にスポット
+   * 入口側へ向けられる）へ短く描く（待機位置）。
+   * 互換合成だけのゲートには PBB 施設自体が無いので対象外（従来の丸印のまま）。
+   */
+  private drawBoardingBridge(f: Facility, ops: OpsState | null, alpha: number): void {
+    const g = this.g;
+    const d = facilityDims(f);
+    const base = { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 };
+    const spec = PBB_TYPES[pbbTypeOf(f)];
+    const offsets = spec.tunnels === 2 ? [-0.16, 0.16] : [0];
+    const door = f.buildState === 'operational' ? this.pbbDoorPoint(f, ops) : null;
+    if (door) {
+      // 接続中: 基部からドアへトンネルを伸ばす
+      const vx = door.x - base.x;
+      const vy = door.y - base.y;
+      const len = Math.hypot(vx, vy) || 1;
+      const px = -vy / len;
+      const py = vx / len;
+      for (const o of offsets) {
+        const tip = { x: door.x + door.axisX * o * 1.25, y: door.y + door.axisY * o * 1.25 };
+        g.moveTo(base.x + px * o, base.y + py * o).lineTo(tip.x, tip.y);
+      }
+      g.stroke({ width: this.px(2), color: 0x222222, alpha });
+      // 基部の印（根元と先端を取り違えないため）
+      g.circle(base.x, base.y, 0.1).fill({ color: 0x222222, alpha });
+    } else {
+      // 待機位置: 基部から施設の向きへ短く描く（従来の印。中心は施設タイル中心）
+      const dir = { 0: [0, -1], 90: [1, 0], 180: [0, 1], 270: [-1, 0] }[f.rotation] as [number, number];
+      for (const o of offsets) {
+        g.moveTo(base.x - dir[0] * 0.3 - dir[1] * o, base.y - dir[1] * 0.3 + dir[0] * o)
+          .lineTo(base.x + dir[0] * 0.45 - dir[1] * o, base.y + dir[1] * 0.45 + dir[0] * o);
+      }
+      g.stroke({ width: this.px(2), color: 0x222222, alpha });
+    }
+    if (pbbDeckOf(f) === 'upper') g.circle(base.x, base.y, 0.14).fill({ color: 0xffffff, alpha });
+  }
+
+  /**
+   * PBB が接続すべきドア位置（Map 座標）と機軸方向（機首向きの単位ベクトル）を返す。
+   * 紐付くスポットに駐機中の機体がいなければ null。
+   * ドア位置の専用データは機種表に無いので、機体描画（drawAircraft）と同じ機軸
+   * 座標系から導出する: 機首先端を a = 1 とし、L1 ドアは a = 0.8（機首から全長の
+   * 約1割後方。実機の L1 位置とほぼ一致）、左舷は b = -0.12（胴体半幅の翼幅比。
+   * drawAircraft のシルエットの fw と同じ値で、先端が描画上の胴体に接する）。
+   * 上デッキ基は2階建て機の前方上デッキドア（a = 0.74）を狙い、2階建て機で
+   * なければ接続しない。対象は駐機中（parked / turnaround / readyForPushback。
+   * 機体が動かない状態）のみで、補間なしの現在位置がシルエットと一致する。
+   */
+  private pbbDoorPoint(f: Facility, ops: OpsState | null): { x: number; y: number; axisX: number; axisY: number } | null {
+    if (!ops) return null;
+    const standId = pbbStandIdOf(f);
+    if (!standId) return null;
+    const deck = pbbDeckOf(f);
+    for (const ac of Object.values(ops.sim.state.aircraft)) {
+      if (ac.standId !== standId) continue;
+      if (ac.state !== 'parked' && ac.state !== 'turnaround' && ac.state !== 'readyForPushback') return null;
+      const t = resolveType(ops.sim.ctx.types, ac.typeId);
+      if (deck === 'upper' && !t.doubleDeck) return null;
+      const pos = worldToMap({ x: ac.x, y: ac.y });
+      const rad = (ac.heading * Math.PI) / 180;
+      const fx = Math.sin(rad);
+      const fy = -Math.cos(rad);
+      const half = Math.max(0.5, t.lengthM / 25 / 2);
+      const span = Math.max(0.5, t.wingspanM / 25 / 2);
+      const a = deck === 'upper' ? 0.74 : 0.8;
+      const b = -0.12; // 左舷（b > 0 が右翼側。drawAircraft の P(a, b) と同じ規約）
+      return {
+        x: pos.x + fx * a * half - fy * b * span,
+        y: pos.y + fy * a * half + fx * b * span,
+        axisX: fx,
+        axisY: fy,
+      };
+    }
+    return null;
   }
 
   private drawStand(st: Stand, connected: boolean): void {

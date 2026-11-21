@@ -53,6 +53,7 @@ Phase 6 は親計画です。5-18 / 5-19 / 5-20 / 5-21 / 5-25 と A6（Phase 5 5
 
 
 | Overnight carry-over departure readiness | completed | [overnight_departure_readiness_fix_plan.md](completed/overnight_departure_readiness_fix_plan.md) | skip された地上作業と固定タスク数の不整合。修正・通しテストによる翌朝便の離陸検証まで実施済み |
+| 2026-TK 離陸滑走の入口位置ベース制限（2段構え） | active（第1段） | [takeoff_entry_restriction_plan.md](active/takeoff_entry_restriction_plan.md) | 第1段は診断のみ（検証に2コード追加、挙動変更なし）。第2段（候補ゼロ時のフォールバック・ATC側）は未着手で計画書 §10 に設計下書き |
 
 ## 2026-11-20 PO 追加要望バッチの個別計画（docs/42 §3.11）
 
@@ -64,6 +65,7 @@ Phase 6 は親計画です。5-18 / 5-19 / 5-20 / 5-21 / 5-25 と A6（Phase 5 5
 | 2026-G〜J 地下ターミナル・PBB・AGT・階層統一 | planned（詳細設計完了・PO 承認済み） | [underground_terminal_pbb_agt_plan.md](planned/underground_terminal_pbb_agt_plan.md) | 5-18 の後段。推奨順 J-1 → G → H → J-2 → I。H に PBB 本数と既存ゲート置き換えの変更要望あり |
 | 2026-G 追随 ターミナル階範囲のプルダウン一本化 | active（実装済み・PR 化待ち） | [terminal_floor_span_unification_plan.md](active/terminal_floor_span_unification_plan.md) | パネルで建物の絶対階範囲（最下階・最上階）から基底階・階数を導出し、地下だけの建物をパネルから作れるようにする。エリア範囲の絞り込みは詳細設定として残置。版上げなし |
 | 2026-PERF 性能改善 | active（第1・2弾は PR #65 マージ済み、第3弾は実装完了・PR 化指示済み） | [performance_improvement_plan.md](active/performance_improvement_plan.md) | 計測→地図なし→結果不変の削減。簡略モードは保留 |
+| 2026-QT 鉄道の複々線 | active（実装完了・未push） | [rail_quadruple_track_plan.md](active/rail_quadruple_track_plan.md) | 線路辺 tracks = 4 を追加し、区間モデルの既定能力を 24 本/時に。集約モデル・既存レイアウト・保存形式・SIM 版は不変 |
 | 2026-CARGO 国内貨物航空会社の拡充 | active（実装完了・PR 化指示済み） | [domestic_cargo_airlines_plan.md](active/domestic_cargo_airlines_plan.md) | 5-12 貨物基盤の上のカタログ拡充。国内貨物専用機の対象はスプリング・ジャパンのみ |
 | 2026-UI 日報・経営再編／2026-LV 階層同期／2026-FIDS 便名カラー | 完了（PR #61・#62・#66 マージ済み） | 計画書は作成せず、確定仕様は docs/36・37・34・06 へ直接反映 | — |
 

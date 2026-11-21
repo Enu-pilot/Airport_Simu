@@ -54,7 +54,8 @@ const ROAD_SPEED_MPS = 30_000 / 3600; // 時速 30 km
 export const ROAD_LANE_CAPACITY_PER_HOUR = 900;
 
 export const roadEdgeCapacity = (e: RoadEdge): number => e.capacityPerHour ?? (e.lanes ?? 1) * ROAD_LANE_CAPACITY_PER_HOUR;
-export const railEdgeCapacity = (e: RoadEdge): number => e.capacityPerHour ?? ((e.tracks ?? 1) >= 2 ? 12 : 4);
+/** 線路の既定能力（本/時）: 単線 4・複線 12・複々線 24（2026-QT。複々線は複線の線形 2 倍）。capacityPerHour 未設定の辺に使う */
+export const railEdgeCapacity = (e: RoadEdge): number => e.capacityPerHour ?? ((e.tracks ?? 1) >= 4 ? 24 : (e.tracks ?? 1) >= 2 ? 12 : 4);
 
 function edgeT0Min(layout: AirportLayout, e: RoadEdge): number {
   const a = layout.roadNodes[e.from];
