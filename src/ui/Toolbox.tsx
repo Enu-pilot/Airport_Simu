@@ -2,6 +2,7 @@ import { FACILITY_SIM_EFFECT, FACILITY_SPECS } from '../core/model/catalog';
 import type { BuildState, FacilityKind, RoadClass, SizeClass } from '../core/model/types';
 import { BUILD_STATES } from '../core/model/types';
 import { actions, useEditor, type ToolId } from '../editor/store';
+import { digitKeyForLevel } from '../editor/shortcuts';
 import { facilityKindOf } from '../editor/tools';
 import { useLayout } from '../editor/store';
 import { RunwayToolOptions } from './RunwayPanels';
@@ -36,12 +37,12 @@ const GROUPS: { title: string; tools: ToolDef[] }[] = [
     title: '滑走路・誘導路',
     tools: [
       { id: 'runway', label: '滑走路', hint: '始点→終点をクリック（またはドラッグ）。既定は8方向（オプションで自由形: 任意の方位・実寸）' },
-      { id: 'taxiway', label: '誘導路', hint: 'クリックで頂点を追加、ダブルクリック/Enter/右クリックで確定' },
+      { id: 'taxiway', label: '誘導路', hint: 'クリックで頂点を追加、ダブルクリック/Enter/右クリックで確定（T キーで選択）' },
     ],
   },
   {
     title: 'エプロン・スポット',
-    tools: [fac('apron'), { id: 'stand', label: '駐機スポット', hint: 'クリックで配置（R で機首の向きを回転）' }],
+    tools: [fac('apron'), { id: 'stand', label: '駐機スポット', hint: 'クリックで配置（R で機首の向きを回転、P キーで選択）' }],
   },
   {
     title: 'ターミナル',
@@ -262,7 +263,7 @@ export function Toolbox() {
           ターミナル内部の階
           <span>
             {FLOOR_SELECTOR_LEVELS.map((l) => (
-              <button key={l} className={interior && level === l ? 'small tool active' : 'small'} onClick={() => actions.setInteriorLevel(l)} data-testid={`level-${l}`} title={floorDisplayLabel(l)}>
+              <button key={l} className={interior && level === l ? 'small tool active' : 'small'} onClick={() => actions.setInteriorLevel(l)} data-testid={`level-${l}`} title={`${floorDisplayLabel(l)}${digitKeyForLevel(l) ? `（${digitKeyForLevel(l)} キー）` : ''}`}>
                 {floorDisplay(l).building}
               </button>
             ))}
@@ -286,7 +287,7 @@ export function Toolbox() {
         {tool === 'runway' && (
           <label>
             舗装幅
-            <select value={options.runwayWidth} onChange={(e) => actions.setOption('runwayWidth', Number(e.target.value) as 30 | 45 | 60)}>
+            <select value={options.runwayWidth} onChange={(e) => actions.setOption('runwayWidth', Number(e.target.value) as 30 | 45 | 60)} title="S/M/L/F キーでも変更できます（F は最大）">
               <option value={30}>30m（S級まで）</option>
               <option value={45}>45m（M級まで）</option>
               <option value={60}>60m（L級まで）</option>
@@ -372,7 +373,7 @@ export function Toolbox() {
 
 function SizeSelect({ value, onChange }: { value: SizeClass; onChange: (v: SizeClass) => void }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value as SizeClass)}>
+    <select value={value} onChange={(e) => onChange(e.target.value as SizeClass)} title="S/M/L/F キーでも変更できます（F は最大）">
       <option value="S">S（小型）</option>
       <option value="M">M（中型）</option>
       <option value="L">L（大型）</option>

@@ -2,7 +2,8 @@ import { panBy, screenToTile, screenToWorld, zoomAt } from '../core/geometry/cam
 import { mapToWorld, worldToMap, type WorldPoint } from '../core/geometry/frames';
 import { normalizeDeg } from '../core/geometry/angle';
 import { sameTile, type Tile, type Vec2 } from '../core/geometry/vec';
-import { FACILITY_SPECS } from '../core/model/catalog';
+import { FACILITY_SPECS, RUNWAY_WIDTH_CLASS } from '../core/model/catalog';
+import { floorDisplayLabel } from '../core/model/levels';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import { entityTiles } from '../core/layout/footprint';
 import {
@@ -17,7 +18,8 @@ import {
 } from '../core/layout/operations';
 import { pickCandidatesAt, type PickView } from '../core/layout/pick';
 import { actions, applyOp, editorStore, showToast, type EditorState } from './store';
-import { FOOTPRINT_UI, PLACEMENT_PROBLEM_LABEL } from '../i18n/ja';
+import { FOOTPRINT_UI, PLACEMENT_PROBLEM_LABEL, SIZE_LABEL } from '../i18n/ja';
+import { ALL_LAYERS_KEY, levelForDigitKey, overlayToggleForKey, sizeKeyOf, sizeOptionForTool, toolForKey, type OverlayToggle, type SizeOptionTarget } from './shortcuts';
 import { agtStationAt, areaKindOf, computeOp, computePreview, deleteFootprintVertex, facilityKindOf, footprintEdgeInsert, footprintVertexAt, handleAt, moveFootprintVertex, nextPathPoint, nextTaxiPoint, pbbPickAt, snapPointW } from './tools';
 import { aircraftAt } from '../core/sim/query';
 import { SPEED_LEVELS } from '../core/sim/clock';
@@ -344,6 +346,26 @@ export interface KeyInfo {
   shift: boolean;
 }
 
+/** サイズショートカットの適用（オプション変更＋結果のトースト表示。docs/06 §4.1.1） */
+function applySizeOption(target: SizeOptionTarget): void {
+  if (target.option === 'runwayWidth') {
+    actions.setOption('runwayWidth', target.value);
+    showToast(`滑走路の舗装幅: ${target.value}m（${RUNWAY_WIDTH_CLASS[target.value]}級まで）`);
+  } else if (target.option === 'taxiWidth') {
+    actions.setOption('taxiWidth', target.value);
+    showToast(`誘導路幅: ${SIZE_LABEL[target.value]}`);
+  } else {
+    actions.setOption('standSize', target.value);
+    showToast(`スポットのサイズ: ${SIZE_LABEL[target.value]}`);
+  }
+}
+
+/** 表示レイヤ切替の適用（トグル＋結果のトースト表示。docs/06 §4.1.1） */
+function applyOverlayToggle(toggle: OverlayToggle): void {
+  actions.toggleOverlay(toggle.overlay);
+  showToast(`${toggle.label}: ${get().overlays[toggle.overlay] ? '表示' : '非表示'}`);
+}
+
 /** キー操作。処理した場合 true */
 export function onKeyDown(k: KeyInfo): boolean {
   const s = get();
@@ -368,6 +390,40 @@ export function onKeyDown(k: KeyInfo): boolean {
     return true;
   }
   if (k.ctrl) return false;
+  // 数字キー: 表示階の切り替え（階ボタン B3〜4F と同じ setInteriorLevel で、地図階層・配置先の階も同期する。docs/06 §4.1.1）
+  const digitLevel = levelForDigitKey(key);
+  if (digitLevel !== null) {
+    actions.setInteriorLevel(digitLevel);
+    showToast(`表示階: ${floorDisplayLabel(digitLevel)}`);
+    return true;
+  }
+  // S/M/L/F: 現在のツールのサイズ段階の切り替え（サイズを持たないツールでは何もしない。docs/06 §4.1.1）
+  const sizeKey = sizeKeyOf(key);
+  if (sizeKey) {
+    const target = sizeOptionForTool(s.tool, sizeKey);
+    if (target) {
+      applySizeOption(target);
+      return true;
+    }
+  }
+  // A: 表示階を全レイヤにする（配置先の階は維持される。docs/06 §4.1.1）
+  if (key === ALL_LAYERS_KEY) {
+    actions.setMapLevel('all');
+    showToast('地図階層: 全レイヤ（配置先の階は維持されます）');
+    return true;
+  }
+  // 表示レイヤの切替（レイヤーポップオーバーと同じ toggleOverlay。docs/06 §4.1.1）
+  const overlayToggle = overlayToggleForKey('build', key);
+  if (overlayToggle) {
+    applyOverlayToggle(overlayToggle);
+    return true;
+  }
+  // ツール切替（V = 選択は従来どおり switch 側。同じツールのキーは描画中の下書きを消さないよう何もしない。docs/06 §4.1.1）
+  const toolTarget = toolForKey(key);
+  if (toolTarget) {
+    if (toolTarget !== s.tool) actions.setTool(toolTarget);
+    return true;
+  }
   switch (key) {
     case 'escape':
       if (s.draft) actions.setDraft(null);
@@ -411,11 +467,17 @@ export function onKeyDown(k: KeyInfo): boolean {
   }
 }
 
-/** 運航モードのキー操作: Space 一時停止、1〜5 時間倍率、Esc 選択解除、矢印 パン */
+/** 運航モードのキー操作: Space 一時停止、1〜5 時間倍率、Esc 選択解除、矢印 パン、表示レイヤ切替 */
 function onOperateKey(k: KeyInfo): boolean {
   const s = get();
   const key = k.key.toLowerCase();
   if (k.ctrl) return false;
+  // 表示レイヤの切替（建設モードと共通のキー＋運航中の地図注記。docs/06 §4.1.1）
+  const overlayToggle = overlayToggleForKey('operate', key);
+  if (overlayToggle) {
+    applyOverlayToggle(overlayToggle);
+    return true;
+  }
   if (key === ' ') {
     ops.togglePause();
     return true;
