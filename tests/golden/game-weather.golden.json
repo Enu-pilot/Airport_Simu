@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.11",
+ "simModelVersion": "skyport-sim-10.12",
  "runs": {
   "day0-normal": {
    "day": 0,
@@ -102,8 +102,8 @@
     "HB": 62,
     "ML": 60
    },
-   "stateSha256": "f4c70e2ac6da39d221c085d36f478ad7216d8d37c3d2602a54e42f655aabfe47",
-   "stateLength": 2350139
+   "stateSha256": "8d852279903acdbf1e4cc71973c5595f60943c0c0b02786743a7b3658d4b3ca2",
+   "stateLength": 2350142
   },
   "bad-winter-normal": {
    "day": 108,
@@ -207,8 +207,8 @@
     "HB": 62,
     "ML": 60
    },
-   "stateSha256": "610abedb5a8f92c14960522e2c25bf7091fb87936046666732f89c217860c77b",
-   "stateLength": 2164918
+   "stateSha256": "a5a67b53994978ddd65c5b66f8935b0c6921f08b44f9aacd172adfa9bc285c22",
+   "stateLength": 2164921
   },
   "bad-humid-expert": {
    "day": 10,
@@ -313,8 +313,8 @@
     "HB": 52,
     "ML": 60
    },
-   "stateSha256": "0baed80a7ba3536df18bce089fba64654ac6e927513c3cc39f65888e6420d829",
-   "stateLength": 2087400
+   "stateSha256": "8c2c455204bc10997cd27a07f4a349a370a61aa037f6629584b1c0299bb3e85c",
+   "stateLength": 2087525
   }
  }
 }

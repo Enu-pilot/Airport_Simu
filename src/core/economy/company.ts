@@ -702,7 +702,18 @@ export function fictionalRestrictionActive(c: CompanyState): boolean {
 }
 
 /**
+ * 提案確率への保有規模の反映（2026-11-21 ユーザー要望）。「保有する飛行機数」の代理指標として
+ * 保有型式数（その会社の現在のフリート一覧の件数）を使う（ゲーム内データに型式ごとの機数は無い）。
+ * 倍率 = 1 + BALANCE.offers.fleetWeightPerType × (型式数 − 1) で、1 型式の会社は 1（従来どおり）、
+ * 型式数が多い会社ほど少しだけ提案が届きやすくなる。カタログ最大（ANA 14 型式）でも 1.52 倍。
+ */
+export function offerFleetWeight(fleetTypeCount: number): number {
+  return 1 + BALANCE.offers.fleetWeightPerType * Math.max(0, fleetTypeCount - 1);
+}
+
+/**
  * 新しい契約提案を作る。航空会社ごとに、空港評価が高いほど提案しやすい。
+ * 保有型式数が多い会社は少しだけ提案しやすい（offerFleetWeight）。
  * operableTypes = 現在の空港で運航できる機種（それ以外の機種の提案も「受け入れ不可」として届く）
  */
 export function generateOffers(
@@ -722,7 +733,7 @@ export function generateOffers(
       if (c.game?.goals && c.goals && a.unlock.minTier !== undefined && c.goals.tier < a.unlock.minTier) continue;
       const rel = (c.airlines[a.id] ??= { satisfaction: 60, lowDays: 0 });
       c.fleets[a.id] ??= a.fleet.map((entry) => ({ ...entry }));
-      const p = (BALANCE.offers.baseProb + BALANCE.offers.ratingProb * (c.rating / 100) * (rel.satisfaction / 60)) * offerBoost(c, a.id);
+      const p = (BALANCE.offers.baseProb + BALANCE.offers.ratingProb * (c.rating / 100) * (rel.satisfaction / 60)) * offerBoost(c, a.id) * offerFleetWeight((c.fleets[a.id] ?? a.fleet).length);
       if (rng.next() >= p) continue;
       const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && (k.status === 'active' || k.status === 'offered')).map((k) => k.destinationId));
       const dests = destinationsFor(c).filter((d) => {
