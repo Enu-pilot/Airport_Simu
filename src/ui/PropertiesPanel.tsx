@@ -28,7 +28,7 @@ import { distance } from '../core/geometry/vec';
 import { facilityDims, standEntry } from '../core/layout/footprint';
 import { DEFAULT_LEVEL_HEIGHT_M, facilityLevel, floorDisplay, floorDisplayLabel, roadEdgeLevelValid } from '../core/model/levels';
 import { INTERIOR_MIN_FLOOR, TERMINAL_AREA_MIN_LEVEL, floorRangeInUse, levelsInUse, terminalFloorRange } from '../core/layout/levelRules';
-import { edgesOfNode } from '../core/layout/network';
+import { edgesOfNode, taxiwayRouteEdges } from '../core/layout/network';
 import {
   deleteEntity,
   connectRoadLevels,
@@ -42,6 +42,7 @@ import {
   reverseEdge,
   rotateEntity,
   setFacilityFootprint,
+  setTaxiwayRouteWidth,
   updateConnectionFacility,
   updateEntity,
   PORTAL_FACILITY_KINDS,
@@ -1104,6 +1105,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
     const e = layout.taxiways[id]!;
     const a = layout.taxiNodes[e.from]!;
     const b = layout.taxiNodes[e.to]!;
+    const routeIds = taxiwayRouteEdges(layout, id);
     return (
       <>
         <NameField layout={layout} id={id} value={e.name} />
@@ -1116,6 +1118,13 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             ))}
           </select>
         </Field>
+        {routeIds.length >= 2 && (
+          <Field label="経路全体">
+            <button className="small" onClick={() => applyOp(setTaxiwayRouteWidth(layout, id, e.widthClass))} data-testid="prop-widthClassRoute">
+              この幅を経路全体（{routeIds.length}区間）に適用
+            </button>
+          </Field>
+        )}
         {e.widthClass === 'L' && (
           <Field label="コード F 対応">
             <input type="checkbox" checked={!!e.codeF} onChange={(ev) => update(layout, id, { codeF: ev.target.checked })} data-testid="prop-codeF" title="翼幅 65〜80 m の機体（A380 など）が通行できる（ゲームの適合ルール）" />

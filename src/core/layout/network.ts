@@ -252,3 +252,42 @@ export function removeNode(d: AirportLayout, net: NetKind, nodeId: string): void
   delete netNodes(d, net)[nodeId];
   pruneOrphanNodes(d, net, neighbors);
 }
+
+/**
+ * 誘導路の「経路」: 起点エッジから両方向へ、接するエッジがちょうど2本のノードだけを通過して
+ * たどれるエッジの集合（起点を含む、起点→from 側→to 側の順）。
+ * 分岐・合流（3本以上）と端点（1本）で止まるため、1回で引いた経路がそのまま単位になる。
+ * 次数は誘導路エッジ（layout.taxiways）の中だけで数える。環状の接続でも訪問済みの
+ * エッジへは進まないので必ず止まる。起点が無ければ空配列。
+ */
+export function taxiwayRouteEdges(layout: AirportLayout, startEdgeId: string): string[] {
+  const edges = layout.taxiways;
+  const start = edges[startEdgeId];
+  if (!start) return [];
+  const byNode = new Map<string, string[]>();
+  for (const e of Object.values(edges)) {
+    for (const n of [e.from, e.to]) {
+      const list = byNode.get(n);
+      if (list) list.push(e.id);
+      else byNode.set(n, [e.id]);
+    }
+  }
+  const route = new Set<string>([startEdgeId]);
+  const walk = (firstEdge: string, firstNode: string): void => {
+    let edge = firstEdge;
+    let node = firstNode;
+    for (;;) {
+      const incident = byNode.get(node) ?? [];
+      if (incident.length !== 2) return;
+      const next = incident.find((id) => id !== edge);
+      if (next === undefined || route.has(next)) return;
+      route.add(next);
+      const e = edges[next]!;
+      node = e.from === node ? e.to : e.from;
+      edge = next;
+    }
+  };
+  walk(startEdgeId, start.from);
+  walk(startEdgeId, start.to);
+  return [...route];
+}
