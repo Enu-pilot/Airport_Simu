@@ -1,6 +1,6 @@
 import type { CompanyState } from '../../core/economy/company';
 import type { OpsAlertAttentionInput } from '../../core/attention';
-import { ISSUE_SEVERITY, analyzeLayout, type Issue } from '../../core/validation/validate';
+import { analyzeLayout, type Issue } from '../../core/validation/validate';
 import { passengerFlowIssues } from '../../core/terminal/flowDiagnostics';
 import { terminalTransitStatus } from '../../core/terminal/transitStatus';
 import { serviceSecPerPax } from '../../core/terminal/capacity';
@@ -10,7 +10,7 @@ import { BUS_SHORTAGE_ALERT_SEC } from '../../core/sim/busRules';
 import { airlineDef } from '../../core/economy/registry';
 import { nightRiskFlights } from '../../core/sim/nightOps';
 import type { Simulation } from '../../core/sim/simulation';
-import { NIGHT_UI, formatClock, GAME_UI, SCORE_LABEL, DISRUPTION_KIND_LABEL, OPS_UI, HOLD_REASON_LABEL, WEATHER_LABEL, displayName, issueText } from '../../i18n/ja';
+import { NIGHT_UI, formatClock, GAME_UI, SCORE_LABEL, DISRUPTION_KIND_LABEL, OPS_UI, HOLD_REASON_LABEL, WEATHER_LABEL, displayName } from '../../i18n/ja';
 import type { OverlayKey } from './opsUi';
 
 /**
@@ -47,6 +47,8 @@ export const ALERT_HOLD_SEC = 10 * 60;
 export const ALERT_QUEUE_MIN = 20;
 /** 同時に見せる最大件数 */
 export const ALERT_VISIBLE = 3;
+/** 配置の問題サマリ（運航アラート）の key */
+export const LAYOUT_STRUCTURE_SUMMARY_KEY = 'layoutStructureSummary';
 
 const CRITICAL_DISRUPTION: readonly DisruptionKind[] = ['runwayClosed'];
 const SHOWN_DISRUPTION: readonly DisruptionKind[] = ['weather', 'runwayClosed', 'taxiwayClosed', 'standClosed', 'gateFailure', 'baggageFailure', 'vehicleFailure', 'maintenance', 'staffAbsence'];
@@ -54,13 +56,6 @@ const REPAIRABLE: readonly DisruptionKind[] = ['runwayClosed', 'taxiwayClosed', 
 const TERMINAL_ISSUES = new Set(['TERMINAL_NO_ENTRANCE', 'TERMINAL_NO_EXIT', 'TERMINAL_NO_CHECKIN', 'TERMINAL_NO_SECURITY', 'TERMINAL_NO_BAGGAGE_CLAIM', 'SECURITY_NOT_CONNECTED', 'GATE_NO_BOARDING_ACCESS', 'GATE_NO_ARRIVAL_ACCESS', 'GATE_UNREACHABLE', 'GATE_ARRIVAL_NO_EXIT', 'TERMINAL_DEPARTURE_ROUTE', 'GATE_ARRIVAL_NO_BAGGAGE_ROUTE']);
 const AIRSIDE_ISSUES = new Set(['RUNWAY_TOO_SHORT', 'RUNWAY_NO_TAXIWAY', 'TAXIWAY_ON_RUNWAY', 'TAXIWAY_CROSSES_RUNWAY_NO_ENTRY', 'TAXIWAY_CROSSING_NO_JUNCTION', 'STAND_NOT_CONNECTED', 'STAND_NO_RUNWAY_ROUTE', 'STAND_ROUTE_SIZE_LIMITED', 'STAND_ONE_WAY_TRAP', 'STAND_BUS_GATE_INVALID', 'STAND_BUS_NO_GATE', 'STAND_BUS_NO_VEHICLES', 'STAND_TERMINAL_INVALID', 'STAND_TERMINAL_NO_BUS_GATE', 'STAND_TERMINAL_MISMATCH', 'GATE_NO_STAND', 'GATE_TERMINAL_AMBIGUOUS', 'GATE_STAND_TOO_FAR', 'GATE_CONNECTION_INVALID', 'GATE_BUS_NO_VEHICLES', 'BUS_GATE_NO_REMOTE_STAND']);
 const structureCache = new WeakMap<object, Issue[]>();
-
-function airsideRecommendation(code: string): string {
-  if (code.startsWith('RUNWAY')) return '滑走路の運用状態・機種適合・誘導路との接続を確認してください';
-  if (code.startsWith('TAXIWAY')) return '交差点ノードと誘導路の接続・運用状態を確認してください';
-  if (code.startsWith('STAND')) return 'スポットから滑走路までの運用中経路と機種別サイズ制約を確認してください';
-  return 'ゲート・スポットの接続、バスゲートと運用車両を確認してください';
-}
 
 function targetKindOf(d: Disruption): AlertTargetKind {
   switch (d.kind) {
@@ -154,38 +149,26 @@ export function deriveAlerts(sim: { state: SimState; ctx: SimContext }, company:
     });
   }
 
-  // 静的な動線検証は運航中も常時参照できるようアラート一覧に載せる。
+  // 静的な配置検証（スポット未接続・ターミナル内動線など）は運航中は変更できないため、
+  // 個別項目としては載せず、件数だけを注意（warning）1件に集約する。詳細は建設モードの検証に委ねる。
   // レイアウトは運航中に不変なので、詳細な空港検証はレイアウト単位で一度だけ行う。
   let structural = structureCache.get(layout);
   if (!structural) {
     structural = analyzeLayout(layout).issues.filter((i) => TERMINAL_ISSUES.has(i.code) || AIRSIDE_ISSUES.has(i.code));
     structureCache.set(layout, structural);
   }
-  for (const i of structural) {
-    const target = i.targets[0] ?? null;
-    if (TERMINAL_ISSUES.has(i.code)) {
-      add({
-        key: `paxStructure:${i.key}`,
-        severity: ISSUE_SEVERITY[i.code] === 'error' ? 'critical' : 'warning',
-        t: state.now,
-        title: `旅客動線: ${issueText(layout, i)}`,
-        detail: '影響: 該当ターミナルの便が旅客工程を完了できない可能性があります。推奨: 同一ターミナル内で施設・通路を接続し、必要な処理能力を確保してください。',
-        target: { kind: 'area', id: target },
-        actions: [...(target ? (['focus'] as const) : []), 'openPanel'],
-        panel: 'terminal',
-      });
-    } else if (AIRSIDE_ISSUES.has(i.code)) {
-      add({
-        key: `airsideStructure:${i.key}`,
-        severity: ISSUE_SEVERITY[i.code] === 'error' ? 'critical' : 'warning',
-        t: state.now,
-        title: `航空機動線: ${issueText(layout, i)}`,
-        detail: `影響: 対象の機種または便がスポット・滑走路間を走行できない可能性があります。推奨: ${airsideRecommendation(i.code)}。`,
-        target: { kind: 'area', id: target },
-        actions: [...(target ? (['focus'] as const) : []), 'openPanel'],
-        panel: 'ground',
-      });
-    }
+  if (structural.length > 0) {
+    const summary: Omit<Alert, 'count'> = {
+      key: LAYOUT_STRUCTURE_SUMMARY_KEY,
+      severity: 'warning',
+      t: state.now,
+      title: `配置の問題 ${structural.length}件（建設モードで確認）`,
+      detail: 'スポットの接続やターミナル内の動線など、配置の検証で見つかった問題です。運航中は配置を変更できないため、詳細と修正は建設モードで行ってください。',
+      target: { kind: 'none', id: null },
+      actions: [],
+    };
+    // 件数を count にも載せる（インボックスの metric 表示と揃えるため、問題の件数分だけ集約する）
+    for (let n = 0; n < structural.length; n++) add(summary);
   }
 
   // 実際の旅客状態から、到達不能・長時間の施設待ち・誤ったターミナル割当てを検出する。

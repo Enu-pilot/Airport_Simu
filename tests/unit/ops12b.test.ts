@@ -9,7 +9,7 @@ import { createContext } from '../../src/core/sim/context';
 import { addDisruption } from '../../src/core/sim/disruptions';
 import { addTurnaround, createSimulation, stepSimulation } from '../../src/core/sim/simulation';
 import type { SimEvent } from '../../src/core/sim/types';
-import { deriveAlerts, ALERT_VISIBLE } from '../../src/ui/operate/alerts';
+import { deriveAlerts, ALERT_VISIBLE, LAYOUT_STRUCTURE_SUMMARY_KEY } from '../../src/ui/operate/alerts';
 import { importantEvents } from '../../src/ui/operate/events';
 import { emptyLayout, must } from './helpers';
 
@@ -114,13 +114,15 @@ describe('12B-1: アラート（deriveAlerts）', () => {
     expect(r.alerts[0]).toMatchObject({ key: `diverted:${ac.id}`, severity: 'critical', target: { kind: 'aircraft', id: ac.id } });
   });
 
-  it('航空機のスポット〜滑走路間に経路がない構造問題を常設アラートにし、対象をマップ選択できる', () => {
+  it('構造問題は個別アラートにせず、配置の問題サマリ（注意）1件に集約する', () => {
     const disconnected = must(placeStand(createSampleAirport(), { x: 10, y: 10 }, 'M'));
     const standId = disconnected.created[0]!;
     const sim = createSimulation(disconnected.layout, { company: createSandboxCompany() });
-    const alert = deriveAlerts(sim, sim.company).alerts.find((item) => item.key.includes(standId));
-    expect(alert).toMatchObject({ severity: 'critical', target: { kind: 'area', id: standId }, actions: expect.arrayContaining(['focus']) });
-    expect(alert?.title).toContain('航空機動線');
+    const r = deriveAlerts(sim, sim.company);
+    expect(r.alerts.find((item) => item.key.includes(standId))).toBeUndefined();
+    expect(r.alerts.some((item) => item.key.startsWith('paxStructure:') || item.key.startsWith('airsideStructure:'))).toBe(false);
+    const summary = r.alerts.find((item) => item.key === LAYOUT_STRUCTURE_SUMMARY_KEY);
+    expect(summary).toMatchObject({ severity: 'warning', title: '配置の問題 1件（建設モードで確認）', count: 1 });
   });
 
   it('ターミナル連絡設備の能力待ちを、対象施設への導線付きアラートにする', () => {
