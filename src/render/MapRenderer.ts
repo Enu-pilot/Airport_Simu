@@ -21,11 +21,11 @@ import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_
 import { visibleFacilityLabelIds, visibleInteriorFacilityIds } from './labels';
 import { computePreview, facilityKindOf, nextPathPoint, nextTaxiPoint, rectFromDrag } from '../editor/tools';
 import { validateOrthogonalPolygon } from '../core/geometry/polygon';
-import { getAnalysis, type EditorState, type OpsState } from '../editor/store';
+import { getAnalysis, type EditorState, type OpsState, type Overlays } from '../editor/store';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../core/sim/aircraftTypes';
 import { isVisible } from '../core/sim/query';
 import { edgeIndexAt, pointAt } from '../core/sim/routes';
-import type { Aircraft, UnitKind } from '../core/sim/types';
+import type { Aircraft, AircraftState, UnitKind } from '../core/sim/types';
 import { areaOccupancy, facilityLoad } from '../core/sim/passengers';
 import { linkBetween } from '../core/terminal/route';
 import { areaMapLevel } from '../core/terminal/adjacency';
@@ -52,6 +52,9 @@ const c = (t: Tile): Vec2 => worldToMap(t);
 const fmtDeg = (d: number): string => (Math.round(d * 10) / 10).toFixed(1);
 
 const BUILD_ALPHA: Record<BuildState, number> = { operational: 1, underConstruction: 0.8, planned: 0.45 };
+
+/** 到着側のフェーズ（貨物数ラベルで到着便の搭載量を示す範囲。それ以外は出発便の搭載量） */
+const ARRIVAL_PHASE_STATES: ReadonlySet<AircraftState> = new Set(['inbound', 'holding', 'approach', 'landing', 'vacating', 'taxiIn', 'docking']);
 
 /** 混雑ヒートの3段階（core/access/heatmap の heatBand と対応: 40%未満 / 40–70% / 70%以上） */
 const HEAT_COLORS = [0x3ccf6e, 0xffc23d, 0xff4d4f] as const;
@@ -207,7 +210,7 @@ export class MapRenderer {
     if (s.overlays.labels) this.drawLabels(layout, analysis, cam);
     if (s.ops && s.overlays.congestion) this.drawCongestion(layout, s.ops, cam, s.overlays.labels);
     if (!s.ops && s.overlays.congestion) this.drawStaticHeat(layout, s, cam);
-    if (s.ops) this.drawOps(s.ops, cam, s.overlays.network);
+    if (s.ops) this.drawOps(s.ops, cam, s.overlays);
     for (const [k, t] of this.textPool) t.visible = this.usedTexts.has(k);
   }
 
@@ -1131,7 +1134,7 @@ export class MapRenderer {
 
   // ------------------------------------------------------------ 運航
 
-  private drawOps(ops: OpsState, cam: Camera, showReservations: boolean): void {
+  private drawOps(ops: OpsState, cam: Camera, overlays: Overlays): void {
     this.typeTable = ops.sim.ctx.types;
     const o = this.overlay;
     const { sim } = ops;
@@ -1150,7 +1153,7 @@ export class MapRenderer {
     }
 
     // 予約中の区間（論理ネットワーク表示時）
-    if (showReservations) {
+    if (overlays.network) {
       for (const [eid, acId] of Object.entries(sim.state.edgeReservations)) {
         const e = net.edges[eid];
         if (!e) continue;
@@ -1201,7 +1204,7 @@ export class MapRenderer {
       if (u.kind === 'apronBus') {
         o.rect(x - 0.56, y - 0.2, 1.12, 0.4).fill({ color }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.7 });
         const trip = u.trip ? sim.state.bus?.trips[u.trip] : undefined;
-        if (trip && trip.pax > 0 && this.zoom >= 8) this.label(`bus:${u.id}`, `🚌${trip.pax}`, { x, y: y - 0.7 }, cam, { size: 10, color: 0xbfe1ff });
+        if (trip && trip.pax > 0 && this.zoom >= 8 && overlays.busPax) this.label(`bus:${u.id}`, `🚌${trip.pax}`, { x, y: y - 0.7 }, cam, { size: 10, color: 0xbfe1ff });
         continue;
       }
       o.rect(x - 0.28, y - 0.18, 0.56, 0.36).fill({ color }).stroke({ width: this.px(1), color: 0x000000, alpha: 0.7 });
@@ -1219,9 +1222,11 @@ export class MapRenderer {
       const t = resolveType(this.typeTable ?? AIRCRAFT_TYPES, ac.typeId);
       const extent = Math.max(0.5, t.lengthM / 25 / 2) + Math.max(0.5, t.wingspanM / 25 / 2);
       const bodyVisible = this.boxInView(x - extent, y - extent, extent * 2, extent * 2, 0.3 + 3 / this.zoom);
-      const showLabel = this.zoom >= 6 || ac.id === ops.selectedAircraft;
+      const showLabel = overlays.flightNames && (this.zoom >= 6 || ac.id === ops.selectedAircraft);
       const labelVisible = showLabel && this.pointInView(x, y - 1.4, 30 / this.zoom);
-      if (!bodyVisible && !labelVisible) continue;
+      // 貨物数ラベル: 貨物便の搭載量（Flight.cargo.volumeM3）。到着側のフェーズでは到着便、それ以外は出発便の搭載量
+      const cargoVisible = overlays.cargoCounts && this.zoom >= 6 && this.pointInView(x, y - 2.3, 30 / this.zoom);
+      if (!bodyVisible && !labelVisible && !cargoVisible) continue;
       if (bodyVisible) {
         const dh = ((ac.heading - ac.pheading + 540) % 360) - 180;
         const heading = ac.pheading + dh * alpha;
@@ -1229,6 +1234,12 @@ export class MapRenderer {
       }
       if (labelVisible) {
         this.label(`ac:${ac.id}`, ac.callsign, { x, y: y - 1.4 }, cam, { size: 11, color: 0xffffff });
+      }
+      if (cargoVisible) {
+        const arrCargo = sim.state.flights[ac.arrivalFlightId]?.cargo;
+        const depCargo = sim.state.flights[ac.departureFlightId]?.cargo;
+        const cargo = (ARRIVAL_PHASE_STATES.has(ac.state) && arrCargo) ? arrCargo : (depCargo ?? arrCargo);
+        if (cargo) this.label(`cargo:${ac.id}`, `📦${Math.round(cargo.volumeM3)}m³`, { x, y: y - 2.3 }, cam, { size: 10, color: 0xffd28a });
       }
     }
   }

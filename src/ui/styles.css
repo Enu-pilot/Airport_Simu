@@ -347,6 +347,10 @@ table.board tr.closed td { color: var(--muted); text-decoration: line-through; }
 tr.warn-row td:first-child { box-shadow: inset 3px 0 var(--warning); }
 @media (max-width: 1100px) { .mgmt-grid { grid-template-columns: minmax(0, 1fr); } }
 .mgmt-grid > section { min-width: 0; overflow-x: auto; }
+/* 契約パネル（案A）: 単一セクションを全幅化し、パネル内サブタブで3ブロックを出し分ける */
+.mgmt-grid > section.contracts-section { grid-column: 1 / -1; }
+.contracts-tabs { padding-left: 0; padding-right: 0; margin-bottom: 4px; }
+.contracts-tab-deadline { margin-left: 6px; font-size: 11px; opacity: 0.85; }
 .fee-grid input[type='range'] { width: 110px; }
 .capacity-panel { display: grid; gap: 14px; max-width: 1600px; margin: 0 auto; }
 /* 店舗・サービス施設（5-19 粒度分離の UI 接続） */
