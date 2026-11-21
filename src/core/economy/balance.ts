@@ -291,7 +291,20 @@ export const BALANCE = {
       recovery: 1,
     },
   },
-  offers: { baseProb: 0.12, ratingProb: 0.3, maxOpen: 6, expireDays: 3, contractDays: 30 },
+  offers: {
+    baseProb: 0.12,
+    ratingProb: 0.3,
+    maxOpen: 6,
+    expireDays: 3,
+    contractDays: 30,
+    /**
+     * 提案確率への保有規模の反映（2026-11-21 ユーザー要望）: 保有型式数 − 1 にこの定数を掛けた分だけ
+     * 提案確率を割り増す（倍率 = 1 + fleetWeightPerType × (型式数 − 1)）。最小規模（1 型式）は倍率 1 で
+     * 従来どおり、最大規模（ANA 14 型式）でも 1.52 倍に留まる穏やかな効き方にするための値。
+     * 強くしたい／弱くしたいときはこの定数だけを動かす（0 で無効化）。
+     */
+    fleetWeightPerType: 0.04,
+  },
   contracts: { renewGoodSat: 70, renewOkSat: 45, withdrawSat: 25, withdrawDays: 3, increaseMinSat: 60, decreasePenaltySat: 10 },
   bankruptcyDays: 30,
 

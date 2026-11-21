@@ -1,10 +1,10 @@
 {
- "simModelVersion": "skyport-sim-10.11",
+ "simModelVersion": "skyport-sim-10.12",
  "runs": {
   "sandbox": {
    "seconds": 86400,
-   "stateSha256": "3e6e42e1cad3ce9e6a3d06c71c07a4b0b45b74a133088185965eadbab1baf348",
-   "stateLength": 2441534,
+   "stateSha256": "23f63025f0be039a9894035934cb39e2d6a329ec6ac0a546e1ab9c11c8e01788",
+   "stateLength": 2441537,
    "invariantViolations": 0,
    "stats": {
     "arrivals": 19,
