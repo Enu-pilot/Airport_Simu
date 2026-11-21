@@ -98,9 +98,9 @@
 
 レイアウト（シナリオのレイアウトを含む）にエリア種別 `lounge`（ラウンジ、`layoutUsesFormat8`）を含むときだけ `formatVersion 8`（`versions.format` も 8）で書く。含まないプロジェクトは従来の版（1〜7）のまま書く。ラウンジは席数（`props.seats`）を持つターミナル内エリアで、保存形式以外の版（`SCHEMA_VERSION` 等）は上げない。
 
-### 版 9（搭乗橋 PBB。機能H）
+### 版 9（搭乗橋 PBB・複合連絡施設。機能H・J-2）
 
-レイアウト（シナリオのレイアウトを含む）に施設種別 `boardingBridge`（搭乗橋、`layoutUsesFormat9`）を含むときだけ `formatVersion 9`（`versions.format` も 9）で書く。含まないプロジェクトは従来の版（1〜8）のまま書く。`SCHEMA_VERSION` は 3 を維持し、`SIM_MODEL_VERSION` も上げない（明示 PBB の無いゲートは従来の `jetBridge` から tunnel1 相当を読み取り時に合成し、搭乗/降機速度が従来定数と一致するため運航結果が変わらない）。版 8 以下を名乗るのに `boardingBridge` を含むファイルは拒否する。
+レイアウト（シナリオのレイアウトを含む）に施設種別 `boardingBridge`（搭乗橋）または `connectionFacilities`（複合連絡施設のグルーピング記録）を含むときだけ `formatVersion 9`（`versions.format` も 9）で書く（どちらも `layoutUsesFormat9` で判定）。含まないプロジェクトは従来の版（1〜8）のまま書く。`SCHEMA_VERSION` は 3 を維持し、`SIM_MODEL_VERSION` も上げない（明示 PBB の無いゲートは従来の `jetBridge` から tunnel1 相当を読み取り時に合成し、搭乗/降機速度が従来定数と一致するため運航結果が変わらない。複合連絡施設は通路段＋両端の垂直エリアを束ねる編集メタデータであり、部品自体は従来のエリア＋リンクで、旅客シミュレーションは記録を読まない）。版 8 以下を名乗るのに版 9 の項目を含むファイルは拒否する。`connectionFacilities` の参照切れは読み込みでは拒否せず、検証の `CONNECTION_FACILITY_DANGLING`（エラー）で報告する。
 
 ### 架空会社の就航制限・持ち替え（機能F。版上げなし）
 

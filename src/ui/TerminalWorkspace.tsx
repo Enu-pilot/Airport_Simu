@@ -1,13 +1,16 @@
-import { useMemo } from 'react';
-import { actions, useEditor, useLayout, type ToolId } from '../editor/store';
+import { useMemo, useState } from 'react';
+import { actions, applyOp, useEditor, useLayout, type ToolId } from '../editor/store';
 import { terminalServiceComplexes } from '../core/terminal/serviceComplex';
 import { terminalCapacitySummaries } from '../core/terminal/terminalCapacitySummary';
 import { terminalFloorSummary } from '../core/terminal/terminalFloorSummary';
 import { terminalFloorRange } from '../core/layout/levelRules';
+import { createConnectionFacility, deleteConnectionFacility, type ConnectionVerticalKind } from '../core/layout/operations';
+import { connectionFacilityCost } from '../core/economy/construction';
+import { TILE_M } from '../core/model/catalog';
 import { facilityLevel, floorDisplayLabel } from '../core/model/levels';
 import { featureForAreaKind, lockLabel } from '../core/economy/unlocks';
-import type { TerminalAreaKind } from '../core/model/types';
-import { AREA_KIND_LABEL, FACILITY_LABEL, PBB_DECK_LABEL, PBB_TYPE_LABEL } from '../i18n/ja';
+import type { AirportLayout, CrossingMaxCode, TerminalAreaKind, TerminalTransitKind } from '../core/model/types';
+import { AREA_KIND_LABEL, FACILITY_LABEL, PBB_DECK_LABEL, PBB_TYPE_LABEL, ZONE_LABEL } from '../i18n/ja';
 import { buildTerminalModel } from '../core/terminal/model';
 import { gateMode } from '../core/model/gates';
 import { pbbForGate } from '../core/model/boardingBridge';
@@ -266,6 +269,14 @@ export function TerminalWorkspace() {
             <div className="muted small">型式の変更・追加は、ゲートを選んでプロパティの「搭乗橋（PBB）」節から行います</div>
           </div>
 
+          <ConnectionFacilityGroup
+            layout={layout}
+            terminalId={terminalId}
+            complexMembers={complexMembers}
+            selection={selection}
+            floorLabel={floorLabel}
+          />
+
           <div className="tool-group">
             <div className="tool-group-title">
               <span>現在の階のエリア（{floorLabel(currentFloor)}）</span>
@@ -287,5 +298,253 @@ export function TerminalWorkspace() {
         </div>
       </div>
     </aside>
+  );
+}
+
+const TRANSIT_KIND_LABEL: Record<TerminalTransitKind, string> = {
+  walkway: '徒歩連絡通路',
+  movingWalkway: '動く歩道',
+  elevatedWalkway: '高層通路',
+  escalator: 'エスカレーター',
+  elevator: 'エレベーター',
+};
+
+const VERTICAL_KIND_OPTIONS: { value: ConnectionVerticalKind | ''; label: string }[] = [
+  { value: '', label: '生成しない' },
+  { value: 'stairs', label: '階段' },
+  { value: 'escalator', label: 'エスカレーター' },
+  { value: 'elevator', label: 'エレベーター' },
+];
+
+/**
+ * 複合連絡施設（J-2）: この複合体に属する連絡施設の一覧と、3ステップの作成フロー
+ * （端点エリア → 通路段 → 両端の垂直ノード）。作成は1つの操作（= Undo 1回）で
+ * 部品生成とグルーピング記録までを原子的に行う。
+ */
+function ConnectionFacilityGroup({
+  layout,
+  terminalId,
+  complexMembers,
+  selection,
+  floorLabel,
+}: {
+  layout: AirportLayout;
+  terminalId: string;
+  complexMembers: string[];
+  selection: string | null;
+  floorLabel: (floor: number) => string;
+}) {
+  const facilitiesHere = useMemo(
+    () =>
+      Object.values(layout.connectionFacilities ?? {})
+        .filter((cf) => {
+          if (cf.segment.kind !== 'link') return false;
+          const link = layout.terminalLinks?.[cf.segment.linkId];
+          if (!link) return false;
+          const from = layout.terminalAreas[link.fromAreaId];
+          const to = layout.terminalAreas[link.toAreaId];
+          return !!from && !!to && (complexMembers.includes(from.terminalId) || complexMembers.includes(to.terminalId));
+        })
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    [layout, complexMembers],
+  );
+
+  const [fromAreaId, setFromAreaId] = useState('');
+  const [toAreaId, setToAreaId] = useState('');
+  const [segKind, setSegKind] = useState<TerminalTransitKind>('elevatedWalkway');
+  const [crossingMaxCode, setCrossingMaxCode] = useState<CrossingMaxCode | ''>('');
+  const [autoMetrics, setAutoMetrics] = useState(true);
+  const [distanceM, setDistanceM] = useState(250);
+  const [travelSec, setTravelSec] = useState(190);
+  const [aKind, setAKind] = useState<ConnectionVerticalKind | ''>('escalator');
+  const [bKind, setBKind] = useState<ConnectionVerticalKind | ''>('escalator');
+  const [stepFreeMode, setStepFreeMode] = useState<'auto' | 'yes' | 'no'>('auto');
+  const [name, setName] = useState('');
+
+  const ownAreas = useMemo(
+    () =>
+      Object.values(layout.terminalAreas)
+        .filter((a) => a.terminalId === terminalId)
+        .sort((a, b) => a.level - b.level || a.id.localeCompare(b.id)),
+    [layout, terminalId],
+  );
+  const fromArea = layout.terminalAreas[fromAreaId];
+  const toCandidates = useMemo(
+    () =>
+      fromArea
+        ? Object.values(layout.terminalAreas)
+            .filter((a) => a.terminalId !== terminalId && a.zone === fromArea.zone)
+            .sort((a, b) => a.terminalId.localeCompare(b.terminalId) || a.level - b.level || a.id.localeCompare(b.id))
+        : [],
+    [layout, terminalId, fromArea],
+  );
+  const toArea = toCandidates.find((a) => a.id === toAreaId);
+  const autoDistance =
+    fromArea && toArea
+      ? Math.max(
+          25,
+          Math.round(
+            Math.hypot(
+              fromArea.origin.x + fromArea.w / 2 - (toArea.origin.x + toArea.w / 2),
+              fromArea.origin.y + fromArea.h / 2 - (toArea.origin.y + toArea.h / 2),
+            ) * TILE_M,
+          ),
+        )
+      : 250;
+  const effDistance = autoMetrics ? autoDistance : distanceM;
+  const effTravel = autoMetrics ? Math.max(10, Math.round(autoDistance / 1.2)) : travelSec;
+
+  const areaOptionLabel = (a: (typeof ownAreas)[number]) =>
+    `${floorLabel(a.level)} ${a.name || AREA_KIND_LABEL[a.kind]}（${ZONE_LABEL[a.zone]}）`;
+
+  const create = () => {
+    if (!fromArea || !toArea) return;
+    applyOp(
+      createConnectionFacility(layout, {
+        name: name.trim() || undefined,
+        fromAreaId: fromArea.id,
+        toAreaId: toArea.id,
+        link: {
+          kind: segKind,
+          distanceM: effDistance,
+          travelSec: effTravel,
+          ...(segKind === 'elevatedWalkway' && crossingMaxCode ? { crossingMaxCode } : {}),
+        },
+        aVerticalKind: aKind || null,
+        bVerticalKind: bKind || null,
+        stepFree: stepFreeMode === 'auto' ? undefined : stepFreeMode === 'yes',
+      }),
+      { select: true },
+    );
+  };
+
+  return (
+    <div className="tool-group" data-testid="workspace-connection-facilities">
+      <div className="tool-group-title">
+        <span>連絡施設（複合）</span>
+        <span className="tool-group-count">{facilitiesHere.length}</span>
+      </div>
+      {facilitiesHere.map((cf) => {
+        const link = cf.segment.kind === 'link' ? layout.terminalLinks?.[cf.segment.linkId] : undefined;
+        return (
+          <div key={cf.id} className="muted small" data-testid={`workspace-cf-${cf.id}`}>
+            <span>
+              {cf.name || '（名称未設定）'}（{link ? TRANSIT_KIND_LABEL[link.kind] : 'AGT'}・
+              {cf.stepFree ? '段差なし' : '段差あり'}・{connectionFacilityCost(layout, cf.id).toLocaleString()} cr）
+            </span>{' '}
+            <button className="tool" onClick={() => actions.select(cf.id)}>
+              選択
+            </button>{' '}
+            <button className="tool danger" onClick={() => applyOp(deleteConnectionFacility(layout, cf.id))}>
+              削除
+            </button>
+          </div>
+        );
+      })}
+      <div className="muted small">新しい連絡施設を作成（端点 → 通路段 → 垂直ノードの3ステップ、1回の操作で配置されます）</div>
+      <label className="small">
+        名前（任意）{' '}
+        <input type="text" value={name} onChange={(e) => setName(e.target.value)} data-testid="cf-create-name" />
+      </label>
+      <label className="small">
+        1. 入口エリア（このターミナル）{' '}
+        <select
+          value={fromAreaId}
+          onChange={(e) => {
+            setFromAreaId(e.target.value);
+            setToAreaId('');
+          }}
+          data-testid="cf-create-from"
+        >
+          <option value="">選択してください</option>
+          {ownAreas.map((a) => (
+            <option key={a.id} value={a.id}>
+              {areaOptionLabel(a)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="small">
+        出口エリア（別ターミナル・同じ区域）{' '}
+        <select value={toAreaId} onChange={(e) => setToAreaId(e.target.value)} disabled={!fromArea} data-testid="cf-create-to">
+          <option value="">選択してください</option>
+          {toCandidates.map((a) => (
+            <option key={a.id} value={a.id}>
+              {layout.facilities[a.terminalId]?.name || a.terminalId}: {areaOptionLabel(a)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="small">
+        2. 通路段の種類{' '}
+        <select value={segKind} onChange={(e) => setSegKind(e.target.value as TerminalTransitKind)} data-testid="cf-create-kind">
+          {(Object.keys(TRANSIT_KIND_LABEL) as TerminalTransitKind[]).map((k) => (
+            <option key={k} value={k}>
+              {TRANSIT_KIND_LABEL[k]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {segKind === 'elevatedWalkway' && (
+        <label className="small">
+          下を通過する最大機種コード（クリアランス導出）{' '}
+          <select value={crossingMaxCode} onChange={(e) => setCrossingMaxCode(e.target.value as CrossingMaxCode | '')} data-testid="cf-create-crossing">
+            <option value="">指定なし（従来 33m）</option>
+            <option value="C">C（床 +18m）</option>
+            <option value="E">E（床 +24m）</option>
+            <option value="F">F（床 +30m）</option>
+          </select>
+        </label>
+      )}
+      <label className="small">
+        <input type="checkbox" checked={autoMetrics} onChange={(e) => setAutoMetrics(e.target.checked)} /> 距離・所要時間を端点間から自動計算
+      </label>
+      {!autoMetrics && (
+        <>
+          <label className="small">
+            距離（m） <input type="number" min={1} value={distanceM} onChange={(e) => setDistanceM(Number(e.target.value))} />
+          </label>
+          <label className="small">
+            所要時間（秒） <input type="number" min={1} value={travelSec} onChange={(e) => setTravelSec(Number(e.target.value))} />
+          </label>
+        </>
+      )}
+      <label className="small">
+        3. 入口側の垂直ノード{' '}
+        <select value={aKind} onChange={(e) => setAKind(e.target.value as ConnectionVerticalKind | '')} data-testid="cf-create-akind">
+          {VERTICAL_KIND_OPTIONS.map((o) => (
+            <option key={o.label} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="small">
+        出口側の垂直ノード{' '}
+        <select value={bKind} onChange={(e) => setBKind(e.target.value as ConnectionVerticalKind | '')} data-testid="cf-create-bkind">
+          {VERTICAL_KIND_OPTIONS.map((o) => (
+            <option key={o.label} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="small">
+        段差なし{' '}
+        <select value={stepFreeMode} onChange={(e) => setStepFreeMode(e.target.value as 'auto' | 'yes' | 'no')} data-testid="cf-create-stepfree">
+          <option value="auto">自動（垂直ノードの種類から導出）</option>
+          <option value="yes">段差なしにする</option>
+          <option value="no">段差なしにしない</option>
+        </select>
+      </label>
+      <div className="tool-buttons">
+        <button className="tool" disabled={!fromArea || !toArea} onClick={create} data-testid="cf-create">
+          連絡施設を作成
+        </button>
+      </div>
+      <div className="muted small">
+        垂直ノードは端点エリアと同じ位置に、通路段の階までの各階へ生成されます（高層通路以外では階移動が無いため生成されません）。費用は部品ごとの通常単価の合計です。
+      </div>
+    </div>
   );
 }

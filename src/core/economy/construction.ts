@@ -115,6 +115,21 @@ export function layoutValue(layout: AirportLayout): number {
 }
 
 /**
+ * 複合連絡施設（J-2）の費用集計: 通路段（リンク）と両端の垂直エリアの
+ * 項目別費用（layoutItems）の合計を1施設単位で返す。存在しない施設は 0。
+ * AGT セグメントは費用の正がまだ無いため、垂直エリア分だけを数える。
+ */
+export function connectionFacilityCost(layout: AirportLayout, id: string): number {
+  const cf = layout.connectionFacilities?.[id];
+  if (!cf) return 0;
+  const items = layoutItems(layout);
+  let sum = 0;
+  if (cf.segment.kind === 'link') sum += items[cf.segment.linkId] ?? 0;
+  for (const areaId of [...cf.aVerticalAreaIds, ...cf.bVerticalAreaIds]) sum += items[areaId] ?? 0;
+  return sum;
+}
+
+/**
  * 空港の規模による割増係数 = min(上限, 1 + 0.5 × 資産額 / 1億cr)。
  * 新しい建設費・払い戻し・施設維持費に掛かる（大きな空港ほど拡張に費用がかかる）。
  */

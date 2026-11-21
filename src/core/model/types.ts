@@ -305,6 +305,29 @@ export type TerminalTransitKind = 'walkway' | 'movingWalkway' | 'elevatedWalkway
  * 欠落 = 従来の全体基準（未知機種 30m + 余裕 3m）で判定する。
  */
 export type CrossingMaxCode = 'C' | 'E' | 'F';
+/** 複合連絡施設の通路段の参照。kind で参照先が変わる（J-2） */
+export type ConnectionSegmentRef =
+  | { kind: 'link'; linkId: string }
+  | { kind: 'agt'; segmentId: string };
+
+/**
+ * 複合連絡施設（J-2）: 両端の垂直移動エリア群と通路段（リンク or AGT セグメント）を束ねる
+ * グルーピング記録。旅客グラフへの展開は既存モデル（エリア＋リンク）そのもので、sim は無変更。
+ * 欠落しても部品（エリア＋リンク）は従来どおり機能する（編集メタデータ）。
+ */
+export interface ConnectionFacility {
+  id: string;
+  name: string;
+  /** 通路段。kind で参照先が変わる */
+  segment: ConnectionSegmentRef;
+  /** 入口側（リンクの fromAreaId 側ターミナル）の垂直移動エリア（階段/エスカレーター/エレベーター等のエリアID） */
+  aVerticalAreaIds: string[];
+  /** 出口側（リンクの toAreaId 側ターミナル）の垂直移動エリア */
+  bVerticalAreaIds: string[];
+  /** 段差なし経路として成立するか（派生値だが検証の正として保存する） */
+  stepFree: boolean;
+}
+
 /** Explicit passenger transport between area nodes in distinct terminals (separate from GateConnector). */
 export interface TerminalTransitLink {
   id: string;
@@ -376,6 +399,8 @@ export interface AirportLayout {
   terminalAreas: Record<string, TerminalArea>;
   /** Optional in old layouts. Explicit inter-terminal passenger links; independent of road and gate graphs. */
   terminalLinks?: Record<string, TerminalTransitLink>;
+  /** 複合連絡施設（J-2）のグルーピング記録。欠落 = 空 */
+  connectionFacilities?: Record<string, ConnectionFacility>;
   /** 歩行ポータル（5-16）。欠落 = ポータルなし（自動接続の推測はしない） */
   portals?: Record<string, PedestrianPortal>;
   /** 磁気偏角（度、東偏差を正、[-180, 180]）。欠落 = 0（手入力のみ） */

@@ -616,7 +616,9 @@ export function entityExists(layout: AirportLayout, id: string): boolean {
     layout.roads[id] ||
     layout.stands[id] ||
     layout.facilities[id] ||
-    layout.terminalAreas[id]
+    layout.terminalAreas[id] ||
+    // 複合連絡施設（J-2）も選択対象として扱う（一体選択・ハイライトのため）
+    layout.connectionFacilities?.[id]
   );
 }
 

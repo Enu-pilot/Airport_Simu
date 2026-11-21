@@ -26,7 +26,8 @@ import { classifySegmentIntersection } from '../geometry/segment';
 import { rasterizeSegment } from '../geometry/vec';
 import { satOverlapConvex } from '../geometry/polygon';
 import { TILE_M } from '../model/catalog';
-import type { NetNode, TerminalArea, TerminalAreaKind } from '../model/types';
+import type { NetNode, TerminalArea, TerminalAreaKind, TerminalTransitLink } from '../model/types';
+import { connectionSegmentLevel, verticalGroupStairsOnly, verticalStepsCovered } from '../terminal/connectionFacility';
 import { CONNECTOR_DETOUR, DEFAULT_TERMINAL_LINK_CLEARANCE_M, DEFAULT_TERMINAL_LINK_ELEVATION_M, areaRectTiles, buildTerminalModel, type TerminalModel } from '../terminal/model';
 import { verifyPortalAccess } from '../terminal/networkGraph';
 import { terminalServiceComplexes } from '../terminal/serviceComplex';
@@ -146,6 +147,10 @@ export type IssueCode =
   | 'PBB_LEGACY_OVERRIDDEN'
   | 'INTERIOR_FACILITY_UNLINKED'
   | 'TERMINAL_LINK_CLEARANCE'
+  // 複合連絡施設（J-2）
+  | 'CONNECTION_FACILITY_DANGLING'
+  | 'CONNECTION_FACILITY_FLOOR_GAP'
+  | 'CONNECTION_FACILITY_STEP_FREE'
   | 'PORTAL_LEVEL_MISMATCH'
   | 'PORTAL_CONNECTION_PENDING'
   | 'PORTAL_UNREACHABLE'
@@ -247,6 +252,9 @@ export const ISSUE_SEVERITY: Record<IssueCode, Severity> = {
   PBB_LEGACY_OVERRIDDEN: 'info',
   INTERIOR_FACILITY_UNLINKED: 'info',
   TERMINAL_LINK_CLEARANCE: 'error',
+  CONNECTION_FACILITY_DANGLING: 'error',
+  CONNECTION_FACILITY_FLOOR_GAP: 'warning',
+  CONNECTION_FACILITY_STEP_FREE: 'warning',
   PORTAL_LEVEL_MISMATCH: 'warning',
   PORTAL_CONNECTION_PENDING: 'info',
   PORTAL_UNREACHABLE: 'warning',
@@ -1268,6 +1276,72 @@ function checkTerminals(layout: AirportLayout, model: TerminalModel, sink: Issue
     if (clearance < required || elevation < clearance || (declared !== undefined && elevation < deckElevationForCode(declared))) {
       const area = layout.terminalAreas[link.fromAreaId];
       sink.add('TERMINAL_LINK_CLEARANCE', [link.id], { clearance, required, elevation }, area?.origin);
+    }
+  }
+
+  // 複合連絡施設（J-2）: グルーピング記録の参照切れ・階カバー不足・段差なし申告の誤りを検査する。
+  // 記録は編集メタデータであり、部品（エリア＋リンク）自体の検証は従来の検査が担う
+  for (const cf of sortedValues(layout.connectionFacilities ?? {})) {
+    const dangling: string[] = [];
+    let link: TerminalTransitLink | undefined;
+    let from: TerminalArea | undefined;
+    let to: TerminalArea | undefined;
+    if (cf.segment.kind === 'link') {
+      link = layout.terminalLinks?.[cf.segment.linkId];
+      if (!link) dangling.push(cf.segment.linkId);
+      else {
+        from = layout.terminalAreas[link.fromAreaId];
+        to = layout.terminalAreas[link.toAreaId];
+        if (!from) dangling.push(link.fromAreaId);
+        if (!to) dangling.push(link.toAreaId);
+      }
+    } else {
+      // AGT セグメント（機能I）は未実装のため、現時点では解決不能な参照として
+      // DANGLING 扱いにする（型の union は I への接続点として用意してある）
+      dangling.push(cf.segment.segmentId);
+    }
+    const sideAreas = (ids: string[], endpoint: TerminalArea | undefined): TerminalArea[] => {
+      const out: TerminalArea[] = [];
+      for (const areaId of ids) {
+        const a = layout.terminalAreas[areaId];
+        if (!a || (endpoint && a.terminalId !== endpoint.terminalId)) dangling.push(areaId);
+        else out.push(a);
+      }
+      return out;
+    };
+    const aAreas = sideAreas(cf.aVerticalAreaIds, from);
+    const bAreas = sideAreas(cf.bVerticalAreaIds, to);
+    if (dangling.length > 0) {
+      sink.add('CONNECTION_FACILITY_DANGLING', [cf.id, ...dangling], {}, from?.origin ?? to?.origin);
+      continue;
+    }
+    if (link && from && to) {
+      const sides = [
+        { side: 'a', endpoint: from, areas: aAreas },
+        { side: 'b', endpoint: to, areas: bAreas },
+      ] as const;
+      for (const s of sides) {
+        // J-1: 階は端点ターミナル基点の実効階に換算し、併記ラベルで統一表記にする
+        const base = layout.facilities[s.endpoint.terminalId] ? facilityLevel(layout.facilities[s.endpoint.terminalId]!) : 0;
+        const segLevel = connectionSegmentLevel(link, s.endpoint.level, base);
+        if (!verticalStepsCovered(s.areas, s.endpoint.level, segLevel)) {
+          sink.add(
+            'CONNECTION_FACILITY_FLOOR_GAP',
+            [cf.id],
+            {
+              side: s.side,
+              endpointFloorLabel: floorDisplayLabel(base + s.endpoint.level),
+              segmentFloorLabel: floorDisplayLabel(base + segLevel),
+            },
+            s.endpoint.origin,
+          );
+        }
+      }
+      // 段差なしを名乗るのに片側が階段のみ（段差なし旅客の経路探索は既存の階段除外に乗るため実害は警告どおり）
+      if (cf.stepFree && (verticalGroupStairsOnly(aAreas) || verticalGroupStairsOnly(bAreas))) {
+        const stairsIds = [...aAreas, ...bAreas].filter((a) => a.kind === 'stairs').map((a) => a.id);
+        sink.add('CONNECTION_FACILITY_STEP_FREE', [cf.id, ...stairsIds], {}, from.origin);
+      }
     }
   }
 

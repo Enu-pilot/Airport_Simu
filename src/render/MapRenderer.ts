@@ -727,18 +727,37 @@ export class MapRenderer {
   /** Explicitly configured walkways between distinct terminal area graphs. */
   private drawTerminalTransit(layout: AirportLayout, selection: string | null): void {
     const g = this.overlay;
+    // 複合連絡施設（J-2）が選択中なら、その通路段と両端の垂直エリア・端点エリアを一体でハイライトする
+    const cf = selection ? layout.connectionFacilities?.[selection] : undefined;
+    const cfLinkId = cf?.segment.kind === 'link' ? cf.segment.linkId : null;
     for (const link of Object.values(layout.terminalLinks ?? {})) {
       const from = layout.terminalAreas[link.fromAreaId];
       const to = layout.terminalAreas[link.toAreaId];
       if (!from || !to) continue;
       const a = c({ x: from.origin.x + from.w / 2, y: from.origin.y + from.h / 2 });
       const b = c({ x: to.origin.x + to.w / 2, y: to.origin.y + to.h / 2 });
-      const selected = selection === from.id || selection === to.id;
+      const selected = selection === from.id || selection === to.id || link.id === cfLinkId;
       const color = link.kind === 'movingWalkway' ? COLOR.selection : link.kind === 'elevatedWalkway' ? 0x7fdbff : COLOR.walkway;
       const alpha = BUILD_ALPHA[link.buildState];
       this.dashed(g, a, b, 0.65, 0.4, { width: this.px(selected ? 3 : 1.7), color, alpha });
       if (!link.bidirectional) this.arrow(g, a, b, color, alpha);
       for (const p of [a, b]) g.circle(p.x, p.y, this.px(selected ? 4 : 2.5)).fill({ color, alpha });
+    }
+    if (cf) {
+      const partIds = new Set<string>([...cf.aVerticalAreaIds, ...cf.bVerticalAreaIds]);
+      if (cfLinkId) {
+        const link = layout.terminalLinks?.[cfLinkId];
+        if (link) {
+          partIds.add(link.fromAreaId);
+          partIds.add(link.toAreaId);
+        }
+      }
+      for (const areaId of partIds) {
+        const a = layout.terminalAreas[areaId];
+        if (!a) continue;
+        const p = c({ x: a.origin.x + a.w / 2, y: a.origin.y + a.h / 2 });
+        g.circle(p.x, p.y, this.px(6)).stroke({ width: this.px(2), color: COLOR.selection, alpha: 0.95 });
+      }
     }
   }
 

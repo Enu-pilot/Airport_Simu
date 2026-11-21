@@ -33,15 +33,19 @@ import {
   connectRoadLevels,
   addPortal,
   addTerminalTransitLink,
+  deleteConnectionFacility,
   deletePortal,
   deleteTerminalTransitLink,
   duplicateEntity,
+  moveConnectionFacility,
   reverseEdge,
   rotateEntity,
   setFacilityFootprint,
+  updateConnectionFacility,
   updateEntity,
   PORTAL_FACILITY_KINDS,
 } from '../core/layout/operations';
+import { connectionFacilityCost } from '../core/economy/construction';
 import { rectRing, validateOrthogonalPolygon } from '../core/geometry/polygon';
 import { classifyFacilityConnection, verifyPortalAccess } from '../core/terminal/networkGraph';
 import { deriveTerminalComplexes } from '../core/terminal/complex';
@@ -108,6 +112,15 @@ export function PropertiesPanel() {
   const pickCandidates = useEditor((s) => s.pickCandidates);
   const mode = useEditor((s) => s.mode);
   const layout = useLayout();
+  // 複合連絡施設（J-2）は EntityType を持たないため、通常の分岐より先に専用節で扱う
+  if (selection && layout.connectionFacilities?.[selection]) {
+    return (
+      <div className="properties" data-testid="properties" key={selection}>
+        <ConnectionFacilitySection layout={layout} id={selection} readOnly={mode === 'operate'} />
+      </div>
+    );
+  }
+
   if ((!selection || !entityTypeOf(selection)) && mode === 'operate') {
     return (
       <div className="properties empty" data-testid="properties">
@@ -159,6 +172,79 @@ export function PropertiesPanel() {
       )}
       <EntityProperties layout={layout} id={selection} />
     </div>
+  );
+}
+
+/**
+ * 複合連絡施設（J-2）のプロパティ節: 構成部品の一覧・費用合計・改名・段差なしの切替・
+ * 垂直エリアのまとめて移動・一体削除。部品そのものの編集は従来どおり各部品の節で行う。
+ */
+function ConnectionFacilitySection({ layout, id, readOnly }: { layout: AirportLayout; id: string; readOnly: boolean }) {
+  const cf = layout.connectionFacilities?.[id];
+  if (!cf) return null;
+  const link = cf.segment.kind === 'link' ? layout.terminalLinks?.[cf.segment.linkId] : undefined;
+  const from = link ? layout.terminalAreas[link.fromAreaId] : undefined;
+  const to = link ? layout.terminalAreas[link.toAreaId] : undefined;
+  const areaLine = (areaId: string) => {
+    const a = layout.terminalAreas[areaId];
+    if (!a) return `${areaId}（参照切れ）`;
+    const base = layout.facilities[a.terminalId] ? facilityLevel(layout.facilities[a.terminalId]!) : 0;
+    return `${AREA_KIND_LABEL[a.kind]}（${displayName(layout, a.terminalId)} / ${floorDisplayLabel(base + a.level)}）`;
+  };
+  const verticalCount = cf.aVerticalAreaIds.length + cf.bVerticalAreaIds.length;
+  return (
+    <>
+      <div className="prop-title">複合連絡施設</div>
+      <Section title="概要">
+        {readOnly ? (
+          <Info label="名前">{cf.name || '（名称未設定）'}</Info>
+        ) : (
+          <Field label="名前">
+            <TextInput value={cf.name} onCommit={(v) => applyOp(updateConnectionFacility(layout, id, { name: v }))} testid="cf-name" />
+          </Field>
+        )}
+        <Info label="通路段">
+          {link
+            ? `${TERMINAL_TRANSIT_LABEL[link.kind]}（${from ? displayName(layout, from.terminalId) : '?'} → ${to ? displayName(layout, to.terminalId) : '?'}、${link.distanceM}m / ${link.travelSec}秒）`
+            : cf.segment.kind === 'agt'
+              ? 'AGT 区間（機能Iで導入）'
+              : '参照切れ'}
+        </Info>
+        <Info label="入口側の垂直エリア">{cf.aVerticalAreaIds.length ? cf.aVerticalAreaIds.map(areaLine).join('、') : 'なし'}</Info>
+        <Info label="出口側の垂直エリア">{cf.bVerticalAreaIds.length ? cf.bVerticalAreaIds.map(areaLine).join('、') : 'なし'}</Info>
+        <Info label="費用（部品合計）">{connectionFacilityCost(layout, id).toLocaleString()} cr</Info>
+        <Field label="段差なし">
+          <input
+            type="checkbox"
+            checked={cf.stepFree}
+            disabled={readOnly}
+            onChange={(e) => applyOp(updateConnectionFacility(layout, id, { stepFree: e.target.checked }))}
+            data-testid="cf-stepfree"
+          />
+        </Field>
+      </Section>
+      {!readOnly && verticalCount > 0 && (
+        <Section title="垂直エリアの移動（両端まとめて）">
+          <div className="row">
+            <button onClick={() => applyOp(moveConnectionFacility(layout, id, { x: 0, y: -1 }))}>↑ 1タイル</button>
+            <button onClick={() => applyOp(moveConnectionFacility(layout, id, { x: 0, y: 1 }))}>↓ 1タイル</button>
+            <button onClick={() => applyOp(moveConnectionFacility(layout, id, { x: -1, y: 0 }))}>← 1タイル</button>
+            <button onClick={() => applyOp(moveConnectionFacility(layout, id, { x: 1, y: 0 }))}>→ 1タイル</button>
+          </div>
+          <div className="muted small">端点エリアと通路段は動きません（垂直エリアだけがまとめて移動します）</div>
+        </Section>
+      )}
+      {!readOnly && (
+        <Section title="削除">
+          <div className="row">
+            <button className="danger" onClick={() => applyOp(deleteConnectionFacility(layout, id))} data-testid="cf-delete">
+              連絡施設を削除（通路段と垂直エリアも削除）
+            </button>
+          </div>
+          <div className="muted small">端点エリアは残ります</div>
+        </Section>
+      )}
+    </>
   );
 }
 

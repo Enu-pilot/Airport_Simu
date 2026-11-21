@@ -226,6 +226,9 @@ export const FLOOR_SELECTOR_LEVELS: readonly number[] = [-3, -2, -1, 0, 1, 2, 3]
 export function displayName(layout: AirportLayout, id: string): string {
   const type = entityTypeOf(id);
   const num = id.slice(id.indexOf('_') + 1);
+  // 複合連絡施設（J-2）は EntityType を持たないため、ここで先に解決する
+  const cf = layout.connectionFacilities?.[id];
+  if (cf) return cf.name ? `複合連絡施設 ${cf.name}` : `複合連絡施設 #${num}`;
   switch (type) {
     case 'runway': {
       const r = layout.runways[id];
@@ -438,6 +441,9 @@ const ISSUE_TEXT: Record<IssueCode, (n: string[], p: Issue['params']) => string>
   FACILITY_INTERIOR_INVALID: (n, p) => `${n[0]} の建物内配置が無効です（階 ${p.floorLabel ?? p.floor ?? '不明'} または親建物・階層を確認してください）`,
   FACILITY_INTERIOR_OUTSIDE: (n) => `${n[0]} が親建物 ${n[1]} の範囲外にあります`,
   TERMINAL_LINK_CLEARANCE: (n, p) => `${n[0]} の連絡通路下の航空機クリアランスが不足しています（${p.clearance}m、必要 ${p.required}m）`,
+  CONNECTION_FACILITY_DANGLING: (n) => `${n[0]}（複合連絡施設）の参照が切れています（通路段・端点エリア・垂直エリアのいずれかが無い、または垂直エリアのターミナルが端点と一致しません）`,
+  CONNECTION_FACILITY_FLOOR_GAP: (n, p) => `${n[0]}（複合連絡施設）の${p.side === 'a' ? '入口' : '出口'}側の垂直エリアが、端点エリアの階（${p.endpointFloorLabel}）と通路段の階（${p.segmentFloorLabel}）をつないでいません（不足する階に階段・エスカレーター・エレベーターを追加してください）`,
+  CONNECTION_FACILITY_STEP_FREE: (n) => `${n[0]}（複合連絡施設）は段差なしとされていますが、片側の垂直移動が階段のみです（エスカレーターまたはエレベーターを追加してください）`,
   PORTAL_LEVEL_MISMATCH: (n, p) => `${n[0]} の歩行ポータルの階が接続先と一致しません（ポータル ${p.portalFloorLabel ?? `${p.floorIndex} 階`}、エリア ${p.areaFloorLabel ?? `${p.areaLevel} 階`}）`,
   PORTAL_CONNECTION_PENDING: (n, p) => `${n[0]} は建設中のポータルが完成すればターミナルと接続します（入口方向: ${portalStatusJa(p.toEntrance)}、出口方向: ${portalStatusJa(p.fromExit)}）`,
   PORTAL_UNREACHABLE: (n, p) => `${n[0]} のポータルからはターミナルの入口/出口へ到達できません（入口方向: ${portalStatusJa(p.toEntrance)}、出口方向: ${portalStatusJa(p.fromExit)}）`,
