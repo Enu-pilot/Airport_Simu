@@ -198,6 +198,7 @@ export const PLACEMENT_PROBLEM_LABEL = {
   outsideParent: '建物の範囲の外には置けません',
   levelsInUse: '上の階にエリアや設備があるため、階数を減らせません',
   floorRangeInUse: '範囲外になる階にエリアがあるため、エリアの置ける階の範囲を変えられません',
+  spanInUse: '範囲外になる階にエリアや設備があるため、建物の階の範囲を変えられません',
 } as const;
 
 /** 空港全体の離発着能力カード（1-19） */

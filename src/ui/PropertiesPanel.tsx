@@ -27,7 +27,7 @@ import { deckElevationForCode, requiredClearanceForCode } from '../core/sim/airc
 import { distance } from '../core/geometry/vec';
 import { facilityDims, standEntry } from '../core/layout/footprint';
 import { DEFAULT_LEVEL_HEIGHT_M, facilityLevel, floorDisplay, floorDisplayLabel, roadEdgeLevelValid } from '../core/model/levels';
-import { INTERIOR_MIN_FLOOR, TERMINAL_AREA_MIN_LEVEL, floorRangeInUse, levelsInUse, terminalFloorRange } from '../core/layout/levelRules';
+import { INTERIOR_MIN_FLOOR, TERMINAL_AREA_MIN_LEVEL, floorRangeInUse, levelsInUse, terminalFloorRange, terminalSpanPatch } from '../core/layout/levelRules';
 import { edgesOfNode, taxiwayRouteEdges } from '../core/layout/network';
 import {
   deleteEntity,
@@ -107,6 +107,122 @@ import {
   CAPABILITY_STATE_LABEL,
   SIM_EFFECT_LABEL,
 } from '../i18n/ja';
+
+/**
+ * ターミナル（単独）の建物の階範囲を編集する絶対階プルダウン対（階範囲のプルダウン一本化）。
+ * 建物の最下階・最上階（絶対階）から基底階と階数を導き、levels と floorRange は従属値として
+ * terminalSpanPatch が決める（配置時の変換規則と同じ）。ターミナルの「階層」「levels」の
+ * 数値入力はこのプルダウンに一本化され、パネルには出ない。
+ */
+export function TerminalFloorSpanFields({ layout, id }: { layout: AirportLayout; id: string }) {
+  const f = layout.facilities[id]!;
+  const base = facilityLevel(f);
+  const top = base + Math.max(1, Number(f.props.levels ?? 1)) - 1;
+  const candidates = Array.from(new Set([-3, -2, -1, 0, 1, 2, 3, base, top])).sort((a, b) => a - b);
+  const applySpan = (absMin: number, absMax: number) => {
+    const patch = terminalSpanPatch(layout, id, absMin, absMax);
+    if (!patch) {
+      showToast(PLACEMENT_PROBLEM_LABEL.spanInUse, 'error');
+      return;
+    }
+    update(layout, id, { mapLevel: patch.mapLevel, props: { levels: patch.levels, floorRangeMin: patch.floorRangeMin, floorRangeMax: patch.floorRangeMax } });
+  };
+  return (
+    <>
+      <Field label="建物の最下階">
+        <select value={base} onChange={(e) => applySpan(Number(e.target.value), top)} data-testid="prop-spanMin">
+          {candidates.map((v) => (
+            <option key={v} value={v} disabled={v > top || top - v + 1 > 4}>
+              {floorDisplayLabel(v)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="建物の最上階">
+        <select value={top} onChange={(e) => applySpan(base, Number(e.target.value))} data-testid="prop-spanMax">
+          {candidates.map((v) => (
+            <option key={v} value={v} disabled={v < base || v - base + 1 > 4}>
+              {floorDisplayLabel(v)}
+            </option>
+          ))}
+        </select>
+        <span className="muted small">最下階が建物の基底階になります。地下だけの建物も作れます</span>
+      </Field>
+    </>
+  );
+}
+
+/**
+ * ターミナルのエリアを置ける相対階範囲（floorRangeMin / floorRangeMax）を編集するプルダウン対。
+ * 建物の階範囲（TerminalFloorSpanFields）とは独立に、エリアを置ける階だけを絞れる。
+ * 範囲外になるエリアがある変更は floorRangeInUse で弾き、コア（updateEntity）でも検証される。
+ * 下限は基底より下（TERMINAL_AREA_MIN_LEVEL）まで選べるため、旧データの地下エリアの意味は変わらない。
+ */
+export function TerminalAreaRangeFields({ layout, id }: { layout: AirportLayout; id: string }) {
+  const f = layout.facilities[id]!;
+  return (
+    <>
+      <Field label="エリアの最下階">
+        <select
+          value={terminalFloorRange(layout, id).min}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            const range = terminalFloorRange(layout, id);
+            if (floorRangeInUse(layout, id, v, range.max)) {
+              showToast(PLACEMENT_PROBLEM_LABEL.floorRangeInUse, 'error');
+              return;
+            }
+            update(layout, id, { props: { floorRangeMin: v } });
+          }}
+          data-testid="prop-floorRangeMin"
+        >
+          {Array.from({ length: Math.max(1, Number(f.props.levels ?? 1)) - TERMINAL_AREA_MIN_LEVEL }, (_, i) => i + TERMINAL_AREA_MIN_LEVEL).map((v) => (
+            <option key={v} value={v}>
+              {floorDisplayLabel(facilityLevel(f) + v)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="エリアの最上階">
+        <select
+          value={terminalFloorRange(layout, id).max}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            const range = terminalFloorRange(layout, id);
+            if (floorRangeInUse(layout, id, range.min, v)) {
+              showToast(PLACEMENT_PROBLEM_LABEL.floorRangeInUse, 'error');
+              return;
+            }
+            update(layout, id, { props: { floorRangeMax: v } });
+          }}
+          data-testid="prop-floorRangeMax"
+        >
+          {Array.from({ length: Math.max(1, Number(f.props.levels ?? 1)) - terminalFloorRange(layout, id).min }, (_, i) => i + terminalFloorRange(layout, id).min).map((v) => (
+            <option key={v} value={v}>
+              {floorDisplayLabel(facilityLevel(f) + v)}
+            </option>
+          ))}
+        </select>
+      </Field>
+    </>
+  );
+}
+
+/**
+ * 単独ターミナルの詳細設定（折りたたみ）: エリアを置ける階範囲を、建物の階範囲から独立に
+ * 絞るための副次コントロール。主操作は絶対階プルダウン対（TerminalFloorSpanFields）で、
+ * こちらは「建物は 3F まであるがエリアは 2F までに制限する」といった絞り込み専用に残す
+ * （一本化のトレードオフに対する PO 指示 2026-11-21「詳細設定としておいて」）。
+ */
+export function TerminalFloorAdvancedFields({ layout, id }: { layout: AirportLayout; id: string }) {
+  return (
+    <details className="prop-section prop-advanced" data-testid="prop-floorAdvanced">
+      <summary className="prop-section-title">詳細設定（エリアを置ける階の絞り込み）</summary>
+      <TerminalAreaRangeFields layout={layout} id={id} />
+      <span className="muted small">建物の階範囲は変えず、エリアを置ける階だけを狭くできます</span>
+    </details>
+  );
+}
 
 export function PropertiesPanel() {
   useEditor((s) => s.ops?.uiVersion ?? -1);
@@ -1426,52 +1542,14 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             <Info label="建物の階範囲">
               {`${floorDisplay(facilityLevel(f)).building}〜${floorDisplay(facilityLevel(f) + Math.max(1, Number(f.props.levels ?? 1)) - 1).building}（地図階層 ${floorDisplay(facilityLevel(f)).map}〜${floorDisplay(facilityLevel(f) + Math.max(1, Number(f.props.levels ?? 1)) - 1).map}）`}
             </Info>
-            {!readOnly && (
-              <>
-                <Field label="エリアの最下階">
-                  <select
-                    value={terminalFloorRange(layout, id).min}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      const range = terminalFloorRange(layout, id);
-                      if (floorRangeInUse(layout, id, v, range.max)) {
-                        showToast(PLACEMENT_PROBLEM_LABEL.floorRangeInUse, 'error');
-                        return;
-                      }
-                      update(layout, id, { props: { floorRangeMin: v } });
-                    }}
-                    data-testid="prop-floorRangeMin"
-                  >
-                    {Array.from({ length: Math.max(1, Number(f.props.levels ?? 1)) - TERMINAL_AREA_MIN_LEVEL }, (_, i) => i + TERMINAL_AREA_MIN_LEVEL).map((v) => (
-                      <option key={v} value={v}>
-                        {floorDisplayLabel(facilityLevel(f) + v)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="エリアの最上階">
-                  <select
-                    value={terminalFloorRange(layout, id).max}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      const range = terminalFloorRange(layout, id);
-                      if (floorRangeInUse(layout, id, range.min, v)) {
-                        showToast(PLACEMENT_PROBLEM_LABEL.floorRangeInUse, 'error');
-                        return;
-                      }
-                      update(layout, id, { props: { floorRangeMax: v } });
-                    }}
-                    data-testid="prop-floorRangeMax"
-                  >
-                    {Array.from({ length: Math.max(1, Number(f.props.levels ?? 1)) - terminalFloorRange(layout, id).min }, (_, i) => i + terminalFloorRange(layout, id).min).map((v) => (
-                      <option key={v} value={v}>
-                        {floorDisplayLabel(facilityLevel(f) + v)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              </>
+            {!f.parentFacilityId && terminalFloorRange(layout, id).min < 0 && (
+              <Info label="エリアを置ける階">
+                {`${floorDisplay(facilityLevel(f) + terminalFloorRange(layout, id).min).building}〜${floorDisplay(facilityLevel(f) + terminalFloorRange(layout, id).max).building}（建物の下の階を含みます）`}
+              </Info>
             )}
+            {!readOnly && f.parentFacilityId && <TerminalAreaRangeFields layout={layout} id={id} />}
+            {!readOnly && !f.parentFacilityId && <TerminalFloorSpanFields layout={layout} id={id} />}
+            {!readOnly && !f.parentFacilityId && <TerminalFloorAdvancedFields layout={layout} id={id} />}
           </>
         )}
         {f.parentFacilityId ? (
@@ -1489,7 +1567,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
               ))}
             </select>
           </Field>
-        ) : f.kind !== 'gate' && (
+        ) : f.kind !== 'gate' && f.kind !== 'terminal' && (
           <Field label="階層">
             <NumberInput value={facilityLevel(f)} min={-5} max={10} onCommit={(v) => update(layout, id, { mapLevel: v })} testid="prop-mapLevel" />
           </Field>
@@ -1523,7 +1601,7 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         {f.kind !== 'gate' && <RotationField value={f.rotation} onChange={(r) => update(layout, id, { rotation: r })} label="向き" />}
         {PROP_SCHEMAS[f.kind]
           .filter((def) => !(f.kind === 'gate' && busGate && (def.key === 'standId' || def.key === 'jetBridge')))
-          .filter((def) => !(f.kind === 'terminal' && (def.key === 'floorRangeMin' || def.key === 'floorRangeMax')))
+          .filter((def) => !(f.kind === 'terminal' && (def.key === 'floorRangeMin' || def.key === 'floorRangeMax' || (def.key === 'levels' && !f.parentFacilityId))))
           .map((def) => (
           <Field key={def.key} label={propLabel(f.kind, def.key)}>
             {def.type === 'int' && (

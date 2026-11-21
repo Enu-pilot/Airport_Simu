@@ -256,6 +256,10 @@ input[type='number'] { width: 80px; }
 .operability .reason { font-weight: 400; font-size: 12px; }
 .prop-section { margin-top: 8px; }
 .prop-section-title { font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); margin-bottom: 4px; padding-bottom: 2px; }
+.prop-advanced > summary { cursor: pointer; list-style: none; }
+.prop-advanced > summary::-webkit-details-marker { display: none; }
+.prop-advanced > summary::before { content: '▸ '; }
+.prop-advanced[open] > summary::before { content: '▾ '; }
 .prop-field { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 3px 0; }
 .prop-label { color: var(--muted); font-size: 12px; flex: none; max-width: 48%; }
 .prop-value { text-align: right; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 2px; min-width: 0; }

@@ -62,6 +62,7 @@ Phase 6 は親計画です。5-18 / 5-19 / 5-20 / 5-21 / 5-25 と A6（Phase 5 5
 | 2026-E 住民満足度施策 | active（PR #68 マージ待ち） | [resident_satisfaction_measures_plan.md](active/resident_satisfaction_measures_plan.md) | 防音工事・夜間割増・NoiseCard＋海上移転係数・住民向け施設・騒音対策費。10.10 |
 | 2026-F 架空会社の制限と持ち替え | active（PR #67 マージ済み、仕様反映のみ残件） | [fictional_airline_restriction_plan.md](active/fictional_airline_restriction_plan.md) | 提案生成への制限と契約パネルでの付け替え。版上げなし |
 | 2026-G〜J 地下ターミナル・PBB・AGT・階層統一 | planned（詳細設計完了・PO 承認済み） | [underground_terminal_pbb_agt_plan.md](planned/underground_terminal_pbb_agt_plan.md) | 5-18 の後段。推奨順 J-1 → G → H → J-2 → I。H に PBB 本数と既存ゲート置き換えの変更要望あり |
+| 2026-G 追随 ターミナル階範囲のプルダウン一本化 | active（実装済み・PR 化待ち） | [terminal_floor_span_unification_plan.md](active/terminal_floor_span_unification_plan.md) | パネルで建物の絶対階範囲（最下階・最上階）から基底階・階数を導出し、地下だけの建物をパネルから作れるようにする。エリア範囲の絞り込みは詳細設定として残置。版上げなし |
 | 2026-PERF 性能改善 | active（第1・2弾は PR #65 マージ済み、第3弾は実装完了・PR 化指示済み） | [performance_improvement_plan.md](active/performance_improvement_plan.md) | 計測→地図なし→結果不変の削減。簡略モードは保留 |
 | 2026-CARGO 国内貨物航空会社の拡充 | active（実装完了・PR 化指示済み） | [domestic_cargo_airlines_plan.md](active/domestic_cargo_airlines_plan.md) | 5-12 貨物基盤の上のカタログ拡充。国内貨物専用機の対象はスプリング・ジャパンのみ |
 | 2026-UI 日報・経営再編／2026-LV 階層同期／2026-FIDS 便名カラー | 完了（PR #61・#62・#66 マージ済み） | 計画書は作成せず、確定仕様は docs/36・37・34・06 へ直接反映 | — |
