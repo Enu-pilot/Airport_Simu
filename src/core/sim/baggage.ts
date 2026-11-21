@@ -36,11 +36,33 @@ function nextId(state: SimState, prefix: string): string {
   return `${prefix}_${n}`;
 }
 
+/**
+ * グループの手荷物の「ベルトに出た/回収された」回数（PERF4-4）。
+ * waitingBaggage で眠るグループの起床署名に使う。実行時状態（保存しない）。
+ */
+const bagWakeStore = new WeakMap<SimState, Map<string, number>>();
+
+export function bagGroupVersion(state: SimState, groupId: string): number {
+  return bagWakeStore.get(state)?.get(groupId) ?? 0;
+}
+
 export function moveBag(state: SimState, bag: Bag, to: BagState, location: string): void {
+  const from = bag.state;
+  const fromLocation = bag.location;
   bag.state = to;
   bag.location = location;
   bag.since = state.now;
   bag.history.push({ t: state.now, state: to, location });
+  if (to === 'onBelt' || to === 'collected') {
+    // 受取待ちグループの起床トリガー（passengers の睡眠署名が参照する）
+    let m = bagWakeStore.get(state);
+    if (!m) {
+      m = new Map();
+      bagWakeStore.set(state, m);
+    }
+    m.set(bag.paxGroupId, (m.get(bag.paxGroupId) ?? 0) + 1);
+  }
+  if (bagEventMode) bagTransitionHook(state, bag, from, fromLocation, to, location);
 }
 
 function addBag(state: SimState, g: PaxGroup, flightId: string, s: BagState, location: string, opts: { direction?: Bag['direction']; transferToFlightId?: string } = {}): Bag {
@@ -61,6 +83,10 @@ function addBag(state: SimState, g: PaxGroup, flightId: string, s: BagState, loc
   state.activeBags.push(id);
   (state.flightBags[flightId] ??= []).push(id);
   (state.groupBags[g.id] ??= []).push(id);
+  if (bagEventMode && bag.state === 'checkedIn') {
+    // コンベヤー待ちへ（出現順 = since の昇順に並ぶ。now は単調なため末尾追加でよい）
+    bagRuntime(state).conveyor.push(id);
+  }
   return bag;
 }
 
@@ -112,6 +138,149 @@ export function groupBagsOf(state: SimState, groupId: string): Bag[] {
   return (state.groupBags[groupId] ?? []).map((id) => state.bags[id]!);
 }
 
+// ---------------------------------------------------------------- イベント駆動化（性能改善 第4弾 PERF4-5）
+
+/**
+ * 手荷物のイベント駆動化（perf4-design.md §3.8）。
+ * stepBaggage の毎 tick 全走査（コンベヤー・仕分け・ベルト・終端除去）を、
+ * 状態ごとの索引で置き換える:
+ * - コンベヤー: checkedIn はタイマー（since + CONVEYOR_SEC）。due 順キューから処理する
+ * - 仕分け: 仕分け設備ごとの ID 順キュー。アキュムレータの計算は従来どおり毎 tick 行い、
+ *   「ID 順に、1 秒以上経過したものを n 個まで」という従来の選択規則をそのまま再現する
+ * - ベルト: 受取所ごとの atClaim キュー＋ベルト使用中の便の数。処理が要るのは
+ *   到着・回収（便の枠が空く）・ベルト故障切替のあった受取所だけ
+ * - 終端除去: 終端化した個数だけ数え、変わった tick の終わりにだけ従来の filter を行う
+ * 索引は実行時状態（保存しない）。復元後は最初の stepBaggage で activeBags から再構築する。
+ * キュー内の古い id は使用時に状態を検証して捨てる（遅延削除）。
+ */
+let bagEventMode = true;
+
+/** テスト用: 手荷物のイベント経路の有効/無効（false で従来の全走査経路） */
+export function setBagEventModeForTest(v: boolean): void {
+  bagEventMode = v;
+}
+export function isBagEventMode(): boolean {
+  return bagEventMode;
+}
+
+interface BagRuntime {
+  /** checkedIn の bag id（due = since + CONVEYOR_SEC の昇順） */
+  conveyor: string[];
+  /** 仕分け設備 id → sorting 中の bag id（ID 順） */
+  sorting: Map<string, string[]>;
+  /** 受取所エリア id → atClaim の bag id（ID 順） */
+  claimQueue: Map<string, string[]>;
+  /** 受取所エリア id → (便 id → onBelt 中の個数) */
+  beltFlights: Map<string, Map<string, number>>;
+  /** ベルト再評価が必要な受取所エリア */
+  beltDirty: Set<string>;
+  /** 終端化したが activeBags に残っている個数 */
+  finalsPending: number;
+  initialized: boolean;
+}
+
+const bagRuntimeStore = new WeakMap<SimState, BagRuntime>();
+
+const bagNum = (id: string): number => Number(id.slice(3));
+
+function bagRuntime(state: SimState): BagRuntime {
+  let rt = bagRuntimeStore.get(state);
+  if (!rt) {
+    rt = {
+      conveyor: [],
+      sorting: new Map(),
+      claimQueue: new Map(),
+      beltFlights: new Map(),
+      beltDirty: new Set(),
+      finalsPending: 0,
+      initialized: false,
+    };
+    bagRuntimeStore.set(state, rt);
+  }
+  return rt;
+}
+
+/** ID 順を保って挿入する */
+function insertBagId(list: string[], id: string): void {
+  const n = bagNum(id);
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (bagNum(list[mid]!) < n) lo = mid + 1;
+    else hi = mid;
+  }
+  list.splice(lo, 0, id);
+}
+
+/** 復元直後など、索引が無い状態からの初期構築（activeBags の1回走査） */
+function initBagRuntime(state: SimState): BagRuntime {
+  const rt = bagRuntime(state);
+  if (rt.initialized) return rt;
+  rt.initialized = true;
+  const conveyor: Bag[] = [];
+  for (const id of state.activeBags) {
+    const b = state.bags[id];
+    if (!b) continue;
+    if (BAG_FINAL_STATES.includes(b.state)) {
+      rt.finalsPending++;
+    } else if (b.state === 'checkedIn') {
+      conveyor.push(b);
+    } else if (b.state === 'sorting') {
+      const sid = b.location.slice('sorter:'.length);
+      (rt.sorting.get(sid) ?? rt.sorting.set(sid, []).get(sid)!).push(id);
+    } else if (b.state === 'atClaim') {
+      const area = b.location.slice('claim:'.length);
+      (rt.claimQueue.get(area) ?? rt.claimQueue.set(area, []).get(area)!).push(id);
+      rt.beltDirty.add(area);
+    } else if (b.state === 'onBelt') {
+      const area = b.location.slice('belt:'.length);
+      const m = rt.beltFlights.get(area) ?? rt.beltFlights.set(area, new Map()).get(area)!;
+      m.set(b.flightId, (m.get(b.flightId) ?? 0) + 1);
+    }
+  }
+  conveyor.sort((a, b) => a.since - b.since || bagNum(a.id) - bagNum(b.id));
+  rt.conveyor = conveyor.map((b) => b.id);
+  return rt;
+}
+
+/** moveBag の遷移通知: 索引への追加・ベルト占有・終端数だけを維持する（除去は遅延） */
+function bagTransitionHook(state: SimState, bag: Bag, from: BagState, fromLocation: string, to: BagState, location: string): void {
+  const rt = bagRuntime(state);
+  if (!rt.initialized) initBagRuntime(state);
+  if (from === 'onBelt') {
+    const area = fromLocation.slice('belt:'.length);
+    const m = rt.beltFlights.get(area);
+    if (m) {
+      const left = (m.get(bag.flightId) ?? 0) - 1;
+      if (left <= 0) {
+        m.delete(bag.flightId);
+        rt.beltDirty.add(area); // 便の枠が空いた → 待ち手荷物を流せる可能性がある
+      } else {
+        m.set(bag.flightId, left);
+      }
+    }
+  }
+  if (to === 'onBelt') {
+    const area = location.slice('belt:'.length);
+    const m = rt.beltFlights.get(area) ?? rt.beltFlights.set(area, new Map()).get(area)!;
+    m.set(bag.flightId, (m.get(bag.flightId) ?? 0) + 1);
+  } else if (to === 'checkedIn') {
+    rt.conveyor.push(bag.id); // since = now（最大）なので末尾追加で due 順を保つ
+  } else if (to === 'atClaim') {
+    const area = location.slice('claim:'.length);
+    insertBagId(rt.claimQueue.get(area) ?? rt.claimQueue.set(area, []).get(area)!, bag.id);
+    rt.beltDirty.add(area);
+  }
+  if (BAG_FINAL_STATES.includes(to) && !BAG_FINAL_STATES.includes(from)) rt.finalsPending++;
+}
+
+/** ベルト設備の故障・復旧は、その受取所の再評価トリガーになる */
+function noteBeltEquipment(state: SimState, key: string): void {
+  if (!bagEventMode || !key.startsWith('belt:')) return;
+  bagRuntime(state).beltDirty.add(key.slice('belt:'.length));
+}
+
 // ---------------------------------------------------------------- 設備の故障
 
 export function equipment(state: SimState, key: string): EquipmentState {
@@ -128,11 +297,134 @@ export function setEquipmentBroken(sim: Simulation, key: string, broken: boolean
   e.broken = broken;
   e.repairUntil = broken && repairSec ? state.now + repairSec : null;
   log(state, { t: state.now, kind: broken ? 'equipmentDown' : 'equipmentUp', note: key });
+  noteBeltEquipment(state, key);
 }
 
 // ---------------------------------------------------------------- 1ティック
 
 export function stepBaggage(sim: Simulation): void {
+  if (bagEventMode) {
+    stepBaggageEvent(sim);
+    return;
+  }
+  stepBaggageLegacy(sim);
+}
+
+/** イベント経路（PERF4-5）。設備タイマーと仕分けアキュムレータは毎 tick、他は索引で処理する */
+function stepBaggageEvent(sim: Simulation): void {
+  const { state, ctx } = sim;
+  const rt = initBagRuntime(state);
+  for (const [key, e] of Object.entries(state.equipment)) {
+    if (e.broken) {
+      e.downSec++;
+      if (e.repairUntil !== null && state.now >= e.repairUntil) setEquipmentBroken(sim, key, false);
+    }
+  }
+  const sorter = ctx.sorters[0];
+  // コンベヤー → 仕分け設備（due 順キューの先頭から。due でないものが先頭なら後ろも due でない）
+  const conv = rt.conveyor;
+  let cut = 0;
+  while (cut < conv.length) {
+    const b = state.bags[conv[cut]!];
+    if (!b) {
+      cut++;
+      continue;
+    }
+    // 既に checkedIn でないものは二度と戻らない（戻る場合は付け替えで新規に追加される）ため捨てる
+    if (b.state !== 'checkedIn') {
+      cut++;
+      continue;
+    }
+    if (state.now - b.since < CONVEYOR_SEC) break;
+    cut++;
+    if (sorter) {
+      moveBag(state, b, 'sorting', `sorter:${sorter.id}`);
+      insertBagId(rt.sorting.get(sorter.id) ?? rt.sorting.set(sorter.id, []).get(sorter.id)!, b.id);
+    } else if (b.location !== 'conveyor:noSorter') {
+      b.location = 'conveyor:noSorter';
+      b.history.push({ t: state.now, state: b.state, location: b.location });
+    }
+  }
+  if (cut > 0) rt.conveyor = conv.slice(cut);
+  // 仕分け: アキュムレータは従来どおり毎 tick 更新し、設備ごとの ID 順キューから選ぶ
+  for (const s of ctx.sorters) {
+    if (isDown(state, s.id)) continue;
+    const acc = (state.sorterAcc[s.id] ?? 0) + s.capacityPerMin / 60;
+    let n = Math.floor(acc);
+    state.sorterAcc[s.id] = acc - n;
+    const q = rt.sorting.get(s.id);
+    if (q && q.length > 0) {
+      const loc = `sorter:${s.id}`;
+      const survivors: string[] = [];
+      let i = 0;
+      for (; i < q.length; i++) {
+        if (n <= 0) break; // 従来も n が尽きた時点で走査をやめる
+        const id = q[i]!;
+        const b = state.bags[id];
+        if (!b || b.state !== 'sorting' || b.location !== loc) continue; // 遅延削除
+        if (state.now - b.since < 1) {
+          survivors.push(id);
+          continue;
+        }
+        moveBag(state, b, 'madeUp', `makeup:${s.id}`);
+        n--;
+      }
+      for (; i < q.length; i++) survivors.push(q[i]!);
+      rt.sorting.set(s.id, survivors);
+    }
+    if (n === 0 && acc >= 1) state.sorterAcc[s.id] = Math.min(state.sorterAcc[s.id]!, 1);
+  }
+  // 受取所: 再評価が必要な受取所だけ、待ち手荷物を ID 順（受取所横断）に流す
+  if (rt.beltDirty.size > 0) {
+    const areas = [...rt.beltDirty];
+    rt.beltDirty.clear();
+    const areaSet = new Set(areas);
+    const beltsByArea = new Map<string, number>();
+    for (const area of areas) {
+      beltsByArea.set(
+        area,
+        isDown(state, `belt:${area}`) ? 0 : Math.max(0, Number(ctx.layout.terminalAreas[area]?.props.belts ?? 0)),
+      );
+    }
+    const cand: string[] = [];
+    for (const area of areas) {
+      const q = rt.claimQueue.get(area);
+      if (q) cand.push(...q);
+    }
+    cand.sort((a, b) => bagNum(a) - bagNum(b));
+    for (const id of cand) {
+      const b = state.bags[id];
+      if (!b || b.state !== 'atClaim') continue;
+      const area = b.location.slice('claim:'.length);
+      if (!areaSet.has(area)) continue;
+      const flights = rt.beltFlights.get(area) ?? rt.beltFlights.set(area, new Map()).get(area)!;
+      if ((flights.get(b.flightId) ?? 0) > 0 || flights.size < beltsByArea.get(area)!) {
+        moveBag(state, b, 'onBelt', `belt:${area}`);
+        const f = state.flights[b.flightId]!;
+        f.pax.bagsReadyAt ??= state.now;
+      }
+    }
+    for (const area of areas) {
+      const q = rt.claimQueue.get(area);
+      if (q) {
+        rt.claimQueue.set(
+          area,
+          q.filter((id) => {
+            const b = state.bags[id];
+            return b !== undefined && b.state === 'atClaim' && b.location === `claim:${area}`;
+          }),
+        );
+      }
+    }
+  }
+  // 終端除去は、終端化が起きた tick の終わりにだけ従来の filter を行う
+  if (rt.finalsPending > 0) {
+    state.activeBags = state.activeBags.filter((id) => !BAG_FINAL_STATES.includes(state.bags[id]!.state));
+    rt.finalsPending = 0;
+  }
+}
+
+function stepBaggageLegacy(sim: Simulation): void {
   const { state, ctx } = sim;
   for (const [key, e] of Object.entries(state.equipment)) {
     if (e.broken) {

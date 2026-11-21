@@ -6,7 +6,7 @@ import { terminalServiceComplexes } from '../terminal/serviceComplex';
 import { areaServerCount, serviceSecPerPax } from '../terminal/capacity';
 import { resolveType } from './aircraftTypes';
 import { demandFactorAt } from './disruptions';
-import { arrivalBags, checkInBags, collectBags, groupBagsOnBelt, reconcileDepartureBags, transferArrivalBags } from './baggage';
+import { arrivalBags, bagGroupVersion, checkInBags, collectBags, groupBagsOnBelt, reconcileDepartureBags, transferArrivalBags } from './baggage';
 import { boardingAllowed } from './ground';
 import { applyBusArrival, applyBusDeparture, pickBusGate, stepBusBoarding } from './apronBus';
 import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './busRules';
@@ -25,6 +25,7 @@ import { recordPortalPassage } from './portalUsage';
 import { isProcessStep, markProcessQueueJoin, recordProcessStart } from './processStats';
 import { recordJourneyFinish, recordJourneyStart, recordJourneyStepFreeMiss } from './journeyStats';
 import { isRoutePending, markRoutePending, recordMissBreakdown, type MissBottleneck } from './missBreakdown';
+import { notePaxScale, paxDetailStart } from './perfStats';
 import type { Simulation } from './simulation';
 import {
   EVENT_LOG_LIMIT,
@@ -54,6 +55,78 @@ export const PAX_GENERATE_LEAD_SEC = 3 * 3600;
 export const PAX_ARRIVAL_MIN = { earliest: 150, mode: 90, latest: 45 };
 /** フェーズ 4 §4.4: 国際の出発旅客は早く来て長く滞在する */
 export const PAX_ARRIVAL_MIN_INTL = { earliest: 240, mode: 150, latest: 75 };
+
+/**
+ * 規模ステージ（PAX-3: 来港分布の規模連動）。格（tier）を 3 段階に丸めたもので、
+ * 大規模な空港ほど旅客が早く来ることを生成パラメータに反映するための軸。
+ * S は従来値と完全に同一に保ち、小規模空港の運航結果を変えない。
+ */
+export type PaxScaleStage = 'S' | 'M' | 'L';
+
+/** 格 → 規模ステージ（S: 0〜2、M: 3〜4、L: 5〜7） */
+export function paxScaleStageOfTier(tier: number): PaxScaleStage {
+  return tier <= 2 ? 'S' : tier <= 4 ? 'M' : 'L';
+}
+
+/**
+ * この運航の規模ステージ。格は会社の目標（goals）から読む（tier は日次締めでのみ
+ * 変わるため運航中は安定する）。会社のない経路（シナリオ等）は S 固定。
+ */
+export function paxScaleStage(sim: Simulation): PaxScaleStage {
+  return paxScaleStageOfTier(sim.company?.goals?.tier ?? 0);
+}
+
+export interface PaxArrivalDist {
+  earliest: number;
+  mode: number;
+  latest: number;
+}
+
+/** 来港分布表（ステージ × 国内/国際、単位は分、[最早, 最頻, 最遅] の三角分布） */
+export const PAX_ARRIVAL_TABLE: Record<PaxScaleStage, { domestic: PaxArrivalDist; international: PaxArrivalDist }> = {
+  S: { domestic: PAX_ARRIVAL_MIN, international: PAX_ARRIVAL_MIN_INTL },
+  M: { domestic: { earliest: 180, mode: 105, latest: 50 }, international: { earliest: 270, mode: 165, latest: 80 } },
+  L: { domestic: { earliest: 210, mode: 120, latest: 55 }, international: { earliest: 300, mode: 180, latest: 90 } },
+};
+
+/**
+ * ステージ別の生成リード（秒）。M/L は国際の earliest + 30 分で、生成時点で出現時刻が
+ * 過去になる（分布の左裾が潰れる）ことがない。S は従来どおり 3 時間。
+ */
+export const PAX_GENERATE_LEAD_SEC_BY_STAGE: Record<PaxScaleStage, number> = {
+  S: PAX_GENERATE_LEAD_SEC,
+  M: (PAX_ARRIVAL_TABLE.M.international.earliest + 30) * 60,
+  L: (PAX_ARRIVAL_TABLE.L.international.earliest + 30) * 60,
+};
+
+/** この運航の生成リード（秒） */
+export function paxGenerateLeadSec(sim: Simulation): number {
+  return PAX_GENERATE_LEAD_SEC_BY_STAGE[paxScaleStage(sim)];
+}
+
+export interface LoungeDwellDist {
+  min: number;
+  mode: number;
+  max: number;
+}
+
+/**
+ * ラウンジ滞在希望時間の分布（分、[最小, 最頻, 最大] の三角分布。PAX-4）。
+ * S/M は共通で、L は最頻 +15 分・最大 +30 分（設計書の国際 L の例 [30, 75, 150] 分に倣い、
+ * 国内も同じずらし方を適用する）。実際の滞在は min(希望, 搭乗開始までの余裕)。
+ */
+export const LOUNGE_DWELL_MIN_TABLE: Record<PaxScaleStage, { domestic: LoungeDwellDist; international: LoungeDwellDist }> = {
+  S: { domestic: { min: 20, mode: 45, max: 90 }, international: { min: 30, mode: 60, max: 120 } },
+  M: { domestic: { min: 20, mode: 45, max: 90 }, international: { min: 30, mode: 60, max: 120 } },
+  L: { domestic: { min: 20, mode: 60, max: 120 }, international: { min: 30, mode: 75, max: 150 } },
+};
+
+/** ラウンジ滞在希望時間（秒）を分布から引く（グループの便の国内/国際と規模ステージで決まる） */
+export function drawLoungeDwellSec(sim: Simulation, g: PaxGroup): number {
+  const f = sim.state.flights[g.flightId]!;
+  const d = LOUNGE_DWELL_MIN_TABLE[paxScaleStage(sim)][f.routeType === 'international' ? 'international' : 'domestic'];
+  return withRng(sim.state, (rng) => Math.round(triangular(rng.next(), d.min, d.mode, d.max) * 60));
+}
 export const LOAD_FACTOR = { min: 0.65, max: 0.9 };
 export const MAX_GROUP_SIZE = 5;
 const STEP_FREE_GROUP_RATE = 0.05;
@@ -190,6 +263,26 @@ const STEP_KIND: Partial<Record<PaxStep, AreaNode['kind']>> = {
   transferSecurity: 'transferSecurity',
 };
 
+/**
+ * ctx から決まる定数のキャッシュ（PERF4-6: 実規模計測で見つけた小粒削減）。
+ * リモート指定スタンドの有無と複数ターミナルかは ctx（シミュレーション中は不変）だけの
+ * 関数だが、従来は便ごと・tick ごとに全スタンド走査で再計算していた。値は不変なので
+ * ctx 単位でメモ化しても結果は変わらない。
+ */
+const ctxConstStore = new WeakMap<object, { remoteExists: boolean; multiTerminal: boolean }>();
+
+function ctxConsts(ctx: Simulation['ctx']): { remoteExists: boolean; multiTerminal: boolean } {
+  let c = ctxConstStore.get(ctx);
+  if (!c) {
+    c = {
+      remoteExists: Object.values(ctx.layout.stands).some((stand) => stand.remoteBoarding !== undefined),
+      multiTerminal: Object.keys(ctx.terminal.byTerminal).length > 1,
+    };
+    ctxConstStore.set(ctx, c);
+  }
+  return c;
+}
+
 function boardingLeadSec(sim: Simulation, f: Flight): number {
   const ac = sim.state.aircraft[f.aircraftId]!;
   // バス扱いの便は、バスの移動・乗降の分だけ早く搭乗を始める。国際は搭乗開始が 15 分早い（フェーズ 4 §4.4）
@@ -205,6 +298,8 @@ function gateProfile(sim: Simulation, gateId: string | null, typeId: string) {
 
 export function stepPassengers(sim: Simulation): void {
   const { state } = sim;
+  // サブフェーズ計測（PERF4-0）: 有効化時のみ時刻を読む。無効時は pd = null で追加コストなし
+  const pd = paxDetailStart();
   // 便・グループは ID の発行順に挿入されるため、Object の列挙順がそのまま決定的な処理順になる
   for (const f of Object.values(state.flights)) {
     if (f.cargo) continue; // 貨物便（5-12）は旅客を生成しない
@@ -213,17 +308,48 @@ export function stepPassengers(sim: Simulation): void {
     if (f.direction === 'departure') stepDepartureFlight(sim, f);
     else stepArrivalFlight(sim, f);
   }
-  const occupancy = areaOccupancy(state);
-  for (const id of state.activePax) stepGroup(sim, state.paxGroups[id]!, occupancy);
-  // 終了したグループを処理対象から外す
-  state.activePax = state.activePax.filter((id) => !PAX_FINAL_STATES.includes(state.paxGroups[id]!.state));
-  for (const key of sortedFacilityKeys(state.facilities)) stepFacility(sim, key);
+  pd?.mark('flight');
+  if (paxEventMode) {
+    stepPaxEventPhases(sim, pd);
+    return;
+  }
+  promotePendingPax(sim);
+  const idx = paxScan(state);
+  const occupancy = occupancyOf(state, idx.scan);
+  pd?.mark('occupancy');
+  const scanCount = idx.scan.length;
+  for (const id of idx.scan) stepGroup(sim, state.paxGroups[id]!, occupancy);
+  // 終了したグループを処理対象から外す（台帳の activePax も従来どおり同じ条件で落とす）
+  idx.scan = idx.scan.filter((id) => !PAX_FINAL_STATES.includes(state.paxGroups[id]!.state));
+  state.activePax = state.activePax.filter((id) => {
+    const g = state.paxGroups[id]!;
+    if (!PAX_FINAL_STATES.includes(g.state)) return true;
+    occUncount(state, g); // 安全網（PERF4-3）: 終端グループは占有から外す
+    return false;
+  });
+  pd?.mark('groups');
+  if (facilityEventMode) stepFacilitiesEvent(sim);
+  else stepFacilitiesFull(sim);
+  pd?.finish('facility');
+  notePaxScale({ paxScan: scanCount, paxPending: idx.pending.length });
+}
+
+/** 施設フェーズ（全施設走査）。PERF4-2 のイベント経路と切り替えるため関数に切り出す */
+function stepFacilitiesFull(sim: Simulation): void {
+  for (const key of sortedFacilityKeys(sim.state.facilities)) stepFacility(sim, key);
 }
 
 /** エリアごとの滞在人数（歩行中は出発側のエリアに数える） */
 export function areaOccupancy(state: SimState): Map<string, number> {
+  // PERF4-3: 増分マップの写し（実行時状態が無い場合は従来どおり全構築）
+  const rt = paxEventStore.get(state);
+  if (rt) return new Map(rt.occ);
+  return occupancyOf(state, state.activePax);
+}
+
+function occupancyOf(state: SimState, ids: readonly string[]): Map<string, number> {
   const m = new Map<string, number>();
-  for (const id of state.activePax) {
+  for (const id of ids) {
     const g = state.paxGroups[id]!;
     if (g.area && !PAX_FINAL_STATES.includes(g.state)) m.set(g.area, (m.get(g.area) ?? 0) + g.count);
   }
@@ -244,8 +370,8 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
   const prospectiveStandId = ac.standId ?? f.plannedStandId;
   const prospectiveStandInfo = prospectiveStandId ? ctx.stands[prospectiveStandId] : undefined;
   const explicitRemoteConfiguration = !!prospectiveStandInfo && !prospectiveStandInfo.contact && ctx.layout.stands[prospectiveStandId!]?.remoteBoarding !== undefined;
-  const configuredRemoteStandExists = Object.values(ctx.layout.stands).some((stand) => stand.remoteBoarding !== undefined);
-  const requiresTerminalAssignment = Object.keys(ctx.terminal.byTerminal).length > 1 || explicitRemoteConfiguration || (!ac.standId && configuredRemoteStandExists);
+  const cc = ctxConsts(ctx);
+  const requiresTerminalAssignment = cc.multiTerminal || explicitRemoteConfiguration || (!ac.standId && cc.remoteExists);
   // A planned stand gives us a stable terminal/gate early enough to start passenger
   // processing on time. Invalid explicit remote mappings deliberately remain unset.
   if (!ac.standId && prospectiveStandInfo && requiresTerminalAssignment && !p.gateId) {
@@ -260,7 +386,7 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
   }
   const hasStableTerminal = !!p.gateId && !!ctx.terminal.gates[p.gateId]?.terminalId;
   // Keep the legacy single-terminal order when no planned gate is available.
-  if ((!requiresTerminalAssignment || hasStableTerminal) && !p.generated && state.now >= f.scheduled - PAX_GENERATE_LEAD_SEC) generateDeparturePax(sim, f);
+  if ((!requiresTerminalAssignment || hasStableTerminal) && !p.generated && state.now >= f.scheduled - paxGenerateLeadSec(sim)) generateDeparturePax(sim, f);
   // 搭乗ゲートは機体のスポットで決まる
   if (ac.standId && p.boarding !== 'closed') {
     const previousGateId = p.gateId;
@@ -273,7 +399,7 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
   }
   // 複数ターミナルでは、ゲート所属先が確定してから旅客を作る。
   // 単一ターミナル空港では従来どおり、便の生成時刻に旅客を作る。
-  if (requiresTerminalAssignment && !p.generated && ac.standId && state.now >= f.scheduled - PAX_GENERATE_LEAD_SEC) {
+  if (requiresTerminalAssignment && !p.generated && ac.standId && state.now >= f.scheduled - paxGenerateLeadSec(sim)) {
     generateDeparturePax(sim, f);
   }
 
@@ -295,19 +421,120 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
       stepBusBoarding(sim, f, closeBoarding);
       return;
     }
-    const groups = groupsOf(state, f.id);
     // 搭乗処理中は締め切らない（ただし故障中のゲートは処理が進まないので締め切る）
     const gateClosed = !!p.gateId && state.closures.gates.includes(p.gateId);
     const gateBusy =
       p.gateId && !gateClosed ? (state.facilities[`gate:${p.gateId}`]?.queue.length ?? 0) + (state.facilities[`gate:${p.gateId}`]?.inService.length ?? 0) > 0 : false;
-    const allResolved = p.generated && groups.every((g) => PAX_FINAL_STATES.includes(g.state));
+    // イベント経路では allResolved をグループ構成の版数で dirty 化する（PERF4-1。結果は同一）
+    const allResolved = paxEventMode
+      ? allResolvedCached(sim, f)
+      : p.generated && groupsOf(state, f.id).every((g) => PAX_FINAL_STATES.includes(g.state));
     if ((state.now >= p.deadline && !gateBusy) || allResolved) closeBoarding(sim, f, null);
   }
 }
 
+/**
+ * 未出現グループの pending 分離（PAX-2）。
+ *
+ * 生成済みだが出現時刻（appearAt）前の出発グループは、出現まで毎 tick の処理が
+ * 時刻比較だけで終わる。それでも処理対象に入れたままだと、生成リードを長くするほど
+ * 走査コストだけが増えるため、出現までは待機リスト（pending）で持ち、出現した tick の
+ * グループ処理の前に走査リスト（scan）へ戻す。戻す位置は発行順（ID の番号順）で、
+ * 従来の処理順と 1 つも変わらないようにする（乱数消費順・行列順を変えない）。
+ *
+ * state.activePax は「終了していない全グループの台帳」として従来どおり維持する
+ * （保存形式・状態フィンガープリント・不変条件の前提を変えないため）。分離するのは
+ * stepPassengers が毎 tick 走査する対象だけで、そのための索引を SimState の外
+ * （WeakMap）に置く（journeyStats と同じ方針）。復元された状態ではストアが無いので、
+ * 初回アクセス時に activePax と各グループの状態から再構築する。再構築の分類は
+ * 「toAirport かつ appearAt が未来 → pending、それ以外 → scan」で、アクセス遅延で
+ * appearAt が未来に戻ったグループが pending に振り分けられても、出現までは従来も
+ * 無処理（時刻比較で return）なので結果は変わらない。
+ */
+interface PaxScanIndex {
+  /** 出現待ちの出発グループ（発行順） */
+  pending: string[];
+  /** 毎 tick の処理対象（発行順） */
+  scan: string[];
+}
+
+const paxScanStore = new WeakMap<SimState, PaxScanIndex>();
+
+function paxScan(state: SimState): PaxScanIndex {
+  let idx = paxScanStore.get(state);
+  if (!idx) {
+    const pending: string[] = [];
+    const scan: string[] = [];
+    for (const id of state.activePax) {
+      const g = state.paxGroups[id];
+      if (g && g.state === 'toAirport' && g.appearAt > state.now) pending.push(id);
+      else scan.push(id);
+    }
+    idx = { pending, scan };
+    paxScanStore.set(state, idx);
+  }
+  return idx;
+}
+
+/** テスト・診断用: 現在の待機リスト（コピー） */
+export function pendingPaxOf(state: SimState): string[] {
+  return [...paxScan(state).pending];
+}
+
+const paxSeq = (id: string): number => Number(id.slice(id.indexOf('_') + 1));
+
+/**
+ * 出現時刻に達した待機グループを走査リストへ戻す（stepPassengers の便処理の後・
+ * グループ処理の前に呼ぶ）。生成と同じ tick に出現するグループもここで戻るため、
+ * 従来と処理される tick・順序は変わらない。終了済みのグループは待機から落とす
+ * （締切・欠航で pending のまま乗り遅れになった分）。
+ */
+function promotePendingPax(sim: Simulation): void {
+  const { state } = sim;
+  const idx = paxScan(state);
+  if (idx.pending.length === 0) return;
+  const due: string[] = [];
+  const keep: string[] = [];
+  for (const id of idx.pending) {
+    const g = state.paxGroups[id];
+    if (!g || PAX_FINAL_STATES.includes(g.state)) continue;
+    if (g.state === 'toAirport' && state.now >= g.appearAt) due.push(id);
+    else keep.push(id);
+  }
+  idx.pending = keep;
+  if (due.length === 0) return;
+  // due は発行順（ID 番号の昇順）で集まるのが原則だが、イベント経路から pending へ
+  // 戻されたグループが混ざると順序が崩れうるため、マージ前に番号順へ整える（PERF4-1）
+  due.sort((a, b) => paxSeq(a) - paxSeq(b));
+  // scan も due も発行順（ID 番号の昇順）なので、番号順を保ったままマージする
+  const act = idx.scan;
+  const merged: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < act.length && j < due.length) {
+    if (paxSeq(act[i]!) < paxSeq(due[j]!)) merged.push(act[i++]!);
+    else merged.push(due[j++]!);
+  }
+  while (i < act.length) merged.push(act[i++]!);
+  while (j < due.length) merged.push(due[j++]!);
+  idx.scan = merged;
+}
+
 function registerGroup(state: SimState, g: PaxGroup): void {
+  // 走査索引の初期化（復元状態の再構築）は、このグループを登録する前に済ませる
+  const idx = paxScan(state);
+  const rt = paxEventRuntime(state); // 占有の初期構築が新規グループを含まないよう先に用意する
   state.paxGroups[g.id] = g;
   state.activePax.push(g.id);
+  if (g.area && !PAX_FINAL_STATES.includes(g.state)) {
+    rt.occ.set(g.area, (rt.occ.get(g.area) ?? 0) + g.count);
+    rt.occCounted.add(g.id);
+  }
+  bumpFlightPax(state, g.flightId);
+  // 出現が未来の出発グループだけを待機させる。到着・乗継と、出現時刻を過ぎた出発は
+  // 即座に走査対象へ（この tick のグループ処理で扱われる）
+  if (g.state === 'toAirport' && g.appearAt > state.now) idx.pending.push(g.id);
+  else idx.scan.push(g.id);
   (state.flightPax[g.flightId] ??= []).push(g.id);
   // 5-23: 外部境界の起点（アクセス遅延で appearAt がずれる前の出現時刻）をサイドストアへ
   recordJourneyStart(state, g.id, g.appearAt);
@@ -315,6 +542,503 @@ function registerGroup(state: SimState, g: PaxGroup): void {
 
 function groupsOf(state: SimState, flightId: string): PaxGroup[] {
   return (state.flightPax[flightId] ?? []).map((id) => state.paxGroups[id]!);
+}
+
+// ---------------------------------------------------------------- イベント駆動化（性能改善 第4弾 PERF4-1）
+
+/**
+ * 旅客処理のイベント駆動化（perf4-design.md §3）。
+ *
+ * タイマー型・外部イベント型の状態にあるグループは、毎 tick の stepGroup が
+ * 「waitSec++ と時刻比較」しかしない。そこで、それらのグループを走査リスト
+ * （paxScan の scan）から外して睡眠索引に移し、次のいずれかまで起こさない:
+ * - タイマー到来（wakeAt <= now）: retryAt / serviceUntil / リンク待ちの retryAt
+ * - 外部からの変更: 登録時の署名（状態・タイマー・所属施設・ターミナル等）が
+ *   変わっていたら、その tick のグループフェーズで stepGroup を実行する
+ * 施設フェーズ・バス・アクセス等の外部遷移はすべて署名の変化として検出される。
+ *
+ * 結果不変の要点:
+ * - waitSec は睡眠中も毎 tick の検証パスで +1 する（スリープ先の状態が従来
+ *   stepGroup で waitSec++ する状態のときだけ）。tick 境界で waitSec は常に従来と
+ *   同じ値になるため、状態 JSON のハッシュ（ゴールデン）・保存・表示は不変。
+ *   遅延加算（materialize）ではなく最小の増分パスにしたのはこのため（設計書 §3.6
+ *   からの変更点。キャプチャが live な SimState を直接 JSON 化するため）。
+ * - 処理順序は従来どおり「便 → グループ（ID順）→ 施設（キー順）」を保存する。
+ *   起床グループは scan と ID 順にマージして処理し、乱数消費順を変えない。
+ * - 睡眠索引は SimState の外（WeakMap）に置き、保存しない。復元時は索引が無い
+ *   状態から全グループが scan に入っており、初回 tick の終わりに再構築される
+ *   （= 復元直後の tick は従来どおり全グループを処理する）。
+ *
+ * テスト用に setPaxEventModeForTest(false) で従来経路へ切り替えられる（影照合）。
+ */
+let paxEventMode = true;
+
+/** 施設フェーズのイベント化（PERF4-2）。テスト用に false へ切り替えると全施設走査（従来経路） */
+let facilityEventMode = true;
+
+export function setPaxEventModeForTest(on: boolean): void {
+  paxEventMode = on;
+}
+
+export function setFacilityEventModeForTest(on: boolean): void {
+  facilityEventMode = on;
+}
+
+export function isFacilityEventMode(): boolean {
+  return facilityEventMode;
+}
+
+/**
+ * 施設への参加通知（PERF4-2）。joinQueue から呼ぶ。
+ * 施設フェーズの外（便・グループフェーズ）での参加は、その tick の施設フェーズで
+ * 処理されるよう dirty にする。施設フェーズ中の参加は同一 tick の意味論に従う:
+ * - 未処理の施設 → 作業リストに入れる（従来どおりこの tick に処理されうる）
+ * - 処理済みの施設 → 翌 tick に回す（従来は翌 tick の stepFacility で初めて処理される）
+ * - 処理中の施設自身 → 開始ループで拾い直すための印を立てる
+ */
+function noteFacilityJoin(state: SimState, key: string): void {
+  if (!facilityEventMode) return;
+  const rt = paxEventRuntime(state);
+  const phase = rt.facPhase;
+  if (phase) {
+    if (key === phase.currentKey) {
+      rt.facSelfJoin = true;
+      return;
+    }
+    if (phase.processed.has(key)) {
+      rt.facDue.set(key, state.now + 1);
+      return;
+    }
+  }
+  rt.facDirty.add(key);
+}
+
+/** 施設からの離脱通知（PERF4-2）。leaveFacility から呼ぶ（窓口が空く・キューが縮む変更） */
+function noteFacilityLeave(state: SimState, key: string): void {
+  if (!facilityEventMode) return;
+  const rt = paxEventRuntime(state);
+  if (rt.facPhase && key === rt.facPhase.currentKey) return; // 処理後の due 再計算で拾う
+  rt.facDirty.add(key);
+}
+
+/** ゲート施設の浄化述語の署名: キュー内グループの便の (搭乗状態, ゲート) の並び */
+function gatePurgeSig(sim: Simulation, queue: readonly string[]): string {
+  const { state } = sim;
+  return queue
+    .map((id) => {
+      const g = state.paxGroups[id];
+      const f = g ? state.flights[g.flightId] : undefined;
+      return f ? `${f.pax.boarding}/${f.pax.gateId ?? ''}` : '?';
+    })
+    .join(',');
+}
+
+/** 施設の処理後に「次に処理が必要な時刻」を再計算する（PERF4-2） */
+function recomputeFacilityDue(sim: Simulation, key: string): void {
+  const { state } = sim;
+  const rt = paxEventRuntime(state);
+  const fac = state.facilities[key];
+  let due = Infinity;
+  if (fac) {
+    for (const id of fac.inService) {
+      const su = state.paxGroups[id]?.serviceUntil;
+      if (su != null && su < due) due = su;
+    }
+  }
+  // 処理直後の施設は「開始可能な状態」が残らない（stepFacility が開始し尽くすか
+  // 浄化し尽くす）ため、次に必要なのは処理中グループの完了だけ。キューへの参加や
+  // 窓口数の変化は dirty / 署名の変化で拾う
+  if (due === Infinity) rt.facDue.delete(key);
+  else rt.facDue.set(key, due);
+  if (key.startsWith('gate:')) {
+    if (fac && fac.queue.length > 0) rt.facGateSig.set(key, gatePurgeSig(sim, fac.queue));
+    else rt.facGateSig.delete(key);
+  }
+}
+
+/** 開始余地があるか（自施設への参加を同じ tick で拾い直すかの判定） */
+function facilityStartPossible(sim: Simulation, key: string): boolean {
+  const fac = sim.state.facilities[key];
+  if (!fac || fac.queue.length === 0) return false;
+  return fac.inService.length < serversOf(sim, key);
+}
+
+/**
+ * 施設フェーズのイベント経路（PERF4-2、perf4-design.md §3.5）。
+ * 処理が起きる条件を満たした施設だけをキー順に stepFacility する:
+ * - 処理中グループの完了が到来した（facDue）
+ * - キューへの参加・離脱があった（facDirty。同一 tick の作業リスト意味論つき）
+ * - 閉鎖集合が変わった（その tick は全施設）
+ * - ゲート施設の浄化述語（便の搭乗状態・ゲート割当）が変わった（署名比較）
+ * 空の施設・窓口満杯で完了も来ない施設は、従来でも訪問が no-op のため省略しても結果は変わらない。
+ */
+function stepFacilitiesEvent(sim: Simulation): void {
+  const { state } = sim;
+  const rt = paxEventRuntime(state);
+  const keys = sortedFacilityKeys(state.facilities);
+  const candidates = new Set<string>();
+  // 閉鎖集合の署名変化（エリア閉鎖・ゲート閉鎖）は稀なので、その tick は全施設を処理する
+  const closureSig = `${state.closedAreas.join(',')}|${state.closures.gates.join(',')}`;
+  if (rt.facClosureSig !== null && rt.facClosureSig !== closureSig) {
+    for (const k of keys) candidates.add(k);
+  }
+  rt.facClosureSig = closureSig;
+  if (!rt.facInitialized) {
+    // 初回（復元直後を含む）は全施設を1回処理して due・署名を確立する
+    for (const k of keys) candidates.add(k);
+    rt.facInitialized = true;
+  }
+  for (const k of rt.facDirty) candidates.add(k);
+  rt.facDirty.clear();
+  for (const [k, due] of rt.facDue) if (due <= state.now && state.facilities[k]) candidates.add(k);
+  // ゲート施設の浄化述語の変化を検出する（キューがある施設だけ署名を持つ）
+  for (const k of keys) {
+    if (!k.startsWith('gate:')) continue;
+    const fac = state.facilities[k]!;
+    if (fac.queue.length === 0) continue;
+    if (rt.facGateSig.get(k) !== gatePurgeSig(sim, fac.queue)) candidates.add(k);
+  }
+  const ordered = [...candidates].filter((k) => state.facilities[k]).sort();
+  rt.facPhase = { currentKey: null, processed: new Set() };
+  try {
+    let i = 0;
+    while (i < ordered.length) {
+      const key = ordered[i++]!;
+      if (rt.facPhase.processed.has(key)) continue;
+      rt.facPhase.processed.add(key);
+      rt.facPhase.currentKey = key;
+      stepFacility(sim, key);
+      rt.facPhase.currentKey = null;
+      recomputeFacilityDue(sim, key);
+      if (rt.facSelfJoin) {
+        rt.facSelfJoin = false;
+        // 自施設への参加は、従来は同じ stepFacility 呼び出しの開始ループで拾われる。
+        // 開始余地がある場合だけ再訪する（完了・浄化は再訪でも no-op）
+        if (facilityStartPossible(sim, key)) {
+          stepFacility(sim, key);
+          recomputeFacilityDue(sim, key);
+        }
+      }
+      // 処理中に参加・離脱した未処理施設を、キー順を保って作業リストへ入れる
+      if (rt.facDirty.size > 0) {
+        for (const k of rt.facDirty) {
+          if (rt.facPhase.processed.has(k)) {
+            rt.facDue.set(k, state.now + 1);
+            continue;
+          }
+          if (!ordered.includes(k)) {
+            let pos = i;
+            while (pos < ordered.length && ordered[pos]! < k) pos++;
+            ordered.splice(pos, 0, k);
+          }
+        }
+        rt.facDirty.clear();
+      }
+    }
+  } finally {
+    rt.facPhase = null;
+  }
+}
+
+export function isPaxEventMode(): boolean {
+  return paxEventMode;
+}
+
+/** 睡眠登録時の署名（外部変更の検出に使う、stepGroup の挙動を左右するフィールド群） */
+interface PaxSleepEntry {
+  state: PaxGroup['state'];
+  retryAt: number;
+  serviceUntil: number | null;
+  facility: string | null;
+  linkId: string | undefined;
+  terminalId: string | null;
+  routeLen: number;
+  /** waitingBaggage 用: 自グループの手荷物がベルトに出た/回収された回数（PERF4-4） */
+  bagVersion: number;
+  /** 次に stepGroup が必要な時刻。null は外部イベント駆動（タイマーなし） */
+  wakeAt: number | null;
+  /** 睡眠中も毎 tick waitSec++ する状態か（従来 stepGroup が加算する状態） */
+  inc: boolean;
+}
+
+interface PaxEventRuntime {
+  sleep: Map<string, PaxSleepEntry>;
+  /** 便ごとの「グループ構成の版数」（登録・終端遷移で増える。allResolved の dirty 判定用） */
+  flightVersion: Map<string, number>;
+  allResolvedCache: Map<string, { version: number; generated: boolean; result: boolean }>;
+  // --- 施設イベント化（PERF4-2） ---
+  /** 施設ごとの「次に処理が必要な時刻」（処理中グループの最小 serviceUntil） */
+  facDue: Map<string, number>;
+  /** この tick の施設フェーズで処理すべき施設（参加・離脱・外部変更の通知） */
+  facDirty: Set<string>;
+  /** ゲート施設の浄化述語の署名（キュー内グループの便の boarding/gateId） */
+  facGateSig: Map<string, string>;
+  /** 閉鎖集合（エリア＋ゲート）の署名。変化した tick は全施設を処理する */
+  facClosureSig: string | null;
+  /** 初回の全施設処理（due・署名の確立）が済んだか */
+  facInitialized: boolean;
+  /** 施設フェーズ実行中の作業状態（同一 tick の作業リスト意味論の再現用） */
+  facPhase: { currentKey: string | null; processed: Set<string> } | null;
+  /** 処理中の施設自身への参加が起きたか（開始ループで拾い直すための印） */
+  facSelfJoin: boolean;
+  // --- 占有の増分化（PERF4-3） ---
+  /** エリア別占有人数（setGroupArea 経由でのみ更新される増分マップ） */
+  occ: Map<string, number>;
+  /** 現在 occ に数えられているグループ id（終端遷移の順序に依存しないための台帳） */
+  occCounted: Set<string>;
+}
+
+const paxEventStore = new WeakMap<SimState, PaxEventRuntime>();
+
+function paxEventRuntime(state: SimState): PaxEventRuntime {
+  let rt = paxEventStore.get(state);
+  if (!rt) {
+    rt = {
+      sleep: new Map(),
+      flightVersion: new Map(),
+      allResolvedCache: new Map(),
+      facDue: new Map(),
+      facDirty: new Set(),
+      facGateSig: new Map(),
+      facClosureSig: null,
+      facInitialized: false,
+      facPhase: null,
+      facSelfJoin: false,
+      occ: new Map(),
+      occCounted: new Set(),
+    };
+    // 占有の初期構築（復元直後など）: 現在の activePax から全構築する。
+    // 以後は setGroupArea / registerGroup が増分で維持する
+    for (const id of state.activePax) {
+      const g = state.paxGroups[id];
+      if (g && g.area && !PAX_FINAL_STATES.includes(g.state)) {
+        rt.occ.set(g.area, (rt.occ.get(g.area) ?? 0) + g.count);
+        rt.occCounted.add(id);
+      }
+    }
+    paxEventStore.set(state, rt);
+  }
+  return rt;
+}
+
+/** 便のグループ構成が変わった（登録・終端遷移）ことを記録する */
+function bumpFlightPax(state: SimState, flightId: string): void {
+  const rt = paxEventRuntime(state);
+  rt.flightVersion.set(flightId, (rt.flightVersion.get(flightId) ?? 0) + 1);
+}
+
+/** 占有マップからグループを外す（PERF4-3） */
+function occUncount(state: SimState, g: PaxGroup): void {
+  const rt = paxEventRuntime(state);
+  if (!rt.occCounted.delete(g.id)) return;
+  if (!g.area) return;
+  const v = (rt.occ.get(g.area) ?? 0) - g.count;
+  if (v <= 0) rt.occ.delete(g.area);
+  else rt.occ.set(g.area, v);
+}
+
+/**
+ * グループの所在エリアを変更する唯一の経路（PERF4-3、perf4-design.md §3.7）。
+ * エリア別占有（areaOccupancy）の増分マップを同時に維持する。
+ * 数え替えは「現在数えられているか」の台帳で駆動するため、終端状態への遷移と
+ * area のクリアの順序に依存しない。
+ */
+export function setGroupArea(state: SimState, g: PaxGroup, area: string | null): void {
+  if (g.area === area) return;
+  occUncount(state, g);
+  g.area = area;
+  if (area && !PAX_FINAL_STATES.includes(g.state)) {
+    const rt = paxEventRuntime(state);
+    rt.occ.set(area, (rt.occ.get(area) ?? 0) + g.count);
+    rt.occCounted.add(g.id);
+  }
+}
+
+/**
+ * 搭乗中便の allResolved（全グループ終端か）の dirty 化（設計書 §3.4）。
+ * every の結果はグループの終端状態の集合だけで決まるため、構成の版数が
+ * 変わっていない便では前回値を再利用しても結果は同一になる。
+ */
+function allResolvedCached(sim: Simulation, f: Flight): boolean {
+  const { state } = sim;
+  const rt = paxEventRuntime(state);
+  const version = rt.flightVersion.get(f.id) ?? 0;
+  const c = rt.allResolvedCache.get(f.id);
+  if (c && c.version === version && c.generated === f.pax.generated) return c.result;
+  const result = f.pax.generated && groupsOf(state, f.id).every((g) => PAX_FINAL_STATES.includes(g.state));
+  rt.allResolvedCache.set(f.id, { version, generated: f.pax.generated, result });
+  return result;
+}
+
+function sleepSignature(state: SimState, g: PaxGroup): Omit<PaxSleepEntry, 'wakeAt' | 'inc'> {
+  return {
+    state: g.state,
+    retryAt: g.retryAt,
+    serviceUntil: g.serviceUntil,
+    facility: g.facility,
+    linkId: g.terminalLinkWaitingId,
+    terminalId: g.terminalId,
+    routeLen: g.route.length,
+    bagVersion: g.state === 'waitingBaggage' ? bagGroupVersion(state, g.id) : 0,
+  };
+}
+
+function sleepSignatureChanged(state: SimState, e: PaxSleepEntry, g: PaxGroup): boolean {
+  return (
+    e.state !== g.state ||
+    e.retryAt !== g.retryAt ||
+    e.serviceUntil !== g.serviceUntil ||
+    e.facility !== g.facility ||
+    e.linkId !== g.terminalLinkWaitingId ||
+    e.terminalId !== g.terminalId ||
+    e.routeLen !== g.route.length ||
+    e.bagVersion !== (g.state === 'waitingBaggage' ? bagGroupVersion(state, g.id) : 0)
+  );
+}
+
+/**
+ * グループが眠れる状態かを判定し、睡眠エントリを返す（眠れない場合は null）。
+ * 眠れない = 毎 tick の実処理が要る状態（歩行系・出現処理）。
+ */
+function classifySleep(state: SimState, g: PaxGroup): PaxSleepEntry | null {
+  const sig = sleepSignature(state, g);
+  switch (g.state) {
+    case 'queuing':
+    case 'boardingQueue':
+    case 'waitingTransport':
+      // 連絡設備の容量待ちだけは retryAt のタイマーで起きる。それ以外は施設側のイベント駆動
+      return g.terminalLinkWaitingId ? { ...sig, wakeAt: g.retryAt, inc: true } : { ...sig, wakeAt: null, inc: true };
+    case 'waitingBus':
+    case 'onBus':
+      return { ...sig, wakeAt: null, inc: true };
+    case 'inService':
+      // 施設キーがあれば完了は施設フェーズが処理する。なければ serviceUntil のタイマー
+      return g.facility ? { ...sig, wakeAt: null, inc: false } : { ...sig, wakeAt: g.serviceUntil, inc: false };
+    case 'stranded':
+    case 'waitingFacility':
+      return { ...sig, wakeAt: g.retryAt, inc: true };
+    case 'waitingBaggage':
+      // 手荷物がベルトに出る/回収されるたびに署名（bagVersion）が変わって起きる（PERF4-4）。
+      // 登録時点で既に受取可能な場合は、将来の遷移が起きないため眠らせない
+      // （従来は次の tick の stepGroup で受け取りに進む）
+      if (groupBagsOnBelt(state, g.id)) return null;
+      return { ...sig, wakeAt: null, inc: true };
+    case 'dwelling':
+      return { ...sig, wakeAt: g.retryAt, inc: false };
+    default:
+      return null;
+  }
+}
+
+/** イベント経路のグループ＋施設フェーズ（stepPassengers から呼ばれ、便フェーズは共通） */
+function stepPaxEventPhases(sim: Simulation, pd: ReturnType<typeof paxDetailStart>): void {
+  const { state } = sim;
+  const rt = paxEventRuntime(state);
+  promotePendingPax(sim);
+  const idx = paxScan(state);
+  // 占有は増分マップのスナップショット（PERF4-3）。フェーズ開始時点の所在で固定され、
+  // 従来の「フェーズ冒頭に全構築」と同じ意味論になる（眠っているグループも数えられている。
+  // pending は area が無く従来も数えない）
+  const occupancy = new Map(rt.occ);
+  pd?.mark('occupancy');
+  // 睡眠中の検証: 終端は落とし、署名変化・タイマー到来は起こす。それ以外は waitSec だけ進める
+  const due: string[] = [];
+  if (rt.sleep.size > 0) {
+    for (const [id, e] of rt.sleep) {
+      const g = state.paxGroups[id];
+      if (!g || PAX_FINAL_STATES.includes(g.state)) {
+        rt.sleep.delete(id);
+        if (g) occUncount(state, g); // 安全網: 終端遷移が area を経由しなかった場合の掃除
+        continue;
+      }
+      if (sleepSignatureChanged(state, e, g) || (e.wakeAt !== null && e.wakeAt <= state.now)) {
+        due.push(id);
+        rt.sleep.delete(id);
+        continue;
+      }
+      if (e.inc) g.waitSec++;
+    }
+  }
+  due.sort((a, b) => paxSeq(a) - paxSeq(b));
+  const dueSet = new Set(due);
+  // scan（覚醒）と due（起床）を ID 順にマージして処理する（従来の処理順と同一）
+  const scan = idx.scan;
+  const processed: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < scan.length && j < due.length) {
+    const id = paxSeq(scan[i]!) < paxSeq(due[j]!) ? scan[i++]! : due[j++]!;
+    processed.push(id);
+    stepGroup(sim, state.paxGroups[id]!, occupancy);
+  }
+  while (i < scan.length) {
+    const id = scan[i++]!;
+    processed.push(id);
+    stepGroup(sim, state.paxGroups[id]!, occupancy);
+  }
+  while (j < due.length) {
+    const id = due[j++]!;
+    processed.push(id);
+    stepGroup(sim, state.paxGroups[id]!, occupancy);
+  }
+  const awakeCount = processed.length;
+  // 終了したグループを処理対象から外す（台帳の activePax も従来どおり同じ条件で落とす）
+  idx.scan = idx.scan.filter((id) => !PAX_FINAL_STATES.includes(state.paxGroups[id]!.state));
+  state.activePax = state.activePax.filter((id) => {
+    const g = state.paxGroups[id]!;
+    if (!PAX_FINAL_STATES.includes(g.state)) return true;
+    occUncount(state, g); // 安全網（PERF4-3）: 終端グループは占有から外す
+    return false;
+  });
+  pd?.mark('groups');
+  if (facilityEventMode) stepFacilitiesEvent(sim);
+  else stepFacilitiesFull(sim);
+  pd?.finish('facility');
+  // 再登録: この tick に処理したグループのうち眠れる状態のものを索引へ移す。
+  // 施設フェーズで遷移した後の状態で分類するため、施設フェーズの後に行う
+  const sleepingNow: string[] = [];
+  const returning: string[] = [];
+  for (const id of processed) {
+    const g = state.paxGroups[id];
+    if (!g || PAX_FINAL_STATES.includes(g.state)) continue;
+    if (g.state === 'toAirport' && g.appearAt > state.now) {
+      // 出現が未来へ戻った出発グループは pending へ（従来も出現まで無処理）
+      idx.pending.push(id);
+      sleepingNow.push(id);
+      continue;
+    }
+    const entry = classifySleep(state, g);
+    if (entry) {
+      rt.sleep.set(id, entry);
+      sleepingNow.push(id);
+    } else if (dueSet.has(id)) {
+      returning.push(id);
+    }
+  }
+  if (sleepingNow.length > 0) {
+    const sleepSet = new Set(sleepingNow);
+    idx.scan = idx.scan.filter((id) => !sleepSet.has(id));
+  }
+  if (returning.length > 0) {
+    // scan も returning も発行順なので番号順を保ったままマージする
+    const merged: string[] = [];
+    let a = 0;
+    let b = 0;
+    const cur = idx.scan;
+    while (a < cur.length && b < returning.length) {
+      if (paxSeq(cur[a]!) < paxSeq(returning[b]!)) merged.push(cur[a++]!);
+      else merged.push(returning[b++]!);
+    }
+    while (a < cur.length) merged.push(cur[a++]!);
+    while (b < returning.length) merged.push(returning[b++]!);
+    idx.scan = merged;
+  }
+  notePaxScale({
+    paxScan: awakeCount,
+    paxPending: idx.pending.length,
+    paxSleeping: rt.sleep.size,
+    paxAwake: awakeCount,
+  });
 }
 
 export { groupsOf as groupsOfFlight };
@@ -399,7 +1123,7 @@ export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null
     g.state = reason === 'cancelled' ? 'cancelled' : 'missed';
     g.reason = reason;
     g.finishedAt = state.now;
-    g.area = null;
+    setGroupArea(sim.state, g, null);
     g.route = [];
     delete g.busTrip;
     if (reason !== 'cancelled') {
@@ -411,6 +1135,7 @@ export function missGroups(sim: Simulation, f: Flight, forced: MissReason | null
       if (g.transfer) transferMissed += g.count;
     }
   }
+  bumpFlightPax(state, f.id);
   // 乗継の失敗は補償が別（600/人）。乗り遅れ率には p.missed として含まれる
   if (missed - transferMissed > 0) onPaxMissed(sim, f, missed - transferMissed);
   if (transferMissed > 0) {
@@ -472,8 +1197,8 @@ function generateDeparturePax(sim: Simulation, f: Flight): void {
     while (remaining > 0) {
       const count = Math.min(remaining, rng.int(1, MAX_GROUP_SIZE));
       remaining -= count;
-      const table = f.routeType === 'international' ? PAX_ARRIVAL_MIN_INTL : PAX_ARRIVAL_MIN;
-      const minutesBefore = triangular(rng.next(), table.latest, table.mode, table.earliest);
+      const dist = PAX_ARRIVAL_TABLE[paxScaleStage(sim)][f.routeType === 'international' ? 'international' : 'domestic'];
+      const minutesBefore = triangular(rng.next(), dist.latest, dist.mode, dist.earliest);
       addGroup(sim, rng, f, count, Math.round(f.scheduled - minutesBefore * 60), terminal);
     }
   });
@@ -649,6 +1374,9 @@ function addTransferGroup(
   // 任意の立ち寄りは専用の乱数で決める（地元の出発と同じ確率・順序）
   if (shopAreas(sim, terminalId).length > 0 && trng.next() < BALANCE.retail.shopVisitProb) steps.splice(steps.length - 1, 0, 'shop');
   if (trng.next() < RESTROOM_PROB) steps.splice(steps.length - 1, 0, 'restroom');
+  // ラウンジも地元出発と同じ確率・順序（shop → restroom の後、gate の前）で積む（PAX-4）。
+  // 実際に寄るかは planLounge が余裕（minSlackMin）で判定するので、短い乗継では自動で飛ばされる
+  if (loungeAreas(sim, terminalId).length > 0 && trng.next() < BALANCE.lounge.visitProb) steps.splice(steps.length - 1, 0, 'lounge');
   // 出発便のゲートが未確定でも、計画スポットから所属ターミナルは分かる。跨ターミナル乗継では
   // targetTerminalId がないと経路が割当て先外と判定される（不変条件 P6）ため、計画スポットで補う
   const depGateId = dep?.pax.gateId ?? (dep?.plannedStandId ? ctx.standGate[dep.plannedStandId] ?? null : null);
@@ -697,10 +1425,11 @@ function addTransferGroup(
   if (dep && (dep.pax.boarding === 'closed' || dep.status === 'completed' || dep.status === 'cancelled')) {
     // 出発便の締切後に生まれた乗継は、その場で乗り遅れにする（人数保存を保つため）
     const cancelled = dep.status === 'cancelled';
+    bumpFlightPax(state, g.flightId);
     g.state = cancelled ? 'cancelled' : 'missed';
     g.reason = cancelled ? 'cancelled' : 'late';
     g.finishedAt = state.now;
-    g.area = null;
+    setGroupArea(sim.state, g, null);
     if (!cancelled) {
       // 乗り遅れの内訳: 締切後に生まれた乗継は、接続できなかったこと自体が理由（乗継時間の不足）
       recordMissBreakdown(state, 'transferLate', null, size);
@@ -713,7 +1442,7 @@ function addTransferGroup(
   }
   if (f.pax.bus && gateId && deplaneArea) {
     g.state = 'waitingBus';
-    g.area = null;
+    setGroupArea(sim.state, g, null);
   } else if (!g.area) {
     g.state = 'stranded';
     g.reason = 'unreachable';
@@ -845,7 +1574,7 @@ function stepArrivalFlight(sim: Simulation, f: Flight): void {
       if (p.bus && gateId && deplaneArea) {
         // スポットでランプバスを待つ（降機口へはバスが運ぶ）
         g.state = 'waitingBus';
-        g.area = null;
+        setGroupArea(sim.state, g, null);
       } else if (!g.area) {
         // 降機口がない（ゲートなし・到着通路なし）: 到達不能として記録する
         g.state = 'stranded';
@@ -992,7 +1721,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
           beginPortalLeg(sim, g, leg);
           return;
         }
-        g.area = entrance;
+        setGroupArea(sim.state, g, entrance);
         planStep(sim, g);
       }
       return;
@@ -1003,7 +1732,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
       if (g.legProgress >= g.legLength) {
         const leg = g.accessLeg!;
         if (leg.phase === 'enter') {
-          g.area = leg.areaId;
+          setGroupArea(sim.state, g, leg.areaId);
           planStep(sim, g);
         } else {
           completeExit(sim, g);
@@ -1275,11 +2004,13 @@ function planLounge(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
   const { state } = sim;
   const f = state.flights[g.flightId]!;
   const slack = f.estimated - boardingLeadSec(sim, f) - state.now;
+  // 滞在希望時間は利用が確定した時点で1回だけ引く（再計画では引き直さない。PAX-4）
+  const dwellSec = (): number => (g.plannedDwellSec ??= drawLoungeDwellSec(sim, g));
   if (sim.serviceGranularity === 'aggregate') {
     const handled = planAggregateLoungeVisit(sim, g, closed, slack, () => {
       g.stepIndex++;
       planStep(sim, g);
-    });
+    }, dwellSec);
     if (handled) return;
   }
   const skip = (): void => {
@@ -1301,6 +2032,7 @@ function planLounge(sim: Simulation, g: PaxGroup, closed: Set<string>): void {
   }
   const route = goals.size > 0 ? findPaxRoute(sim.ctx.terminal, { from: g.area!, goals, closed, uncleared: uncleared(g), stepFree: g.stepFree }) : null;
   if (route) {
+    dwellSec();
     startRoute(sim, g, route.areas);
     return;
   }
@@ -1441,7 +2173,7 @@ function walk(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>): voi
       const hs = hubStatsOf(state);
       hs.byLink[link.transferLinkId] = (hs.byLink[link.transferLinkId] ?? 0) + g.count;
     }
-    g.area = next;
+    setGroupArea(sim.state, g, next);
     const nextTerminal = ctx.terminal.areas[next]?.terminalId;
     if (nextTerminal && nextTerminal !== g.terminalId) {
       g.terminalId = nextTerminal;
@@ -1511,15 +2243,17 @@ export function completeExit(sim: Simulation, g: PaxGroup): void {
   const f = state.flights[g.flightId]!;
   g.state = 'exited';
   g.finishedAt = state.now;
-  g.area = null;
+  setGroupArea(sim.state, g, null);
   f.pax.exited += g.count;
   finish(state, g);
   state.paxStats.exited += g.count;
+  bumpFlightPax(state, g.flightId);
 }
 
 function joinQueue(state: SimState, g: PaxGroup, key: string, s: 'queuing' | 'boardingQueue'): void {
   const fac = facility(state, key);
   fac.queue.push(g.id);
+  noteFacilityJoin(state, key);
   g.facility = key;
   g.state = s;
   // 5-21: 工程別の待ちを切り出すため、行列に入った時点の累積待ちを記録する
@@ -1530,13 +2264,15 @@ function joinQueue(state: SimState, g: PaxGroup, key: string, s: 'queuing' | 'bo
 
 function leaveFacility(state: SimState, g: PaxGroup): void {
   if (!g.facility) return;
-  const fac = state.facilities[g.facility];
+  const key = g.facility;
+  const fac = state.facilities[key];
   if (fac) {
     fac.queue = fac.queue.filter((id) => id !== g.id);
     fac.inService = fac.inService.filter((id) => id !== g.id);
   }
   g.facility = null;
   g.serviceUntil = null;
+  noteFacilityLeave(state, key);
 }
 
 function finish(state: SimState, g: PaxGroup): void {
@@ -1570,11 +2306,12 @@ function stepFacility(sim: Simulation, key: string): void {
       g.state = 'boarded';
       g.boardedGate = key.slice('gate:'.length);
       g.finishedAt = state.now;
-      g.area = null;
+      setGroupArea(sim.state, g, null);
       if (g.transfer) hubStatsOf(state).connected += g.count;
       f.pax.boarded += g.count;
       state.paxStats.boarded += g.count;
       finish(state, g);
+      bumpFlightPax(state, g.flightId);
       continue;
     }
     const area = sim.ctx.terminal.areas[key];
@@ -1646,10 +2383,12 @@ function serviceSec(sim: Simulation, key: string, g: PaxGroup): number {
   if (a.kind === 'restroom') return RESTROOM_SEC;
   if (a.kind === 'shop') return BALANCE.retail.shopSec;
   if (a.kind === 'restaurant') return BALANCE.retail.restaurantSec;
-  // ラウンジの滞在は搭乗開始まで（最低 30 秒。搭乗開始を過ぎていれば即完了）
+  // ラウンジの滞在は min(滞在希望時間, 搭乗開始までの余裕)（最低 30 秒。PAX-4。
+  // 希望時間が無いグループ＝旧セーブ等は従来どおり搭乗開始まで）
   if (a.kind === 'lounge') {
     const f = sim.state.flights[g.flightId]!;
-    return Math.max(30, f.estimated - boardingLeadSec(sim, f) - sim.state.now);
+    const remain = f.estimated - boardingLeadSec(sim, f) - sim.state.now;
+    return Math.max(30, g.plannedDwellSec === undefined ? remain : Math.min(g.plannedDwellSec, remain));
   }
   return withRng(sim.state, (rng) => Math.max(1, Math.round(g.count * perPaxSec(sim, key) * (0.8 + rng.next() * 0.4))));
 }
@@ -1662,12 +2401,13 @@ export function finishBusBoarded(sim: Simulation, g: PaxGroup): void {
   const f = state.flights[g.flightId]!;
   g.state = 'boarded';
   g.finishedAt = state.now;
-  g.area = null;
+  setGroupArea(sim.state, g, null);
   delete g.busTrip;
   if (g.transfer) hubStatsOf(state).connected += g.count;
   f.pax.boarded += g.count;
   state.paxStats.boarded += g.count;
   finish(state, g);
+  bumpFlightPax(state, g.flightId);
 }
 
 /** 到着旅客がバスを降りて、降機口から手荷物受取・出口へ歩き出す */
@@ -1677,10 +2417,10 @@ export function releaseBusArrival(sim: Simulation, g: PaxGroup, gateId: string):
   if (!area) {
     g.state = 'stranded';
     g.reason = 'unreachable';
-    g.area = null;
+    setGroupArea(sim.state, g, null);
     return;
   }
-  g.area = area;
+  setGroupArea(sim.state, g, area);
   g.state = 'walking';
   planStep(sim, g);
 }
@@ -1689,7 +2429,7 @@ export function releaseBusArrival(sim: Simulation, g: PaxGroup, gateId: string):
 export function returnToBusQueue(sim: Simulation, g: PaxGroup, depGateId: string | null): void {
   delete g.busTrip;
   g.state = 'waitingBus';
-  g.area = depGateId ? (sim.ctx.terminal.gates[depGateId]?.boarding ?? null) : null;
+  setGroupArea(sim.state, g, depGateId ? (sim.ctx.terminal.gates[depGateId]?.boarding ?? null) : null);
 }
 
 // ---------------------------------------------------------------- 施設の閉鎖

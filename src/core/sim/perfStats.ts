@@ -50,6 +50,25 @@ export interface PerfScale {
   aircraft: number;
   /** 処理中の手荷物数（state.activeBags） */
   bags: number;
+  /** 旅客の走査対象グループ数（stepPassengers が毎 tick 処理する数。PERF4-0） */
+  paxScan?: number;
+  /** 出現待ち（pending）グループ数（PERF4-0） */
+  paxPending?: number;
+  /** イベント駆動化で眠っているグループ数（PERF4-1 以降） */
+  paxSleeping?: number;
+  /** 毎 tick 処理されるグループ数 = 歩行中＋タイマー到来（PERF4-1 以降） */
+  paxAwake?: number;
+}
+
+/** stepPassengers のサブフェーズ区分（PERF4-0: passengers バケットの内訳） */
+export type PaxDetailKey = 'flight' | 'occupancy' | 'groups' | 'facility';
+
+export const PAX_DETAIL_KEYS: readonly PaxDetailKey[] = ['flight', 'occupancy', 'groups', 'facility'];
+
+export interface PaxDetailAvg {
+  key: PaxDetailKey;
+  /** tick あたり平均 ms */
+  avgMs: number;
 }
 
 export interface PerfStepAvg {
@@ -77,12 +96,18 @@ export interface PerfSnapshot {
   droppedFrames: number;
   /** 直近に記録された規模カウンタ */
   scale: PerfScale;
+  /** passengers サブフェーズ内訳（有効化されていた tick の平均。計測されていない場合は空） */
+  paxDetail: PaxDetailAvg[];
+  /** サブフェーズ計測が有効だった tick 数 */
+  paxDetailTicks: number;
 }
 
 interface Accumulator {
   ticks: number;
   tickTotalMs: number;
   stepMs: Record<PerfStepKey, number>;
+  paxDetailMs: Record<PaxDetailKey, number>;
+  paxDetailTicks: number;
   drawCount: number;
   drawTotalMs: number;
   frames: number;
@@ -95,6 +120,8 @@ const emptyAccumulator = (): Accumulator => ({
   ticks: 0,
   tickTotalMs: 0,
   stepMs: Object.fromEntries(PERF_STEP_KEYS.map((k) => [k, 0])) as Record<PerfStepKey, number>,
+  paxDetailMs: Object.fromEntries(PAX_DETAIL_KEYS.map((k) => [k, 0])) as Record<PaxDetailKey, number>,
+  paxDetailTicks: 0,
   drawCount: 0,
   drawTotalMs: 0,
   frames: 0,
@@ -141,9 +168,55 @@ export function perfChainStart(): PerfChain {
       add(key);
       acc.ticks += 1;
       acc.tickTotalMs += total;
-      acc.scale = scale;
+      acc.scale = { ...paxScaleNote, ...scale };
     },
   };
+}
+
+/**
+ * passengers サブフェーズ計測（PERF4-0）。
+ *
+ * 有効化されている間だけ stepPassengers 内で時刻を読む。無効時は paxDetailStart() が
+ * null を返し、呼び出し側は追加の時計呼び出しを一切しない（計測オーバーヘッドで
+ * 結果も性能特性も変えない）。有効化するのは性能パネルを開いている間とベンチテスト。
+ */
+let paxDetailEnabled = false;
+
+export function setPaxDetailEnabled(on: boolean): void {
+  paxDetailEnabled = on;
+}
+
+export function isPaxDetailEnabled(): boolean {
+  return paxDetailEnabled;
+}
+
+export interface PaxDetailChain {
+  mark(key: PaxDetailKey): void;
+  finish(key: PaxDetailKey): void;
+}
+
+export function paxDetailStart(): PaxDetailChain | null {
+  if (!paxDetailEnabled) return null;
+  let last = now();
+  const add = (key: PaxDetailKey): void => {
+    const t = now();
+    acc.paxDetailMs[key] += t - last;
+    last = t;
+  };
+  return {
+    mark: add,
+    finish(key: PaxDetailKey): void {
+      add(key);
+      acc.paxDetailTicks += 1;
+    },
+  };
+}
+
+/** 旅客側の規模カウンタ（走査対象・pending・睡眠/覚醒）を記録する。finish の scale と合成される */
+let paxScaleNote: Partial<PerfScale> = {};
+
+export function notePaxScale(note: Partial<PerfScale>): void {
+  paxScaleNote = { ...paxScaleNote, ...note };
 }
 
 /** 描画1回の所要時間を記録する（MapView の draw 呼び出し側が実時間で測って渡す） */
@@ -176,6 +249,7 @@ export function peekPerfSnapshot(): PerfSnapshot {
 /** 集計をすべて捨てる（テスト用） */
 export function resetPerfStats(): void {
   acc = emptyAccumulator();
+  paxScaleNote = {};
 }
 
 function buildSnapshot(a: Accumulator): PerfSnapshot {
@@ -195,5 +269,9 @@ function buildSnapshot(a: Accumulator): PerfSnapshot {
     ticksPerFrame: a.frames > 0 ? a.frameTicks / a.frames : 0,
     droppedFrames: a.droppedFrames,
     scale: { ...a.scale },
+    paxDetail: a.paxDetailTicks > 0
+      ? PAX_DETAIL_KEYS.map((key) => ({ key, avgMs: a.paxDetailMs[key] / a.paxDetailTicks }))
+      : [],
+    paxDetailTicks: a.paxDetailTicks,
   };
 }

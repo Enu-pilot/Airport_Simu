@@ -196,8 +196,10 @@ export function completeLoungeStay(sim: Simulation, g: PaxGroup): void {
  *   閉鎖中の施設は席数から差し引く。
  * - 搭乗開始までの余裕が BALANCE.lounge.minSlackMin 未満なら行かない（詳細モードと同じ）。
  * - 席が足りなければ待合（従来の gate ステップの滞留）へフォールバックし、skipped に数える。
- * - 滞在は搭乗開始まで。売上は記録しない。満足度換算は BALANCE.lounge の暫定係数の
- *   まま表示側の指標に留め、航空会社の満足度式へは接続しない（係数の確定は PO 判断待ち）。
+ * - 滞在は min(滞在希望時間, 搭乗開始までの余裕)（PAX-4 の分布化。希望時間は呼び出し側が
+ *   利用確定時に1回だけ引く dwellSec 経由で渡す）。売上は記録しない。満足度換算は
+ *   BALANCE.lounge の暫定係数のまま表示側の指標に留め、航空会社の満足度式へは接続しない
+ *   （係数の確定は PO 判断待ち）。
  */
 export function planAggregateLoungeVisit(
   sim: Simulation,
@@ -205,6 +207,7 @@ export function planAggregateLoungeVisit(
   closed: ReadonlySet<string>,
   slackSec: number,
   advance: () => void,
+  dwellSec: () => number,
 ): boolean {
   const profiles = sim.ctx.service;
   const terminalId = g.terminalId ?? sim.ctx.paxTerminal;
@@ -241,7 +244,7 @@ export function planAggregateLoungeVisit(
   g.aggService = { kind: 'lounge', key };
   g.state = 'inService';
   g.facility = null;
-  g.serviceUntil = sim.state.now + slackSec;
+  g.serviceUntil = sim.state.now + Math.min(dwellSec(), slackSec);
   return true;
 }
 
