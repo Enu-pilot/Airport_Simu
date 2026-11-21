@@ -1,5 +1,5 @@
 import type { Disruption, DisruptionKind, WeatherKind, AircraftState, BagState, BlockReason, BusTripPhase, DelayCause, FlightPax, FlightStatus, HoldReason, MissReason, PaxState, RunwayMode, SimEvent, TaskKind, TaskState, UnitKind, UnitStatus } from '../core/sim/types';
-import type { BuildState, EntityType, FacilityKind, PaxZone, RoadClass, RoadConnectorKind, SizeClass, TerminalAreaKind } from '../core/model/types';
+import type { BuildState, EntityType, FacilityKind, PaxZone, RoadClass, RoadConnectorKind, SizeClass, TaxiwayWidthClass, TerminalAreaKind } from '../core/model/types';
 import { entityTypeOf, type AirportLayout } from '../core/model/types';
 import type { Issue, IssueCode, OperabilityReason, Severity } from '../core/validation/validate';
 import type { OpFailure } from '../core/layout/operations';
@@ -80,6 +80,8 @@ export const BUILD_STATE_LABEL: Record<BuildState, string> = {
 };
 
 export const SIZE_LABEL: Record<SizeClass, string> = { S: 'S（小型）', M: 'M（中型）', L: 'L（大型）' };
+/** 誘導路幅の表示名（2026-CF: F はコード F 対応の独立区分） */
+export const TAXIWAY_WIDTH_LABEL: Record<TaxiwayWidthClass, string> = { S: 'S（小型）', M: 'M（中型）', L: 'L（大型）', F: 'F（コード F）' };
 export const ROAD_CLASS_LABEL: Record<RoadClass, string> = { public: '一般道路', service: 'サービス道路（業務用）', rail: '鉄道（空港連絡線）', walkway: '旅客連絡通路', fuel: '燃料ハイドラント配管' };
 
 export const PROP_LABEL: Record<string, string> = {
@@ -1482,6 +1484,8 @@ export const DAY_LOOP = {
   prefPauseTitle: '日付が変わる 0:00 に運航を止めて「1日の振り返り」を表示します（切ると止まらずに続きます）',
   prefAutoStop: 'スキップを重大な障害で止める',
   prefAutoStopTitle: '1 日スキップ中に滑走路の閉鎖・整備やダイバートが起きたら止めます',
+  prefTypeCode: '機種を略号で表示（788（内）など）',
+  prefTypeCodeTitle: '運航表・FIDS・契約や機材一覧の機種名を、全文ではなく略号コードと仕様マーク（内＝国内線機材／際＝国際線機材）で表示します。表示だけの設定です',
   openReview: '前日の振り返り',
   openHistory: '履歴',
   // スキップ

@@ -15,12 +15,12 @@ import type { Runway } from '../../src/core/model/types';
 const rwy: Runway = { id: 'r', name: '', start: { x: 2, y: 3 }, heading: 135, length: 20, surfaceWidthM: 45, buildState: 'operational' } as Runway;
 
 describe('描画用の面（surfaces）', () => {
-  it('誘導路の描画幅は m の単一の表で、codeF は区分より優先', () => {
-    expect(TAXIWAY_DRAW_WIDTH_M).toEqual({ S: 15, M: 23, L: 30, codeF: 38 });
+  it('誘導路の描画幅は m の単一の表で、F は独立区分（2026-CF。旧 codeF 幅 38 m を引き継ぐ）', () => {
+    expect(TAXIWAY_DRAW_WIDTH_M).toEqual({ S: 15, M: 23, L: 30, F: 38 });
     expect(taxiwayDrawWidthM({ widthClass: 'S' })).toBe(15);
     expect(taxiwayDrawWidthM({ widthClass: 'M' })).toBe(23);
     expect(taxiwayDrawWidthM({ widthClass: 'L' })).toBe(30);
-    expect(taxiwayDrawWidthM({ widthClass: 'S', codeF: true })).toBe(38);
+    expect(taxiwayDrawWidthM({ widthClass: 'F' })).toBe(38);
     expect(roadDrawWidthM({ roadClass: 'rail' })).toBe(ROAD_DRAW_WIDTH_M.rail);
     expect(roadDrawWidthM({ roadClass: 'public' })).toBe(ROAD_DRAW_WIDTH_M.road);
   });

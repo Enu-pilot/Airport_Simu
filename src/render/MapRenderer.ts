@@ -21,7 +21,7 @@ import { COLOR, FACILITY_COLOR, NODE_COLOR, SEVERITY_COLOR, SIZE_COLOR, TERRAIN_
 import { visibleFacilityLabelIds, visibleInteriorFacilityIds } from './labels';
 import { computePreview, facilityKindOf, nextPathPoint, nextTaxiPoint, rectFromDrag } from '../editor/tools';
 import { validateOrthogonalPolygon } from '../core/geometry/polygon';
-import { getAnalysis, type EditorState, type OpsState, type Overlays } from '../editor/store';
+import { getAnalysis, type EditorState, type OpsState, type Overlays, type ToolId } from '../editor/store';
 import { AIRCRAFT_TYPES, resolveType, type TypeTable } from '../core/sim/aircraftTypes';
 import { isVisible } from '../core/sim/query';
 import { edgeIndexAt, pointAt } from '../core/sim/routes';
@@ -39,8 +39,10 @@ import { blockCapacity } from '../core/sim/taxiBlocks';
 import { TILE_M } from '../core/model/catalog';
 
 /**
- * PixiJS による空港マップ描画。シミュレーション・編集の状態は一切変更せず、
- * EditorState を受け取って毎回描き直す（編集エディタの規模では十分高速）。
+ * PixiJS による空港マップ描画。シミュレーション・編集の状態は一切変更しない。
+ *
+ * 静的レイヤ（グリッド＋レイアウト）は入力が変わらない限り再構築しない（updateStaticLayer）。
+ * 動的レイヤ（機体・旅客・選択など）とラベルは毎回描き直す。
  *
  * world コンテナはタイル単位で描画し、カメラに合わせて拡大・平行移動する。
  * 線幅などの画面上の太さは px(n) = n / zoom でタイル単位に換算する。
@@ -58,6 +60,34 @@ const ARRIVAL_PHASE_STATES: ReadonlySet<AircraftState> = new Set(['inbound', 'ho
 
 /** 混雑ヒートの3段階（core/access/heatmap の heatBand と対応: 40%未満 / 40–70% / 70%以上） */
 const HEAT_COLORS = [0x3ccf6e, 0xffc23d, 0xff4d4f] as const;
+
+/**
+ * ラベルのカテゴリと、配置ツール使用中に描くカテゴリの対応（性能改善 §3.6）。
+ * 建設画面ではツールと無関係なカテゴリのラベル（走査と Text 発行が毎フレーム掛かる）を
+ * 省き、対象カテゴリだけを描く。選択ツール・運航中は全カテゴリ（従来どおり）。
+ */
+type LabelKind = 'rwy' | 'twy' | 'std' | 'fac' | 'tn';
+const LABEL_SCOPE_ALL: ReadonlySet<LabelKind> = new Set(['rwy', 'twy', 'std', 'fac', 'tn']);
+
+function labelScopeForTool(tool: ToolId): ReadonlySet<LabelKind> {
+  switch (tool) {
+    case 'taxiway':
+      return new Set(['rwy', 'twy', 'tn']);
+    case 'stand':
+      return new Set(['rwy', 'std']);
+    case 'pbb':
+      return new Set(['rwy', 'std', 'fac']);
+    case 'agt':
+      return new Set(['rwy', 'fac']);
+    case 'runway':
+    case 'road':
+    case 'land':
+      return new Set(['rwy']);
+    default:
+      // facility:* / area:* は施設名、select は全カテゴリ
+      return tool === 'select' ? LABEL_SCOPE_ALL : new Set(['rwy', 'fac']);
+  }
+}
 
 export class MapRenderer {
   readonly app = new Application();
@@ -78,8 +108,20 @@ export class MapRenderer {
   private kpiCache: { now: number; sim: unknown; k: AirportKpis } | null = null;
   private interiorShown = false;
   private mapLevel: number | 'all' = 0;
+  /** このフレームで描くラベルのカテゴリ（draw の冒頭でツールから決める。§3.6） */
+  private labelScope: ReadonlySet<LabelKind> = LABEL_SCOPE_ALL;
   /** 現在のカメラで見えている範囲（マップ座標＝タイル単位）。draw の冒頭で更新し、画面外カリングの判定に使う */
   private view = { x0: 0, y0: 0, x1: 0, y1: 0 };
+  /** 静的レイヤ（グリッド＋レイアウト）のキャッシュキー。前回構築時の入力と全て一致すれば再構築しない */
+  private staticKey: {
+    layout: AirportLayout;
+    analysis: LayoutAnalysis;
+    zoom: number;
+    mapLevel: number | 'all';
+    grid: boolean;
+    network: boolean;
+    tool: EditorState['tool'];
+  } | null = null;
 
   /** 矩形（x, y, w, h）が表示範囲（margin 分だけ拡張）と重なるか。重ならない要素は描いても画面に出ない */
   private boxInView(x: number, y: number, w: number, h: number, margin: number): boolean {
@@ -159,7 +201,13 @@ export class MapRenderer {
   draw(s: EditorState): void {
     const preview = s.mode === 'build' ? computePreview(s) : null;
     const layout = preview?.result.ok ? preview.result.layout : s.history.present;
-    const analysis = getAnalysis(layout);
+    // 建設画面の軽量化（性能改善 §3.6）: 解析は実レイアウトに対してだけ取る。
+    // ゴースト（プレビューの仮レイアウト）に全量解析を回すとホバーのたびに秒単位で
+    // 止まるため、ゴーストの形状だけをゴーストから描き、解析由来の表示（接続ドット・
+    // ホールドショート印・課題マーカー等）は実レイアウト時点のものを使う。
+    // 接続・立地などの診断は配置確定（境界）で全量解析が実行され、従来どおり表示される。
+    const analysis = getAnalysis(s.history.present);
+    this.labelScope = s.mode === 'build' ? labelScopeForTool(s.tool) : LABEL_SCOPE_ALL;
     const ghostIds = new Set(preview?.ghostIds ?? []);
     const cam = s.camera;
     this.zoom = cam.zoom;
@@ -173,13 +221,10 @@ export class MapRenderer {
 
     this.updateTerrain(layout.site);
     this.buildable.visible = s.overlays.buildable;
-    const g = this.g;
     const o = this.overlay;
-    g.clear();
     o.clear();
 
-    if (s.overlays.grid) this.drawGrid(cam, s.viewSize, layout.site);
-    this.drawLayout(layout, analysis, s);
+    this.updateStaticLayer(layout, analysis, s);
     this.drawConnectors(layout, analysis, s.selection);
     this.drawTerminalTransit(layout, s.selection);
     this.drawPortalLinks(layout, s.selection);
@@ -191,10 +236,10 @@ export class MapRenderer {
 
     // 選択
     if (s.selection && !ghostIds.has(s.selection)) this.outline(o, layout, s.selection, COLOR.selection, 3);
-    // プレビュー（緑 = 配置可能、赤 = エラーあり）
+    // プレビュー（緑 = 配置操作として成立。接続・立地などの診断はプレビュー中は
+    // 判定せず、確定後の全量解析で課題として示す。性能改善 §3.6）
     for (const id of ghostIds) {
-      const bad = (analysis.byTarget[id] ?? []).some((i) => i.severity === 'error');
-      this.outline(o, layout, id, bad ? COLOR.ghostBad : COLOR.ghostOk, 3);
+      this.outline(o, layout, id, COLOR.ghostOk, 3);
     }
     this.drawDraft(s);
     this.drawFootprintEdit(s);
@@ -212,6 +257,51 @@ export class MapRenderer {
     if (!s.ops && s.overlays.congestion) this.drawStaticHeat(layout, s, cam);
     if (s.ops) this.drawOps(s.ops, cam, s.overlays);
     for (const [k, t] of this.textPool) t.visible = this.usedTexts.has(k);
+  }
+
+  /**
+   * 静的レイヤ（グリッド＋レイアウト）を this.g へ構築する。レイアウト・解析・zoom・表示条件が
+   * 前回構築時と全て同じなら何もしない（Graphics の内容が残り、Pixi がジオメトリを使い回す）。
+   *
+   * 構築時は画面外カリングの範囲を全域に広げて敷地全体を描く。カリングは「画面外を描かない」
+   * 最適化であり、画面外の図形を描いても画面内の表示は変わらない（ビューポートで切り取られる）。
+   * これによりカメラの平行移動（パン・追従）では再構築されず、再構築は zoom の変更・
+   * レイアウトの編集・表示レイヤやツールの切替のときだけになる。
+   * 線幅は px() 経由で zoom に依存するため、zoom が変われば再構築する。
+   */
+  private updateStaticLayer(layout: AirportLayout, analysis: LayoutAnalysis, s: EditorState): void {
+    const key = this.staticKey;
+    if (
+      key !== null &&
+      key.layout === layout &&
+      key.analysis === analysis &&
+      key.zoom === this.zoom &&
+      key.mapLevel === s.mapLevel &&
+      key.grid === s.overlays.grid &&
+      key.network === s.overlays.network &&
+      key.tool === s.tool
+    ) {
+      return;
+    }
+    const g = this.g;
+    g.clear();
+    const view = this.view;
+    this.view = { x0: -1e9, y0: -1e9, x1: 1e9, y1: 1e9 };
+    if (s.overlays.grid) {
+      // グリッドは敷地全体に引く（従来は表示範囲分だけだったが、画面外の線は表示に影響しない）
+      this.drawGrid({ ...s.camera, x: 0, y: 0 }, { w: layout.site.width * this.zoom, h: layout.site.height * this.zoom }, layout.site);
+    }
+    this.drawLayout(layout, analysis, s);
+    this.view = view;
+    this.staticKey = {
+      layout,
+      analysis,
+      zoom: this.zoom,
+      mapLevel: s.mapLevel,
+      grid: s.overlays.grid,
+      network: s.overlays.network,
+      tool: s.tool,
+    };
   }
 
   /** Display-only game-time tint and bounded airfield lights. */
@@ -1074,7 +1164,7 @@ export class MapRenderer {
       this.label(`rwy0:${r.id}`, m0!.text, c(m0!.pos), cam, { size: 13 });
       this.label(`rwy1:${r.id}`, m1!.text, c(m1!.pos), cam, { size: 13 });
     }
-    if (cam.zoom >= 5) {
+    if (cam.zoom >= 5 && this.labelScope.has('twy')) {
       // 誘導路名は同名区間のうち最長の区間に1つだけ
       const best = new Map<string, { len: number; mid: Vec2 }>();
       for (const e of Object.values(layout.taxiways)) {
@@ -1087,17 +1177,23 @@ export class MapRenderer {
       for (const [name, { mid }] of best) this.label(`twy:${name}`, name, mid, cam, { color: COLOR.taxiCenter });
     }
     if (cam.zoom >= 8) {
-      for (const st of Object.values(layout.stands)) {
-        const d = standDims(st);
-        if (st.name) this.label(`std:${st.id}`, st.name, { x: st.origin.x + d.w / 2, y: st.origin.y + d.h / 2 }, cam, { size: 11 });
+      if (this.labelScope.has('std')) {
+        for (const st of Object.values(layout.stands)) {
+          const d = standDims(st);
+          if (st.name) this.label(`std:${st.id}`, st.name, { x: st.origin.x + d.w / 2, y: st.origin.y + d.h / 2 }, cam, { size: 11 });
+        }
       }
-      for (const id of visibleFacilityLabelIds(layout, this.mapLevel, this.interiorShown)) {
-        const f = layout.facilities[id]!;
-        const d = facilityDims(f);
-        this.label(`fac:${f.id}`, f.name, { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 }, cam, { size: 11 });
+      if (this.labelScope.has('fac')) {
+        for (const id of visibleFacilityLabelIds(layout, this.mapLevel, this.interiorShown)) {
+          const f = layout.facilities[id]!;
+          const d = facilityDims(f);
+          this.label(`fac:${f.id}`, f.name, { x: f.origin.x + d.w / 2, y: f.origin.y + d.h / 2 }, cam, { size: 11 });
+        }
       }
-      for (const n of Object.values(layout.taxiNodes)) {
-        if (n.name) this.label(`tn:${n.id}`, n.name, { x: c(n.pos).x + 0.8, y: c(n.pos).y - 0.6 }, cam, { size: 10, color: 0xffe082 });
+      if (this.labelScope.has('tn')) {
+        for (const n of Object.values(layout.taxiNodes)) {
+          if (n.name) this.label(`tn:${n.id}`, n.name, { x: c(n.pos).x + 0.8, y: c(n.pos).y - 0.6 }, cam, { size: 10, color: 0xffe082 });
+        }
       }
     }
     void analysis;

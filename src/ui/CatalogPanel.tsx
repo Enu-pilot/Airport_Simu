@@ -6,7 +6,9 @@ import { buildAirsideNetwork } from '../core/airside/network';
 import { maxSeatsOf } from '../core/economy/company';
 import { AIRLINES } from '../core/economy/registry';
 import { companyActions } from '../editor/simRunner';
-import { useLayout } from '../editor/store';
+import { useEditor, useLayout } from '../editor/store';
+import { formatTypeWithSpec } from './aircraftLabel';
+import type { CabinSpec } from '../core/data/types';
 import { useCompany } from './ManagementPanels';
 import { COMPAT_REASON_LABEL, COMPAT_STATUS_LABEL, DATA_STATUS_LABEL, displayName } from '../i18n/ja';
 import type { SizeClass } from '../core/model/types';
@@ -211,9 +213,11 @@ function ModelDetail({ m }: { m: AircraftModel }) {
 /** 航空会社の保有機材と座席構成 */
 function FleetEditor() {
   const c = useCompany();
+  const typeLabelMode = useEditor((s) => s.opsPrefs.typeLabelMode);
   const [airline, setAirline] = useState(AIRLINES[0]!.id);
   const [typeId, setTypeId] = useState('A320neo');
   const [seats, setSeats] = useState(180);
+  const [spec, setSpec] = useState<CabinSpec | ''>('');
   const fleet = c.fleets?.[airline] ?? [];
   return (
     <div data-testid="fleet-editor">
@@ -230,11 +234,11 @@ function FleetEditor() {
       <table className="board">
         <tbody>
           {fleet.map((e) => (
-            <tr key={e.typeId}>
-              <td>{AIRCRAFT_TYPES[e.typeId]?.label ?? `未解決の機種（${e.typeId}）`}</td>
+            <tr key={`${e.typeId}:${e.spec ?? ''}`}>
+              <td>{AIRCRAFT_TYPES[e.typeId] ? formatTypeWithSpec(e.typeId, e.spec, typeLabelMode) : `未解決の機種（${e.typeId}）`}</td>
               <td className="num">{e.seats}席</td>
               <td>
-                <button onClick={() => companyActions.removeFleetEntry(airline, e.typeId)}>外す</button>
+                <button onClick={() => companyActions.removeFleetEntry(airline, e.typeId, e.spec)}>外す</button>
               </td>
             </tr>
           ))}
@@ -248,12 +252,17 @@ function FleetEditor() {
             </option>
           ))}
         </select>
+        <select value={spec} onChange={(e) => setSpec(e.target.value as CabinSpec | '')} data-testid="fleet-spec">
+          <option value="">仕様なし</option>
+          <option value="domestic">国内線機材</option>
+          <option value="international">国際線機材</option>
+        </select>
         <input type="number" min={1} value={seats} onChange={(e) => setSeats(Number(e.target.value))} data-testid="fleet-seats" style={{ width: 70 }} />
-        <button onClick={() => companyActions.setFleetEntry(airline, typeId, seats)} data-testid="fleet-add">
+        <button onClick={() => companyActions.setFleetEntry(airline, typeId, seats, spec === '' ? undefined : spec)} data-testid="fleet-add">
           追加・座席数を変更
         </button>
       </div>
-      <div className="muted small">同じ機種でも航空会社ごとに座席数を変えられます（上限は最大旅客定員。資料で確認できない機種は既定座席の1.25倍）。</div>
+      <div className="muted small">同じ機種でも航空会社ごとに座席数を変えられます（上限は最大旅客定員。資料で確認できない機種は既定座席の1.25倍）。国内線／国際線の仕様が違う機材は、仕様を選んで別々に登録できます。</div>
     </div>
   );
 }

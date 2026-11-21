@@ -2,7 +2,7 @@ import { Rng, type RngState } from '../rng';
 import { compareIds } from '../model/ids';
 import { AIRCRAFT_TYPES, resolveType, type AircraftTypeId, type TypeTable } from '../sim/aircraftTypes';
 import { BALANCE } from './balance';
-import { AIRLINES, FICTIONAL_RESTRICTION_TIER, HOME_COUNTRY_ID, airlineDef, airlineFictionalAllows, airlineNetworkAllows, airlinesFor, destinationDef, destinationsFor, findAirline, findDestination, resolveAirlineId, resolveDestinationId, routeAvailability, type AirlineDef, type DestinationDef, type DestinationService, type FleetEntry } from './registry';
+import { AIRLINES, FICTIONAL_RESTRICTION_TIER, HOME_COUNTRY_ID, airlineDef, airlineFictionalAllows, airlineNetworkAllows, airlinesFor, destinationDef, destinationsFor, findAirline, findDestination, resolveAirlineId, resolveDestinationId, routeAvailability, type AirlineDef, type CabinSpec, type DestinationDef, type DestinationService, type FleetEntry } from './registry';
 import { routeDemand } from './demand';
 import { NO_FEEDBACK, type AccessFeedback, type AccessMode } from '../access/model';
 import { checkGameSettings, otpAddOf, type GameSettings } from './game';
@@ -86,6 +86,8 @@ export interface Contract {
   airlineId: string;
   destinationId: string;
   typeId: AircraftTypeId;
+  /** 客室仕様（2026-FLEET）: 提案が選んだフリート項目の仕様。座席数はこの仕様で引く。欠落 = 仕様なし */
+  spec?: CabinSpec;
   /** 1日あたりの往復便数 */
   perDay: number;
   window: TimeWindow;
@@ -399,9 +401,18 @@ export function maxPerDayFor(c: CompanyState, dest?: DestinationDef): number {
   return Math.max(1, Math.round(base * (1 - 0.5 * dest.congestion)));
 }
 
-/** 便の座席数: 航空会社の座席構成にあればその値、なければ機種の既定値 */
-export function seatsFor(c: CompanyState, airlineId: string, typeId: AircraftTypeId, types: TypeTable = AIRCRAFT_TYPES): number {
-  return c.fleets?.[airlineId]?.find((e) => e.typeId === typeId)?.seats ?? resolveType(types, typeId).seats;
+/**
+ * 便の座席数: 航空会社の座席構成にあればその値、なければ機種の既定値。
+ * spec 指定時は (typeId, spec) が一致する項目を引き、見つからなければ従来どおり typeId の先頭一致に落とす
+ * （仕様の無い旧セーブ・旧契約でも座席数が引けるようにするため）。
+ */
+export function seatsFor(c: CompanyState, airlineId: string, typeId: AircraftTypeId, types: TypeTable = AIRCRAFT_TYPES, spec?: CabinSpec): number {
+  const fleet = c.fleets?.[airlineId];
+  if (spec !== undefined) {
+    const exact = fleet?.find((e) => e.typeId === typeId && e.spec === spec);
+    if (exact) return exact.seats;
+  }
+  return fleet?.find((e) => e.typeId === typeId)?.seats ?? resolveType(types, typeId).seats;
 }
 
 export type FleetResult = { ok: true } | { ok: false; reason: 'UNKNOWN_TYPE' | 'SEATS_INVALID' | 'OVER_MAX_PAX' | 'NOT_IN_FLEET' | 'IN_USE' | 'NOT_FOUND' };
@@ -415,39 +426,42 @@ export function maxSeatsOf(typeId: AircraftTypeId, types: TypeTable = AIRCRAFT_T
   return t.maxPax !== null ? { max: t.maxPax, official: true } : { max: Math.round(t.seats * 1.25), official: false };
 }
 
-/** 保有機材の追加・座席数の変更 */
-export function setFleetEntry(c: CompanyState, airlineId: string, typeId: AircraftTypeId, seats: number, types: TypeTable = AIRCRAFT_TYPES): FleetResult {
+/** 保有機材の追加・座席数の変更。仕様バリアントは (typeId, spec) の組で別項目として扱う */
+export function setFleetEntry(c: CompanyState, airlineId: string, typeId: AircraftTypeId, seats: number, types: TypeTable = AIRCRAFT_TYPES, spec?: CabinSpec): FleetResult {
   if (!c.airlines[airlineId]) return { ok: false, reason: 'NOT_FOUND' };
   if (!types[typeId]) return { ok: false, reason: 'UNKNOWN_TYPE' };
   if (!Number.isInteger(seats) || seats < 1) return { ok: false, reason: 'SEATS_INVALID' };
   if (seats > maxSeatsOf(typeId, types).max) return { ok: false, reason: 'OVER_MAX_PAX' };
   const fleet = (c.fleets[airlineId] ??= []);
-  const e = fleet.find((x) => x.typeId === typeId);
+  const e = fleet.find((x) => x.typeId === typeId && x.spec === spec);
   if (e) e.seats = seats;
-  else fleet.push({ typeId, seats });
+  else fleet.push({ typeId, seats, ...(spec ? { spec } : {}) });
   return { ok: true };
 }
 
-/** 保有機材から外す（契約で使っている機種は外せない） */
-export function removeFleetEntry(c: CompanyState, airlineId: string, typeId: AircraftTypeId): FleetResult {
+/** 保有機材から外す（契約で使っている機種は外せない）。spec 指定時はその仕様の項目だけを対象にする */
+export function removeFleetEntry(c: CompanyState, airlineId: string, typeId: AircraftTypeId, spec?: CabinSpec): FleetResult {
   const fleet = c.fleets[airlineId];
-  if (!fleet?.some((e) => e.typeId === typeId)) return { ok: false, reason: 'NOT_FOUND' };
-  if (contractsOf(c).some((k) => k.airlineId === airlineId && k.typeId === typeId && (k.status === 'active' || k.status === 'offered'))) {
+  if (!fleet?.some((e) => e.typeId === typeId && (spec === undefined || e.spec === spec))) return { ok: false, reason: 'NOT_FOUND' };
+  if (contractsOf(c).some((k) => k.airlineId === airlineId && k.typeId === typeId && (spec === undefined || k.spec === spec) && (k.status === 'active' || k.status === 'offered'))) {
     return { ok: false, reason: 'IN_USE' };
   }
-  c.fleets[airlineId] = fleet.filter((e) => e.typeId !== typeId);
+  c.fleets[airlineId] = fleet.filter((e) => !(e.typeId === typeId && (spec === undefined || e.spec === spec)));
   return { ok: true };
 }
 
 /**
  * 契約の機材変更（便への機材割り当て）: 航空会社の保有機材の機種に変える。
  * 機種を変えると旅客定員・地上作業・施設の適合性・着陸料が変わる（翌日の運航計画から）。
+ * spec を渡すと客室仕様（国内線／国際線）もあわせて切り替える。
  */
-export function changeContractAircraft(c: CompanyState, contractId: string, typeId: AircraftTypeId): FleetResult {
+export function changeContractAircraft(c: CompanyState, contractId: string, typeId: AircraftTypeId, spec?: CabinSpec): FleetResult {
   const k = c.contracts[contractId];
   if (!k) return { ok: false, reason: 'NOT_FOUND' };
-  if (!(c.fleets[k.airlineId] ?? airlineDef(k.airlineId).fleet).some((e) => e.typeId === typeId)) return { ok: false, reason: 'NOT_IN_FLEET' };
+  if (!(c.fleets[k.airlineId] ?? airlineDef(k.airlineId).fleet).some((e) => e.typeId === typeId && (spec === undefined || e.spec === spec))) return { ok: false, reason: 'NOT_IN_FLEET' };
   k.typeId = typeId;
+  if (spec === undefined) delete k.spec;
+  else k.spec = spec;
   return { ok: true };
 }
 
@@ -703,12 +717,19 @@ export function fictionalRestrictionActive(c: CompanyState): boolean {
 
 /**
  * 提案確率への保有規模の反映（2026-11-21 ユーザー要望）。「保有する飛行機数」の代理指標として
- * 保有型式数（その会社の現在のフリート一覧の件数）を使う（ゲーム内データに型式ごとの機数は無い）。
+ * 保有型式数を使う（ゲーム内データに型式ごとの機数は無い）。
  * 倍率 = 1 + BALANCE.offers.fleetWeightPerType × (型式数 − 1) で、1 型式の会社は 1（従来どおり）、
  * 型式数が多い会社ほど少しだけ提案が届きやすくなる。カタログ最大（ANA 14 型式）でも 1.52 倍。
+ * 型式数は distinct な typeId の数で数える: 客室仕様バリアント（2026-FLEET）は同じ型式の
+ * 座席違いであり、項目数で数えると仕様を持つ大手だけが過大になるため。
  */
 export function offerFleetWeight(fleetTypeCount: number): number {
   return 1 + BALANCE.offers.fleetWeightPerType * Math.max(0, fleetTypeCount - 1);
+}
+
+/** 保有型式数（distinct な typeId の数。仕様バリアントは 1 型式として数える） */
+export function fleetTypeCount(fleet: readonly FleetEntry[]): number {
+  return new Set(fleet.map((e) => e.typeId)).size;
 }
 
 /**
@@ -733,7 +754,7 @@ export function generateOffers(
       if (c.game?.goals && c.goals && a.unlock.minTier !== undefined && c.goals.tier < a.unlock.minTier) continue;
       const rel = (c.airlines[a.id] ??= { satisfaction: 60, lowDays: 0 });
       c.fleets[a.id] ??= a.fleet.map((entry) => ({ ...entry }));
-      const p = (BALANCE.offers.baseProb + BALANCE.offers.ratingProb * (c.rating / 100) * (rel.satisfaction / 60)) * offerBoost(c, a.id) * offerFleetWeight((c.fleets[a.id] ?? a.fleet).length);
+      const p = (BALANCE.offers.baseProb + BALANCE.offers.ratingProb * (c.rating / 100) * (rel.satisfaction / 60)) * offerBoost(c, a.id) * offerFleetWeight(fleetTypeCount(c.fleets[a.id] ?? a.fleet));
       if (rng.next() >= p) continue;
       const served = new Set(contractsOf(c).filter((k) => k.airlineId === a.id && (k.status === 'active' || k.status === 'offered')).map((k) => k.destinationId));
       const dests = destinationsFor(c).filter((d) => {
@@ -750,7 +771,7 @@ export function generateOffers(
           const demand = routeDemand(c, d, 1) ?? 0;
           const supplied = contractsOf(c)
             .filter((k) => k.destinationId === d.id && (k.status === 'active' || k.status === 'offered'))
-            .reduce((s, k) => s + k.perDay * seatsFor(c, k.airlineId, k.typeId) * 2, 0);
+            .reduce((s, k) => s + k.perDay * seatsFor(c, k.airlineId, k.typeId, AIRCRAFT_TYPES, k.spec) * 2, 0);
           return Math.max(0.05, demand - supplied);
         });
         const totalW = weights.reduce((s, w) => s + w, 0);
@@ -765,12 +786,15 @@ export function generateOffers(
       } else {
         dest = dests[rng.int(0, dests.length - 1)]!;
       }
-      // 運航できる機種を優先しつつ、評価が高いと大型機の提案も来る
-      const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId);
-      if (own.length === 0) continue;
-      const fleet = own.filter((t) => operable.includes(t) || (resolveType(AIRCRAFT_TYPES, t).size === 'L' && c.rating >= 60 && !aircraftIsLow(c, a.id)) || rng.next() < 0.25);
-      const candidates = fleet.length > 0 ? fleet : own;
-      let typeId = candidates[rng.int(0, candidates.length - 1)]!;
+      // 運航できる機種を優先しつつ、評価が高いと大型機の提案も来る。
+      // 候補はフリート項目（型式＋客室仕様）の単位で持ち、選ばれた項目の仕様を契約へ引き継ぐ（2026-FLEET）。
+      // 仕様バリアントのない会社では項目と型式が 1 対 1 で、乱数の消費は従来と同一になる。
+      const ownEntries = c.fleets[a.id] ?? a.fleet;
+      if (ownEntries.length === 0) continue;
+      const fleetEntries = ownEntries.filter((e) => operable.includes(e.typeId) || (resolveType(AIRCRAFT_TYPES, e.typeId).size === 'L' && c.rating >= 60 && !aircraftIsLow(c, a.id)) || rng.next() < 0.25);
+      const candidates = fleetEntries.length > 0 ? fleetEntries : ownEntries;
+      let picked = candidates[rng.int(0, candidates.length - 1)]!;
+      let typeId = picked.typeId;
       const maxPerDay = maxPerDayFor(c, dest);
       const windows: TimeWindow[] = ['morning', 'daytime', 'evening', 'any'];
       // 乱数の消費順は従来と同一に保つ（discount の rng.next() → perDay の rng.int() → window の rng.int()）
@@ -780,13 +804,14 @@ export function generateOffers(
       if (c.market && c.city) {
         // 機種と便数は、未充足需要に最も近い座席供給（座席 × 便数 × 2）の組を選ぶ（追加の乱数は使わない）
         let best = Number.POSITIVE_INFINITY;
-        for (const t of candidates) {
-          const seats = seatsFor(c, a.id, t);
+        for (const e of candidates) {
+          const seats = seatsFor(c, a.id, e.typeId, AIRCRAFT_TYPES, e.spec);
           for (let pd = 1; pd <= maxPerDay; pd++) {
             const diff = Math.abs(seats * pd * 2 - unmet);
             if (diff < best) {
               best = diff;
-              typeId = t;
+              picked = e;
+              typeId = e.typeId;
               perDay = pd;
             }
           }
@@ -797,6 +822,7 @@ export function generateOffers(
           airlineId: a.id,
           destinationId: dest.id,
           typeId,
+          ...(picked.spec ? { spec: picked.spec } : {}),
           perDay,
           window: windows[rng.int(0, windows.length - 1)]!,
           feeDiscount: Math.round(discount * 100) / 100,
@@ -841,14 +867,15 @@ export function generatePhase4Offers(
       if (c.game?.goals && c.goals && d.unlock.minTier !== undefined && c.goals.tier < d.unlock.minTier) return false;
       return airlineNetworkAllows(a, d) && airlineFictionalAllows(a, d, tier) && routeAvailability(a, d, { originCountryId, internationalPassengerProcessing }) === 'available';
     });
-    const own = (c.fleets[a.id] ?? a.fleet).map((e) => e.typeId).filter((t) => operable.includes(t));
-    if (own.length === 0) continue;
+    const ownEntries = (c.fleets[a.id] ?? a.fleet).filter((e) => operable.includes(e.typeId));
+    if (ownEntries.length === 0) continue;
     if (wantOvernight && rng.next() < 0.35) {
       const candidates = dests.filter((d) => !served.has(`${d.id}:overnight`) && d.scope === 'domestic');
       if (candidates.length > 0) {
         const dest = candidates[rng.int(0, candidates.length - 1)]!;
+        const picked = ownEntries[rng.int(0, ownEntries.length - 1)]!;
         out.push(addContract(c, {
-          airlineId: a.id, destinationId: dest.id, typeId: own[rng.int(0, own.length - 1)]!,
+          airlineId: a.id, destinationId: dest.id, typeId: picked.typeId, ...(picked.spec ? { spec: picked.spec } : {}),
           perDay: rng.int(1, 3), window: 'evening', feeDiscount: 0.1,
           startDay: c.day, endDay: c.day + BALANCE.offers.contractDays - 1, status: 'offered',
           offerExpiresDay: c.day + BALANCE.offers.expireDays, kind: 'overnight',
@@ -860,8 +887,9 @@ export function generatePhase4Offers(
       const candidates = dests.filter((d) => !served.has(`${d.id}:based`) && d.scope === 'domestic');
       if (candidates.length > 0) {
         const dest = candidates[rng.int(0, candidates.length - 1)]!;
+        const picked = ownEntries[rng.int(0, ownEntries.length - 1)]!;
         out.push(addContract(c, {
-          airlineId: a.id, destinationId: dest.id, typeId: own[rng.int(0, own.length - 1)]!,
+          airlineId: a.id, destinationId: dest.id, typeId: picked.typeId, ...(picked.spec ? { spec: picked.spec } : {}),
           perDay: rng.int(1, 3), window: 'any', feeDiscount: 0.25,
           startDay: c.day, endDay: c.day + BALANCE.offers.contractDays * 3 - 1, status: 'offered',
           offerExpiresDay: c.day + BALANCE.offers.expireDays, kind: 'based', basedAircraft: rng.int(2, 4),
@@ -997,11 +1025,11 @@ export function updateContracts(c: CompanyState, results: Record<string, Airline
         k.endDay = c.day + BALANCE.offers.contractDays;
         let acted = false;
         if (c.market && k.perDay >= maxPerDayFor(c, destinationDef(k.destinationId))) {
-          const curSeats = seatsFor(c, k.airlineId, k.typeId);
+          const curSeats = seatsFor(c, k.airlineId, k.typeId, AIRCRAFT_TYPES, k.spec);
           const bigger = (c.fleets[k.airlineId] ?? airlineDef(k.airlineId).fleet)
-            .filter((e) => e.typeId !== k.typeId && seatsFor(c, k.airlineId, e.typeId) > curSeats && (!operable || operable.includes(e.typeId)))
-            .sort((x, y) => seatsFor(c, k.airlineId, x.typeId) - seatsFor(c, k.airlineId, y.typeId))[0];
-          if (bigger && changeContractAircraft(c, k.id, bigger.typeId).ok) {
+            .filter((e) => (e.typeId !== k.typeId || e.spec !== k.spec) && seatsFor(c, k.airlineId, e.typeId, AIRCRAFT_TYPES, e.spec) > curSeats && (!operable || operable.includes(e.typeId)))
+            .sort((x, y) => seatsFor(c, k.airlineId, x.typeId, AIRCRAFT_TYPES, x.spec) - seatsFor(c, k.airlineId, y.typeId, AIRCRAFT_TYPES, y.spec))[0];
+          if (bigger && changeContractAircraft(c, k.id, bigger.typeId, bigger.spec).ok) {
             events.push(`${airlineDef(k.airlineId).name} が契約を大型化して更新しました`);
             acted = true;
           }
@@ -1223,7 +1251,7 @@ export function importCompany(json: string): CompanyState | null {
       c.fleets = defaultFleets();
       for (const k of Object.values(c.contracts)) {
         const f = (c.fleets[k.airlineId] ??= []);
-        if (!f.some((e) => e.typeId === k.typeId)) f.push({ typeId: k.typeId, seats: resolveType(AIRCRAFT_TYPES, k.typeId).seats });
+        if (!f.some((e) => e.typeId === k.typeId && e.spec === k.spec)) f.push({ typeId: k.typeId, seats: resolveType(AIRCRAFT_TYPES, k.typeId).seats, ...(k.spec ? { spec: k.spec } : {}) });
       }
     }
     // 使用ターミナル制限（airlineTerminals）: 形が不正な項目は捨てる（寛容読み込み。他の任意項目と同じ扱い）

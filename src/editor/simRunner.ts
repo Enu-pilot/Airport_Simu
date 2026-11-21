@@ -13,7 +13,8 @@ import { INBOUND_LEAD_SEC } from '../core/sim/rules';
 import { setAreaClosed } from '../core/sim/passengers';
 import { setUnitBroken } from '../core/sim/ground';
 import { setEquipmentBroken } from '../core/sim/baggage';
-import type { AircraftTypeId } from '../core/sim/aircraftTypes';
+import { AIRCRAFT_TYPES, type AircraftTypeId } from '../core/sim/aircraftTypes';
+import type { CabinSpec } from '../core/data/types';
 import type { RunwayConfig } from '../core/sim/types';
 import { applyFinishedProjects, editorStore, forgetCharges, formatCr, initialDayFlow, saveCompanyAutosave, showToast, type OpsState } from './store';
 import { settleDay } from '../core/economy/ops';
@@ -663,15 +664,15 @@ export const companyActions = {
   setHours(hours: Partial<OperatingHours>): void {
     mutateCompany((c) => setHours(c, hours));
   },
-  /** 保有機材の追加・座席数の変更（座席数は最大旅客定員まで） */
-  setFleetEntry(airlineId: string, typeId: string, seats: number): boolean {
-    return mutateCompany((c) => setFleetEntry(c, airlineId, typeId, seats));
+  /** 保有機材の追加・座席数の変更（座席数は最大旅客定員まで）。spec は客室仕様（2026-FLEET） */
+  setFleetEntry(airlineId: string, typeId: string, seats: number, spec?: CabinSpec): boolean {
+    return mutateCompany((c) => setFleetEntry(c, airlineId, typeId, seats, AIRCRAFT_TYPES, spec));
   },
-  removeFleetEntry(airlineId: string, typeId: string): void {
-    mutateCompany((c) => removeFleetEntry(c, airlineId, typeId));
+  removeFleetEntry(airlineId: string, typeId: string, spec?: CabinSpec): void {
+    mutateCompany((c) => removeFleetEntry(c, airlineId, typeId, spec));
   },
-  /** 契約の機材変更（翌日の運航計画から） */
-  changeContractAircraft(contractId: string, typeId: string): void {
-    if (mutateCompany((c) => changeContractAircraft(c, contractId, typeId))) showToast('機材を変更しました（次の運航計画から反映）');
+  /** 契約の機材変更（翌日の運航計画から）。spec を渡すと客室仕様も切り替える */
+  changeContractAircraft(contractId: string, typeId: string, spec?: CabinSpec): void {
+    if (mutateCompany((c) => changeContractAircraft(c, contractId, typeId, spec))) showToast('機材を変更しました（次の運航計画から反映）');
   },
 };

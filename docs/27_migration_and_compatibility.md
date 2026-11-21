@@ -18,6 +18,8 @@
 
 Phase U の階層・交通項目も任意データとして追加し、内部 `SCHEMA_VERSION = 3` を維持する。多層設備を含むプロジェクトは外側の `formatVersion: 3` で識別し、旧アプリが階層・旅客区域・接続能力を無視しないよう読み込みを拒否する。
 
+2026-CF（誘導路幅の F 区分）: `TaxiwayEdge.widthClass` に `'F'` を追加し、旧 `codeF` フラグを廃止した。読み込み時に版に依らず正規化する（`migrateLayout` の版非依存段）: `widthClass: 'L'` ＋ `codeF: true` → `'F'`、`codeF` キーは除去。F のネットワーク導出は旧表現と同一（maxSize 'L' ＋ codeF）で運航結果は不変のため、`SCHEMA_VERSION`（3 のまま）・`SIM_MODEL_VERSION` は上げない。F 幅を含むデータを旧アプリで開くと幅区分として不正な値になるため、F 幅を使った空港は旧アプリで編集しないこと。
+
 ## 2. 版の方針（Phase 12 の結果）
 
 | 版 | 値 | 理由 |

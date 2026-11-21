@@ -4,7 +4,7 @@ import { intlProcessingReady, type TerminalModel } from '../terminal/model';
 import type { CompanyState } from './company';
 import { featureOn } from './unlocks';
 
-export type { AirlineDef, AirlineType, AirlineService, CountryDef, DestinationDef, FleetEntry, RegionDef, Unlock } from '../data/types';
+export type { AirlineDef, AirlineType, AirlineService, CabinSpec, CountryDef, DestinationDef, FleetEntry, RegionDef, Unlock } from '../data/types';
 export { CATALOG, HOME_COUNTRY_ID, airlinesFor, destinationsFor, findAirline, findDestination, resolveAirlineId, resolveDestinationId } from '../data/index';
 
 /**

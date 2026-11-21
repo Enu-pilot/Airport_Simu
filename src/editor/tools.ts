@@ -302,8 +302,57 @@ export function computePreview(s: PreviewState): Preview | null {
   return a && a.result.ok ? { result: a.result, ghostIds: [...a.result.created, ...a.extra] } : null;
 }
 
+/**
+ * computeOp のメモ化（性能改善 §3.6）。プレビュー計算は実配置操作の試行で大きく、
+ * 描画・ステータスバー・プロパティパネルが同じ状態に対して各々呼んでいた。
+ * 入力（実レイアウト参照・ツール・オプション参照・ホバー座標・下書き参照・内部階）が
+ * すべて一致すれば前回の結果をそのまま返す。状態は不変として扱われる（ストアは
+ * 変更のたびに新しいオブジェクトを作る）ため、同一性キーで意味は変わらない。
+ */
+interface OpCacheKey {
+  layout: AirportLayout;
+  tool: PreviewState['tool'];
+  options: PreviewState['options'];
+  hover: Tile | null;
+  hoverW: PreviewState['hoverW'];
+  draft: PreviewState['draft'];
+  interiorLevel: number;
+}
+let opCache: { key: OpCacheKey; result: OpAttempt | null } | null = null;
+
+const samePoint = (a: { x: number; y: number } | null | undefined, b: { x: number; y: number } | null | undefined): boolean =>
+  a === b || (a != null && b != null && a.x === b.x && a.y === b.y);
+
 /** 現在のツール状態で確定したときの操作。失敗の結果も返す（何もする対象が無ければ null） */
 export function computeOp(s: PreviewState): OpAttempt | null {
+  const key: OpCacheKey = {
+    layout: s.history.present,
+    tool: s.tool,
+    options: s.options,
+    hover: s.hover,
+    hoverW: s.hoverW,
+    draft: s.draft,
+    interiorLevel: s.interiorLevel,
+  };
+  const c = opCache;
+  if (
+    c &&
+    c.key.layout === key.layout &&
+    c.key.tool === key.tool &&
+    c.key.options === key.options &&
+    c.key.draft === key.draft &&
+    c.key.interiorLevel === key.interiorLevel &&
+    samePoint(c.key.hover, key.hover) &&
+    samePoint(c.key.hoverW, key.hoverW)
+  ) {
+    return c.result;
+  }
+  const result = computeOpUncached(s);
+  opCache = { key, result };
+  return result;
+}
+
+function computeOpUncached(s: PreviewState): OpAttempt | null {
   const layout: AirportLayout = s.history.present;
   const { hover, draft, options, tool } = s;
   const wrap = (result: OpResult, extra: string[] = [], problem?: PlacementProblem | null): OpAttempt | null => ({ result, extra, ...(!result.ok && problem ? { problem } : {}) });

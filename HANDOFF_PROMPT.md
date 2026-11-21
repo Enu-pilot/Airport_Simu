@@ -65,3 +65,10 @@
 - 当日の PO 追加要望バッチ（A〜J・UI・階層・FIDS・性能・貨物・乗客生成）を docs/42 §3.11 に一覧化し、§5.3 に 10.9/10.10 の版記録を追加。マージ済みの確定仕様は docs/03・06・34・35・36・37 へ反映。
 - 計画書を 4 件新規作成（E 住民施策・F 架空会社・国内貨物会社は active、G〜J 地下/PBB/AGT/階層は planned）し、5-18・性能改善の 2 件に進捗を追記。docs/10 に §R（式の構造的限界・既存テスト失敗・未決事項・Vercel 確認待ち）を追加。索引（docs/README・implementation/README）を同期。
 - 本変更は PO の指示で PR として提出する（ブランチ `claude/docs-20261120-sync`）。コード変更なし、コードテスト未実行（Docs-only）。リンク・パス・記述整合は検証済み。
+
+## 実装記録（2026-11-21、2026-CF 誘導路幅の F 区分）
+- PO 指示で誘導路幅に F を独立区分として追加（作業コピー `fclass-work`、土台 main `11b552c7`、PR 化は PO 指示待ち）。`TaxiwayWidthClass = S/M/L/F` を新設し、旧「L ＋ codeF フラグ」を廃止。読み込み時に (L, codeF) → F へ版に依らず正規化（migrate の正規化段。project 側の移行呼び出しを常時化）。ネットワーク導出は (maxSize L, codeF true) で従来と完全一致するため SIM_MODEL_VERSION・SCHEMA_VERSION は据え置き、ゴールデン再採取なし。
+- F キーは誘導路ツールで F 区分そのもの（スポット・滑走路では従来どおり最大の別名）。プロパティパネル／ツールボックスは4段階セレクト、誘導路のコード F チェックボックスは廃止（スポット側は存続）。F 幅の建設費は 10,000 cr/タイル（+2,000 の等差延長、PO 調整可）。スポット・滑走路・機体区分への波及は見送り（理由は計画書 §2）。
+- 検証: 新規テスト 15 件・監査 a_network 18 件・関連既存テスト全通過、tsc・vite build・ESLint 通過。ゴールデンは幾何 4 件の既存不一致（pristine でも再現）を除き全通過。全スイートは本 VM の制約で完走できず、失敗は分離再実行で全件切り分け済み（本変更起因 0 件、詳細は計画書 §9）。
+- 統合注意: 作業後に main へ PR #88・#89・#90 がマージ済み。PR 化前に最新 main と突合せ。並行作業「経路一括幅変更」が入る場合は、その幅パラメータの TaxiwayWidthClass 化が統合点（競合ファイル: operations.ts・input.ts・PropertiesPanel.tsx・docs/06）。
+- 正本: docs/implementation/active/code_f_taxiway_width_plan.md、docs/42 §3.11（2026-CF 行）、docs/06 §4.1.1、docs/17、docs/27、docs/21、docs/03。

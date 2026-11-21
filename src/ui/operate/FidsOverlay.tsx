@@ -14,6 +14,8 @@ import {
   formatClock,
 } from '../../i18n/ja';
 import { useOps } from '../OpsPanels';
+import { useEditor } from '../../editor/store';
+import { aircraftTypeCode } from '../aircraftLabel';
 import { fidsNumStyle } from './airlineColor';
 import { canReassignStand, compatibleStands, standOptionLabel } from './flightActions';
 import { selectAircraftAndFocus } from './focus';
@@ -48,6 +50,7 @@ export function tone(f: Flight, ac: Aircraft, delay: number | null): 'ok' | 'del
  */
 export function FidsOverlay() {
   const o = useOps();
+  const typeLabelMode = useEditor((s) => s.opsPrefs.typeLabelMode);
   const filter = useOpsUi((s) => s.fidsFilter);
   const hideDone = useOpsUi((s) => s.fidsHideDone);
   const collapsed = useOpsUi((s) => s.fidsCollapsed);
@@ -179,7 +182,7 @@ export function FidsOverlay() {
                         <span className="fids-dir">{f.direction === 'arrival' ? OPS_UI.fidsFrom : OPS_UI.fidsTo}</span>
                         {place}
                       </td>
-                      <td className="col-type">{type.shortLabel}</td>
+                      <td className="col-type">{typeLabelMode === 'code' ? aircraftTypeCode(type.id, ctx.types) : type.shortLabel}</td>
                       <td>
                         {stand}
                         {busTag}

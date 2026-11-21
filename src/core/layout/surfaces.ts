@@ -7,16 +7,16 @@
  * - 誘導路・道路の帯は、ノード間の中心線を幅 widthM（m）で太らせ、両端を半幅だけ延ばした矩形。
  */
 import { ROAD_DRAW_WIDTH_M, TAXIWAY_DRAW_WIDTH_M, TILE_M } from '../model/catalog';
-import { isFreeRunway, type AirportLayout, type Runway, type SizeClass } from '../model/types';
+import { isFreeRunway, type AirportLayout, type Runway, type TaxiwayWidthClass } from '../model/types';
 import { mToTiles, type WorldPoint } from '../geometry/frames';
 import { rectAlong, rectAlongDir } from '../geometry/stroke';
 import { designatorsOf } from './designators';
 import { runwayAreas } from './runwayAreas';
 import { runwayAxis, runwayPolygon, runwayStripPolygon } from './runway';
 
-/** 誘導路の描画幅（m）。codeF は幅区分より優先 */
-export function taxiwayDrawWidthM(e: { widthClass: SizeClass; codeF?: boolean }): number {
-  return e.codeF ? TAXIWAY_DRAW_WIDTH_M.codeF : TAXIWAY_DRAW_WIDTH_M[e.widthClass];
+/** 誘導路の描画幅（m）。'F' の幅（38 m）は従来のコード F 幅をそのまま引き継ぐ（2026-CF） */
+export function taxiwayDrawWidthM(e: { widthClass: TaxiwayWidthClass }): number {
+  return TAXIWAY_DRAW_WIDTH_M[e.widthClass];
 }
 
 /** 道路・鉄道の描画幅（m） */
@@ -43,7 +43,7 @@ export function bandSurface(a: WorldPoint, b: WorldPoint, widthM: number): World
   return rectAlong(a, b, half, half);
 }
 
-export function taxiwayBandSurface(a: WorldPoint, b: WorldPoint, e: { widthClass: SizeClass; codeF?: boolean }): WorldPoint[] {
+export function taxiwayBandSurface(a: WorldPoint, b: WorldPoint, e: { widthClass: TaxiwayWidthClass }): WorldPoint[] {
   return bandSurface(a, b, taxiwayDrawWidthM(e));
 }
 

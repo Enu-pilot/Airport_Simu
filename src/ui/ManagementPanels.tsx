@@ -12,6 +12,8 @@ import { BALANCE } from '../core/economy/balance';
 import { forecastForDay } from '../core/sim/weather';
 import { analyzeAccess, type AccessMode } from '../core/access/model';
 import { companyActions } from '../editor/simRunner';
+import { aircraftTypeCode, formatFleetEntry, formatTypeWithSpec, type AircraftLabelMode } from './aircraftLabel';
+import type { CabinSpec, FleetEntry } from '../core/data/types';
 import { addCityEvent, contributeNoiseFund, purchaseSoundproofing, setCompanyCity, editorStore, formatCr, removeCityEvent, useEditor, useLayout } from '../editor/store';
 import { NightOpsSettings } from './NightOpsSettings';
 import { terminalCapacitySummaries } from '../core/terminal/terminalCapacitySummary';
@@ -424,6 +426,7 @@ function usePlanData(): PlanData {
 
 export function PlanPanel() {
   const { c, mode, layout, ctx, routeCapabilities, accessFactor, plan, analysis, issueKeys, name } = usePlanData();
+  const typeLabelMode = useEditor((s) => s.opsPrefs.typeLabelMode);
   return (
     <div className="issues mgmt" data-testid="plan-panel">
       <div className="issues-header">
@@ -551,7 +554,7 @@ export function PlanPanel() {
                       {f.arrNumber}/{f.depNumber}
                     </td>
                     <td>{destinationDef(f.destinationId).name}</td>
-                    <td>{resolveType(AIRCRAFT_TYPES, f.typeId).shortLabel}</td>
+                    <td>{typeLabelMode === 'code' ? aircraftTypeCode(f.typeId) : resolveType(AIRCRAFT_TYPES, f.typeId).shortLabel}</td>
                     <td>
                       {f.arrPax}/{f.depPax}
                     </td>
@@ -696,8 +699,33 @@ export function ContractsTabBar({ tab, onTab, summary }: { tab: ContractsTab; on
 }
 
 /** 契約セクション: 契約中の便・契約の提案・終了した契約／拠点契約の条件 */
+/** 契約の機材変更セレクト。候補は保有機材の項目（型式＋客室仕様）で、表示は aircraftLabel の表記（2026-FLEET / 2026-CODE） */
+function ContractAircraftSelect({ c, k, readOnly, mode }: { c: CompanyState; k: Contract; readOnly: boolean; mode: AircraftLabelMode }) {
+  const current: FleetEntry = { typeId: k.typeId, seats: seatsFor(c, k.airlineId, k.typeId, AIRCRAFT_TYPES, k.spec), ...(k.spec ? { spec: k.spec } : {}) };
+  const entries: FleetEntry[] = [current, ...(c.fleets?.[k.airlineId] ?? []).filter((e) => !(e.typeId === k.typeId && e.spec === k.spec))];
+  return (
+    <select
+      value={`${k.typeId}|${k.spec ?? ''}`}
+      disabled={readOnly}
+      onChange={(e) => {
+        const [t, s] = e.target.value.split('|');
+        companyActions.changeContractAircraft(k.id, t!, s ? (s as CabinSpec) : undefined);
+      }}
+      title="機材変更（航空会社の保有機材から選ぶ。旅客定員・地上作業・適合性が変わる）"
+      data-testid={`contract-type-${k.id}`}
+    >
+      {entries.map((e) => (
+        <option key={`${e.typeId}|${e.spec ?? ''}`} value={`${e.typeId}|${e.spec ?? ''}`}>
+          {formatFleetEntry(e, mode)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function ContractsPanel({ initialTab = 'active' }: { initialTab?: ContractsTab }) {
   const { c, mode, ctx, operable, routeCapabilities, accessFactor } = usePlanData();
+  const typeLabelMode = useEditor((s) => s.opsPrefs.typeLabelMode);
   const readOnly = mode === 'operate';
   const [tab, setTab] = useState<ContractsTab>(initialTab);
   const [contractSort, setContractSort] = useState<ContractSortKey>('airline');
@@ -795,23 +823,11 @@ export function ContractsPanel({ initialTab = 'active' }: { initialTab?: Contrac
                     {routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities) === 'airline-unsupported' && <span className="ng-text"> 航空会社未対応</span>}
                   </td>
                   <td className={operable.includes(k.typeId) ? '' : 'ng-text'}>
-                    <select
-                      value={k.typeId}
-                      disabled={readOnly}
-                      onChange={(e) => companyActions.changeContractAircraft(k.id, e.target.value)}
-                      title="機材変更（航空会社の保有機材から選ぶ。旅客定員・地上作業・適合性が変わる）"
-                      data-testid={`contract-type-${k.id}`}
-                    >
-                      {[...new Set([k.typeId, ...(c.fleets?.[k.airlineId] ?? []).map((e) => e.typeId)])].map((id) => (
-                        <option key={id} value={id}>
-                          {resolveType(AIRCRAFT_TYPES, id).label}（{seatsFor(c, k.airlineId, id)}席）
-                        </option>
-                      ))}
-                    </select>
+                    <ContractAircraftSelect c={c} k={k} readOnly={readOnly} mode={typeLabelMode} />
                     {operable.includes(k.typeId) ? '' : ' 運航不可'}
                   </td>
                   <td>{k.perDay}</td>
-                  {c.market && <td data-testid={`contract-seats-${k.id}`}>{k.perDay * seatsFor(c, k.airlineId, k.typeId, ctx.types) * 2}</td>}
+                  {c.market && <td data-testid={`contract-seats-${k.id}`}>{k.perDay * seatsFor(c, k.airlineId, k.typeId, ctx.types, k.spec) * 2}</td>}
                   {c.market && (
                     <td data-testid={`contract-lf-${k.id}`}>
                       {(() => {
@@ -927,7 +943,7 @@ export function ContractsPanel({ initialTab = 'active' }: { initialTab?: Contrac
                       {routeStatus === 'airline-unsupported' && <span className="ng-text"> 航空会社未対応</span>}
                     </td>
                     <td className={ok ? '' : 'ng-text'}>
-                      {resolveType(AIRCRAFT_TYPES, k.typeId).label}
+                      {formatTypeWithSpec(k.typeId, k.spec, typeLabelMode)}
                       {ok ? '' : '（未対応）'}
                     </td>
                     <td>{k.perDay}便/日</td>

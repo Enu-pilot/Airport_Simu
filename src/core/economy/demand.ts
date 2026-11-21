@@ -133,7 +133,7 @@ export function routeDemandSummary(
   const seatsByDest = new Map<string, number>();
   for (const k of activeContractsOn(c, day)) {
     if (routeAvailability(airlineDef(k.airlineId), destinationDef(k.destinationId), routeCapabilities) !== 'available') continue;
-    const seats = k.perDay * seatsFor(c, k.airlineId, k.typeId, types) * 2;
+    const seats = k.perDay * seatsFor(c, k.airlineId, k.typeId, types, k.spec) * 2;
     seatsByDest.set(k.destinationId, (seatsByDest.get(k.destinationId) ?? 0) + seats);
   }
   const out = new Map<string, RouteDemandInfo>();
@@ -173,7 +173,7 @@ export function routeLoadFactors(
     const a = airlineDef(k.airlineId);
     const q = (TYPE_APPEAL[a.type] ?? 1) * (1 + 0.3 * priceSensitivityOfMarket * (1 - a.fareLevel));
     const list = byDest.get(k.destinationId) ?? [];
-    list.push({ k, q, seats: k.perDay * seatsFor(c, k.airlineId, k.typeId, types) * 2 });
+    list.push({ k, q, seats: k.perDay * seatsFor(c, k.airlineId, k.typeId, types, k.spec) * 2 });
     byDest.set(k.destinationId, list);
   }
   const out = new Map<string, number>();

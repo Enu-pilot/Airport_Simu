@@ -13,7 +13,7 @@ describe('surfaces の頂点が 2D と 3D で一貫して変換される', () =>
   const shapes = [
     ...([0, 45, 90, 135, 180, 225, 270, 315] as const).flatMap((h) => [runwayPavementSurface(mk(h)), runwayStripSurface(mk(h))]),
     taxiwayBandSurface({ x: 1, y: 2 }, { x: 9, y: 2 }, { widthClass: 'M' }),
-    taxiwayBandSurface({ x: 1, y: 2 }, { x: 6, y: 8 }, { widthClass: 'S', codeF: true }),
+    taxiwayBandSurface({ x: 1, y: 2 }, { x: 6, y: 8 }, { widthClass: 'F' }),
     roadBandSurface({ x: 0, y: 0 }, { x: 3, y: 5 }, { roadClass: 'rail' }),
   ];
 

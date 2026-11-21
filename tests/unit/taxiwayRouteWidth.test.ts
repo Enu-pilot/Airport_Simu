@@ -163,25 +163,24 @@ describe('setTaxiwayRouteWidth（一括変更）', () => {
     if (r.ok) expect(Object.values(r.layout.taxiways).every((e) => e.widthClass === 'L')).toBe(true);
   });
 
-  it('codeF の扱いは単一更新と一致する（L から下げても codeF は残る）', () => {
+  it('F 区分の扱いは単一更新と一致する（2026-CF: コード F は幅区分そのもの）', () => {
     let l = path(emptyLayout(80, 60), [
       { x: 10, y: 10 },
       { x: 20, y: 10 },
       { x: 30, y: 10 },
     ], 'L');
     const ids = edgeIds(l);
-    l = must(updateEntity(l, ids[0]!, { codeF: true })).layout;
-    expect(l.taxiways[ids[0]!]!.codeF).toBe(true);
+    // 単一更新で 'F' を直接指定できる（旧 codeF フラグは廃止され、幅区分に一本化）
+    l = must(updateEntity(l, ids[0]!, { widthClass: 'F' })).layout;
+    expect(l.taxiways[ids[0]!]!.widthClass).toBe('F');
 
-    // 単一更新で幅を下げても codeF は残る（従来の挙動）
+    // 単一更新で幅を下げれば F 区分も外れる（保持される隠し状態は無い）
     const single = must(updateEntity(l, ids[0]!, { widthClass: 'M' })).layout;
     expect(single.taxiways[ids[0]!]!.widthClass).toBe('M');
-    expect(single.taxiways[ids[0]!]!.codeF).toBe(true);
 
-    // 一括変更でも同じ: codeF を持つ区間はそのまま保持される
-    const bulk = must(setTaxiwayRouteWidth(l, ids[1]!, 'M')).layout;
-    expect(bulk.taxiways[ids[0]!]!.widthClass).toBe('M');
-    expect(bulk.taxiways[ids[0]!]!.codeF).toBe(true);
+    // 一括変更でも 'F' をそのまま指定でき、経路全体に適用される
+    const bulk = must(setTaxiwayRouteWidth(l, ids[1]!, 'F')).layout;
+    expect(Object.values(bulk.taxiways).every((e) => e.widthClass === 'F')).toBe(true);
   });
 });
 

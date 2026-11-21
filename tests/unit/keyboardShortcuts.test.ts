@@ -209,7 +209,7 @@ describe('入力（ストア経由）', () => {
     expect(key('l')).toBe(true);
     expect(state().options.taxiWidth).toBe('L');
     expect(key('f')).toBe(true);
-    expect(state().options.taxiWidth).toBe('L'); // F は最大の別名
+    expect(state().options.taxiWidth).toBe('F'); // 2026-CF: 誘導路幅は4段階で、F キーは F 区分そのもの
     expect(key('s')).toBe(true);
     expect(state().options.taxiWidth).toBe('S');
 

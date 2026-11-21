@@ -125,6 +125,10 @@ export function TopBar({ page, setPage, onSavedProjects, onOpenAtc }: { page: Ma
             <input type="checkbox" checked={prefs.skipAutoStop} onChange={(e) => setOpsPrefs({ skipAutoStop: e.target.checked })} data-testid="pref-skip-autostop" />
             {DAY_LOOP.prefAutoStop}
           </label>
+          <label title={DAY_LOOP.prefTypeCodeTitle}>
+            <input type="checkbox" checked={prefs.typeLabelMode === 'code'} onChange={(e) => setOpsPrefs({ typeLabelMode: e.target.checked ? 'code' : 'full' })} data-testid="pref-type-code" />
+            {DAY_LOOP.prefTypeCode}
+          </label>
           </div>
         </details>
       </div>

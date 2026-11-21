@@ -190,8 +190,9 @@ export function buildAirsideNetwork(layout: AirportLayout): AirsideNetwork {
       to: e.to,
       bidirectional: !e.oneWay,
       lengthM: Math.round(distance(a.pos, b.pos) * TILE_M),
-      maxSize: e.widthClass,
-      codeF: e.widthClass === 'L' && !!e.codeF,
+      // 2026-CF: 幅区分 'F' は (maxSize 'L', codeF true) と等価。旧表現 (L ＋ codeF) の移行後も導出は同一
+      maxSize: e.widthClass === 'F' ? 'L' : e.widthClass,
+      codeF: e.widthClass === 'F',
       operational: e.buildState === 'operational',
     };
   }

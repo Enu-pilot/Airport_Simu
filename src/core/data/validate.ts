@@ -146,13 +146,22 @@ export function validateCatalog(raw: CatalogRaw): CatalogIssue[] {
     if (!Array.isArray(a.services) || a.services.length === 0) push('航空会社', a.id, 'services', 'サービスが空です', '1 件以上');
     else for (const s of a.services) if (!SERVICES.includes(s)) push('航空会社', a.id, 'services', `サービス "${String(s)}" が不正です`, SERVICES.join(' / '));
     if (!Array.isArray(a.fleet) || a.fleet.length === 0) push('航空会社', a.id, 'fleet', '機材が空です', '1 件以上');
-    else a.fleet.forEach((f, j) => {
-      const t = AIRCRAFT_TYPES[f.typeId];
-      if (!t) push('航空会社', a.id, `fleet[${j}].typeId`, `機種 "${f.typeId}" が機種表にありません`, '存在する機種 ID');
-      else if (!finite(f.seats) || f.seats < 1 || (t.maxPax != null && f.seats > t.maxPax)) {
-        push('航空会社', a.id, `fleet[${j}].seats`, `座席 ${String(f.seats)} が機種 ${f.typeId} の最大旅客数 ${t.maxPax ?? '—'} を超えています`, `1〜${t.maxPax ?? '—'}`);
-      }
-    });
+    else {
+      const seenFleetSpec = new Set<string>();
+      a.fleet.forEach((f, j) => {
+        const t = AIRCRAFT_TYPES[f.typeId];
+        if (!t) push('航空会社', a.id, `fleet[${j}].typeId`, `機種 "${f.typeId}" が機種表にありません`, '存在する機種 ID');
+        else if (!finite(f.seats) || f.seats < 1 || (t.maxPax != null && f.seats > t.maxPax)) {
+          push('航空会社', a.id, `fleet[${j}].seats`, `座席 ${String(f.seats)} が機種 ${f.typeId} の最大旅客数 ${t.maxPax ?? '—'} を超えています`, `1〜${t.maxPax ?? '—'}`);
+        }
+        if (f.spec !== undefined && f.spec !== 'domestic' && f.spec !== 'international') {
+          push('航空会社', a.id, `fleet[${j}].spec`, `客室仕様 "${String(f.spec)}" が不正です`, 'domestic / international');
+        }
+        const specKey = `${f.typeId}:${f.spec ?? ''}`;
+        if (seenFleetSpec.has(specKey)) push('航空会社', a.id, `fleet[${j}]`, `機種 "${f.typeId}" の同じ仕様が重複しています`, '(型式, 仕様) の組で一意');
+        seenFleetSpec.add(specKey);
+      });
+    }
     if (a.cargoFleet !== undefined) {
       if (!Array.isArray(a.cargoFleet)) push('航空会社', a.id, 'cargoFleet', '貨物専用機の指定が配列ではありません', '機種 ID の配列');
       else a.cargoFleet.forEach((t, j) => {

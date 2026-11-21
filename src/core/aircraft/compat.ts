@@ -1,7 +1,7 @@
 import { apronBusesOf, gateMode } from '../model/gates';
 import { explicitPbbForGate } from '../model/boardingBridge';
 import { sortedValues } from '../model/ids';
-import { sizeAtLeast, type AirportLayout, type Facility, type Runway, type Stand } from '../model/types';
+import { sizeAtLeast, taxiwayWidthCap, type AirportLayout, type Facility, type Runway, type Stand } from '../model/types';
 import { canAircraftUse, type AirsideNetwork } from '../airside/network';
 import { runwayLengthM, runwayMaxSize } from '../layout/runway';
 import { takeoffDistanceM, type AircraftType } from '../sim/aircraftTypes';
@@ -84,8 +84,10 @@ export function checkTaxiway(type: AircraftType, e: AirportLayout['taxiways'][st
   if (type.unresolved) return unresolved(e.id);
   const reasons: CompatReason[] = [];
   if (e.buildState !== 'operational') reasons.push('NOT_OPERATIONAL');
-  if (!sizeAtLeast(e.widthClass, type.size)) reasons.push('TAXIWAY_CLASS');
-  if (type.codeF && !(e.widthClass === 'L' && e.codeF)) reasons.push('TAXIWAY_CODE_F');
+  // 2026-CF: 幅区分は4段階（S/M/L/F）。区分不足は 'F' を 'L' に丸めて従来と同じ物差しで判定し、
+  // コード F の要否は幅が 'F' かどうかで判定する（旧表現 (L ＋ codeF) と理由の出方は完全一致）
+  if (!sizeAtLeast(taxiwayWidthCap(e.widthClass), type.size)) reasons.push('TAXIWAY_CLASS');
+  if (type.codeF && e.widthClass !== 'F') reasons.push('TAXIWAY_CODE_F');
   return { id: e.id, status: reasons.length ? 'ng' : 'ok', reasons };
 }
 

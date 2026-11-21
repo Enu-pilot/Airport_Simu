@@ -15,6 +15,20 @@ export const sizeAtLeast = (a: SizeClass, b: SizeClass): boolean => SIZE_ORDER[a
 export const minSize = (a: SizeClass, b: SizeClass): SizeClass => (SIZE_ORDER[a] <= SIZE_ORDER[b] ? a : b);
 
 /**
+ * 誘導路の幅区分（2026-CF）。機体・スポット・滑走路の区分（SizeClass）とは別に、
+ * 誘導路だけはコード F（翼幅 65〜80 m）を独立した第4区分 'F' として持つ。
+ * 従来の「widthClass 'L' ＋ codeF フラグ」は読み込み時に 'F' へ読み替える（io/migrate.ts）。
+ * ネットワーク導出では 'F' は (maxSize 'L', codeF true) と等価で、既存レイアウトの導出は変わらない。
+ */
+export type TaxiwayWidthClass = 'S' | 'M' | 'L' | 'F';
+export const TAXIWAY_WIDTH_ORDER: Record<TaxiwayWidthClass, number> = { S: 1, M: 2, L: 3, F: 4 };
+export const taxiwayWidthAtLeast = (a: TaxiwayWidthClass, b: TaxiwayWidthClass): boolean => TAXIWAY_WIDTH_ORDER[a] >= TAXIWAY_WIDTH_ORDER[b];
+/** 幅区分を機体区分（SizeClass）の物差しに丸める。'F' は 'L' として扱う（コード F の要否は別に判定する） */
+export const taxiwayWidthCap = (w: TaxiwayWidthClass): SizeClass => (w === 'F' ? 'L' : w);
+/** 機体が要求する誘導路幅区分。コード F の機体は 'F'、それ以外は機体の区分そのもの */
+export const requiredTaxiwayWidth = (size: SizeClass, codeF: boolean): TaxiwayWidthClass => (codeF ? 'F' : size);
+
+/**
  * 建設状態。
  * - planned: 計画のみ（配置案）
  * - underConstruction: 建設中
@@ -132,17 +146,15 @@ export interface TaxiwayEdge {
   from: string;
   to: string;
   name: string;
-  /** 通行可能な最大機体区分（誘導路幅に相当） */
-  widthClass: SizeClass;
+  /** 通行可能な最大機体区分（誘導路幅に相当）。'F' はコード F（翼幅 65〜80 m）対応の独立区分（2026-CF） */
+  widthClass: TaxiwayWidthClass;
   /** true の場合 from → to の一方通行 */
   oneWay: boolean;
   buildState: BuildState;
-  /** コード F（翼幅 65〜80 m）の機体が通行できる（L 級のみ意味を持つ。Phase 7） */
-  codeF?: boolean;
   /** 区間ごとに進む地上走行（taxiMode 'block'）で、この誘導路を含む区間に同時に入れる機数の上限（1〜10。計算値より小さくする方向だけ） */
   blockMaxAircraft?: number;
   /**
-   * 実寸設計データ（5-17、任意）。未設定の旧エッジは widthClass / codeF の従来判定のまま
+   * 実寸設計データ（5-17、任意）。未設定の旧エッジは widthClass の従来判定のまま
    * （legacy-game プロファイル）で、通行可否とゴールデンは変わらない。
    * designProfile は 'faa-tdg' | 'easa-omgws' | 'legacy-game' を混ぜずに保持する。
    */
