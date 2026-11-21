@@ -787,6 +787,8 @@ function assignStand(sim: Simulation, ac: Aircraft): HoldReason | null {
         // 運航者が reassignStand で指定したスポットは、ホームスポット等より先に評価する（1-14 / E-3）
         Number(b.id === ac.requestedStandId) - Number(a.id === ac.requestedStandId) ||
         Number(b.id === dedicatedMine) - Number(a.id === dedicatedMine) ||
+        // 貨物便は貨物優先スポットを先に選ぶ（旅客便では効かない。貨物便の通常スポット利用も妨げない）
+        (isCargoFlight ? Number(!!ctx.layout.stands[b.id]?.cargoPreferred) - Number(!!ctx.layout.stands[a.id]?.cargoPreferred) : 0) ||
         Number(gateClosed(sim, a.id)) - Number(gateClosed(sim, b.id)) ||
         Number(!homeSet.has(a.id)) - Number(!homeSet.has(b.id)) ||
         Number(!!homeOwners.get(a.id)?.some((owner) => owner !== airlineId)) - Number(!!homeOwners.get(b.id)?.some((owner) => owner !== airlineId)) ||
