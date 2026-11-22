@@ -26,6 +26,7 @@ import {
   type RunwayGrid8,
   type RunwaySuffix,
   type SizeClass,
+  type TaxiwayWidthClass,
   type Site,
   type Stand,
   type PaxZone,
@@ -87,6 +88,8 @@ const fail = (reason: OpFailure): OpResult => ({ ok: false, reason });
 const ok = (layout: AirportLayout, created: string[] = []): OpResult => ({ ok: true, layout, created });
 
 const SIZES: readonly SizeClass[] = ['S', 'M', 'L'];
+/** 誘導路幅の値域（2026-CF: 'F' はコード F 対応の独立区分） */
+const TAXIWAY_WIDTHS: readonly TaxiwayWidthClass[] = ['S', 'M', 'L', 'F'];
 const ROTATIONS: readonly Rotation[] = [0, 90, 180, 270];
 const RUNWAY_WIDTHS = [30, 45, 60] as const;
 export const MAX_RUNWAY_LENGTH = 200;
@@ -1334,7 +1337,7 @@ export function areasOf(layout: AirportLayout, terminalId: string): TerminalArea
 }
 
 export interface TaxiwayOptions {
-  widthClass?: SizeClass;
+  widthClass?: TaxiwayWidthClass;
   oneWay?: boolean;
   buildState?: BuildState;
   name?: string;
@@ -1721,13 +1724,12 @@ export function reverseEdge(layout: AirportLayout, id: string): OpResult {
 
 /**
  * 誘導路の経路全体（taxiwayRouteEdges: 分岐で止まる連結）の幅を一括で変更する。
- * 変更するのは widthClass だけで、codeF には単一区間の更新（updateEntity）と同じく
- * 一切触らない（L から下げても codeF の保存値は残る。プロパティパネルでは L のときだけ
- * チェックボックスが出るが、値自体は保持されるのが従来の挙動）。
+ * 変更するのは widthClass だけ（2026-CF で 'F' も独立した幅区分として直接指定できる。
+ * 統合時に #90 の本関数を TaxiwayWidthClass 型へ寄せた）。
  * 経路内の1区間でも変われば成功し、全区間が既に同じ幅なら NO_CHANGE。
  */
-export function setTaxiwayRouteWidth(layout: AirportLayout, edgeId: string, widthClass: SizeClass): OpResult {
-  if (!SIZES.includes(widthClass)) return fail('INVALID_VALUE');
+export function setTaxiwayRouteWidth(layout: AirportLayout, edgeId: string, widthClass: TaxiwayWidthClass): OpResult {
+  if (!TAXIWAY_WIDTHS.includes(widthClass)) return fail('INVALID_VALUE');
   if (!layout.taxiways[edgeId]) return fail('NOT_FOUND');
   const route = taxiwayRouteEdges(layout, edgeId);
   const d = cloneLayout(layout);
@@ -1920,7 +1922,8 @@ export function updateEntity(layout: AirportLayout, id: string, patch: Record<st
         // 残りの項目は通常の検証へ（失敗すれば設計データの変更ごと破棄され、操作は原子的に失敗する）
         return updateEntity(d, id, rest);
       }
-      err = apply(d.taxiways[id], { name: str, widthClass: size, oneWay: bool, buildState: isBuildState, codeF: bool, blockMaxAircraft: (v) => isInt(v, 1, TAXI_BLOCK_MAX_AIRCRAFT) });
+      // 2026-CF: 誘導路のコード F は幅区分 'F' に一本化したため、codeF キーは受理しない（スポットとは異なる）
+      err = apply(d.taxiways[id], { name: str, widthClass: (v) => TAXIWAY_WIDTHS.includes(v as TaxiwayWidthClass), oneWay: bool, buildState: isBuildState, blockMaxAircraft: (v) => isInt(v, 1, TAXI_BLOCK_MAX_AIRCRAFT) });
       break;
     }
     case 'road':

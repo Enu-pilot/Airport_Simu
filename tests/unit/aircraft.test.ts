@@ -43,7 +43,7 @@ function run(sim: Simulation, cond: () => boolean, maxTicks: number): void {
 function codeFAirport(): AirportLayout {
   let l = createSampleAirport();
   for (const s of Object.values(l.stands)) if (s.size === 'L') l = must(updateEntity(l, s.id, { codeF: true })).layout;
-  for (const e of Object.values(l.taxiways)) l = must(updateEntity(l, e.id, { codeF: true })).layout;
+  for (const e of Object.values(l.taxiways)) l = must(updateEntity(l, e.id, { widthClass: 'F' })).layout;
   return l;
 }
 

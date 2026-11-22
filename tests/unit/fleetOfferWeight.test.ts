@@ -4,6 +4,7 @@ import { BALANCE } from '../../src/core/economy/balance';
 import {
   createCompany,
   createSandboxCompany,
+  fleetTypeCount,
   generateCargoOffers,
   generateOffers,
   offerFleetWeight,
@@ -22,7 +23,8 @@ import { AIRCRAFT_TYPES } from '../../src/core/sim/aircraftTypes';
  */
 
 const OPERABLE = Object.keys(AIRCRAFT_TYPES);
-const typeCountOf = (id: string): number => airlineDef(id).fleet.length;
+// 型式数は distinct な typeId の数（2026-FLEET の客室仕様バリアントは 1 型式として数える。NH は 18 項目・14 型式）
+const typeCountOf = (id: string): number => fleetTypeCount(airlineDef(id).fleet);
 
 describe('offerFleetWeight: 重み関数', () => {
   it('1 型式の会社は倍率 1（従来どおり）、0 以下でも 1', () => {
@@ -55,7 +57,7 @@ describe('offerFleetWeight: 重み関数', () => {
   it('カタログ全社で倍率は 1 以上 1.6 未満（最大でも最小の 2 倍に届かない）', () => {
     let max = 0;
     for (const a of CATALOG.airlines) {
-      const w = offerFleetWeight(a.fleet.length);
+      const w = offerFleetWeight(fleetTypeCount(a.fleet));
       expect(w, a.id).toBeGreaterThanOrEqual(1);
       expect(w, a.id).toBeLessThan(1.6);
       max = Math.max(max, w);

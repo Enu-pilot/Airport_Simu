@@ -1,5 +1,5 @@
 import { FACILITY_SIM_EFFECT, FACILITY_SPECS } from '../core/model/catalog';
-import type { BuildState, FacilityKind, RoadClass, SizeClass } from '../core/model/types';
+import type { BuildState, FacilityKind, RoadClass, SizeClass, TaxiwayWidthClass } from '../core/model/types';
 import { BUILD_STATES } from '../core/model/types';
 import { actions, useEditor, type ToolId } from '../editor/store';
 import { digitKeyForLevel } from '../editor/shortcuts';
@@ -298,7 +298,7 @@ export function Toolbox() {
           <>
             <label>
               誘導路幅
-              <SizeSelect value={options.taxiWidth} onChange={(v) => actions.setOption('taxiWidth', v)} />
+              <TaxiwayWidthSelect value={options.taxiWidth} onChange={(v) => actions.setOption('taxiWidth', v)} />
             </label>
             <label className="check">
               <input type="checkbox" checked={options.oneWay} onChange={(e) => actions.setOption('oneWay', e.target.checked)} />
@@ -377,6 +377,18 @@ function SizeSelect({ value, onChange }: { value: SizeClass; onChange: (v: SizeC
       <option value="S">S（小型）</option>
       <option value="M">M（中型）</option>
       <option value="L">L（大型）</option>
+    </select>
+  );
+}
+
+/** 誘導路幅のセレクト（2026-CF: F はコード F 対応の独立区分。F キーでも選べる） */
+function TaxiwayWidthSelect({ value, onChange }: { value: TaxiwayWidthClass; onChange: (v: TaxiwayWidthClass) => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value as TaxiwayWidthClass)} title="S/M/L/F キーでも変更できます" data-testid="opt-taxiWidth">
+      <option value="S">S（小型）</option>
+      <option value="M">M（中型）</option>
+      <option value="L">L（大型）</option>
+      <option value="F">F（コード F）</option>
     </select>
   );
 }

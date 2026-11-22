@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { buildAirsideNetwork, canAircraftUse, reachableNodes } from '../../src/core/airside/network';
 import { deleteEntity, addTaxiwayPath, moveEntity, reverseEdge, updateEntity } from '../../src/core/layout/operations';
 import { findNodeAt } from '../../src/core/layout/network';
-import type { AirportLayout, BuildState, SizeClass } from '../../src/core/model/types';
+import { taxiwayWidthCap, type AirportLayout, type BuildState, type SizeClass } from '../../src/core/model/types';
 import { Rng } from '../../src/core/rng';
 import { findPath } from '../../src/core/sim/pathfinding';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
@@ -23,8 +23,8 @@ function oracleAdj(l: AirportLayout, size: SizeClass, codeF = false): Map<string
   for (const id of Object.keys(l.taxiNodes)) adj.set(id, []);
   for (const e of Object.values(l.taxiways)) {
     if (e.buildState !== 'operational') continue;
-    if (RANK[e.widthClass] < RANK[size]) continue;
-    if (codeF && !(e.widthClass === 'L' && e.codeF)) continue;
+    if (RANK[taxiwayWidthCap(e.widthClass)] < RANK[size]) continue;
+    if (codeF && e.widthClass !== 'F') continue;
     adj.get(e.from)!.push(e.to);
     if (!e.oneWay) adj.get(e.to)!.push(e.from);
   }
@@ -273,13 +273,13 @@ describe('ID03 幅区分・コード F・建設状態・スポット/滑走路�
     expect(q(net, false)).not.toBeNull();
     expect(q(net, true), 'codeF 指定なしの網でコード F は通れない').toBeNull();
     let l = l0;
-    for (const t of Object.values(l.taxiways)) l = must(updateEntity(l, t.id, { widthClass: 'L', codeF: true })).layout;
+    for (const t of Object.values(l.taxiways)) l = must(updateEntity(l, t.id, { widthClass: 'F' })).layout;
     l = must(updateEntity(l, 'std_9', { codeF: true })).layout;
     expect(q(buildAirsideNetwork(l), true)).not.toBeNull();
     // 1 本でも codeF でない L 級誘導路で経路が塞がる(経路上の1本を外す)
     const p = q(buildAirsideNetwork(l), true)!;
     const victim = buildAirsideNetwork(l).edges[p.edges.find((e) => buildAirsideNetwork(l).edges[e]!.kind === 'taxiway')!]!;
-    const l2 = must(updateEntity(l, victim.sourceId, { codeF: false })).layout;
+    const l2 = must(updateEntity(l, victim.sourceId, { widthClass: 'L' })).layout;
     const alt = q(buildAirsideNetwork(l2), true);
     expect(alt === null || !alt.edges.includes(victim.id)).toBe(true);
   });

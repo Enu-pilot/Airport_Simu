@@ -161,8 +161,22 @@ export function facilityCapability(f: Facility, opts?: { portalUnreachable?: boo
 /**
  * レイアウト内の全施設の能力（未算出の施設も状態として含む）。ポータル接続の到達性も減額源として反映する。
  * 運航中の閉鎖・故障の状態は含まない（operationalStateReadings が正本。合成は composeCapabilityReadings）。
+ *
+ * 純粋関数（結果はレイアウトだけから決まる）ため、同一レイアウトへの再計算を
+ * WeakMap で止める（性能改善 §3.6。配置プレビューが毎レンダー複数回呼んでいた）。
+ * 呼び出し側は結果を読み取り専用で扱うこと（従来の利用はすべて読み取りのみ）。
  */
+const capabilitiesCache = new WeakMap<AirportLayout, CapabilityReading[]>();
+
 export function layoutCapabilities(layout: AirportLayout): CapabilityReading[] {
+  const cached = capabilitiesCache.get(layout);
+  if (cached) return cached;
+  const readings = computeLayoutCapabilities(layout);
+  capabilitiesCache.set(layout, readings);
+  return readings;
+}
+
+function computeLayoutCapabilities(layout: AirportLayout): CapabilityReading[] {
   const portal = new Map(verifyPortalAccess(layout).map((s) => [s.facilityId, s]));
   return Object.values(layout.facilities).map((f) => {
     const s = portal.get(f.id);

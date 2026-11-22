@@ -17,6 +17,7 @@ import { areaProcessingPerHour } from '../core/terminal/capacity';
 import type { TransferKind } from '../core/terminal/hub';
 import { editorStore, useEditor, useLayout } from '../editor/store';
 import { companyActions } from '../editor/simRunner';
+import { formatAircraftType, formatTypeWithSpec } from './aircraftLabel';
 import { AREA_KIND_LABEL, CONTRACT_KIND_LABEL, FOLLOWUP_UI, GAME_UI, PHASE7B_UI, formatClock, formatMinute } from '../i18n/ja';
 import { NumberInput } from './fields';
 import { useCompany } from './ManagementPanels';
@@ -228,6 +229,7 @@ export function HubPanel() {
   const company = useCompany();
   const layout = useLayout();
   useEditor((s) => s.ops?.uiVersion ?? -1);
+  const typeLabelMode = useEditor((s) => s.opsPrefs.typeLabelMode);
   const ctx = useMemo(() => createContext(layout), [layout]);
   const access = analyzeAccess(layout, { fees: company.fees, feedback: company.accessFeedback, city: company.city, day: company.day });
   const closedGates = editorStore.getState().ops?.sim.state.closures.gates ?? NO_CLOSED_GATES;
@@ -347,7 +349,7 @@ export function HubPanel() {
               <div key={k.id} className="based-contract" data-testid={`based-contract-${k.id}`}>
                 <div className="based-contract-head">
                   <strong>{airlineDef(k.airlineId).name}・{destinationDef(k.destinationId).name}</strong>
-                  <span>{resolveType(AIRCRAFT_TYPES, k.typeId).label} · 所属機 {k.basedAircraft ?? 1} 機 · 折り返し {k.perDay} 回/日 · {k.startDay + 1}〜{k.endDay + 1}日目</span>
+                  <span>{formatTypeWithSpec(k.typeId, k.spec, typeLabelMode)} · 所属機 {k.basedAircraft ?? 1} 機 · 折り返し {k.perDay} 回/日 · {k.startDay + 1}〜{k.endDay + 1}日目</span>
                   {details && (details.allMet ? <span className="ok-text">条件を満たしています</span> : <span className="ng-text">未達: {details.unmet.join('・')}</span>)}
                   {issueDays > 0 && <span className="warn-text" data-testid={`based-issue-days-${k.id}`}>条件未達が {issueDays}/3 日続いています（3 日連続で撤退）</span>}
                 </div>
@@ -380,7 +382,7 @@ export function HubPanel() {
                   <tr key={b.id} data-testid={`based-aircraft-${b.id}`}>
                     <td>{b.id}</td>
                     <td>{airlineDef(b.airlineId).name}</td>
-                    <td>{resolveType(AIRCRAFT_TYPES, b.typeId).label}</td>
+                    <td>{formatAircraftType(resolveType(AIRCRAFT_TYPES, b.typeId), typeLabelMode)}</td>
                     <td>{b.cycles} / {BALANCE.phase4.checkCycles} 回</td>
                     <td>{b.cycles >= BALANCE.phase4.checkCycles ? <span className="ng-text">整備期限を超過</span> : `あと ${BALANCE.phase4.checkCycles - b.cycles} 回`}</td>
                     <td>{b.lastCheckDay !== null ? `${b.lastCheckDay + 1}日目` : '—'}</td>

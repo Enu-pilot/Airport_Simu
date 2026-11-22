@@ -1,4 +1,4 @@
-import type { SizeClass } from '../core/model/types';
+import type { SizeClass, TaxiwayWidthClass } from '../core/model/types';
 import type { Overlays, ToolId } from './store';
 
 /**
@@ -27,7 +27,7 @@ export function levelForDigitKey(key: string): number | null {
   return LEVEL_FOR_DIGIT_KEY[key] ?? null;
 }
 
-/** サイズキー（S/M/L/F）。F は最大段階（Full）の別名キー */
+/** サイズキー（S/M/L/F）。段階位置の一般規則で段階に割り当てる（4 段階の誘導路幅では F = F 区分、3 段階では F = 最大の別名） */
 export type SizeKey = 's' | 'm' | 'l' | 'f';
 
 export function sizeKeyOf(key: string): SizeKey | null {
@@ -55,6 +55,15 @@ export function sizeClassForKey(sizeKey: SizeKey): SizeClass {
   return SIZE_CLASS_STAGES[sizeStageIndex(sizeKey, SIZE_CLASS_STAGES.length)]!;
 }
 
+/**
+ * 誘導路幅（S/M/L/F の 4 段階）への換算（2026-CF）。
+ * 4 段階では一般規則により S/M/L/F が 1 対 1 に対応し、F キーは「最大の別名」ではなく F 区分そのものを選ぶ。
+ */
+export const TAXIWAY_WIDTH_STAGES: readonly TaxiwayWidthClass[] = ['S', 'M', 'L', 'F'];
+export function taxiwayWidthForKey(sizeKey: SizeKey): TaxiwayWidthClass {
+  return TAXIWAY_WIDTH_STAGES[sizeStageIndex(sizeKey, TAXIWAY_WIDTH_STAGES.length)]!;
+}
+
 /** 滑走路の舗装幅（30/45/60m の 3 段階。RUNWAY_WIDTH_CLASS の S/M/L 級に対応）への換算 */
 export const RUNWAY_WIDTH_STAGES: readonly (30 | 45 | 60)[] = [30, 45, 60];
 export function runwayWidthForKey(sizeKey: SizeKey): 30 | 45 | 60 {
@@ -63,14 +72,14 @@ export function runwayWidthForKey(sizeKey: SizeKey): 30 | 45 | 60 {
 
 /** サイズ変更の対象になるツールオプション（現在のツール文脈で決まる）。対象外のツールは null */
 export type SizeOptionTarget =
-  | { option: 'taxiWidth'; value: SizeClass }
+  | { option: 'taxiWidth'; value: TaxiwayWidthClass }
   | { option: 'standSize'; value: SizeClass }
   | { option: 'runwayWidth'; value: 30 | 45 | 60 };
 
 export function sizeOptionForTool(tool: ToolId, sizeKey: SizeKey): SizeOptionTarget | null {
   switch (tool) {
     case 'taxiway':
-      return { option: 'taxiWidth', value: sizeClassForKey(sizeKey) };
+      return { option: 'taxiWidth', value: taxiwayWidthForKey(sizeKey) };
     case 'stand':
       return { option: 'standSize', value: sizeClassForKey(sizeKey) };
     case 'runway':

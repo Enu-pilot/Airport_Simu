@@ -6,6 +6,7 @@ import { contractsOf } from '../core/economy/company';
 import { catalogDiff, compareResults, type Scenario } from '../core/scenario/scenario';
 import { CATALOG } from '../core/aircraft/catalog';
 import { editorStore, formatCr, scenarioActions, useEditor } from '../editor/store';
+import { aircraftTypeCode, SPEC_MARK } from './aircraftLabel';
 import { focusEntity } from '../editor/input';
 import {
   BOTTLENECK_AREA_LABEL,
@@ -196,6 +197,7 @@ export function AnalyticsPanel() {
 
 /** 機種と施設の適合性分析（aircraft/compat.ts の判定を使う） */
 function CompatAnalysis() {
+  const typeLabelMode = useEditor((s) => s.opsPrefs.typeLabelMode);
   const s = editorStore.getState();
   const o = s.ops;
   const layout = o?.sim.ctx.layout ?? s.history.present;
@@ -230,7 +232,7 @@ function CompatAnalysis() {
       {failed.length === 0 ? (
         <div className="empty">ありません</div>
       ) : (
-        <div className="muted small">{failed.map((r) => `${r.arrNumber}（${resolveType(AIRCRAFT_TYPES, r.typeId).shortLabel}: ${r.causes.join('、')}）`).join(' ／ ')}</div>
+        <div className="muted small">{failed.map((r) => `${r.arrNumber}（${typeLabelMode === 'code' ? aircraftTypeCode(r.typeId) : resolveType(AIRCRAFT_TYPES, r.typeId).shortLabel}: ${r.causes.join('、')}）`).join(' ／ ')}</div>
       )}
       <h4>機材変更による適合性の変化（各契約の保有機材）</h4>
       <table className="board">
@@ -244,9 +246,9 @@ function CompatAnalysis() {
                 {(company.fleets?.[k.airlineId] ?? []).map((e) => {
                   const st = checkAirport(resolveType(AIRCRAFT_TYPES, e.typeId), layout, o.sim.ctx.network).status;
                   return (
-                    <span key={e.typeId} className={st === 'ok' ? 'ok-text' : 'ng-text'}>
-                      {resolveType(AIRCRAFT_TYPES, e.typeId).shortLabel}
-                      {e.typeId === k.typeId ? '（現在）' : ''} {COMPAT_STATUS_LABEL[st]}{' '}
+                    <span key={`${e.typeId}:${e.spec ?? ''}`} className={st === 'ok' ? 'ok-text' : 'ng-text'}>
+                      {typeLabelMode === 'code' ? aircraftTypeCode(e.typeId) + (e.spec ? SPEC_MARK[e.spec] : '') : resolveType(AIRCRAFT_TYPES, e.typeId).shortLabel}
+                      {e.typeId === k.typeId && e.spec === k.spec ? '（現在）' : ''} {COMPAT_STATUS_LABEL[st]}{' '}
                     </span>
                   );
                 })}

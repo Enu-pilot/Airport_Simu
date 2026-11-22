@@ -7,7 +7,7 @@ import type { WorldPoint } from '../core/geometry/frames';
 import { commit, createHistory, redo, undo, type History } from '../core/editor/history';
 import type { OpResult } from '../core/layout/operations';
 import { createEmptyLayout, bulkPlaceBoardingBridges } from '../core/layout/operations';
-import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass, TerminalAreaKind } from '../core/model/types';
+import type { AirportLayout, BuildState, FacilityKind, RoadClass, Rotation, SizeClass, TaxiwayWidthClass, TerminalAreaKind } from '../core/model/types';
 import type { PbbBridgeType, PbbDeck } from '../core/model/catalog';
 import { createSampleAirport } from '../core/sample/sampleAirport';
 import { facilityOutline, facilityTiles } from '../core/layout/footprint';
@@ -48,7 +48,7 @@ export type ToolId = 'select' | 'runway' | 'taxiway' | 'road' | 'stand' | 'land'
 export interface ToolOptions {
   rotation: Rotation;
   standSize: SizeClass;
-  taxiWidth: SizeClass;
+  taxiWidth: TaxiwayWidthClass;
   oneWay: boolean;
   roadClass: RoadClass;
   roadLevel: number;
@@ -286,18 +286,20 @@ export interface OpsPrefs {
    * 表示だけの設定で、プロジェクトには保存しない。ON の間は noMap より優先される）
    */
   noRender: boolean;
+  /** 機種の表示モード（2026-CODE）: 'full' = 全文（型式名）、'code' = 略号のみ（788（内）など）。表示だけの設定で、プロジェクトには保存しない */
+  typeLabelMode: 'full' | 'code';
 }
 
 export const initialDayFlow = (): DayFlow => ({ phase: 'none', review: null, viewing: null, atClose: false, skip: null, historyOpen: false });
 
 const PREFS_KEY = 'skyport.opsPrefs.v1';
 function loadPrefs(): OpsPrefs {
-  const d: OpsPrefs = { pauseAtDayClose: true, skipAutoStop: true, noMap: false, noRender: false };
+  const d: OpsPrefs = { pauseAtDayClose: true, skipAutoStop: true, noMap: false, noRender: false, typeLabelMode: 'full' };
   try {
     const raw = globalThis.localStorage?.getItem(PREFS_KEY);
     if (raw) {
       const p = JSON.parse(raw) as Partial<OpsPrefs>;
-      return { pauseAtDayClose: typeof p.pauseAtDayClose === 'boolean' ? p.pauseAtDayClose : d.pauseAtDayClose, skipAutoStop: typeof p.skipAutoStop === 'boolean' ? p.skipAutoStop : d.skipAutoStop, noMap: typeof p.noMap === 'boolean' ? p.noMap : d.noMap, noRender: typeof p.noRender === 'boolean' ? p.noRender : d.noRender };
+      return { pauseAtDayClose: typeof p.pauseAtDayClose === 'boolean' ? p.pauseAtDayClose : d.pauseAtDayClose, skipAutoStop: typeof p.skipAutoStop === 'boolean' ? p.skipAutoStop : d.skipAutoStop, noMap: typeof p.noMap === 'boolean' ? p.noMap : d.noMap, noRender: typeof p.noRender === 'boolean' ? p.noRender : d.noRender, typeLabelMode: p.typeLabelMode === 'code' ? 'code' : 'full' };
     }
   } catch {
     // 既定値を使う

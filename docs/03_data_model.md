@@ -144,7 +144,8 @@ type Runway = RunwayGrid8 | RunwayFree;
 interface RunwayGrid8 { id; name; start: Tile; heading: 0|45|…|315; length: number /*ステップ数*/; surfaceWidthM: 30|45|60; buildState; designatorSuffix?; alignment?: undefined }  // 従来形（v1/v2 はすべてこれ）
 interface RunwayFree  { id; name; alignment: 'free'; start: WorldPoint /*実数可*/; headingDeg: number /*真方位*/; lengthM: number /*m、丸めない*/; surfaceWidthM; buildState; designatorSuffix?; dims?: RunwayDims }
 interface NetNode  { id; pos: WorldPoint /*従来は整数。自由形の中心線上の入口だけ実数*/; name; holdShort: boolean /* 滑走路入口での停止義務 */ }
-interface TaxiwayEdge { id; from; to; name; widthClass: 'S'|'M'|'L'; oneWay: boolean /* from→to */; buildState }
+interface TaxiwayEdge { id; from; to; name; widthClass: 'S'|'M'|'L'|'F'; oneWay: boolean /* from→to */; buildState }
+  // 2026-CF: 幅区分に F（コード F 対応）を追加し、旧 codeF フラグは廃止。読み込み時に L + codeF → F へ正規化（docs/27）
 interface RoadEdge    { id; from; to; name; roadClass: 'public'|'service'; oneWay; buildState }
 interface Stand    { id; name; origin: Tile; rotation: 0|90|180|270 /* 機首の向き */; size: 'S'|'M'|'L'; buildState }
 interface Facility { id; kind: FacilityKind; name; origin: Tile; w; h /* 回転前 */; rotation; buildState; props }

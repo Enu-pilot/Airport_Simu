@@ -12,6 +12,8 @@ import {
   formatClock,
 } from '../../i18n/ja';
 import { useOps } from '../OpsPanels';
+import { useEditor } from '../../editor/store';
+import { aircraftTypeCode } from '../aircraftLabel';
 import { FlightMenu, paxCell, tone } from './FidsOverlay';
 import { fidsNumStyle } from './airlineColor';
 import { selectAircraftAndFocus } from './focus';
@@ -28,6 +30,7 @@ const FULL_ROWS = 150;
  */
 export function FidsBoard() {
   const o = useOps();
+  const typeLabelMode = useEditor((s) => s.opsPrefs.typeLabelMode);
   const filter = useOpsUi((s) => s.fidsFilter);
   const hideDone = useOpsUi((s) => s.fidsHideDone);
   const menu = useOpsUi((s) => s.fidsMenu);
@@ -91,7 +94,7 @@ export function FidsBoard() {
                     {f.number}
                   </td>
                   <td>{f.direction === 'arrival' ? '到着' : '出発'}</td>
-                  <td>{type.shortLabel}</td>
+                  <td>{typeLabelMode === 'code' ? aircraftTypeCode(type.id, ctx.types) : type.shortLabel}</td>
                   <td>{formatClock(f.scheduled)}</td>
                   <td>{f.actual !== null ? formatClock(f.actual) : f.status === 'scheduled' || f.status === 'active' ? formatClock(f.estimated) : '—'}</td>
                   <td className={delay && delay >= 15 ? 'fids-late' : ''}>{delay ? `${delay}分` : ''}</td>

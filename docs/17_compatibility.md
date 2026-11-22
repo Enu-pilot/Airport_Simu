@@ -22,7 +22,7 @@
 | 駐機スポット | 運用中、区分 ≥ 機体の区分 | `NOT_OPERATIONAL` / `STAND_CLASS` |
 | | コード F の機体は L 級かつ「コード F 対応」 | `STAND_CODE_F` |
 | | 誘導路につながっている | `STAND_NOT_CONNECTED` |
-| 誘導路 | 幅の区分 ≥ 機体の区分、コード F の機体は「コード F 対応」 | `TAXIWAY_CLASS` / `TAXIWAY_CODE_F` |
+| 誘導路 | 幅の区分 ≥ 機体の区分、コード F の機体は F 幅（2026-CF で独立区分化。旧「L ＋ コード F 対応」と等価） | `TAXIWAY_CLASS` / `TAXIWAY_CODE_F` |
 | 搭乗ゲート | 紐付いたスポットがある（ない場合は unknown） | `GATE_NO_STAND` |
 | | 紐付いたスポットが使える | `GATE_STAND_NG` |
 | | 2 階建て機（A380）の上階への搭乗橋はモデル化していない（情報。使える） | `GATE_UPPER_DECK` |

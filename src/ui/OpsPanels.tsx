@@ -16,6 +16,7 @@ import type { BagState, BlockReason, DisruptionKind, Flight, RunwayMode, SimStat
 import { designatorsOf } from '../core/layout/designators';
 import type { AirportLayout, Runway } from '../core/model/types';
 import { editorStore, setOpsPrefs, useEditor, type OpsState } from '../editor/store';
+import { formatAircraftType } from './aircraftLabel';
 import { PerfPanel } from './operate/PerfPanel';
 import { disruptionActions, ops } from '../editor/simRunner';
 import { compatibleStands, standOptionLabel } from './operate/flightActions';
@@ -457,6 +458,7 @@ function BusRows({ state, dep, arr, layout }: { state: SimState; dep: Flight; ar
 
 export function AircraftPanel() {
   const o = useOps();
+  const typeLabelMode = useEditor((s) => s.opsPrefs.typeLabelMode);
   const id = o?.selectedAircraft;
   const ac = id ? o.sim.state.aircraft[id] : undefined;
   if (!o || !ac) return null;
@@ -477,7 +479,7 @@ export function AircraftPanel() {
       <div className="prop-header">
         <div className="prop-title">{ac.callsign}</div>
         <div className="prop-sub">
-          {type.label} · {type.size}級{type.codeF ? '（コード F）' : ''} · <code>{ac.id}</code>
+          {formatAircraftType(type, typeLabelMode)} · {type.size}級{type.codeF ? '（コード F）' : ''} · <code>{ac.id}</code>
         </div>
       </div>
       {type.unresolved && <div className="operability ng">機種ID {ac.typeId} がカタログにありません（代替の値で運航中）</div>}

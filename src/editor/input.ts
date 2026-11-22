@@ -20,7 +20,7 @@ import {
 import { taxiwayRouteEdges } from '../core/layout/network';
 import { pickCandidatesAt, type PickView } from '../core/layout/pick';
 import { actions, applyOp, editorStore, showToast, type EditorState } from './store';
-import { FOOTPRINT_UI, PLACEMENT_PROBLEM_LABEL, SIZE_LABEL } from '../i18n/ja';
+import { FOOTPRINT_UI, PLACEMENT_PROBLEM_LABEL, SIZE_LABEL, TAXIWAY_WIDTH_LABEL } from '../i18n/ja';
 import { ALL_LAYERS_KEY, levelForDigitKey, overlayToggleForKey, sizeClassForKey, sizeKeyOf, sizeOptionForTool, toolForKey, type OverlayToggle, type SizeOptionTarget } from './shortcuts';
 import { agtStationAt, areaKindOf, computeOp, computePreview, deleteFootprintVertex, facilityKindOf, footprintEdgeInsert, footprintVertexAt, handleAt, moveFootprintVertex, nextPathPoint, nextTaxiPoint, pbbPickAt, snapPointW } from './tools';
 import { aircraftAt } from '../core/sim/query';
@@ -355,7 +355,7 @@ function applySizeOption(target: SizeOptionTarget): void {
     showToast(`滑走路の舗装幅: ${target.value}m（${RUNWAY_WIDTH_CLASS[target.value]}級まで）`);
   } else if (target.option === 'taxiWidth') {
     actions.setOption('taxiWidth', target.value);
-    showToast(`誘導路幅: ${SIZE_LABEL[target.value]}`);
+    showToast(`誘導路幅: ${TAXIWAY_WIDTH_LABEL[target.value]}`);
   } else {
     actions.setOption('standSize', target.value);
     showToast(`スポットのサイズ: ${SIZE_LABEL[target.value]}`);

@@ -88,6 +88,7 @@ import {
   ROAD_CLASS_LABEL,
   CONNECTOR_KIND_LABEL,
   SIZE_LABEL,
+  TAXIWAY_WIDTH_LABEL,
   displayName,
   issueText,
   AREA_KIND_LABEL,
@@ -1227,9 +1228,9 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
         <NameField layout={layout} id={id} value={e.name} />
         <Field label="誘導路幅（最大機体）">
           <select value={e.widthClass} onChange={(ev) => update(layout, id, { widthClass: ev.target.value })} data-testid="prop-widthClass">
-            {(['S', 'M', 'L'] as const).map((s) => (
+            {(['S', 'M', 'L', 'F'] as const).map((s) => (
               <option key={s} value={s}>
-                {SIZE_LABEL[s]}
+                {TAXIWAY_WIDTH_LABEL[s]}
               </option>
             ))}
           </select>
@@ -1239,11 +1240,6 @@ function TypeFields({ layout, id, readOnly = false }: { layout: AirportLayout; i
             <button className="small" onClick={() => applyOp(setTaxiwayRouteWidth(layout, id, e.widthClass))} data-testid="prop-widthClassRoute">
               この幅を経路全体（{routeIds.length}区間）に適用
             </button>
-          </Field>
-        )}
-        {e.widthClass === 'L' && (
-          <Field label="コード F 対応">
-            <input type="checkbox" checked={!!e.codeF} onChange={(ev) => update(layout, id, { codeF: ev.target.checked })} data-testid="prop-codeF" title="翼幅 65〜80 m の機体（A380 など）が通行できる（ゲームの適合ルール）" />
           </Field>
         )}
         <Field label="一方通行">

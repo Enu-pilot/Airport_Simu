@@ -1,4 +1,4 @@
-import type { FacilityKind, SizeClass, TerminalAreaKind } from '../model/types';
+import type { FacilityKind, SizeClass, TaxiwayWidthClass, TerminalAreaKind } from '../model/types';
 import type { UnitKind } from '../sim/types';
 
 /**
@@ -16,7 +16,8 @@ export const BALANCE = {
   // ------------------------------------------------------------ 建設費
   construction: {
     runwayPerTile: 40_000,
-    taxiwayPerTile: { S: 4_000, M: 6_000, L: 8_000 } as Record<SizeClass, number>,
+    // 2026-CF: F は区分ごとの +2,000 の等差をそのまま延長（PO 調整可）
+    taxiwayPerTile: { S: 4_000, M: 6_000, L: 8_000, F: 10_000 } as Record<TaxiwayWidthClass, number>,
     roadPerTile: 1_500,
     tunnelMultiplier: 10,
     elevatedMultiplier: 2,

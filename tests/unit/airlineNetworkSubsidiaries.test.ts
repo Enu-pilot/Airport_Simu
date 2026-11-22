@@ -31,7 +31,8 @@ describe('airlineNetworkSubsidiaries: 追加した会社と目的地', () => {
     expect(airlineDef('XM').fleet.map((e) => e.typeId)).toEqual(['E170', 'E190']);
     expect(airlineDef('EH').fleet.map((e) => e.typeId)).toEqual(['DHC8-Q400', 'B737-800']);
     expect(airlineDef('JC').fleet.map((e) => e.typeId)).toEqual(['ATR42-600', 'ATR72-600']);
-    expect(airlineDef('NU').fleet.map((e) => e.typeId)).toEqual(['B737-800', 'B737-700']);
+    // JTA は 737-400 → 737-800 の移行のみで 737-700 は運航していない（2026-11-22 精査で修正）
+    expect(airlineDef('NU').fleet.map((e) => e.typeId)).toEqual(['B737-800']);
     expect(airlineDef('BV').fleet.map((e) => e.typeId)).toEqual(['ATR72-600', 'ATR42-600']);
   });
 

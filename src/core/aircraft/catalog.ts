@@ -13,7 +13,7 @@ import type { TaskKind, UnitKind } from '../sim/types';
  * - ゲーム内の性能・適合性は簡略化モデルであり、実際の航空機の運用・空港の設計に使える値ではない。
  */
 
-export const CATALOG_VERSION = '2026.11.3';
+export const CATALOG_VERSION = '2026.11.4';
 
 export type DataStatus = 'official' | 'game' | 'unset';
 
@@ -240,6 +240,27 @@ export const DATA_SOURCES: Record<string, DataSource> = {
     url: 'https://www.atr-aircraft.com/our-aircraft/atr-72-600/',
     accessed: '2026-11-10',
   },
+  'ibex-crj700': {
+    id: 'ibex-crj700',
+    publisher: 'アイベックスエアラインズ',
+    title: '使用機材について（Bombardier CRJ700 の全長・全幅・全高・座席数・航続距離）',
+    url: 'https://www.ibexair.co.jp/character/sincerity/aircraft/',
+    accessed: '2026-11-22',
+  },
+  'flightglobal-crj700': {
+    id: 'flightglobal-crj700',
+    publisher: 'FlightGlobal',
+    title: 'CRJ 700 Specifications（最大離陸重量・燃料搭載量・貨物室容積の諸元表）',
+    url: 'https://www.flightglobal.com/archive/1999/06/crj-700-specifications/',
+    accessed: '2026-11-22',
+  },
+  'wikipedia-crj700': {
+    id: 'wikipedia-crj700',
+    publisher: 'Wikipedia',
+    title: 'Bombardier CRJ700 series（Bombardier 公開諸元の転載: 最大定員・貨物室容積・最大離陸重量）',
+    url: 'https://en.wikipedia.org/wiki/Bombardier_CRJ700_series',
+    accessed: '2026-11-22',
+  },
 };
 
 /**
@@ -324,6 +345,8 @@ const WIDE_NEEDS: GameProfile['unitNeeds'] = {
 const D3 = '2026-11-18';
 /** 2026.11.2 で追加した機種の更新日 */
 const D4 = '2026-11-20';
+/** 2026.11.4 で追加した機種の更新日 */
+const D5 = '2026-11-22';
 const D = '2026-10-27';
 /** 2026.11.0 で追加・更新した機種の更新日 */
 const D2 = '2026-11-10';
@@ -1103,6 +1126,32 @@ export const AIRCRAFT_MODELS: AircraftModel[] = [
     profile: { ...REGIONAL_JET, turnaroundSec: 35 * 60, holdBags: 140, costPerBlockHour: 190_000, mtowT: 37 },
     assetId: 'proc-regional-jet',
     updated: D3,
+  },
+  {
+    // IBEXエアラインズが全便 ANA とのコードシェアで運航する 70 席級リージョナルジェット（2026.11.4 で追加）。
+    // 寸法・座席数は運航会社（IBEX）の公式諸元、重量・定員・貨物室は Bombardier の公開諸元による。
+    // 翼幅 23.2 m はコード B のためサイズ区分は S（汎用 regional70 と同じ区分で、施設要件は変わらない）。
+    id: 'CRJ700',
+    generic: false,
+    manufacturer: 'Bombardier',
+    family: 'CRJ',
+    variant: '700',
+    name: 'Bombardier CRJ700',
+    icao: 'CRJ7',
+    lengthM: off(32.51, 'ibex-crj700', '全長'),
+    wingspanM: off(23.2, 'ibex-crj700', '全幅'),
+    heightM: off(7.57, 'ibex-crj700', '全高'),
+    mtowKg: off(34_019, 'wikipedia-crj700', '最大離陸重量（ER 型の 75,000 lb）'),
+    maxPax: off(78, 'wikipedia-crj700', '最大定員（Series 702 の上限）'),
+    typicalSeats: off('70（1クラス）', 'ibex-crj700', '座席数（IBEX の運航仕様）'),
+    cargoM3: off(15.5, 'wikipedia-crj700', '貨物室容積 547 cu ft'),
+    fuelL: off(11_160, 'flightglobal-crj700', 'Fuel capacity'),
+    defaultSeats: 70,
+    engines: 2,
+    doubleDeck: false,
+    profile: { ...REGIONAL_JET, turnaroundSec: 35 * 60, holdBags: 130, costPerBlockHour: 180_000, mtowT: 34 },
+    assetId: 'proc-regional-jet',
+    updated: D5,
   },
   {
     id: 'A220-300',

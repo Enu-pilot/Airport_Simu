@@ -14,7 +14,7 @@ export const TAXI_BLOCK_MAX_AIRCRAFT = 10;
  * 誘導路の描画幅（m）。ゲーム内の表示用の値であり、ICAO 等の実寸基準ではない（status: game）。
  * 2D・3D の両方がこの表を使う（実寸の値は Phase 12/13 で出典付きの別表を持つ）。
  */
-export const TAXIWAY_DRAW_WIDTH_M = { S: 15, M: 23, L: 30, codeF: 38 } as const;
+export const TAXIWAY_DRAW_WIDTH_M = { S: 15, M: 23, L: 30, F: 38 } as const;
 
 /** 道路・鉄道の描画幅（m、ゲームの表示用の値） */
 export const ROAD_DRAW_WIDTH_M = { road: 12, rail: 8, walkway: 5, fuel: 2 } as const;

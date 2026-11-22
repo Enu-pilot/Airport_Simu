@@ -152,7 +152,7 @@ export function overnightFlightFor(
   paxModel?: (k: Contract, u: number) => number,
 ): PlannedFlight {
   const rng = new Rng(`${c.seed}:${k.id}:${day}:${i}`);
-  const seats = seatsFor(c, k.airlineId, k.typeId, types);
+  const seats = seatsFor(c, k.airlineId, k.typeId, types, k.spec);
   const code = airlineDef(k.airlineId).code;
   const from = c.hours.closeMin - 240;
   const to = c.hours.closeMin - 30;
@@ -244,7 +244,7 @@ export function planDay(
       continue;
     }
     const range = arrivalRange(k.window, k.typeId, c.hours, types);
-    const seats = seatsFor(c, k.airlineId, k.typeId, types);
+    const seats = seatsFor(c, k.airlineId, k.typeId, types, k.spec);
     const code = airlineDef(k.airlineId).code;
     // 夜間滞泊（フェーズ 4 §3.2）: overnight 契約は滞泊だけ、based 契約は日中の折り返しに加えて常駐機が滞泊する
     if (k.kind === 'overnight' || k.kind === 'based') {

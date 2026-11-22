@@ -72,7 +72,7 @@ export interface AirlineInput {
   /** 必須。1 件以上 */
   services: AirlineService[];
   /** 必須。1 件以上。機種は AIRCRAFT_TYPES に存在、座席 1〜機種の maxPax */
-  fleet: { typeId: AircraftTypeId; seats: number }[];
+  fleet: FleetEntry[];
   /** 貨物専用機の機種 ID（5-12）。旅客フリートには入れない（座席を持たず、旅客提案にも混ぜない）。
    * 貨物契約の提案でのみ候補になり、機種の貨物室容積が判明していること */
   cargoFleet?: AircraftTypeId[];
@@ -140,10 +140,19 @@ export interface DestinationDef {
   fictional: boolean;
 }
 
+/**
+ * 客室仕様（2026-FLEET）: 同じ型式でも国内線仕様と国際線仕様で座席数が違う会社があるため、
+ * フリート項目に仕様を持たせる。未指定 = 仕様の区別なし（従来の単一仕様）。
+ * 仕様は選択肢の区別だけに使い、路線への割当制限はしない（PO 決定 2026-11-22）。
+ */
+export type CabinSpec = 'domestic' | 'international';
+
 export interface FleetEntry {
   typeId: AircraftTypeId;
   /** この航空会社の座席数（同じ機種でも航空会社ごとに違ってよい） */
   seats: number;
+  /** 客室仕様（国内線／国際線）。同じ型式の項目は (typeId, spec) の組で一意 */
+  spec?: CabinSpec;
 }
 
 export interface AirlineDef {
