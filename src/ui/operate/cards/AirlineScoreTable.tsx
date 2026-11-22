@@ -1,4 +1,4 @@
-import { airlineDef, destinationDef } from '../../../core/economy/registry';
+import { airlineDef, destinationDef, sortDestinationIdsByDisplayRegion } from '../../../core/economy/registry';
 import { AIRLINE_TYPE_LABEL, OPS_UI, PHASE7B_UI, SCORE_LABEL, SCORE_LEVEL_LABEL, complaintDetailText, lackingText, scoreText } from '../../../i18n/ja';
 import { useScorecard } from './useScorecard';
 import { useOps } from '../../OpsPanels';
@@ -7,11 +7,12 @@ import { GAME_UI } from '../../../i18n/ja';
 /**
  * 就航範囲の表示文（UIデザイン更新 第7段階b）: networkDestinations で制限された会社は
  * 許可目的地を列挙し、範囲外の路線の提案が来ない理由が分かるようにする。無制限はその旨。
+ * 都市名の並びは地域順（2026-REGION、destinationRegions.ts が正本）。
  */
 export function airlineNetworkScopeText(airlineId: string): string {
   const def = airlineDef(airlineId);
   return def.networkDestinations
-    ? `${PHASE7B_UI.networkRestricted(def.networkDestinations.length)}（${def.networkDestinations.map((id) => destinationDef(id).name).join('、')}）`
+    ? `${PHASE7B_UI.networkRestricted(def.networkDestinations.length)}（${sortDestinationIdsByDisplayRegion(def.networkDestinations).map((id) => destinationDef(id).name).join('、')}）`
     : PHASE7B_UI.networkUnrestricted;
 }
 

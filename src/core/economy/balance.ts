@@ -187,6 +187,40 @@ export const BALANCE = {
     /** 国際路線の需要係数 */
     internationalFactor: 0.6,
     /**
+     * 国内線需要モデル v2（対称重力モデル。domestic_route_demand_realism_plan。
+     * 2026-11-22 の PO 決定で案 B を採用）。CityConfig.marketNodeId を持つ会社の
+     * 国内線だけに使い、国際線と v1（K・alpha・beta・distanceFactor）には触れない。
+     * KDomestic は 2025 年度実績への校正値（計画書の校正レポートが正本。v1 の K とは独立に持つ）。
+     */
+    domesticV2: {
+      /** 2025 年度実績への校正値（計画書 §11 の校正レポート。逆算 K の中央値 615.4 を丸めた） */
+      KDomestic: 615,
+      /** OD 距離の減衰 g2(d) = min(1, (d/riseKm)^riseExp) × exp(−max(0, d−decayStartKm)/decayTauKm) */
+      distance: { riseKm: 500, riseExp: 0.55, decayStartKm: 1000, decayTauKm: 6000 },
+      /**
+       * OD 航空依存度 A_od（docs/46 §3.2: 基準 OD = 1.0 の相対倍率、範囲は min〜max）。
+       * 既定値は目的地側の地域特性（docs/46 §5.2 の aviationDependency 事前値）で、
+       * 主要 OD は overrides の明示値（最終値そのもの）を優先する。
+       * キーは両端 ID を辞書順に '|' で連結したもので、方向に依存しない。
+       * 上書きの根拠は計画書 §11 の校正レポートに記録する（実績への場当たり調整はしない）。
+       */
+      odDependency: {
+        min: 0.5,
+        max: 2.0,
+        overrides: {
+          'SPK|TYO': 1.94, // 羽田―新千歳: 海峡を挟み陸上代替は約 8 時間超。航空優位が最も強い幹線
+          'FUK|TYO': 1.77, // 羽田―福岡: 新幹線約 5 時間に対し航空優位が確立した幹線
+          'OKA|TYO': 1.98, // 羽田―那覇: 島嶼で陸上代替なし
+          'FUK|OKA': 1.98, // 福岡―那覇: 同上（九州―沖縄は海路のみ）
+          'NGO|SPK': 0.58, // 中部―新千歳: 事前値では表せない OD 固有の薄さ（docs/46 §3.4 の検証で観測）
+          'FUK|SPK': 0.63, // 福岡―新千歳: 同上
+          'ISG|OKA': 1.98, // 那覇―石垣: 離島区間、代替交通なし
+          'MMY|OKA': 1.98, // 那覇―宮古島: 同上
+          'OKA|SHI': 1.98, // 那覇―下地島: 同上
+        } as Record<string, number>,
+      },
+    },
+    /**
      * 季節・曜日係数（5-06）。各表は平均が 1 になるよう正規化してあり、年間需要はほぼ変わらない。
      * 曜日は day % 7（0 = 月曜）。月は day % 365 を非うるう年の月日に割り当てる。
      */

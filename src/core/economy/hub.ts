@@ -5,7 +5,7 @@ import type { DayPlan, PlannedFlight } from './planning';
 import { transferKindOf, type HubAnalysis } from '../terminal/hub';
 import { featureOn } from './unlocks';
 import { BALANCE } from './balance';
-import { demandIndex, distanceFactor } from './demand';
+import { demandIndex, distanceFactor, greatCircleKm } from './demand';
 import { destinationDef, type DestinationDef } from './registry';
 
 /**
@@ -44,6 +44,12 @@ export function connectionQuality(gapSec: number, mctSec: number): number {
  * （人口^β × 需要指数 I × 国際係数 φ）に、乗継区間の総距離（自空港までの距離 + 先の距離）
  * の減衰 g(d) を掛ける。自空港の人口・アクセス・料金・評価は到着旅客プール側の
  * 大きさ（arrPax）に既に織り込まれているので、ここには入れない。
+ *
+ * 需要モデル v2（対称重力モデル、domestic_route_demand_realism_plan）との関係:
+ * 乗継の魅力は v2 の対象外とし、会社の需要モデル版によらず従来の部品
+ * （population 基準・v1 の distanceFactor）のままにする意図的な分離である。
+ * 乗継は「自空港を経由するスルー需要」であって OD 潜在需要そのものではなく、
+ * v2 の市場ノード（プレイヤー空港の立地市場）とも概念が異なるため、混在ではなく分離として扱う。
  */
 export function onwardAppeal(from: DestinationDef, to: DestinationDef): number {
   const M = BALANCE.market;
@@ -51,15 +57,9 @@ export function onwardAppeal(from: DestinationDef, to: DestinationDef): number {
   return Math.pow(to.population / 1e6, M.beta) * demandIndex(to) * distanceFactor(from.distanceKm + to.distanceKm) * phi;
 }
 
-/** 2 都市間の直行距離 (km)。目的地の座標（緯度経度）から球面距離で求める */
+/** 2 都市間の直行距離 (km)。目的地の座標（緯度経度）から球面距離で求める（計算式は demand.ts の greatCircleKm が正本で、結果は同一） */
 export function directDistanceKm(from: DestinationDef, to: DestinationDef): number {
-  const a = from.coordinates;
-  const b = to.coordinates;
-  const rad = Math.PI / 180;
-  const dLat = (b.latitude - a.latitude) * rad;
-  const dLon = (b.longitude - a.longitude) * rad;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLon / 2) ** 2;
-  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+  return greatCircleKm(from.coordinates, to.coordinates);
 }
 
 /**

@@ -99,6 +99,7 @@ export function validateCatalog(raw: CatalogRaw): CatalogIssue[] {
     // docs/46 の新項目: 範囲外と未定義プロファイルを検出する（受入条件 4）
     if (d.catchmentPopulation !== undefined) range('就航都市', d.id, 'catchmentPopulation', d.catchmentPopulation, 1_000, 50_000_000);
     if (d.aviationDependency !== undefined) range('就航都市', d.id, 'aviationDependency', d.aviationDependency, 0.5, 1.0);
+    if (d.visitorMass !== undefined) range('就航都市', d.id, 'visitorMass', d.visitorMass, 0, 2_000_000);
     if (d.seasonalityProfile !== undefined && !SEASONALITY_PROFILES.includes(d.seasonalityProfile)) push('就航都市', d.id, 'seasonalityProfile', `プロファイル "${String(d.seasonalityProfile)}" は未定義です`, SEASONALITY_PROFILES.join(' / '));
     if (d.congestion !== undefined) range('就航都市', d.id, 'congestion', d.congestion, 0, 1);
     if (d.passengerDemand !== undefined) range('就航都市', d.id, 'passengerDemand', d.passengerDemand, 0.3, 2.0);

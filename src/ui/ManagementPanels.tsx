@@ -4,10 +4,10 @@ import { createContext, operableTypes } from '../core/sim/context';
 import { contractsOf, fictionalActiveContractCount, fictionalReassignmentCandidates, fictionalRestrictionActive, seatsFor, sortContracts, COST_CATEGORIES, REVENUE_CATEGORIES, type CompanyState, type Contract, type ContractSortKey, type DailyKpi, type DailyReport, type WorkOrderAssetKind, type WorkOrderKind } from '../core/economy/company';
 import { analyzeDayPlan, planDay, planDayWithDemand } from '../core/economy/planning';
 import { basedConditionDetails } from '../core/economy/basedConditions';
-import { airlineDef, airlinesFor, classifyRoute, destinationDef, routeAvailability, routeCapabilitiesForAirport, type DestinationDef } from '../core/economy/registry';
+import { airlineDef, airlinesFor, classifyRoute, compareDestinationIdsByDisplayRegion, destinationDef, routeAvailability, routeCapabilitiesForAirport, type DestinationDef } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
 import { renewalOutlook, RENEWAL_LEVEL_LABEL } from '../core/economy/renewal';
-import { demandIndex, distanceFactor, essentialOf, monthOf, routeDemandSummary, seasonalWeekdayFactor } from '../core/economy/demand';
+import { demandIndex, demandModelVersionOf, distanceFactor, distanceFactorV2, effectiveMarketMass, essentialOf, marketNodeOf, monthOf, odAviationDependency, odDistanceKm, routeDemandSummary, seasonalWeekdayFactor } from '../core/economy/demand';
 import { BALANCE } from '../core/economy/balance';
 import { forecastForDay } from '../core/sim/weather';
 import { analyzeAccess, type AccessMode } from '../core/access/model';
@@ -319,6 +319,24 @@ export interface RouteDemandBasisView {
   k: number;
   alpha: number;
   beta: number;
+  /** 需要モデル v2（市場ノード・国内線）の内訳。v1 のときは null */
+  v2: {
+    nodeId: string;
+    nodeName: string;
+    /** 出発側ノードの実効市場質量（利用圏人口 + visitorMass） */
+    originMass: number;
+    /** 目的地の実効市場質量（利用圏人口 + visitorMass） */
+    destMass: number;
+    /** 目的地の visitorMass（0 のときは表示しない） */
+    destVisitorMass: number;
+    /** OD 航空依存度 A_od */
+    odDependency: number;
+    /** OD 距離（座標からの大圏距離 km） */
+    odDistanceKm: number;
+    /** v2 の距離減衰 g2(d) */
+    odDistanceFactor: number;
+    kDomestic: number;
+  } | null;
 }
 
 export function routeDemandBasis(c: CompanyState, destId: string): RouteDemandBasisView | null {
@@ -328,6 +346,7 @@ export function routeDemandBasis(c: CompanyState, destId: string): RouteDemandBa
   const M = BALANCE.market;
   const rawMarket = c.city.airMarketPopulation;
   const originMarket = airMarketPopulationOf(c.city);
+  const node = demandModelVersionOf(c, dest) === 2 ? marketNodeOf(c.city) : null;
   return {
     destId,
     catchment: dest.catchmentPopulation ?? dest.population,
@@ -347,6 +366,19 @@ export function routeDemandBasis(c: CompanyState, destId: string): RouteDemandBa
     k: M.K,
     alpha: M.alpha,
     beta: M.beta,
+    v2: node
+      ? {
+          nodeId: node.id,
+          nodeName: node.name,
+          originMass: effectiveMarketMass(node),
+          destMass: effectiveMarketMass(dest),
+          destVisitorMass: dest.visitorMass,
+          odDependency: odAviationDependency(node, dest),
+          odDistanceKm: odDistanceKm(node, dest),
+          odDistanceFactor: distanceFactorV2(odDistanceKm(node, dest)),
+          kDomestic: M.domesticV2.KDomestic,
+        }
+      : null,
   };
 }
 
@@ -358,29 +390,62 @@ export function RouteBasisDetail({ basis }: { basis: RouteDemandBasisView }) {
     <div className="route-basis">
       <div>
         <b>{DEMAND_UI.basisTitle}</b>
+        {basis.v2 && <span className="muted">（{DEMAND_UI.modelV2}）</span>}
       </div>
-      <div>
-        {DEMAND_UI.catchment}: {basis.catchment.toLocaleString('ja-JP')} 人
-        {basis.catchmentFallback && <span className="muted">（{DEMAND_UI.catchmentFallback}）</span>}
-        {' / '}
-        {DEMAND_UI.originMarket}: {basis.originMarket.toLocaleString('ja-JP')} 人
-        {basis.originFallback && <span className="muted">（{DEMAND_UI.originFallback}）</span>}
-      </div>
-      <div>
-        {DEMAND_UI.aviationDependency}: {basisNum(basis.aviationDependency)}
-        {' / '}
-        {DEMAND_UI.essential}: {basisNum(basis.essential)}
-        {' / '}
-        {DEMAND_UI.leisure}: {basisNum(basis.leisure)}
-        {' / '}
-        {DEMAND_UI.demandIndex}: {basisNum(basis.demandIndex)}
-      </div>
-      <div>
-        {DEMAND_UI.distance(basis.distanceKm)}
-        {' / '}
-        {DEMAND_UI.distanceFactor}: {basis.distanceFactor.toFixed(2)}
-      </div>
-      <div className="muted small">{DEMAND_UI.formula(basis.k, basis.alpha, basis.beta)}</div>
+      {basis.v2 ? (
+        <>
+          <div>
+            {DEMAND_UI.marketNode}: {basis.v2.nodeName}（{basis.v2.nodeId}）
+            {' / '}
+            {DEMAND_UI.originMass}: {basis.v2.originMass.toLocaleString('ja-JP')} 人
+            {' / '}
+            {DEMAND_UI.destMass}: {basis.v2.destMass.toLocaleString('ja-JP')} 人
+            {basis.v2.destVisitorMass > 0 && (
+              <span className="muted">（{DEMAND_UI.visitorMass} {basis.v2.destVisitorMass.toLocaleString('ja-JP')} 人を含む）</span>
+            )}
+          </div>
+          <div>
+            {DEMAND_UI.essential}: {basisNum(basis.essential)}
+            {' / '}
+            {DEMAND_UI.leisure}: {basisNum(basis.leisure)}
+            {' / '}
+            {DEMAND_UI.demandIndex}: {basisNum(basis.demandIndex)}
+            {' / '}
+            {DEMAND_UI.odDependency}: {basisNum(basis.v2.odDependency)}
+          </div>
+          <div>
+            {DEMAND_UI.distance(Math.round(basis.v2.odDistanceKm))}
+            {' / '}
+            {DEMAND_UI.distanceFactor}: {basis.v2.odDistanceFactor.toFixed(2)}
+          </div>
+          <div className="muted small">{DEMAND_UI.formulaV2(basis.v2.kDomestic, basis.alpha, basis.beta)}</div>
+        </>
+      ) : (
+        <>
+          <div>
+            {DEMAND_UI.catchment}: {basis.catchment.toLocaleString('ja-JP')} 人
+            {basis.catchmentFallback && <span className="muted">（{DEMAND_UI.catchmentFallback}）</span>}
+            {' / '}
+            {DEMAND_UI.originMarket}: {basis.originMarket.toLocaleString('ja-JP')} 人
+            {basis.originFallback && <span className="muted">（{DEMAND_UI.originFallback}）</span>}
+          </div>
+          <div>
+            {DEMAND_UI.aviationDependency}: {basisNum(basis.aviationDependency)}
+            {' / '}
+            {DEMAND_UI.essential}: {basisNum(basis.essential)}
+            {' / '}
+            {DEMAND_UI.leisure}: {basisNum(basis.leisure)}
+            {' / '}
+            {DEMAND_UI.demandIndex}: {basisNum(basis.demandIndex)}
+          </div>
+          <div>
+            {DEMAND_UI.distance(basis.distanceKm)}
+            {' / '}
+            {DEMAND_UI.distanceFactor}: {basis.distanceFactor.toFixed(2)}
+          </div>
+          <div className="muted small">{DEMAND_UI.formula(basis.k, basis.alpha, basis.beta)}</div>
+        </>
+      )}
       <div data-testid={`traffic-route-seasonality-${basis.destId}`}>
         <b>{DEMAND_UI.seasonalityTitle}</b>: {DEMAND_UI.profile}{' '}
         {basis.profile ? SEASONALITY_PROFILE_LABEL[basis.profile] : DEMAND_UI.profileNone}
@@ -592,7 +657,9 @@ function RouteTrafficSection({ c, accessFactor, ctx, routeCapabilities }: { c: C
                   </tr>
                 </thead>
                 <tbody>
-                  {[...(routeDemandSummary(c, c.day, accessFactor, ctx.types, routeCapabilities)?.values() ?? [])].map((info) => {
+                  {[...(routeDemandSummary(c, c.day, accessFactor, ctx.types, routeCapabilities)?.values() ?? [])]
+                    .sort((a, b) => compareDestinationIdsByDisplayRegion(a.destinationId, b.destinationId))
+                    .map((info) => {
                     const basis = basisDest === info.destinationId ? routeDemandBasis(c, info.destinationId) : null;
                     return (
                       <Fragment key={info.destinationId}>

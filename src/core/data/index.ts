@@ -40,6 +40,7 @@ function buildDestination(input: DestinationInput, countries: Map<string, Countr
     population: input.population,
     catchmentPopulation: input.catchmentPopulation ?? null,
     aviationDependency: input.aviationDependency ?? 1.0,
+    visitorMass: input.visitorMass ?? 0,
     seasonalityProfile: input.seasonalityProfile ?? null,
     demand,
     congestion: input.congestion ?? 0.3,
