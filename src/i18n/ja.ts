@@ -1767,6 +1767,15 @@ export const DEMAND_UI = {
   distanceFactor: '距離減衰',
   formula: (k: number, alpha: number, beta: number) =>
     `需要 = K ${k.toLocaleString('ja-JP')} × (出発側人口/100万)^${alpha} × (利用圏人口/100万)^${beta} × 需要指数 × 航空依存度 × 距離減衰 × ほか（料金・評価・アクセス）`,
+  // 需要モデル v2（市場ノード・国内線のみ。出発側に市場ノードが設定された会社で使う）
+  modelV2: '需要モデル v2（市場ノード）',
+  marketNode: '出発側の市場ノード',
+  originMass: '出発側の実効市場質量',
+  destMass: '目的地の実効市場質量',
+  visitorMass: '訪問客の滞在換算',
+  odDependency: 'OD 航空依存度',
+  formulaV2: (k: number, alpha: number, beta: number) =>
+    `需要 = K ${k.toLocaleString('ja-JP')} × (出発側の実効市場質量/100万)^${alpha} × (目的地の実効市場質量/100万)^${beta} × 需要指数 × OD 航空依存度 × 距離減衰 × ほか（料金・評価・アクセス）`,
   seasonalityTitle: '季節性',
   profile: '季節プロファイル',
   profileNone: 'なし（従来の月別表で計算）',

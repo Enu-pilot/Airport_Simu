@@ -6,6 +6,7 @@ import { featureOn } from './unlocks';
 
 export type { AirlineDef, AirlineType, AirlineService, CabinSpec, CountryDef, DestinationDef, FleetEntry, RegionDef, Unlock } from '../data/types';
 export { CATALOG, HOME_COUNTRY_ID, airlinesFor, destinationsFor, findAirline, findDestination, resolveAirlineId, resolveDestinationId } from '../data/index';
+export { compareDestinationIdsByDisplayRegion, displayRegionOfDestination, sortDestinationIdsByDisplayRegion, sortDestinationsByDisplayRegion, DESTINATION_DISPLAY_REGIONS, DESTINATION_DISPLAY_REGION_BY_ID, type DestinationDisplayRegion, type DestinationDisplayRegionId } from '../data/destinationRegions';
 
 /**
  * 航空会社・就航先の登録データの互換の窓口。

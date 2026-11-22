@@ -60,6 +60,13 @@ export interface CityConfig {
    * 都市タイプから自動設定はしない。
    */
   airMarketPopulation?: number;
+  /**
+   * 出発側の市場ノード（需要モデル v2、domestic_route_demand_realism_plan）。
+   * 目的地カタログの ID（都市市場単位。例: 東京市場なら 'TYO'）を指し、設定された会社の
+   * 国内線需要は対称重力モデル（v2）で計算する。未設定（旧セーブ・架空都市）は従来形（v1）。
+   * 都市成長・都市格・都市需要上限には使わない。ノードが解決できない場合も v1 にフォールバックする。
+   */
+  marketNodeId?: string;
   distanceKm: number;
   roadQuality: 1 | 2 | 3 | 4 | 5;
   railQuality: 0 | 1 | 2 | 3 | 4 | 5;
@@ -321,6 +328,7 @@ export function isCityConfig(value: unknown): value is CityConfig {
     && CITY_TYPES.includes(c.type as CityType)
     && Number.isFinite(c.population) && Number(c.population) >= 1
     && (c.airMarketPopulation === undefined || (Number.isFinite(c.airMarketPopulation) && Number(c.airMarketPopulation) >= 1_000 && Number(c.airMarketPopulation) <= 50_000_000))
+    && (c.marketNodeId === undefined || (typeof c.marketNodeId === 'string' && /^[A-Z][A-Z0-9]{2}$/.test(c.marketNodeId)))
     && Number.isFinite(c.distanceKm) && Number(c.distanceKm) >= 0 && Number(c.distanceKm) <= 500
     && Number.isInteger(c.roadQuality) && Number(c.roadQuality) >= 1 && Number(c.roadQuality) <= 5
     && Number.isInteger(c.railQuality) && Number(c.railQuality) >= 0 && Number(c.railQuality) <= 5

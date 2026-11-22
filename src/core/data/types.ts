@@ -47,6 +47,12 @@ export interface DestinationInput {
   catchmentPopulation?: number;
   /** 航空依存度 0.50〜1.00（docs/46）。未指定なら 1.0 */
   aviationDependency?: number;
+  /**
+   * 観光地の実効質量への加算（人。需要モデル v2 専用、国内のみ設定する）。
+   * 年間航空訪問客数 × 平均滞在日数 / 365 の滞在人口換算（domestic_route_demand_realism_plan）。
+   * 未指定なら 0。v1 の需要式・貨物需要には使わない。
+   */
+  visitorMass?: number;
   /** 観光需要の季節プロファイル（docs/46）。未指定なら従来の月別表を使う */
   seasonalityProfile?: SeasonalityProfile;
   /** 相手空港の混雑度 0〜1、既定 0.3（提案の便数上限に効く） */
@@ -128,6 +134,8 @@ export interface DestinationDef {
   catchmentPopulation: number | null;
   /** 航空依存度（docs/46）。未指定は 1.0 */
   aviationDependency: number;
+  /** 観光地の実効質量への加算（人。需要モデル v2 専用）。未指定は 0 */
+  visitorMass: number;
   /** 季節プロファイル（docs/46）。未指定は null（従来の月別表にフォールバック） */
   seasonalityProfile: SeasonalityProfile | null;
   demand: { business: number; essential: number; leisure: number; cargo: number };

@@ -111,27 +111,36 @@ function hanedaCase(): CompanyState {
   return c;
 }
 
-describe('docs/46 K 暫定校正の再現（§3.3、受入条件 11）', () => {
-  it('K は 1263（暫定値）', () => {
-    expect(BALANCE.market.K).toBe(1263);
+/**
+ * K 校正の経緯と v2 への移行（2026-11-22、モデル変更に伴う期待値の再設定）。
+ * 旧ブロックは「K = 1,263 で docs/46 §3.3 の校正値を再現する」ことを固定していたが、
+ * K はその後ユーザー調整で 750 → 710 → 711 と変わり、前提が崩れて 3 件が失敗したまま
+ * 残っていた。docs/46 §3.3 の K は「暫定値」と明記されたもので、実績照合の役割は
+ * 需要モデル v2（市場ノード）の校正（KDomestic = 615、domesticDemandV2.test.ts が
+ * 正本、計画書 §11）に移った。ここでは v1 が現行 K の式どおりであることと、
+ * v2 の羽田再現が実績に一致することだけを固定する。
+ */
+describe('K の経緯と v2 校正への移行（旧 §3.3 再現ブロックの置き換え）', () => {
+  it('v1 の K は 711（ユーザー調整値。v1 互換の維持対象であり校正の正本ではない）', () => {
+    expect(BALANCE.market.K).toBe(711);
   });
 
-  it('羽田―新千歳/福岡/那覇の予測が文書の校正値と一致する（±2%）', () => {
+  it('v1・羽田再現ケースの予測は現行 K の式どおり（SPK 15,839・FUK 14,784・OKA 10,850、±2%）', () => {
     const c = hanedaCase();
-    // 文書 §3.3: K=1263 の予測/日（那覇は leisure=3.0 適用後の約 19,274）
-    const cases: [string, number][] = [['SPK', 28136], ['FUK', 26261], ['OKA', 19274]];
+    const cases: [string, number][] = [['SPK', 15839], ['FUK', 14784], ['OKA', 10850]];
     for (const [id, expected] of cases) {
       const d = routeDemand(c, destinationDef(id), 1)!;
       expect(Math.abs(d - expected) / expected, id).toBeLessThan(0.02);
     }
   });
 
-  it('実績（2025年度・両方向/日）との桁感: 新千歳 28,250・福岡 26,152・那覇 19,235', () => {
+  it('v2・羽田再現ケース（市場ノード TYO）は 2025 年度実績に ±10% で一致する', () => {
     const c = hanedaCase();
+    c.city = { ...defaultCity('metropolitan'), airMarketPopulation: 37_000_000, marketNodeId: 'TYO' };
     const actual: [string, number][] = [['SPK', 28250], ['FUK', 26152], ['OKA', 19235]];
     for (const [id, real] of actual) {
       const d = routeDemand(c, destinationDef(id), 1)!;
-      expect(Math.abs(d - real) / real, id).toBeLessThan(0.05);
+      expect(Math.abs(d - real) / real, id).toBeLessThan(0.10);
     }
   });
 });

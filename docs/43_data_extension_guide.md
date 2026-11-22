@@ -45,6 +45,8 @@ defineDestination({ id: 'TST', name: '試験市', countryId: 'JP', distanceKm: 5
 | `retired` | | — | 一覧と新規の提案から外すが、既存契約の参照は解決できる。削除の代わりに使う |
 | `fictional` | | 実在 | 実在しない都市にだけ付ける。空港の格が閾値（格 3）以上のとき、架空会社の新規提案は架空の目的地だけになる（機能F）。付けられる ID は検証の固定リスト（`FICTIONAL_DESTINATION_IDS`）と一致が必要で、新しい架空都市を足すときはリストも更新する。架空の国（ND/BH/LM）の都市には必須 |
 
+都市を足したら、表示順のための地域も登録する。一覧表示の並びは `src/core/data/destinationRegions.ts` の表示用地域区分（2026-REGION。国内 11 地方＋海外 11 地域）が決めており、`regionId`（検証・ゴールデンで使う粗い区分）とは別物。`DESTINATION_DISPLAY_REGION_BY_ID` に新しい都市の ID を足すこと（網羅は `tests/unit/destinationRegionOrder.test.ts` が検証するので、足し忘れるとテストが落ちる）。
+
 ## 3. 航空会社を足す
 
 `airlines.ts` の末尾に `defineAirline({...})` を 1 件足す。

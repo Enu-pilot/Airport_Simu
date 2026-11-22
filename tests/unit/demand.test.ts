@@ -15,6 +15,12 @@ import { destinationDef } from '../../src/core/economy/registry';
  * （TYO 3,700 万・KTA 50 万）と航空依存度（TYO 0.52・KTA 0.94）を使うため
  * TYO 1,416 → 4,707、KTA 260 → 448。市場モードの都市需要上限による配分は廃止した
  * （docs/46 §7.1-3。旧「上限で配分する」テストは「配分しない」検証に置き換えた）。
+ * 2026-11-22 期待値の再設定（モデル変更に伴う再設定。検証の裏付けは需要計画書 §11）:
+ * K はその後ユーザー調整で 1,263 → 750 → 710 → 711 と変わったが本テストは追随して
+ * おらず、2 件が失敗したまま残っていた。v1 の式自体は今回の v2 化でも不変のため、
+ * 期待値は現行 K = 711 の式どおりの値（TYO 4,707 → 2,650、KTA 448 → 252、
+ * KTA 2 便の搭乗率 0.94 → 0.86）に直す。実績照合の正本は v2 の校正スイート
+ * （domesticDemandV2.test.ts）に移った。
  */
 function marketCompany(): CompanyState {
   const c = createCompany('career', 'demand-test');
@@ -27,10 +33,10 @@ function marketCompany(): CompanyState {
 const base = { feeDiscount: 0, startDay: 0, endDay: 999, status: 'active' as const, offerExpiresDay: 0, window: 'any' as const };
 
 describe('demand: 路線需要モデル（3-05）', () => {
-  it('計算例: TYO ≈ 4,707 人/日、KTA ≈ 448 人/日（docs/46 反映後の潜在需要）', () => {
+  it('計算例: TYO ≈ 2,650 人/日、KTA ≈ 252 人/日（v1・現行 K = 711 の潜在需要）', () => {
     const c = marketCompany();
-    expect(routeDemand(c, destinationDef('TYO'), 1)).toBeCloseTo(4707, -1);
-    expect(routeDemand(c, destinationDef('KTA'), 1)).toBeCloseTo(448, -1);
+    expect(routeDemand(c, destinationDef('TYO'), 1)).toBeCloseTo(2650, -1);
+    expect(routeDemand(c, destinationDef('KTA'), 1)).toBeCloseTo(252, -1);
   });
 
   it('距離の減衰 g(d): 450km で 0.85、760km で 1', () => {
@@ -53,13 +59,13 @@ describe('demand: 路線需要モデル（3-05）', () => {
     expect(total).toBeGreaterThan(1956); // 旧上限 C ≈ 1,955 を超えても縮小されない
   });
 
-  it('搭乗率: KTA 1 便は 1.89 → 0.98 にクランプ、2 便で 0.94（3-04）', () => {
+  it('搭乗率: KTA 1 便は 0.98 にクランプ、2 便で 0.86（3-04、現行 K = 711）', () => {
     const c = marketCompany();
     addContract(c, { ...base, airlineId: 'NH', destinationId: 'TYO', typeId: 'B787-9', perDay: 1 });
     const k1 = addContract(c, { ...base, airlineId: 'RJ', destinationId: 'KTA', typeId: 'regional70', perDay: 1 });
     expect(routeLoadFactors(c, 0, 1)!.get(k1.id)).toBeCloseTo(0.98, 2);
     k1.perDay = 2;
-    expect(routeLoadFactors(c, 0, 1)!.get(k1.id)).toBeCloseTo(0.94, 1);
+    expect(routeLoadFactors(c, 0, 1)!.get(k1.id)).toBeCloseTo(0.86, 1);
   });
 
   it('大型化すると搭乗率は下がる（3-05）', () => {

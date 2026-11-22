@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { analyzeAccess } from '../core/access/model';
 import { analyzeAirportCapacity, capacityDelta, previewContractCapacity, type CapacityMetric, type CapacityPreview, type CapacityStatus } from '../core/economy/capacity';
-import { airlineDef, airlinesFor, destinationDef, destinationsFor, routeCapabilitiesForAirport } from '../core/economy/registry';
+import { airlineDef, airlinesFor, destinationDef, destinationsFor, routeCapabilitiesForAirport, sortDestinationsByDisplayRegion } from '../core/economy/registry';
 import { previewLoadFactor } from '../core/economy/traffic';
 import { CAPABILITY_STATE_LABEL, OVERALL_CAPACITY_NOTE, OVERALL_CAPACITY_TITLE, OVERALL_LIMIT_LABEL, PLAN_ISSUE_LABEL } from '../i18n/ja';
 import { capabilityUtilization, composeCapabilityReadings, maintenanceReading, overnightReadings, readingsFromProcessPeak, type CapabilityReading } from '../core/capability';
@@ -313,7 +313,7 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
       <p className="muted">現在の空港・契約・セーブには反映しません。既存の計画生成と割当・能力警告で追加便を評価します。</p>
       <div className="capacity-form">
         <label>航空会社 <select value={airlineId} onChange={(e) => { const next = e.target.value; setAirlineId(next); setTypeId((company.fleets?.[next] ?? airlineDef(next).fleet)[0]?.typeId ?? ''); setPreview(null); }}>{airlinesFor(company).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
-        <label>就航先 <select value={destinationId} onChange={(e) => setDestinationId(e.target.value)}>{destinationsFor(company).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+        <label>就航先 <select value={destinationId} onChange={(e) => setDestinationId(e.target.value)}>{sortDestinationsByDisplayRegion(destinationsFor(company)).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
         <label>機種 <select value={typeId} onChange={(e) => setTypeId(e.target.value)}>{fleet.map((f) => <option key={f.typeId} value={f.typeId}>{f.typeId}</option>)}</select></label>
         <label>往復便数/日 <input type="number" min={1} max={20} value={perDay} onChange={(e) => setPerDay(Number(e.target.value))} /></label>
         <label>時間帯 <select value={window} onChange={(e) => setWindow(e.target.value as typeof window)}><option value="any">終日</option><option value="morning">朝</option><option value="daytime">昼</option><option value="evening">夕方</option></select></label>
