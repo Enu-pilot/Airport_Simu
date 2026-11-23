@@ -61,7 +61,7 @@ test('運航すると収入・費用が計上され、運航を終えるとそ�
   await page.getByTestId('speed-600').click();
   await page.getByTestId('tab-finance').click();
   const ledger = page.getByTestId('today-ledger');
-  await expect(ledger).toContainText('人件費');
+  await expect(ledger).toContainText('人件費', { timeout: 25_000 }); // 費用は毎正時に計上（06:00 開始 → 07:00 で初回。×600 で実時間約 6 秒）
   await expect(ledger).toContainText('着陸料', { timeout: 25_000 });
   await page.getByTestId('stop-ops').click();
   await expect(page.getByTestId('toast')).toContainText('1日目を締めました');
