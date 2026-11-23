@@ -3,7 +3,7 @@ import { disruptionActions } from '../../editor/simRunner';
 import { OPS_UI } from '../../i18n/ja';
 import { useCompany } from '../ManagementPanels';
 import { useOps } from '../OpsPanels';
-import { ALERT_VISIBLE, deriveAlerts, partitionAlerts, type Alert, type AlertAction } from './alerts';
+import { ALERT_VISIBLE, deriveAlertsShared, partitionAlerts, type Alert, type AlertAction } from './alerts';
 import { focusTarget, selectAircraftAndFocus } from './focus';
 import { opsUi, useOpsUi } from './opsUi';
 
@@ -61,8 +61,9 @@ export function AlertStack() {
   const company = useCompany();
   const dismissed = useOpsUi((s) => s.dismissed);
   const expanded = useOpsUi((s) => s.alertsExpanded);
-  const result = o ? deriveAlerts(o.sim, company, dismissed) : { alerts: [], keys: [] };
-  const allAlerts = o ? deriveAlerts(o.sim, company) : result;
+  // 同じ画面更新の中で要対応（バッジ・一覧）と結果を共有する（deriveAlertsShared。結果は deriveAlerts と同一）
+  const result = o ? deriveAlertsShared(o.sim, company, dismissed, o.uiVersion) : { alerts: [], keys: [] };
+  const allAlerts = o ? deriveAlertsShared(o.sim, company, [], o.uiVersion) : result;
   const historyStorageKey = o ? historyKey(o.sim.ctx.layout.name, o.sim.state.seed, o.sim.state.analytics.since) : '';
   const flowAlerts = allAlerts.alerts.filter((a) => a.key.startsWith('paxFlow:') || a.key.startsWith('paxStructure:') || a.key.startsWith('airsideStructure:'));
   const now = o?.sim.state.now ?? 0;

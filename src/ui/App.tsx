@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Viewport } from '../render/MapView';
-import { actions, editorStore, useAnalysis, useEditor, useLayout, type BuildPanel } from '../editor/store';
-import { buildAttentionItems } from '../core/attention';
-import { composeCapabilityReadings } from '../core/capability';
+import { actions, useAnalysis, useEditor, useLayout, type BuildPanel } from '../editor/store';
 import { SHELL_UI } from '../i18n/ja';
 import { AirlinesPanel, ContractsPanel, FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
 import { AccessPanel, ExpansionPanel } from './AccessPanels';
@@ -19,7 +17,6 @@ import { FacilityList } from './FacilityList';
 import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
 import { OperateLayout } from './operate/OperateLayout';
-import { opsInboxAttentionFromSim } from './operate/alerts';
 import { OpsBoard } from './operate/DetailOverlay';
 import { opsUi } from './operate/opsUi';
 import { StatusBar, Toast } from './StatusBar';
@@ -29,6 +26,7 @@ import { AtcApp } from './atc/AtcApp';
 import { TopBar, type MainPage } from './shell/TopBar';
 import { Rail } from './shell/Rail';
 import { Timeline } from './shell/Timeline';
+import { sharedAttentionItems } from './attentionShared';
 export function App() {
   // ゲームモード選択（経営 / 管制官）。ATC は専用ストア・画面で完結し、
   // EditorState には混ぜない（計画書 air_traffic_control_mode_plan.md §3.1）
@@ -184,9 +182,8 @@ function BuildLeftPanel({ readOnly = false }: { readOnly?: boolean }) {
   const company = useCompany();
   const uiVersion = useEditor((s) => s.ops?.uiVersion ?? -1);
   const attentionCount = useMemo(
-    () => buildAttentionItems({ layout, analysis, company, capabilities: composeCapabilityReadings(layout, editorStore.getState().ops?.sim.state), opsAlerts: opsInboxAttentionFromSim(editorStore.getState().ops?.sim, company) }).length,
+    () => sharedAttentionItems(layout, analysis, company, uiVersion).length,
     // uiVersion は運航中の閉鎖・故障（F6-04）の変化をバッジへ反映するための購読
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [layout, analysis, company, uiVersion],
   );
   const tabBtn = (target: BuildPanel, label: string, testid: string) => (
