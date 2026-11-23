@@ -69,3 +69,24 @@ export async function openAirportSettings(page: Page): Promise<void> {
 export async function closeAirportSettings(page: Page): Promise<void> {
   if (await page.getByTestId('airport-settings-modal').isVisible().catch(() => false)) await page.getByTestId('airport-settings-close').click();
 }
+
+/**
+ * プロジェクト（保存・読み込み）の画面を開く。運航中は運航ナビのボード、建設中は経営画面の「プロジェクト・保存」。
+ * 建設画面の下部タブは表示高が小さく、保存済み一覧の行が固定見出しの下に隠れて押せないため（docs/implementation/planned/ui_usability_improvement_plan.md U1）、
+ * 同じ ProjectPanel を全画面で表示する経営画面を使う。
+ */
+export async function openProjectPanel(page: Page): Promise<void> {
+  if (await page.getByTestId('ops-nav').isVisible().catch(() => false)) {
+    await page.getByTestId('tab-project').click();
+    return;
+  }
+  if (!(await page.getByTestId('management-project').isVisible().catch(() => false))) await page.getByTestId('page-management').click();
+  await page.getByTestId('management-project').click();
+}
+
+/** 表示レイヤのチェック（`overlay-<key>`）。レールの「レイヤー」ポップオーバーを開いてから返す */
+export async function overlayToggle(page: Page, key: string): Promise<Locator> {
+  const pop = page.getByTestId('overlays-pop');
+  if (!(await pop.evaluate((node) => (node as HTMLDetailsElement).open))) await pop.locator('summary').click();
+  return page.getByTestId(`overlay-${key}`);
+}

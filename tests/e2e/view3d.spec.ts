@@ -41,6 +41,7 @@ test('3D で施設をクリックするとプロパティに詳細が出て、�
   // 初期の視点は 2D の表示範囲の中心（サンプル空港のターミナル）を見下ろす
   await page.mouse.click(b.x + b.width * 0.5, b.y + b.height * 0.5);
   await expect(page.getByTestId('properties')).toContainText('旅客ターミナル');
-  await page.mouse.click(b.x + b.width * 0.5, b.y + b.height * 0.6);
+  // 何もない所（左下の草地）。画面構成の再編で視点の中心が移り、中央の少し下は駐車場に当たるようになったため
+  await page.mouse.click(b.x + b.width * 0.08, b.y + b.height * 0.9);
   await expect(page.getByTestId('properties')).toContainText('施設を選択すると');
 });

@@ -61,7 +61,7 @@ test('market のプロジェクト（保存形式 5）: 新規の就航先（名
   await page.getByTestId('tab-contracts').click();
   await expect(page.getByTestId('contracts-panel')).toBeVisible();
   await expect(page.getByTestId(`contract-${k.id}`)).toContainText('名古屋');
-  await expect(page.getByTestId(`contract-seats-${k.id}`)).toHaveText('1064'); // 266 席 × 2 便 × 2（往復）
+  await expect(page.getByTestId(`contract-seats-${k.id}`)).toHaveText('1160'); // 290 席 × 2 便 × 2（往復）。B787-9 の既定席数は PR #52 のカタログ更新で 266 → 290
   await expect(page.getByTestId(`contract-lf-${k.id}`)).toContainText('%');
   // 航空会社の一覧には market 専用の会社も出る
   await page.getByTestId('tab-airlines').click();

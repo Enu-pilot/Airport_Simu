@@ -11,15 +11,29 @@ import { openBuildPanel, row, tool } from './ui';
  */
 test.use({ viewport: { width: 1920, height: 1080 } });
 
-const HANGAR = { x: 445, y: 275 };
-const TERMINAL = { x: 770, y: 380 };
-const EMPTY = { x: 600, y: 650 };
+// 画面上の点は、既定のカメラ（左上 (10, 20)・9px/タイル）と地図の表示位置からタイル座標で求める
+// （画面構成の再編で地図の表示位置が変わっても、同じ施設を指すように。open() で更新する）
+const CAM = { x: 10, y: 20, zoom: 9 };
+const HANGAR_TILE = { x: 33, y: 41 }; // サンプル空港の格納庫（origin (31, 39)）の内側
+const TERMINAL_TILE = { x: 56, y: 52 }; // 旅客ターミナル（origin (46, 49)・48×8）の左寄り。右へ 60〜110px のドラッグも建物内に収まる
+const EMPTY_TILE = { x: 30, y: 75 }; // 道路・駐車場から離れた空き地
+let HANGAR = { x: 0, y: 0 };
+let TERMINAL = { x: 0, y: 0 };
+let EMPTY = { x: 0, y: 0 };
+async function resolvePoints(page: Page): Promise<void> {
+  const box = (await page.getByTestId('map').boundingBox())!;
+  const px = (t: { x: number; y: number }) => ({ x: box.x + (t.x + 0.5 - CAM.x) * CAM.zoom, y: box.y + (t.y + 0.5 - CAM.y) * CAM.zoom });
+  HANGAR = px(HANGAR_TILE);
+  TERMINAL = px(TERMINAL_TILE);
+  EMPTY = px(EMPTY_TILE);
+}
 
 async function open(page: Page): Promise<void> {
   page.on('dialog', (d) => void d.accept());
   await page.goto('/');
   await expect(page.getByTestId('map-canvas')).toBeVisible();
   await page.waitForTimeout(600);
+  await resolvePoints(page);
 }
 async function clickMap(page: Page, p: { x: number; y: number }): Promise<void> {
   await page.mouse.move(p.x, p.y);
@@ -140,7 +154,7 @@ test('1-03 建物の子の一覧から内部設備を選べ、階を変更でき
 
 test('1-04 ターミナルの子の階を、プロパティで 1F から 2F に変更できる（W-6）', async ({ page }) => {
   await open(page);
-  await placeInside(page, 'ターミナル', 'tool-facility:gseBase', '0', { x: 770, y: 380 });
+  await placeInside(page, 'ターミナル', 'tool-facility:gseBase', '0', TERMINAL);
   await (await tool(page, 'select')).click();
   await clickMap(page, TERMINAL);
   await expect(page.getByTestId('prop-title')).toContainText('ターミナル');
@@ -157,8 +171,10 @@ test('1-04 親の階数を超える階には「この建物にはありません
   const parents = await page.getByTestId('facility-parent').locator('option').allTextContents();
   await page.getByTestId('facility-parent').selectOption({ label: parents.find((o) => o.includes('格納庫'))! });
   const texts = await page.getByTestId('facility-floor').locator('option').allTextContents();
-  expect(texts.find((t) => t.startsWith('1階'))).toBe('1階');
-  expect(texts.find((t) => t.startsWith('2階'))).toContain('この建物にはありません');
+  // 階の表記は階層表示統一（PR #62）で「1F（床 0m／地図階層 0）」形式。1 階建ての格納庫では 1F に注記がなく、2F には付く
+  expect(texts.find((t) => t.startsWith('1F'))).toBeDefined();
+  expect(texts.find((t) => t.startsWith('1F'))).not.toContain('この建物にはありません');
+  expect(texts.find((t) => t.startsWith('2F'))).toContain('この建物にはありません');
 });
 
 // W-8: 内部名（baggageSort など）が画面に出ない

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
+import { openProjectPanel } from './ui';
 
 const uncaught = new WeakMap<Page, string[]>();
 
@@ -21,13 +22,15 @@ test.afterEach(async ({ page }) => {
 const status = (page: Page) => page.getByTestId('status');
 
 test('保存したプロジェクトを開くと、変更前の空港・会社に戻る', async ({ page }) => {
-  await page.getByTestId('tab-project').click();
+  await openProjectPanel(page);
   await page.getByTestId('project-name').fill('テスト空港');
   await page.getByTestId('project-save').click();
   await expect(page.getByTestId('project-slot-テスト空港')).toBeVisible();
   await expect(status(page)).toContainText('滑走路 1');
+  await page.getByTestId('board-close').click(); // 設定メニューは建設画面から操作する
   await settingsAction(page, 'new-empty');
   await expect(status(page)).toContainText('滑走路 0');
+  await openProjectPanel(page);
   await page.getByTestId('project-slot-テスト空港').getByTestId('project-load').click();
   await expect(status(page)).toContainText('滑走路 1');
   await expect(page.getByTestId('project-report')).toContainText('読み込みました');
@@ -48,7 +51,7 @@ test('運航中に保存すると運航状態を含み、開くと同じ時刻�
   await expect(page.getByTestId('project-slot-運航中')).toContainText('あり');
   await page.getByTestId('stop-ops').click();
   await expect(page.getByTestId('page-operations')).toBeVisible();
-  await page.getByTestId('tab-project').click();
+  await openProjectPanel(page);
   await page.getByTestId('project-slot-運航中').getByTestId('project-load').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await expect(page.getByTestId('sim-clock')).toHaveText(clock!);
@@ -89,7 +92,7 @@ test('JSON に書き出したファイルを読み込むと同じ空港に戻る
 });
 
 test('保存時の機種データが古いプロジェクトは、差分を確認してから最新カタログを適用できる', async ({ page }) => {
-  await page.getByTestId('tab-project').click();
+  await openProjectPanel(page);
   await page.getByTestId('project-name').fill('古い機種データ');
   await page.getByTestId('project-save').click();
   // 保存データの機種データを古い版に書き換える（カタログ更新前に保存した状態を再現）
@@ -102,6 +105,7 @@ test('保存時の機種データが古いプロジェクトは、差分を確�
     p.catalog.models['B777-300'].defaultSeats = 290;
     localStorage.setItem(key, JSON.stringify(p));
   });
+  await openProjectPanel(page);
   await page.getByTestId('project-slot-古い機種データ').getByTestId('project-load').click();
   await expect(page.getByTestId('project-warnings')).toContainText('2025.01.0');
   await expect(page.getByTestId('catalog-pin')).toContainText('差分があります');

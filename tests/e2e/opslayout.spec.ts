@@ -84,10 +84,11 @@ test('運航表は出発・到着を切り替えられ、折りたためる。�
   await expect(page.getByTestId('aircraft-panel')).toBeVisible();
   await expect(page.getByTestId('ops-detail').getByTestId('aircraft-history')).toContainText('到着処理中');
   await expectInViewport(page, 'ops-detail');
-  // 全列表示（上部の「運航表（全列）」）でも同じ表のまま列が増える
+  // 全列表示（上部の「運航表（全列）」）は運航ボード（FidsBoard）で開き、浮動の運航表（要約）より列が多い
+  // （ユーザ決定C: 浮動の運航表は要約のみ、全列はボード。src/ui/operate/OpsNav.tsx）
   await page.getByTestId('tab-flights').click();
-  await expect(page.locator('table.fids-table thead')).toContainText('滑走路');
-  await expect(page.locator('table.board')).toHaveCount(1);
+  await expect(page.getByTestId('fids-board').locator('thead')).toContainText('滑走路');
+  await expect(page.getByTestId('flight-board').locator('thead')).not.toContainText('滑走路');
 });
 
 test('運航表の行から遅延・優先を直接操作できる', async ({ page }) => {
@@ -141,10 +142,13 @@ test('あまり使わないパネルは大きなオーバーレイで開き、�
   const ov = (await page.getByTestId('detail-overlay').boundingBox())!;
   const left = (await page.getByTestId('ops-controls').boundingBox())!;
   expect(ov.width).toBeGreaterThan(900);
-  expect(ov.x).toBeGreaterThanOrEqual(left.x + left.width - 1); // 左列は覆わない
-  // 開いたままでも時計・倍率・停止が押せる
-  await page.getByTestId('speed-240').click();
+  void left;
+  // 運航ボードは左列を覆う（docs/06「運航ナビの詳細オーバーレイ群は運航ボード（z-20）に集約…左側の運航コントロールが覆われる
+  // （速度のキーボードショートカットは有効なまま）」）。開いたままでもキーで倍率を変えられ、停止はトップバーから押せる
+  await page.keyboard.press('4');
+  await page.getByTestId('overlay-close').click();
   await expect(page.getByTestId('speed-240')).toHaveClass(/active/);
+  await page.getByTestId('tab-analytics').click();
   await expect(page.getByTestId('stop-ops')).toBeVisible();
   await page.getByTestId('overlay-close').click();
   await expect(page.getByTestId('detail-overlay')).toHaveCount(0);
@@ -188,7 +192,8 @@ test('航空会社の評価カードが点数と「足りないもの」を表�
 });
 
 test('建設モードの画面は従来のまま（ツールボックス・下部タブ・プロパティ）', async ({ page }) => {
-  for (const id of ['toolbox', 'undo', 'redo', 'tab-issues', 'tab-plan', 'tab-finance', 'tab-project', 'properties', 'facility-list', 'status']) await expect(page.getByTestId(id), id).toBeVisible();
+  // 配置チェック（旧 tab-issues）は建設パネルの「要対応」タブ、施設一覧は「施設一覧」タブに移った（建設パネルのタブ化）
+  for (const id of ['toolbox', 'undo', 'redo', 'build-panel-inbox', 'build-panel-facilities', 'tab-plan', 'tab-finance', 'tab-project', 'properties', 'status']) await expect(page.getByTestId(id), id).toBeVisible();
   await expect(page.getByTestId('ops-nav')).toHaveCount(0);
   await expect(page.getByTestId('flight-board')).toHaveCount(0);
   await expect(page.getByTestId('detail-overlay')).toHaveCount(0);
@@ -196,7 +201,7 @@ test('建設モードの画面は従来のまま（ツールボックス・下�
   await startOps(page);
   await page.getByTestId('stop-ops').click();
   await expect(page.getByTestId('toolbox')).toBeVisible();
-  await expect(page.getByTestId('tab-issues')).toBeVisible();
+  await expect(page.getByTestId('build-panel-inbox')).toBeVisible();
   await expect(page.getByTestId('ops-nav')).toHaveCount(0);
 });
 
