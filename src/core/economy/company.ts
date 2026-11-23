@@ -1225,6 +1225,10 @@ export function importCompany(json: string): CompanyState | null {
       if (mapped !== undefined) c.goals.tier = mapped;
       c.goals.tierScale = 2;
     }
+    // 最長記録（2026-GOALS）: 項目のない旧セーブは、現在の連続を初期値として種付けする（過去分の遡及はしない）
+    if (c.goals && c.goals.bestStreaks === undefined && Object.keys(c.goals.streaks).length > 0) {
+      c.goals.bestStreaks = { ...c.goals.streaks };
+    }
     c.accessFeedback ??= { ...NO_FEEDBACK, waitMin: {} };
     c.parkedCars ??= [];
     c.projects ??= {};
