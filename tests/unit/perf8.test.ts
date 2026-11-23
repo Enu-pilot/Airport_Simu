@@ -8,7 +8,7 @@ import { createSimulation, stepSimulation } from '../../src/core/sim/simulation'
 import { deriveAlerts, deriveAlertsShared } from '../../src/ui/operate/alerts';
 
 /**
- * 性能改善 第8弾（docs/implementation/active/performance_improvement_plan.md §3.8）:
+ * 性能改善 第8弾（docs/implementation/active/performance_improvement_plan.md §3.7）:
  * 結果を変えない軽量化の同値性と、描画フレームの tick 上限の境界。
  * 運航結果そのものの同一性はゴールデン・legacyFingerprint・実セーブ 1 日の状態ハッシュで確認している。
  */
