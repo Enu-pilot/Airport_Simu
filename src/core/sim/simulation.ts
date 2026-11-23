@@ -1,5 +1,5 @@
 import { Rng } from '../rng';
-import { compareIds, sortedValues } from '../model/ids';
+import { compareIds, sortedValues, sortedValuesCached } from '../model/ids';
 import type { AirportLayout, SizeClass } from '../model/types';
 import { canAircraftUse, otherEnd } from '../airside/network';
 import { resolveType, takeoffDistanceM, type AircraftType, type AircraftTypeId, type TypeTable } from './aircraftTypes';
@@ -890,7 +890,9 @@ export function stepSimulation(sim: Simulation): void {
   } else if (state.settings.autoSchedule && state.now % DAY_SEC >= 23 * 3600) generateDaySchedule(sim, day + 1);
   perf.mark('economy');
 
-  const all = sortedValues(state.aircraft);
+  // ID 順の一覧は機体の追加・削除がない間は使い回す（性能改善 第8弾。sortedValuesCached が中身を検証するので並びは常に sortedValues と同一）。
+  // この tick の各所は読み取り専用で走査する
+  const all = sortedValuesCached(state.aircraft) as Aircraft[];
   for (const ac of all) {
     ac.px = ac.x;
     ac.py = ac.y;

@@ -81,7 +81,7 @@ describe('JT3: 複合作成（端点 → 通路段 → 両端の垂直ノード�
     expect(cf).toBeDefined();
     expect(cf!.name).toBe('北連絡橋');
     expect(cf!.segment).toEqual({ kind: 'link', linkId: r.created[1] });
-    const link = r.layout.terminalLinks?.[r.created[1]!]!;
+    const link = r.layout.terminalLinks![r.created[1]!]!;
     expect(link.kind).toBe('elevatedWalkway');
     expect(link.crossingMaxCode).toBe('C');
     expect(connectionDeckLevel(link)).toBe(3);
@@ -123,7 +123,7 @@ describe('JT3: 複合作成（端点 → 通路段 → 両端の垂直ノード�
         bVerticalKind: 'stairs',
       }),
     );
-    const cf = r.layout.connectionFacilities?.[r.created[0]!]!;
+    const cf = r.layout.connectionFacilities![r.created[0]!]!;
     expect(cf.aVerticalAreaIds).toEqual([]);
     expect(cf.bVerticalAreaIds).toEqual([]);
     expect(cf.stepFree).toBe(true);
@@ -192,7 +192,7 @@ describe('JT3: 複合作成（端点 → 通路段 → 両端の垂直ノード�
     const liftA = Object.values(l.terminalAreas).find((a) => a.kind === 'elevator')!;
 
     const g = must(groupConnectionFacility(l, { linkId, aVerticalAreaIds: [liftA.id], name: '手組み' }));
-    const cf = g.layout.connectionFacilities?.[g.created[0]!]!;
+    const cf = g.layout.connectionFacilities![g.created[0]!]!;
     expect(cf.name).toBe('手組み');
     expect(cf.aVerticalAreaIds).toEqual([liftA.id]);
     // A側はエレベーターで移動あり・B側は移動なし（端点階≠デッキ階だが垂直エリア無し）

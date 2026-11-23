@@ -4,7 +4,6 @@ import { advanceProjects, applyCompletedProjects, prepareCareerEdit, syncProject
 import { createCareerCompany } from '../../src/core/economy/company';
 import { buildTerminalModel } from '../../src/core/terminal/model';
 import { classifyPaxConnection } from '../../src/core/terminal/route';
-import type { AirportLayout } from '../../src/core/model/types';
 import { emptyLayout, must } from './helpers';
 
 /**

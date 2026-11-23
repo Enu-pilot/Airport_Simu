@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { tool } from './ui';
 
 const CAM = { x: 10, y: 20, zoom: 9 };
 const uncaught = new WeakMap<Page, string[]>();
@@ -22,7 +23,7 @@ test.afterEach(async ({ page }) => {
 
 test('ターミナル内部のエリアを階を選んで配置し、選択してプロパティを編集できる', async ({ page }) => {
   await page.getByTestId('level-0').click();
-  await page.getByTestId('tool-area:restroom').click();
+  await (await tool(page, 'area:restroom')).click();
   // 1F の空いている場所（西端、到着通路の下）にドラッグで配置
   const a = await tilePos(page, 47, 52);
   const b = await tilePos(page, 49, 53);

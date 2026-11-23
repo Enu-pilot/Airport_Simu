@@ -26,7 +26,9 @@ function setup(portalState?: 'underConstruction' | 'planned') {
 
 describe('5-16 T3/T4 複合グラフと接続分類', () => {
   it('ポータル経由で交通施設から入口・待合エリアまで到達できる', () => {
-    let { l, bt, entrance, waiting } = setup();
+    const s0 = setup();
+    let l = s0.l;
+    const { bt, entrance, waiting } = s0;
     l = must(addPortal(l, { facilityId: bt.id, areaId: entrance.id })).layout;
     const c = classifyFacilityConnection(l, bt.id, entrance.id);
     expect(c.status).toBe('operational');
@@ -59,7 +61,9 @@ describe('5-16 T3/T4 複合グラフと接続分類', () => {
   });
 
   it('ポータル施設ごとに往路（入口まで）・復路（出口から）の状態を検査できる', () => {
-    let { l, bt, entrance } = setup();
+    const s0 = setup();
+    let l = s0.l;
+    const { bt, entrance } = s0;
     l = must(addPortal(l, { facilityId: bt.id, areaId: entrance.id })).layout;
     const statuses = verifyPortalAccess(l);
     expect(statuses).toHaveLength(1);
@@ -74,7 +78,9 @@ describe('5-16 T3/T4 複合グラフと接続分類', () => {
   });
 
   it('グラフ構築は決定的で、エリア間リンクの費用がモデルと一致する', () => {
-    let { l, bt, entrance } = setup();
+    const s0 = setup();
+    let l = s0.l;
+    const { bt, entrance } = s0;
     l = must(addPortal(l, { facilityId: bt.id, areaId: entrance.id })).layout;
     const g1 = buildCompositeGraph(l);
     const g2 = buildCompositeGraph(l);

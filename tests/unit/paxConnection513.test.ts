@@ -79,7 +79,9 @@ describe('5-13 旅客接続の3状態判定', () => {
 
   it('運用中の迂回路があれば、建設中リンクがあっても operational を優先', () => {
     // A-B が建設中でも A-B の別リンク（運用中）があれば operational
-    let { layout, from, mid } = setup(['underConstruction']);
+    const s0 = setup(['underConstruction']);
+    let layout = s0.layout;
+    const { from, mid } = s0;
     layout = must(addTerminalTransitLink(layout, {
       kind: 'movingWalkway', fromAreaId: from, toAreaId: mid,
       distanceM: 150, travelSec: 90, bidirectional: true,

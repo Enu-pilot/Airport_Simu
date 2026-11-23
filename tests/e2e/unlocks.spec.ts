@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
+import { tool } from './ui';
 
 /** フェーズ 4（4-01 の画面）: 格で解放されるまで、新しいエリアは選べず理由が出る */
 const uncaught = new WeakMap<Page, string[]>();
@@ -26,11 +27,11 @@ test('キャリア開始直後（格 0）: 国際・乗継のエリアはロッ�
   await page.getByTestId('setup-start').click();
 
   // ツールボックス: 出国審査はロック（理由つき）、保安検査は通常どおり選べる
-  const emigration = page.getByTestId('tool-area:emigration');
+  const emigration = (await tool(page, 'area:emigration'));
   await expect(emigration).toBeDisabled();
-  await expect(emigration).toContainText('格 3（国際ハブ）で解放');
-  await expect(page.getByTestId('tool-area:transferSecurity')).toBeDisabled();
-  await expect(page.getByTestId('tool-area:security')).toBeEnabled();
+  await expect(emigration).toContainText('格 4（国際空港）で解放'); // 5-20（PR #52）で国際線の解放は新格 4 へ再配置（src/core/economy/unlocks.ts）
+  await expect((await tool(page, 'area:transferSecurity'))).toBeDisabled();
+  await expect((await tool(page, 'area:security'))).toBeEnabled();
 
   // 設定画面: 機能のチェックボックスもロックされる
   await settingsAction(page, 'tab-settings');

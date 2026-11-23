@@ -6,6 +6,7 @@ import { createSimulation } from '../../src/core/sim/simulation';
 import { stepTicks } from '../../src/core/sim/dayloop';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 import { must } from '../unit/helpers';
+import { openBuildPanel, tool } from './ui';
 
 /** フェーズ 2（2-07・2-06 の画面）: 区間ごとに進む地上走行の設定・誘導路の上書き・区間の表示 */
 const uncaught = new WeakMap<Page, string[]>();
@@ -27,12 +28,13 @@ test.afterEach(async ({ page }) => {
 });
 
 async function deselect(page: Page) {
-  await page.getByTestId('tool-select').click();
+  await (await tool(page, 'select')).click();
   await page.keyboard.press('Escape');
 }
 
 async function selectFirstTaxiway(page: Page) {
-  await page.getByTestId('tool-select').click();
+  await (await tool(page, 'select')).click();
+  await openBuildPanel(page, 'facilities');
   await page.getByTestId('facility-list').getByRole('button', { name: /誘導路/ }).click();
   await page.getByTestId('facility-list').locator('[data-testid^="row-twy_"]').first().click();
 }

@@ -3,6 +3,7 @@ import { createSandboxCompany } from '../../src/core/economy/company';
 import { buildProject, serializeProject } from '../../src/core/io/project';
 import { addRoadPath, connectRoadLevels, createEmptyLayout } from '../../src/core/layout/operations';
 import { createSite } from '../../src/core/model/site';
+import { openBuildPanel, row, tool } from './ui';
 
 /**
  * 建物・階層の接続と UI（docs/39 §10。V-1・V-3〜V-6・W-6・W-8 の修正後の回帰、フェーズ 1 の 1-01・1-03〜1-05）。
@@ -28,14 +29,14 @@ async function clickMap(page: Page, p: { x: number; y: number }): Promise<void> 
 }
 const facilityCount = async (page: Page): Promise<number> => Number(/施設 (\d+)/.exec((await page.getByTestId('status').textContent()) ?? '')?.[1] ?? NaN);
 async function selectAt(page: Page, p: { x: number; y: number }): Promise<string> {
-  await page.getByTestId('tool-select').click();
+  await (await tool(page, 'select')).click();
   await clickMap(page, p);
   return (await page.getByTestId('prop-title').count()) ? ((await page.getByTestId('prop-title').textContent()) ?? '') : '';
 }
-async function placeInside(page: Page, parent: string, tool: string, floor: string, at: { x: number; y: number }): Promise<void> {
+async function placeInside(page: Page, parent: string, toolTestId: string, floor: string, at: { x: number; y: number }): Promise<void> {
   const parents = await page.getByTestId('facility-parent').locator('option').allTextContents();
   await page.getByTestId('facility-parent').selectOption({ label: parents.find((o) => o.includes(parent))! });
-  await page.getByTestId(tool).click();
+  await (await tool(page, toolTestId.replace(/^tool-/, ''))).click();
   await page.getByTestId('facility-floor').selectOption(floor);
   await clickMap(page, at);
 }
@@ -45,7 +46,7 @@ async function placeInside(page: Page, parent: string, tool: string, floor: stri
 for (const roadClass of ['public', 'service', 'rail', 'walkway', 'fuel']) {
   test(`V-1 既定の設定のまま ${roadClass} を引ける`, async ({ page }) => {
     await open(page);
-    await page.getByTestId('tool-road').click();
+    await (await tool(page, 'road')).click();
     await page.getByTestId('opt-roadClass').selectOption(roadClass);
     expect(await page.getByTestId('road-capacity').inputValue()).toBe('0');
     const cash = await page.getByTestId('cash').textContent();
@@ -71,7 +72,7 @@ test('V-3 格納庫の中に設備を置いた後も、格納庫をクリック�
 test('V-4 地上を表示中は、地下 1 階の施設（表示されていない）をクリックで選ばない', async ({ page }) => {
   await open(page);
   await page.getByTestId('map-level').selectOption('-1');
-  await page.getByTestId('tool-facility:tower').click();
+  await (await tool(page, 'facility:tower')).click();
   await clickMap(page, EMPTY);
   await page.getByTestId('map-level').selectOption('0');
   expect(await selectAt(page, EMPTY)).toBe('');
@@ -91,7 +92,7 @@ test('V-5 1 階建ての格納庫で「2階」を選んで配置すると、置�
 test('V-6 2 階建てターミナルの 3F にエリアを置こうとすると、置けない理由が表示される', async ({ page }) => {
   await open(page);
   await page.getByTestId('level-2').click();
-  await page.getByTestId('tool-area:waiting').click();
+  await (await tool(page, 'area:waiting')).click();
   await page.mouse.move(TERMINAL.x + 60, TERMINAL.y - 10);
   await page.mouse.down();
   await page.mouse.move(TERMINAL.x + 110, TERMINAL.y + 15, { steps: 5 });
@@ -106,7 +107,7 @@ test('V-6 2 階建てターミナルの 3F にエリアを置こうとすると�
 test('1-03 内部表示がオン・階が一致すると、内部設備と親の建物が候補になり、選択欄で切り替えられる', async ({ page }) => {
   await open(page);
   await placeInside(page, '格納庫', 'tool-facility:gseBase', '0', HANGAR);
-  await page.getByTestId('tool-select').click();
+  await (await tool(page, 'select')).click();
   // 内部表示をオフにしている間は、親の建物だけが選ばれ、選択欄は出ない
   await clickMap(page, HANGAR);
   await expect(page.getByTestId('prop-title')).toContainText('格納庫');
@@ -127,7 +128,7 @@ test('1-03 内部表示がオン・階が一致すると、内部設備と親の
 test('1-03 建物の子の一覧から内部設備を選べ、階を変更できる（V-3・W-6）', async ({ page }) => {
   await open(page);
   await placeInside(page, '格納庫', 'tool-facility:gseBase', '0', HANGAR);
-  await page.getByTestId('tool-select').click();
+  await (await tool(page, 'select')).click();
   await clickMap(page, HANGAR);
   await expect(page.getByTestId('prop-title')).toContainText('格納庫');
   const children = page.getByTestId('interior-children');
@@ -140,7 +141,7 @@ test('1-03 建物の子の一覧から内部設備を選べ、階を変更でき
 test('1-04 ターミナルの子の階を、プロパティで 1F から 2F に変更できる（W-6）', async ({ page }) => {
   await open(page);
   await placeInside(page, 'ターミナル', 'tool-facility:gseBase', '0', { x: 770, y: 380 });
-  await page.getByTestId('tool-select').click();
+  await (await tool(page, 'select')).click();
   await clickMap(page, TERMINAL);
   await expect(page.getByTestId('prop-title')).toContainText('ターミナル');
   await page.getByTestId('interior-children').locator('button').first().click();
@@ -187,8 +188,9 @@ test('1-05 階層接続設備は和名（階段）で表示される', async ({ 
   await page.getByTestId('tab-project').click();
   await page.getByTestId('project-file').setInputFiles({ name: 'conn.json', mimeType: 'application/json', buffer: Buffer.from(json) });
   await expect(page.getByTestId('project-report')).toContainText('読み込みました');
+  await openBuildPanel(page, 'facilities');
   await page.locator('.list-group-title', { hasText: '道路' }).click();
-  await page.getByTestId(`row-${connector.id}`).click();
+  await (await row(page, `${connector.id}`)).click();
   await expect(page.getByTestId('prop-title')).toContainText('階段');
-  await expect(page.getByTestId(`row-${connector.id}`)).toContainText('階段');
+  await expect((await row(page, `${connector.id}`))).toContainText('階段');
 });

@@ -59,7 +59,13 @@ export function nominalOutSec(sim: Simulation, ac: Aircraft, path?: { nodes: str
 /** 同じ滑走路の離陸待ちの列の見込み（秒） */
 function queueSec(sim: Simulation, ac: Aircraft): number {
   const rid = ac.runwayId;
-  const n = sortedValues(sim.state.aircraft).filter((a) => a.id !== ac.id && (a.state === 'holdShort' || a.state === 'taxiOut' || a.state === 'lineUp') && (!rid || a.runwayId === rid)).length;
+  // 件数だけを数える（順序に依存しない）ので、ID 順の並べ替え・配列の確保はしない（性能改善 第8弾。結果は同一）
+  let n = 0;
+  const aircraft = sim.state.aircraft;
+  for (const id in aircraft) {
+    const a = aircraft[id]!;
+    if (a.id !== ac.id && (a.state === 'holdShort' || a.state === 'taxiOut' || a.state === 'lineUp') && (!rid || a.runwayId === rid)) n++;
+  }
   return n * SEPARATION_SEC.M.M;
 }
 
@@ -89,7 +95,8 @@ export function standReleaseAt(sim: Simulation, ac: Aircraft): number {
   let takeoff = morning + NIGHT_RELEASE_SLACK_SEC;
   let prev: Aircraft | null = null;
   let prevTakeoff = -Infinity;
-  for (const o of sortedValues(sim.state.aircraft)) {
+  // 最大の (離陸見込み, 機体 ID) を選ぶだけで走査順に依存しないため、並べ替えずに走査する（性能改善 第8弾。結果は同一）
+  for (const o of Object.values(sim.state.aircraft)) {
     if (o.id === ac.id || (o.state !== 'turnaround' && o.state !== 'readyForPushback')) continue;
     const f = depOf(sim, o);
     if (f.nightHold?.kind !== 'stand' || f.nightHold.releaseAt < morning - 3600 || f.nightHold.releaseAt > morning + 12 * 3600) continue;

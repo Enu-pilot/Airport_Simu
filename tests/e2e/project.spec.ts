@@ -98,14 +98,15 @@ test('保存時の機種データが古いプロジェクトは、差分を確�
     const key = `skyport.project.v1.${index[0]!.id}`;
     const p = JSON.parse(localStorage.getItem(key)!);
     p.catalog.version = '2025.01.0';
-    p.catalog.models['B777-300ER'].defaultSeats = 290;
+    // 保存データの機種スナップショットは会社が使う機種だけ（サンドボックスの契約は B777-300。2026-FLEET の機材カタログ改修後）
+    p.catalog.models['B777-300'].defaultSeats = 290;
     localStorage.setItem(key, JSON.stringify(p));
   });
   await page.getByTestId('project-slot-古い機種データ').getByTestId('project-load').click();
   await expect(page.getByTestId('project-warnings')).toContainText('2025.01.0');
   await expect(page.getByTestId('catalog-pin')).toContainText('差分があります');
   await page.getByTestId('catalog-diff-toggle').click();
-  await expect(page.getByTestId('catalog-diff')).toContainText('B777-300ER');
+  await expect(page.getByTestId('catalog-diff')).toContainText('B777-300');
   await expect(page.getByTestId('catalog-diff')).toContainText('defaultSeats');
   await page.getByTestId('catalog-apply-latest').click();
   await expect(page.getByTestId('project-versions')).toContainText('最新カタログ');

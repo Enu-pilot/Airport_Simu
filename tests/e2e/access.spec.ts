@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
+import { tool } from './ui';
 
 // 初期カメラ（src/editor/store.ts）: 左上 (10, 20)、9px/タイル。矢印キー1回でカメラが4タイル動く
 const ZOOM = 9;
@@ -40,7 +41,7 @@ test('アクセスの画面で手段の状況を確認し、タクシー乗り�
   await expect(panel.getByTestId('mode-taxi')).toContainText('施設がない');
   await expect(panel.getByTestId('mode-rail')).toContainText('施設がない');
   // サンプル空港の一般道路（y=57）沿い、ターミナルの近く
-  await page.getByTestId('tool-facility:taxiStand').click();
+  await (await tool(page, 'facility:taxiStand')).click();
   await clickTile(page, { x: 10, y: 20 }, 40, 58);
   await expect(panel.getByTestId('mode-taxi')).toContainText('○');
   await expect(page.getByTestId('status')).toContainText('エラー 0 · 警告 0');
@@ -49,7 +50,7 @@ test('アクセスの画面で手段の状況を確認し、タクシー乗り�
 test('土地を購入すると敷地が広がり、拡張計画に購入面積が表示される', async ({ page }) => {
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft');
   const cam = { x: -2, y: 20 };
-  await page.getByTestId('tool-land').click();
+  await (await tool(page, 'land')).click();
   await dragTiles(page, cam, [2, 60], [5, 64]);
   await page.getByTestId('tab-expansion').click();
   await expect(page.getByTestId('expansion-panel')).toContainText('購入 20');

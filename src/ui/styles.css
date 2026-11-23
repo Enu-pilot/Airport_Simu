@@ -176,7 +176,7 @@ input[type='number'] { width: 80px; }
 .left { grid-area: left; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .center { grid-area: center; position: relative; min-width: 0; min-height: 0; }
 .right { grid-area: right; background: var(--panel); border-left: 1px solid var(--border); overflow-y: auto; }
-.bottom { grid-area: bottom; background: var(--panel); border-top: 1px solid var(--border); min-height: 0; }
+.bottom { grid-area: bottom; background: var(--panel); border-top: 1px solid var(--border); min-height: 0; min-width: 0; overflow: hidden; }
 
 .map-host { position: absolute; inset: 0 0 24px 0; overflow: hidden; touch-action: none; cursor: crosshair; }
 .map-host canvas { display: block; }
@@ -314,7 +314,7 @@ button.primary { background: #1d6b3a; border-color: #2c9a57; font-weight: 600; }
 .tabs { display: flex; gap: 2px; padding: 4px 6px 0; border-bottom: 1px solid var(--border); }
 .tab { border-bottom: none; border-radius: 4px 4px 0 0; font-size: 12px; }
 .tab.active { background: var(--accent); color: #062026; border-color: var(--accent); }
-.tab-body { flex: 1; min-height: 0; }
+.tab-body { flex: 1; min-height: 0; min-width: 0; overflow: auto; } /* 中身（空港能力の表など）が枠からはみ出して文書全体のスクロール・右パネルの押し出しを起こさないよう、タブの中でスクロールする */
 table.board { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.board th { position: sticky; top: 0; background: var(--panel); text-align: left; color: var(--muted); font-weight: 400; padding: 2px 6px; }
 table.board td { padding: 1px 6px; white-space: nowrap; border-top: 1px solid #2a3139; }

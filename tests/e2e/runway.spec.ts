@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
+import { closeAirportSettings, inboxEl, openAirportSettings, row, tool } from './ui';
 
 // Phase 12: 自由方位・実寸の滑走路。初期カメラ（src/editor/store.ts）: 左上 (10, 20)、9px/タイル
 const CAM = { x: 10, y: 20, zoom: 9 };
@@ -31,14 +32,14 @@ async function placeNumeric(page: Page, tile: [number, number], headingDeg: numb
 }
 
 async function selectFreeNumeric(page: Page) {
-  await page.getByTestId('tool-runway').click();
+  await (await tool(page, 'runway')).click();
   await page.getByTestId('opt-runwayAlignment').selectOption('free');
   await page.getByTestId('opt-freeInput').selectOption('numeric');
   await page.getByTestId('opt-freeAnchor').selectOption('mid');
 }
 
 async function deselect(page: Page) {
-  await page.getByTestId('tool-select').click();
+  await (await tool(page, 'select')).click();
   await page.keyboard.press('Escape'); // 選択解除
 }
 
@@ -82,6 +83,7 @@ test('自由形の滑走路を任意の方位で置き、番号が決まり、�
   await deselect(page);
   await expect(page.getByTestId('airport-settings')).toBeVisible();
   await expect(page.getByTestId('settings-designators')).toContainText('09/27');
+  await openAirportSettings(page);
   await page.getByTestId('setting-magvar').fill('10');
   await page.getByTestId('setting-magvar').press('Enter');
   await expect(page.getByTestId('settings-designators')).toContainText('08/26');
@@ -89,6 +91,7 @@ test('自由形の滑走路を任意の方位で置き、番号が決まり、�
   // 注意書き（参考値・ゲーム値）
   await expect(page.getByTestId('runway-disclaimer')).toContainText('実際の安全基準への適合を保証しません');
   await expect(page.getByTestId('setting-ruleExplain')).toContainText('Phase 13');
+  await closeAirportSettings(page);
 
   // 元に戻すで偏角が戻る
   await page.getByTestId('undo').click();
@@ -97,7 +100,7 @@ test('自由形の滑走路を任意の方位で置き、番号が決まり、�
 
 test('ドラッグで自由形を置き、端のハンドルで回転し、R キーでも回せる', async ({ page }) => {
   await settingsAction(page, 'new-empty');
-  await page.getByTestId('tool-runway').click();
+  await (await tool(page, 'runway')).click();
   await page.getByTestId('opt-runwayAlignment').selectOption('free');
   await page.getByTestId('opt-angleSnap').selectOption('5');
   await dragTiles(page, [30, 70], [90, 40]); // 北東へ。方位は 5° 刻み
@@ -131,7 +134,7 @@ test('ドラッグで自由形を置き、端のハンドルで回転し、R キ
 });
 
 test('従来形の滑走路を自由形に変換して元に戻す', async ({ page }) => {
-  await page.getByTestId('row-rwy_1').click();
+  await (await row(page, 'rwy_1')).click();
   await expect(page.getByTestId('badge-legacy')).toBeVisible();
   await expect(page.getByTestId('prop-heading')).toBeVisible();
   await page.getByTestId('convert-to-free').click();
@@ -158,12 +161,14 @@ test('従来形の滑走路を自由形に変換して元に戻す', async ({ pa
 });
 
 test('従来形の向きの選択肢は、磁気偏角を設定すると磁方位の番号になる', async ({ page }) => {
-  await page.getByTestId('row-rwy_1').click();
+  await (await row(page, 'rwy_1')).click();
   await expect(page.getByTestId('prop-heading').locator('option:checked')).toHaveText('90°（09/27）');
   await deselect(page);
+  await openAirportSettings(page);
   await page.getByTestId('setting-magvar').fill('10');
   await page.getByTestId('setting-magvar').press('Enter');
-  await page.getByTestId('row-rwy_1').click();
+  await closeAirportSettings(page);
+  await (await row(page, 'rwy_1')).click();
   await expect(page.getByTestId('prop-heading').locator('option:checked')).toHaveText('90°（08/26）');
   await expect(page.getByTestId('prop-magHeading')).toContainText('80°');
 });
@@ -174,19 +179,19 @@ test('交差する自由形の滑走路 2 本は重なりエラーにならず�
   await placeNumeric(page, [80, 60], 90, 2000);
   await placeNumeric(page, [80, 60], 30, 2000);
   await page.keyboard.press('Escape');
-  await expect(page.getByTestId('issues')).not.toContainText('が重なっています');
-  await expect(page.getByTestId('issues')).not.toContainText('保護区域');
+  await expect((await inboxEl(page, 'issues'))).not.toContainText('が重なっています');
+  await expect((await inboxEl(page, 'issues'))).not.toContainText('保護区域');
   // 残るエラーは「誘導路が接続していない」だけ（滑走路 2 本分）
-  await expect(page.getByTestId('count-error')).toHaveText('2');
-  await expect(page.getByTestId('issues')).toContainText('接続する誘導路がありません');
+  await expect((await inboxEl(page, 'count-error'))).toHaveText('2');
+  await expect((await inboxEl(page, 'issues'))).toContainText('接続する誘導路がありません');
   // 交差が認識される（交差点は滑走路のプロパティに表示される）
-  await page.getByTestId('row-rwy_1').click();
+  await (await row(page, 'rwy_1')).click();
   await expect(page.getByTestId('prop-crossings')).toBeVisible();
 });
 
 test('自由形の滑走路を含む空港で運航を開始できる（ページエラーなし）', async ({ page }) => {
   test.setTimeout(60_000);
-  await page.getByTestId('row-rwy_1').click();
+  await (await row(page, 'rwy_1')).click();
   await page.getByTestId('convert-to-free').click();
   await page.getByTestId('convert-do').click();
   await expect(page.getByTestId('badge-free')).toBeVisible();

@@ -69,12 +69,26 @@ export function pickBusGate(sim: Simulation, f: Flight, need: 'boarding' | 'depl
   return resolveBusGateForStand(sim.ctx.layout, sim.ctx.terminal, standId, point, sim.ctx.busGates, sim.state.closures.gates).gateId;
 }
 
+/**
+ * resolveBusGateForStand の結果のメモ（性能改善 第8弾）。入力はコンテキスト（レイアウト・ターミナルモデル・バスゲート一覧。
+ * 運航中は不変で、レイアウトが変わるとコンテキストごと作り直される）と、スポット・閉鎖中のゲートだけなので、
+ * (コンテキスト, スポット, 閉鎖ゲートの並び) が同じなら結果も同じ。保存対象ではない実行時キャッシュ。
+ */
+const busGateMemo = new WeakMap<Simulation['ctx'], Map<string, { gateId: string | null; failure?: 'disabled' | 'unconfigured' | 'invalidGate' }>>();
+
 function configuredBusGate(sim: Simulation, f: Flight, standId: string, need: 'boarding' | 'deplane'): { gateId: string | null; failure?: 'disabled' | 'unconfigured' | 'invalidGate' } {
   void f;
   void need;
+  let memo = busGateMemo.get(sim.ctx);
+  if (!memo) busGateMemo.set(sim.ctx, (memo = new Map()));
+  const key = `${standId}\u0000${sim.state.closures.gates.join('\u0001')}`;
+  const hit = memo.get(key);
+  if (hit) return { ...hit };
   const point = sim.ctx.network.nodes[sim.ctx.stands[standId]?.node ?? '']?.pos ?? null;
   const assignment = resolveBusGateForStand(sim.ctx.layout, sim.ctx.terminal, standId, point, sim.ctx.busGates, sim.state.closures.gates);
-  return { gateId: assignment.gateId, ...(assignment.failure ? { failure: assignment.failure } : {}) };
+  const result = { gateId: assignment.gateId, ...(assignment.failure ? { failure: assignment.failure } : {}) };
+  memo.set(key, result);
+  return { ...result };
 }
 
 /**
@@ -399,9 +413,20 @@ function completeTrip(sim: Simulation, t: BusTrip): void {
 function createRequests(sim: Simulation): void {
   const { state } = sim;
   const bus = state.bus!;
+  // 性能改善 第8弾: 下の処理（到着の到達不能化・運行の作成）はどちらも「未配車のバス待ちグループ」が
+  // 1 つ以上ある便でしか起きない。終了していないグループは activePax の台帳に必ず載るので、
+  // そこに該当グループがなければ全便の走査は何もしない（結果は従来と同一）。
+  const waiting = new Set<string>();
+  for (const id of state.activePax) {
+    const g = state.paxGroups[id]!;
+    if (g.state === 'waitingBus' && !g.busTrip) waiting.add(id);
+  }
+  if (waiting.size === 0) return;
   for (const f of Object.values(state.flights)) {
     const b = f.pax.bus;
     if (!b) continue;
+    const ids = state.flightPax[f.id];
+    if (!ids || !ids.some((id) => waiting.has(id))) continue;
     const dir = f.direction === 'departure' ? 'dep' : 'arr';
     const groups = groupsOfFlight(state, f.id);
     // バスが一台もない・全部故障・来ない到着旅客は、1 時間でスポットから動けないまま到達不能にする（従来のリモートスポットと同じ扱い）。

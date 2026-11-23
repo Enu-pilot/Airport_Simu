@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
+import { inboxEl, tool } from './ui';
 
 // 初期カメラ（src/editor/store.ts）: 左上 (10, 20)、9px/タイル
 const CAM = { x: 10, y: 20, zoom: 9 };
@@ -28,7 +29,7 @@ test.afterEach(async ({ page }) => {
 
 test('新しいゲームは小さな飛行場と初期資金・初期契約で始まり、翌日の運航計画が表示される', async ({ page }) => {
   await expect(page.getByTestId('cash')).toContainText('4,000,000 cr');
-  await expect(page.getByTestId('count-error')).toHaveText('0');
+  await expect((await inboxEl(page, 'count-error'))).toHaveText('0');
   await page.getByTestId('tab-plan').click();
   const panel = page.getByTestId('plan-panel');
   await expect(panel.getByTestId('plan-schedule').locator('tbody tr')).toHaveCount(3);
@@ -41,7 +42,7 @@ test('新しいゲームは小さな飛行場と初期資金・初期契約で�
 });
 
 test('建設すると建設費を支払い、元に戻すと同額が戻る。資金が足りない建設はできない', async ({ page }) => {
-  await page.getByTestId('tool-facility:tower').click();
+  await (await tool(page, 'facility:tower')).click();
   await clickTile(page, 86, 52);
   // 管制塔 800,000 × 規模係数 1.0968（docs/15 §5）
   await expect(page.getByTestId('cash')).toContainText('3,122,555 cr');

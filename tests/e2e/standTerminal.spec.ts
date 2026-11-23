@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { busTwoTerminalLayout } from '../audit/b_helpers';
 import { createSandboxCompany } from '../../src/core/economy/company';
 import { buildProject, serializeProject } from '../../src/core/io/project';
+import { row } from './ui';
 
 /** 1-11 / K-1 と Z-1: リモートスポットの所属ターミナルと、プロパティでのバス搭乗の変更 */
 const uncaught = new WeakMap<Page, string[]>();
@@ -32,7 +33,7 @@ async function loadTwoTerminals(page: Page): Promise<{ t1: string; t2: string }>
 
 test('Z-1: リモートスポットのバス搭乗・接続バスゲートをプロパティで変更でき、「値が不正です」にならない', async ({ page }) => {
   await loadTwoTerminals(page);
-  await page.getByTestId('row-std_8').click();
+  await (await row(page, 'std_8')).click();
   await expect(page.getByTestId('prop-remoteBoarding')).toBeVisible();
   await page.getByTestId('prop-remoteBoarding').selectOption('bus');
   await expect(page.getByTestId('prop-remoteBoarding')).toHaveValue('bus');
@@ -47,7 +48,7 @@ test('Z-1: リモートスポットのバス搭乗・接続バスゲートをプ
 
 test('所属ターミナルを選ぶと、使うバスゲートの候補と表示が所属側に切り替わり、「自動」に戻せる', async ({ page }) => {
   const { t2 } = await loadTwoTerminals(page);
-  await page.getByTestId('row-std_8').click();
+  await (await row(page, 'std_8')).click();
   const sel = page.getByTestId('prop-standTerminal');
   await expect(sel).toBeVisible();
   await expect(sel).toHaveValue('');

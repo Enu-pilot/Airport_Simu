@@ -10,6 +10,7 @@
 4. 計画外の変更、受入条件の変更、保存/シミュレーション版の変更はPO判断を得る。
 
 ## 現在の作業
+- 2026-11-23 **進行中** 性能改善 第8弾＋E2E 追随＋lint（PO 依頼）: 実セーブ mainplay1-20261121-1141 で速度検証、深夜・日中の tick 軽量化と運航パネルの描画軽量化（挙動不変・ゴールデン不変が条件）、既存 E2E の UI 再編への追随、lint 15 件解消、操作性の改善案作成。計画: docs/implementation/active/performance_improvement_plan.md §第8弾。対象: src/core/sim、src/ui/operate、tests/e2e、lint 指摘 6 ファイル。
 - 2026-11-23 総合テスト（**完了**、PO 依頼）: 結果は docs/39 §13。新規 E2E tests/e2e/featureReach.spec.ts 7/7 合格。main 既存の失敗: lint 15・unit 44（ENOENT 7 ファイル・タイムアウト・ゴールデン・paxConservation 等）・E2E 53/114（UI 再編への未追随が主）。600 倍速は 500 往復規模で維持不可（地図 ×420/3.3fps、無描画のみ ×618）。空港能力タブのレイアウト崩れを確認。修正は未着手（PO 判断待ち）。
 - 2026-11-22 就航都市の地域順表示（2026-REGION、docs/42 §3.11、実装完了・未push）: 表示専用の地域区分（国内11地方＋海外11地域）を src/core/data/destinationRegions.ts に新設し、就航先セレクト（CapacityPanel）・就航範囲表示（AirlineScoreTable）・路線の需要と供給表（ManagementPanels）の並びを地域順へ統一した。地域内は destinations.ts の登録順を維持。既存 regionId・保存形式・SIM_MODEL_VERSION は不変、ゴールデン 26/30（失敗4件は既存の幾何不一致）。新規テスト 7/7・関連 98/100（失敗2件は shellPhase7b の既存失敗）・typecheck・build・変更ファイル lint 合格。全スイート完走と E2E は未実施（VM 混雑／ブラウザ未導入）。計画は docs/implementation/active/destination_region_order_plan.md。push・PR は PO 指示待ち。
 - 2026-11-21 鉄道の複々線（2026-QT、実装完了・未push）: 線路辺 tracks = 4 を追加し、区間モデルの既定能力を 24 本/時（複線の線形 2 倍）にした。対象テスト 13/13・関連 30/30・typecheck・build 合格、ゴールデンは main 既存の幾何 4 件を除き一致（新規不一致ゼロ）。全テスト完走のみ VM 混雑で未完了（失敗ファイルは変更前後で同一集合であることを A/B 比較で確認済み）。計画は docs/implementation/active/rail_quadruple_track_plan.md。集約モデル・既存レイアウト・保存形式・SIM_MODEL_VERSION は不変。push・PR は PO 指示待ち。

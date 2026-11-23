@@ -12,7 +12,6 @@ import { applyBusArrival, applyBusDeparture, pickBusGate, stepBusBoarding } from
 import { BUS_EXTRA_LEAD_MIN, BUS_GATE_SEC_PER_PAX, BUS_MIN_WINDOW_SEC } from './busRules';
 import { completeAggregateService, completeLoungeStay, noteLoungeStayStart, planAggregateLoungeVisit, planAggregateShopVisit } from './serviceAggregate';
 import { isLoungeEligible, loungeSeats } from '../terminal/serviceProfile';
-import { gateMode } from '../model/gates';
 import { boardingProfile } from '../model/boardingBridge';
 import { facilityTiles } from '../layout/footprint';
 import { TILE_M } from '../geometry/frames';
@@ -367,6 +366,13 @@ function stepDepartureFlight(sim: Simulation, f: Flight): void {
     if (p.boarding !== 'closed') closeBoarding(sim, f, 'cancelled');
     return;
   }
+  // 性能改善 第8弾: スポット到着前・旅客生成前・搭乗未開始で、計画ゲートが決定済み（または計画スポットがなく決める対象外）の出発便は、
+  // 以下のどの分岐も状態を変えない（計画ゲートの決定は !p.gateId かつ計画スポットあり、旅客生成は生成リード到来後、
+  // ゲートの付け替え・バス搭乗はスポット到着後、搭乗開始は駐機中のみ）。翌日分の出発便が大半を占める深夜の走査を軽くする。結果は同一
+  if (
+    !ac.standId && p.boarding === 'notStarted' && !p.generated && ac.state !== 'turnaround' && ac.state !== 'readyForPushback'
+    && (p.gateId || !f.plannedStandId) && state.now < f.scheduled - paxGenerateLeadSec(sim)
+  ) return;
   const prospectiveStandId = ac.standId ?? f.plannedStandId;
   const prospectiveStandInfo = prospectiveStandId ? ctx.stands[prospectiveStandId] : undefined;
   const explicitRemoteConfiguration = !!prospectiveStandInfo && !prospectiveStandInfo.contact && ctx.layout.stands[prospectiveStandId!]?.remoteBoarding !== undefined;
