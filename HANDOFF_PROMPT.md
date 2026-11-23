@@ -10,6 +10,7 @@
 4. 計画外の変更、受入条件の変更、保存/シミュレーション版の変更はPO判断を得る。
 
 ## 現在の作業
+- 2026-11-22 **進行中** 総合テスト（PO 依頼）: 目的＝(1) 追加バックエンド機能のフロント操作可否、(2) 500往復/30万人日規模・600倍速での進行/描画遅延、(3) UI 操作性（分類・スクロールなし一覧・ワンクリック配置・ショートカット）の検証。対象: tests/e2e、src/ui、性能ベンチ。コード変更は原則なし（テスト追加のみ）。
 - 2026-11-22 就航都市の地域順表示（2026-REGION、docs/42 §3.11、実装完了・未push）: 表示専用の地域区分（国内11地方＋海外11地域）を src/core/data/destinationRegions.ts に新設し、就航先セレクト（CapacityPanel）・就航範囲表示（AirlineScoreTable）・路線の需要と供給表（ManagementPanels）の並びを地域順へ統一した。地域内は destinations.ts の登録順を維持。既存 regionId・保存形式・SIM_MODEL_VERSION は不変、ゴールデン 26/30（失敗4件は既存の幾何不一致）。新規テスト 7/7・関連 98/100（失敗2件は shellPhase7b の既存失敗）・typecheck・build・変更ファイル lint 合格。全スイート完走と E2E は未実施（VM 混雑／ブラウザ未導入）。計画は docs/implementation/active/destination_region_order_plan.md。push・PR は PO 指示待ち。
 - 2026-11-21 鉄道の複々線（2026-QT、実装完了・未push）: 線路辺 tracks = 4 を追加し、区間モデルの既定能力を 24 本/時（複線の線形 2 倍）にした。対象テスト 13/13・関連 30/30・typecheck・build 合格、ゴールデンは main 既存の幾何 4 件を除き一致（新規不一致ゼロ）。全テスト完走のみ VM 混雑で未完了（失敗ファイルは変更前後で同一集合であることを A/B 比較で確認済み）。計画は docs/implementation/active/rail_quadruple_track_plan.md。集約モデル・既存レイアウト・保存形式・SIM_MODEL_VERSION は不変。push・PR は PO 指示待ち。
 - 2026-11-21 離陸入口制限（2026-TK、docs/42 §3.11）: 第 1 段（診断のみ）を作業コピーで実装済み・PR 化待ち。経営 sim の入口候補の絞り込み（残り距離 ≥ 離陸距離 + 100m）は実装済みだったため、第 1 段は本当に困る構成の可視化に絞り、検証に 2 コード（RUNWAY_ENTRY_ALL_SHORT / STAND_NO_DEPARTURE_ENTRY、docs/26 §3c）を追加。挙動変更なし・SIM_MODEL_VERSION 不変。ゴールデンは main の時点で失敗している分と同一で新規の不一致なし（ゴールデン自体の陳腐化は範囲外）。第 2 段（候補ゼロ時のフォールバック方針と ATC 側）は未着手で、論点は docs/10 R-06 と計画書 §10。
