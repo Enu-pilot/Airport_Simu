@@ -4,7 +4,7 @@ import { buildDayReview, emptyResponses, type DayReview, type ReviewResponses } 
 import { recordDayClose } from './dayHistory';
 import { buildTypeTable } from '../core/sim/aircraftTypes';
 import { effectiveModels } from '../core/io/project';
-import { advanceClock, createClock, type SimClock } from '../core/sim/clock';
+import { advanceClock, createClock, DEFAULT_MAX_TICKS_PER_FRAME, type SimClock } from '../core/sim/clock';
 import { recordFrame, setPerfClock } from '../core/sim/perfStats';
 
 // 性能計測の時計は editor 層から注入する（core は実時間に依存しない）
@@ -128,16 +128,69 @@ function toReviewPhase(clock: OpsState['clock']): OpsState['clock'] {
   return { ...clock, speed: 0, acc: 0 };
 }
 
+/** 描画のあるモードで 1 フレームの tick に使う実時間の最低保証（ミリ秒） */
+export const FRAME_SIM_BUDGET_MS = 50;
+/**
+ * 1 フレームのうち tick に回す割合の目安。描画・画面更新（フレームの残り）の実測に対して、tick には
+ * その SIM_SHARE / (1 − SIM_SHARE) 倍の時間を割り当てる。描画が軽い（地図なし等）ほど予算は小さくなり画面が滑らかに、
+ * 描画が重い（大規模な地図）ほど予算が大きくなり、進行速度の低下は最大でも約 2 割に収まる。
+ */
+export const FRAME_SIM_SHARE = 0.8;
+/** 1 tick の実時間・フレームの tick 以外の時間（描画・画面更新）の移動平均（ミリ秒）。上限の見積もりだけに使い、運航の状態には入れない */
+let tickMsAvg = 0;
+let overheadMsAvg = 0;
+
+function ema(prev: number, x: number): number {
+  return prev === 0 ? x : prev * 0.8 + x * 0.2;
+}
+
+function noteTickCost(ticks: number, ms: number): void {
+  if (ticks <= 0) return;
+  tickMsAvg = ema(tickMsAvg, ms / ticks);
+}
+
+/** 前フレームの間隔から tick に使った時間を引いた残り（描画・画面更新・ブラウザの処理）を記録する */
+function noteFrameOverhead(frameIntervalMs: number, prevStepMs: number): void {
+  if (!(frameIntervalMs > 0) || frameIntervalMs > 2000) return; // タブ非表示からの復帰などは捨てる
+  overheadMsAvg = ema(overheadMsAvg, Math.max(0, frameIntervalMs - prevStepMs));
+}
+
+/** フレームの tick 予算（ミリ秒）: 描画・画面更新の実測に比例し、最低 FRAME_SIM_BUDGET_MS */
+export function frameSimBudgetFor(overheadMs: number): number {
+  const share = (overheadMs > 0 ? overheadMs : 0) * (FRAME_SIM_SHARE / (1 - FRAME_SIM_SHARE));
+  return Math.max(FRAME_SIM_BUDGET_MS, share);
+}
+
+/** 描画のあるモードのフレームの tick 上限: 予算 ÷ 1 tick の平均。従来の上限（120）を超えず、少なくとも 1 */
+export function frameTickLimitFor(avgTickMs: number, budgetMs = FRAME_SIM_BUDGET_MS): number {
+  if (!(avgTickMs > 0)) return DEFAULT_MAX_TICKS_PER_FRAME;
+  return Math.max(1, Math.min(DEFAULT_MAX_TICKS_PER_FRAME, Math.floor(budgetMs / avgTickMs)));
+}
+
+function frameTickLimit(): number {
+  return frameTickLimitFor(tickMsAvg, frameSimBudgetFor(overheadMsAvg));
+}
+
+/** 直前フレームで tick に使った実時間（描画・画面更新の時間の算出用） */
+let lastStepMs = 0;
+
 function frame(ts: number): void {
   const ops = get().ops;
   if (!ops) return;
   const dt = lastTs ? (ts - lastTs) / 1000 : 0;
+  if (lastTs) noteFrameOverhead(ts - lastTs, lastStepMs);
   lastTs = ts;
   const headless = get().opsPrefs.noRender;
-  const r = advanceClock(pendingClock ?? ops.clock, dt);
+  // 描画のあるモードでは、1 フレームで進める tick を実時間の予算（FRAME_SIM_BUDGET_MS）に収める（性能改善 第8弾）。
+  // 1 tick が重い大規模空港で 1 フレームが 0.3〜0.5 秒になり、画面と操作が止まったように見えるのを防ぐ。
+  // tick の刻みは一定なので運航の結果は変わらず、変わるのは実時間 1 秒あたりに進むゲーム内時間だけ（既定上限 120 と同じ扱い）。
+  // 無描画モードは最大速度を優先して従来の上限のまま
+  const maxTicks = headless ? DEFAULT_MAX_TICKS_PER_FRAME : frameTickLimit();
+  const r = advanceClock(pendingClock ?? ops.clock, dt, maxTicks);
   let clock = r.clock;
   let stoppedAtClose = false;
   let remaining = r.ticks;
+  const stepStart = performance.now();
   while (remaining > 0) {
     const res = stepTicks(ops.sim, remaining, { stopAtDayClose: true });
     remaining -= res.ticks;
@@ -156,6 +209,8 @@ function frame(ts: number): void {
       }
     }
   }
+  lastStepMs = performance.now() - stepStart;
+  noteTickCost(r.ticks, lastStepMs);
   // 性能計測: このフレームで進めた tick 数と dropped を記録する（計測のみ。進行には影響しない）
   recordFrame(r.ticks, r.dropped);
   // 一時停止中で何も進まなかったフレームは、画面に出る状態が前回から変わっていない。

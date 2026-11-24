@@ -1,34 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Viewport } from '../render/MapView';
 import { actions, editorStore, useAnalysis, useEditor, useLayout, type BuildPanel } from '../editor/store';
-import { buildAttentionItems } from '../core/attention';
-import { composeCapabilityReadings } from '../core/capability';
 import { SHELL_UI } from '../i18n/ja';
-import { AirlinesPanel, ContractsPanel, FinancePanel, PlanPanel, useCompany } from './ManagementPanels';
-import { AccessPanel, ExpansionPanel } from './AccessPanels';
-import { CatalogPanel } from './CatalogPanel';
-import { ScenarioPanel } from './AnalysisPanels';
+import { useCompany } from './ManagementPanels';
 import { GameSetupDialog } from './GameSetup';
 import { ReviewDrawer } from './shell/ReviewDrawer';
 import { SkipDayOverlay } from './SkipDayOverlay';
 import { onKeyDown, onKeyUp } from '../editor/input';
-import { ProjectPanel } from './ProjectPanel';
 import { Toolbox } from './Toolbox';
 import { TerminalWorkspace } from './TerminalWorkspace';
 import { FacilityList } from './FacilityList';
 import { PropertiesPanel } from './PropertiesPanel';
 import { IssuesPanel } from './IssuesPanel';
 import { OperateLayout } from './operate/OperateLayout';
-import { opsInboxAttentionFromSim } from './operate/alerts';
 import { OpsBoard } from './operate/DetailOverlay';
 import { opsUi } from './operate/opsUi';
 import { StatusBar, Toast } from './StatusBar';
 import { ManagementPage, type ManagementSection } from './ManagementPage';
-import { CapacityPanel } from './CapacityPanel';
 import { AtcApp } from './atc/AtcApp';
 import { TopBar, type MainPage } from './shell/TopBar';
 import { Rail } from './shell/Rail';
 import { Timeline } from './shell/Timeline';
+import { sharedAttentionItems } from './attentionShared';
+import { ShortcutHelp, shortcutHelp } from './ShortcutHelp';
+import { quickTools } from './quickTools';
+import { quickSlotForCode } from '../editor/shortcuts';
 export function App() {
   // ゲームモード選択（経営 / 管制官）。ATC は専用ストア・画面で完結し、
   // EditorState には混ぜない（計画書 air_traffic_control_mode_plan.md §3.1）
@@ -44,6 +40,34 @@ export function App() {
     const down = (e: KeyboardEvent) => {
       if (appModeRef.current === 'atc') return; // ATC モード中は経営側のキー処理をしない
       if (isEditable(e.target)) return;
+      // UX-1: ? でショートカット一覧を開閉、Esc で閉じる（他のキー処理より先）
+      if (e.key === '?') {
+        shortcutHelp.toggle();
+        e.preventDefault();
+        return;
+      }
+      if (e.key === 'Escape' && shortcutHelp.isOpen()) {
+        shortcutHelp.set(false);
+        e.preventDefault();
+        return;
+      }
+      if (editorStore.getState().mode === 'build' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // UX-4: / でツール検索へ（ツールタブを開いてからフォーカス）
+        if (e.key === '/') {
+          actions.setBuildPanel('tools');
+          setTimeout(() => (document.querySelector('[data-testid="tool-search"]') as HTMLInputElement | null)?.focus(), 0);
+          e.preventDefault();
+          return;
+        }
+        // UX-3: Shift+1〜6 でクイックバーのツール（キー配列に依存しないよう e.code で判定）
+        const slot = e.shiftKey ? quickSlotForCode(e.code) : null;
+        if (slot !== null) {
+          const target = quickTools.slots()[slot];
+          if (target) actions.setTool(target);
+          e.preventDefault();
+          return;
+        }
+      }
       // 運航モードの大きなオーバーレイは Esc で閉じる（他のキー処理より先）
       if (e.key === 'Escape' && opsUi.get().overlay) {
         opsUi.closeOverlay();
@@ -124,7 +148,7 @@ export function App() {
         {/* 経営はボードモード（第3段階）: 背景のワークスペース（地図）はそのまま残し、ボードを重ねる。
             背景の下部タブはボードと内容が重なるため、ボード表示中は畳む */}
         <div className={`app mode-${mode} page-${page === 'management' ? (mode === 'operate' ? 'operations' : 'construction') : page}${page === 'management' && mode !== 'operate' ? ' board-open' : ''}`}>
-          {mode === 'operate' && page !== 'construction' ? <OperateLayout /> : <BuildLayout readOnly={mode === 'operate'} boardOpen={page === 'management'} />}
+          {mode === 'operate' && page !== 'construction' ? <OperateLayout /> : <BuildLayout readOnly={mode === 'operate'} boardOpen={page === 'management'} onOpenManagement={(section) => { setManagementSection(section); setPage('management'); }} />}
         </div>
         {page === 'management' && (
           <div className="board-overlay" data-testid="management-board">
@@ -140,6 +164,7 @@ export function App() {
       <Timeline />
       <SkipDayOverlay />
       <GameSetupDialog />
+      <ShortcutHelp />
     </div>
   );
 }
@@ -150,7 +175,7 @@ export function App() {
  * 左パネル=ツールボックス／施設一覧／要対応インボックスのタブ切替、右=インスペクタ（プロパティ）、
  * 地図下端にステータスバー。下部タブは経営系のみ残る（配置チェックはインボックスへ移行済み）。
  */
-function BuildLayout({ readOnly = false, boardOpen = false }: { readOnly?: boolean; boardOpen?: boolean }) {
+function BuildLayout({ readOnly = false, boardOpen = false, onOpenManagement }: { readOnly?: boolean; boardOpen?: boolean; onOpenManagement: (section: ManagementSection) => void }) {
   // ターミナル専用設計 Workspace（5-18）: 開いている間は左パネルだけを差し替える。
   // 運航中（readOnly）は開かない（store 側でも運航中は開けない）
   const workspace = useEditor((s) => s.terminalWorkspace);
@@ -168,7 +193,7 @@ function BuildLayout({ readOnly = false, boardOpen = false }: { readOnly?: boole
       {/* 経営ボード表示中は、ボードと内容が重なる下部タブを畳む（閉じれば元に戻る） */}
       {!boardOpen && (
         <footer className="bottom">
-          <BuildBottom />
+          <BuildBottom onOpenManagement={onOpenManagement} />
         </footer>
       )}
     </>
@@ -184,9 +209,8 @@ function BuildLeftPanel({ readOnly = false }: { readOnly?: boolean }) {
   const company = useCompany();
   const uiVersion = useEditor((s) => s.ops?.uiVersion ?? -1);
   const attentionCount = useMemo(
-    () => buildAttentionItems({ layout, analysis, company, capabilities: composeCapabilityReadings(layout, editorStore.getState().ops?.sim.state), opsAlerts: opsInboxAttentionFromSim(editorStore.getState().ops?.sim, company) }).length,
+    () => sharedAttentionItems(layout, analysis, company, uiVersion).length,
     // uiVersion は運航中の閉鎖・故障（F6-04）の変化をバッジへ反映するための購読
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [layout, analysis, company, uiVersion],
   );
   const tabBtn = (target: BuildPanel, label: string, testid: string) => (
@@ -231,63 +255,33 @@ function BuildLeftPanel({ readOnly = false }: { readOnly?: boolean }) {
 
 type BottomTab = 'plan' | 'contracts' | 'airlines' | 'capacity' | 'finance' | 'access' | 'expansion' | 'catalog' | 'scenarios' | 'project';
 
-function Tabs({ tabs, tab, setTab }: { tabs: readonly (readonly [BottomTab, string])[]; tab: BottomTab; setTab: (t: BottomTab) => void }) {
+/**
+ * 建設画面の下部（UX-7、2026-11-24）: 従来の下部タブ（表示高 約 170px）は経営画面と内容が重複し、中身の大半が隠れていたため、
+ * 1 行の「経営への近道」に置き換えた。ボタンは従来と同じ data-testid（tab-*）で、押すと経営ボードの該当区分を全画面で開く。
+ * 内容の正本は経営ボード（ManagementPage）だけになり、地図が縦に広がる。
+ */
+const BOTTOM_SHORTCUTS: readonly (readonly [BottomTab, string, ManagementSection])[] = [
+  ['plan', '運航計画', 'plan'],
+  ['contracts', '契約', 'contracts'],
+  ['airlines', '航空会社', 'airlines'],
+  ['capacity', '空港能力', 'capacity'],
+  ['finance', '経営', 'finance'],
+  ['access', 'アクセス', 'access'],
+  ['expansion', '拡張計画', 'expansion'],
+  ['catalog', '機種カタログ', 'catalog'],
+  ['scenarios', 'シナリオ', 'scenarios'],
+  ['project', 'プロジェクト', 'project'],
+];
+
+function BuildBottom({ onOpenManagement }: { onOpenManagement: (section: ManagementSection) => void }) {
   return (
-    <div className="tabs">
-      {tabs.map(([k, label]) => (
-        <button key={k} className={tab === k ? 'tab active' : 'tab'} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
+    <div className="bottom-shortcuts" data-testid="bottom-shortcuts">
+      <span className="muted small">経営</span>
+      {BOTTOM_SHORTCUTS.map(([k, label, section]) => (
+        <button key={k} className="tab" onClick={() => onOpenManagement(section)} data-testid={`tab-${k}`} title={`経営画面の「${label}」を開く`}>
           {label}
         </button>
       ))}
-    </div>
-  );
-}
-
-function BuildBottom() {
-  const [tab, setTab] = useState<BottomTab>('plan');
-  return (
-    <div className="tabbed">
-      <Tabs
-        tabs={[
-          ['plan', '運航計画'],
-          ['contracts', '契約'],
-          ['airlines', '航空会社'],
-          ['capacity', '空港能力'],
-          ['finance', '経営'],
-          ['access', 'アクセス'],
-          ['expansion', '拡張計画'],
-          ['catalog', '機種カタログ'],
-          ['scenarios', 'シナリオ'],
-          ['project', 'プロジェクト'],
-        ]}
-        tab={tab}
-        setTab={setTab}
-      />
-      <div className="tab-body">
-        {tab === 'plan' ? (
-          <PlanPanel />
-        ) : tab === 'contracts' ? (
-          <ContractsPanel />
-        ) : tab === 'airlines' ? (
-          <AirlinesPanel />
-        ) : tab === 'capacity' ? (
-          <CapacityPanel />
-        ) : tab === 'finance' ? (
-          <FinancePanel />
-        ) : tab === 'access' ? (
-          <AccessPanel />
-        ) : tab === 'expansion' ? (
-          <ExpansionPanel />
-        ) : tab === 'catalog' ? (
-          <CatalogPanel />
-        ) : tab === 'scenarios' ? (
-          <ScenarioPanel />
-        ) : tab === 'project' ? (
-          <ProjectPanel />
-        ) : (
-          <PlanPanel />
-        )}
-      </div>
     </div>
   );
 }

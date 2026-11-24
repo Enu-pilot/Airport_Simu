@@ -1,12 +1,10 @@
 import { useMemo } from 'react';
-import { actions, editorStore, useAnalysis, useEditor, useLayout, type Overlays } from '../../editor/store';
+import { actions, useAnalysis, useEditor, useLayout, type Overlays } from '../../editor/store';
 import { useCompany } from '../ManagementPanels';
-import { buildAttentionItems } from '../../core/attention';
-import { composeCapabilityReadings } from '../../core/capability';
 import { HEAT_LEGEND, SHELL_UI } from '../../i18n/ja';
-import { opsInboxAttentionFromSim } from '../operate/alerts';
 import { keyForOverlayToggle } from '../../editor/shortcuts';
 import type { MainPage } from './TopBar';
+import { sharedAttentionItems } from '../attentionShared';
 
 /**
  * UIデザイン更新 第1段階: 左端レール（ワークスペース骨格）。
@@ -49,9 +47,8 @@ export function Rail({ page, setPage, onOpenAtc }: { page: MainPage; setPage: (p
   const company = useCompany();
   const uiVersion = useEditor((s) => s.ops?.uiVersion ?? -1);
   const attentionCount = useMemo(
-    () => buildAttentionItems({ layout, analysis, company, capabilities: composeCapabilityReadings(layout, editorStore.getState().ops?.sim.state), opsAlerts: opsInboxAttentionFromSim(editorStore.getState().ops?.sim, company) }).length,
+    () => sharedAttentionItems(layout, analysis, company, uiVersion).length,
     // uiVersion は運航中の閉鎖・故障（F6-04）の変化をバッジへ反映するための購読
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [layout, analysis, company, uiVersion],
   );
   const overlayKeys = (Object.keys(OVERLAY_LABEL) as (keyof Overlays)[]).filter((k) => mode === 'operate' || !OPERATE_ONLY_OVERLAYS.includes(k));

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { compareIds } from '../core/model/ids';
 import { departureCutoffIssue } from '../core/economy/city';
 import { PLAN_TURN_BUFFER_SEC } from '../core/economy/planning';
@@ -94,7 +94,7 @@ export function OpsControls() {
       </div>
       {o.dropped && <div className="warn-text">処理が追いつかないため、ゲーム内時間を遅らせています</div>}
 
-      <div className="tool-group-title">ターミナル内部の表示</div>
+      <Fold id="interior" title="ターミナル内部の表示" defaultOpen={false}>
       <div className="speed-buttons">
         {FLOOR_SELECTOR_LEVELS.map((l) => (
           <button key={l} className={interior && level === l ? 'tool active' : 'tool'} onClick={() => actions.setInteriorLevel(l)} title={floorNameLabel(l)}>
@@ -105,6 +105,7 @@ export function OpsControls() {
           外観
         </button>
       </div>
+      </Fold>
 
       <div className="tool-group-title">運航状況</div>
       <div className="stat-grid">
@@ -973,5 +974,38 @@ export function BaggageBoard() {
         </table>
       </div>
     </div>
+  );
+}
+
+/**
+ * 運航の左列の折りたたみ見出し（UX-8）。開閉は表示設定として localStorage に保存（シミュレーションとは無関係）。
+ * 既定で閉じるのは使用頻度の低い「ターミナル内部の表示」だけ（速度・運航状況・便の追加・表示モードは常に見える）。
+ */
+function Fold({ id, title, defaultOpen, children }: { id: string; title: string; defaultOpen: boolean; children: ReactNode }) {
+  const key = `skyport.ui.opsFold.${id}`;
+  const [open, setOpen] = useState(() => {
+    try {
+      const v = globalThis.localStorage?.getItem(key);
+      return v === null || v === undefined ? defaultOpen : v === 'open';
+    } catch {
+      return defaultOpen;
+    }
+  });
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try {
+      globalThis.localStorage?.setItem(key, next ? 'open' : 'closed');
+    } catch {
+      // 保存できなくても表示には影響しない
+    }
+  };
+  return (
+    <>
+      <button className="tool-group-title fold-title" onClick={toggle} aria-expanded={open} data-testid={`ops-fold-${id}`}>
+        {open ? '▾' : '▸'} {title}
+      </button>
+      {open && children}
+    </>
   );
 }

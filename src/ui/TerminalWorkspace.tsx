@@ -478,7 +478,7 @@ function ConnectionFacilityGroup({
   layout,
   terminalId,
   complexMembers,
-  selection,
+  selection: _selection,
   floorLabel,
 }: {
   layout: AirportLayout;

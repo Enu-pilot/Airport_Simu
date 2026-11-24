@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
+import { inboxEl, openTab, tool } from './ui';
 
 // 初期カメラ（src/editor/store.ts）: 左上 (10, 20)、9px/タイル
 const CAM = { x: 10, y: 20, zoom: 9 };
@@ -28,20 +29,20 @@ test.afterEach(async ({ page }) => {
 
 test('新しいゲームは小さな飛行場と初期資金・初期契約で始まり、翌日の運航計画が表示される', async ({ page }) => {
   await expect(page.getByTestId('cash')).toContainText('4,000,000 cr');
-  await expect(page.getByTestId('count-error')).toHaveText('0');
-  await page.getByTestId('tab-plan').click();
+  await expect((await inboxEl(page, 'count-error'))).toHaveText('0');
+  await openTab(page, 'plan');
   const panel = page.getByTestId('plan-panel');
   await expect(panel.getByTestId('plan-schedule').locator('tbody tr')).toHaveCount(3);
   await expect(panel).toContainText('実在の空港料金とは無関係');
   // 契約は独立した「契約」タブへ分離された
-  await page.getByTestId('tab-contracts').click();
+  await openTab(page, 'contracts');
   const contractsPanel = page.getByTestId('contracts-panel');
   await expect(contractsPanel.getByTestId('contracts')).toContainText('リージョナルジェット');
   await expect(contractsPanel.getByTestId('contracts')).toContainText('ハミングバード');
 });
 
 test('建設すると建設費を支払い、元に戻すと同額が戻る。資金が足りない建設はできない', async ({ page }) => {
-  await page.getByTestId('tool-facility:tower').click();
+  await (await tool(page, 'facility:tower')).click();
   await clickTile(page, 86, 52);
   // 管制塔 800,000 × 規模係数 1.0968（docs/15 §5）
   await expect(page.getByTestId('cash')).toContainText('3,122,555 cr');
@@ -58,13 +59,13 @@ test('運航すると収入・費用が計上され、運航を終えるとそ�
   await page.getByTestId('page-operations').click();
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await page.getByTestId('speed-600').click();
-  await page.getByTestId('tab-finance').click();
+  await openTab(page, 'finance');
   const ledger = page.getByTestId('today-ledger');
-  await expect(ledger).toContainText('人件費');
+  await expect(ledger).toContainText('人件費', { timeout: 25_000 }); // 費用は毎正時に計上（06:00 開始 → 07:00 で初回。×600 で実時間約 6 秒）
   await expect(ledger).toContainText('着陸料', { timeout: 25_000 });
   await page.getByTestId('stop-ops').click();
   await expect(page.getByTestId('toast')).toContainText('1日目を締めました');
-  await page.getByTestId('tab-finance').click();
+  await openTab(page, 'finance');
   await expect(page.getByTestId('reports')).toContainText('1日目（途中）');
   await expect(page.getByTestId('company-day')).toHaveText('2日目');
   await expect(page.getByTestId('kpi-otp')).toBeVisible();

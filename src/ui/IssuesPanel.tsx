@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react';
-import { buildAttentionItems, type AttentionBand } from '../core/attention';
-import { composeCapabilityReadings } from '../core/capability';
+import { type AttentionBand } from '../core/attention';
 import { worldToMap } from '../core/geometry/frames';
 import type { Severity } from '../core/validation/validate';
-import { actions, editorStore, useAnalysis, useEditor, useLayout } from '../editor/store';
+import { actions, useAnalysis, useEditor, useLayout } from '../editor/store';
 import { focusEntity } from '../editor/input';
 import { ATTENTION_UI, RUNWAY_UI, SEVERITY_LABEL, issueText } from '../i18n/ja';
 import { useCompany } from './ManagementPanels';
-import { opsInboxAttentionFromSim } from './operate/alerts';
+import { sharedAttentionItems } from './attentionShared';
 
 const ICON: Record<Severity, string> = { error: '⛔', warning: '⚠', info: 'ℹ' };
 const BAND_ICON: Record<AttentionBand, string> = { high: '⛔', mid: '⚠', low: 'ℹ' };
@@ -22,8 +21,7 @@ export function IssuesPanel() {
   // 運航中は閉鎖・故障・人員不足（F6-04 の operationalStateReadings を合成）も capability 由来として含める
   const uiVersion = useEditor((s) => s.ops?.uiVersion ?? -1);
   const attention = useMemo(
-    () => buildAttentionItems({ layout, analysis, company, capabilities: composeCapabilityReadings(layout, editorStore.getState().ops?.sim.state), opsAlerts: opsInboxAttentionFromSim(editorStore.getState().ops?.sim, company) }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    () => sharedAttentionItems(layout, analysis, company, uiVersion),
     [layout, analysis, company, uiVersion],
   );
   const opsAttention = attention.filter((i) => i.source !== 'validation');

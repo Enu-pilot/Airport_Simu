@@ -103,9 +103,33 @@ export function partitionAlerts(alerts: readonly Alert[]): { stack: Alert[]; inb
 export function opsInboxAttentionFromSim(
   sim: { state: SimState; ctx: SimContext } | undefined,
   company: CompanyState,
+  version?: number,
 ): OpsAlertAttentionInput[] | undefined {
   if (!sim) return undefined;
-  return opsInboxAttention(deriveAlerts(sim, company).alerts);
+  return opsInboxAttention(deriveAlertsShared(sim, company, [], version).alerts);
+}
+
+/**
+ * deriveAlerts の画面間共有（性能改善 第8弾）。運航中は 1 回の画面更新（uiVersion）で、アラートスタック（2 回）・
+ * 要対応のバッジ（建設パネル・レール）・要対応の一覧が同じ入力で deriveAlerts を呼んでいた。
+ * 入力（運航の参照・その時刻・会社の参照・閉じたアラート・画面更新の版）が同じなら結果も同じなので 1 回だけ計算する。
+ * version は呼び出し側の uiVersion（各 tick の公開と、運航中の操作のたびに増える）。省略時は共有しない（従来どおり毎回計算）。
+ */
+const alertMemo = new Map<string, { sim: unknown; now: number; version: number; company: unknown; result: AlertResult }>();
+export function deriveAlertsShared(
+  sim: { state: SimState; ctx: SimContext },
+  company: CompanyState | null | undefined,
+  dismissed: readonly string[] = [],
+  version?: number,
+): AlertResult {
+  if (version === undefined) return deriveAlerts(sim, company, dismissed);
+  const key = dismissed.join('\u0001');
+  const hit = alertMemo.get(key);
+  if (hit && hit.sim === sim && hit.now === sim.state.now && hit.version === version && hit.company === company) return hit.result;
+  const result = deriveAlerts(sim, company, dismissed);
+  if (alertMemo.size >= 8) alertMemo.clear();
+  alertMemo.set(key, { sim, now: sim.state.now, version, company, result });
+  return result;
 }
 
 export function opsInboxAttention(alerts: readonly Alert[]): OpsAlertAttentionInput[] {

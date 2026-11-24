@@ -97,3 +97,22 @@ export function serviceComplexOf(
 ): string[] {
   return terminalServiceComplexes(layout, opts).get(terminalId) ?? [terminalId];
 }
+
+/**
+ * ターミナル ID → 所属する建物群（サービス複合体）の代表 ID（複合体のソート済み先頭）。
+ * 旅客の経路探索の建物群の制約（route.ts の complexOf、docs/10 R-07）と不変条件 P6 が同じ定義を使う。
+ * 運用中リンク・隣接だけで作る（建設中は含めない）。レイアウト単位でキャッシュ（保存対象外の派生データ）
+ */
+const complexKeyCache = new WeakMap<AirportLayout, Map<string, string>>();
+const complexKeyFutureCache = new WeakMap<AirportLayout, Map<string, string>>();
+export function complexKeyOfLayout(layout: AirportLayout, opts: ServiceComplexOptions = {}): ReadonlyMap<string, string> {
+  // 建設中リンクを含める版（将来モデルでの「完成待ち」判定用）は別にキャッシュする
+  const cache = opts.includeUnderConstruction ? complexKeyFutureCache : complexKeyCache;
+  let m = cache.get(layout);
+  if (!m) {
+    m = new Map();
+    for (const [t, members] of terminalServiceComplexes(layout, opts)) m.set(t, members[0] ?? t);
+    cache.set(layout, m);
+  }
+  return m;
+}

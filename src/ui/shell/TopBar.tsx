@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
+import { shortcutHelp } from '../ShortcutHelp';
 import { actions, editorStore, formatCr, newGame, setOpsPrefs, useEditor, useLayout } from '../../editor/store';
 import { useCompany } from '../ManagementPanels';
 import { DAY_LOOP, GAME_UI, MODE_LABEL } from '../../i18n/ja';
@@ -39,6 +40,7 @@ export function TopBar({ page, setPage, onSavedProjects, onOpenAtc }: { page: Ma
   const skipping = useEditor((s) => s.dayFlow.phase === 'skipping');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [emptySiteSize, setEmptySiteSize] = useState('standard');
+  const narrow = useMediaQuery('(max-width: 1499px)');
 
   // 書き出し・読み込みはプロジェクト単位（レイアウト・会社・機種データ・シナリオ）。旧形式のレイアウトファイルも読める
   const download = () => {
@@ -97,6 +99,11 @@ export function TopBar({ page, setPage, onSavedProjects, onOpenAtc }: { page: Ma
           </button>
         </>
       )}
+      {(() => {
+        // UX-8: 補助ボタン（3D・1日スキップ・振り返り・履歴・日の設定）。狭い画面（1500px 未満）では「⋯」メニューへ収めて
+        // トップバーの折り返しを減らす（data-testid は同じ要素を 1 つだけ描く）
+        const secondary = (
+          <>
       <div className="top-group">
         <button data-testid="view-toggle" className={viewMode === '3d' ? 'active' : ''} onClick={() => actions.setViewMode(viewMode === '3d' ? '2d' : '3d')} title="2D マップと 3D ビューを切り替えます（運航は止まりません）。3D は観賞用です（編集は 2D で行います）">
           {viewMode === '3d' ? '2D表示へ' : '3D表示へ'}
@@ -132,6 +139,20 @@ export function TopBar({ page, setPage, onSavedProjects, onOpenAtc }: { page: Ma
           </div>
         </details>
       </div>
+          </>
+        );
+        return narrow ? (
+          <details className="top-more" data-testid="top-more">
+            <summary title="表示・日の操作">⋯</summary>
+            <div className="top-more-body">{secondary}</div>
+          </details>
+        ) : (
+          secondary
+        );
+      })()}
+      <button className="small" onClick={() => shortcutHelp.toggle()} title="ショートカット一覧（? キー）" data-testid="shortcut-help-open">
+        ?
+      </button>
       {mode === 'operate' && page === 'operations' && <OpsNav />}
       <details className="settings-pop" open={settingsOpen} onToggle={(e) => setSettingsOpen(e.currentTarget.open)} data-testid="settings-menu">
         <summary>⚙ メニュー</summary>
@@ -218,5 +239,18 @@ function CompanyBadge() {
       <span title="空港評価（旅客満足度・航空会社満足度・定時率から）">評価 {c.rating.toFixed(1)}</span>
       {c.bankrupt && <b className="ng-text">経営破綻</b>}
     </span>
+  );
+}
+
+/** メディアクエリの一致（画面幅でトップバーの補助ボタンをまとめる。UX-8） */
+function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      const m = globalThis.matchMedia?.(query);
+      m?.addEventListener('change', cb);
+      return () => m?.removeEventListener('change', cb);
+    },
+    () => globalThis.matchMedia?.(query).matches ?? false,
+    () => false,
   );
 }

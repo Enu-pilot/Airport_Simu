@@ -67,6 +67,19 @@ function MetricCard({ item }: { item: CapacityMetric }) {
   </article>;
 }
 
+/** 空港能力の分野タブ（UX-8） */
+type CapacityView = 'overview' | 'facilities' | 'common' | 'hub' | 'preview' | 'service';
+const CAPACITY_VIEWS: readonly (readonly [CapacityView, string])[] = [
+  ['overview', '概要（空港全体・時間帯）'],
+  ['facilities', '施設別'],
+  ['common', '共通能力・工程の実績'],
+  ['hub', '乗継・ハブ'],
+  ['preview', '契約・増便の仮想チェック'],
+  ['service', '店舗・サービス'],
+];
+/** 上段に常時表示するボトルネックの件数 */
+const BOTTLENECK_TOP = 5;
+
 export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: string) => void }) {
   const company = useCompany();
   const layout = useLayout();
@@ -105,6 +118,9 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
   );
   const deltas = baselineSnapshot ? capacityDelta(baselineSnapshot, snapshot) : [];
   const [filter, setFilter] = useState('すべて');
+  // UX-8: 分野タブ（1 画面に収めるため、ボトルネック上位 5 件だけを上段に常時表示し、詳細はタブで切り替える）
+  const [view, setView] = useState<CapacityView>('overview');
+  const [showAllBottlenecks, setShowAllBottlenecks] = useState(false);
   const [hierarchy, setHierarchy] = useState<CommonHierarchy>('facility');
   const [airlineId, setAirlineId] = useState(airlinesFor(company)[0]?.id ?? '');
   const [destinationId, setDestinationId] = useState(destinationsFor(company)[0]?.id ?? '');
@@ -139,13 +155,23 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
     )}
     {snapshot.bottlenecks.length > 0 ? <section className="capacity-alert" data-testid="capacity-bottlenecks">
       <h4>先に確認するボトルネック</h4>
-      {snapshot.bottlenecks.map((b) => <div className="capacity-bottleneck" key={b.name}>
+      {(showAllBottlenecks ? snapshot.bottlenecks : snapshot.bottlenecks.slice(0, BOTTLENECK_TOP)).map((b) => <div className="capacity-bottleneck" key={b.name}>
         <b className={statusClass[b.status]}>{statusLabel[b.status]} · {b.name}</b>
         <span>能力 {fmt(b.capacity)} {unitLabel[b.unit]} / 需要 {fmt(b.demand)} {unitLabel[b.unit]} · {b.utilization === null ? '使用率未算出' : `${(b.utilization * 100).toFixed(1)}%`}</span>
         <small>{b.basis}</small>
       </div>)}
+      {snapshot.bottlenecks.length > BOTTLENECK_TOP && (
+        <button className="link" onClick={() => setShowAllBottlenecks((v) => !v)} data-testid="capacity-bottlenecks-more">
+          {showAllBottlenecks ? '上位 5 件だけ表示' : `ほか ${snapshot.bottlenecks.length - BOTTLENECK_TOP} 件を表示`}
+        </button>
+      )}
     </section> : <p className="ok-text">計画需要に対する算出可能な能力不足はありません。</p>}
-    <section>
+    <nav className="capacity-views" role="tablist" aria-label="空港能力の分野">
+      {CAPACITY_VIEWS.map(([id, label]) => (
+        <button key={id} className={view === id ? 'tab active' : 'tab'} aria-pressed={view === id} onClick={() => setView(id)} data-testid={`capacity-view-${id}`}>{label}</button>
+      ))}
+    </nav>
+    {view === 'overview' && <section>
       <h4>空港全体</h4>
       <article className="capacity-card capacity-overall" data-testid="capacity-overall" title={OVERALL_CAPACITY_NOTE}>
         <header><strong>{OVERALL_CAPACITY_TITLE}</strong></header>
@@ -154,8 +180,8 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
         <small className="capacity-basis">{OVERALL_CAPACITY_NOTE}</small>
       </article>
       <div className="capacity-grid">{snapshot.summary.map((item) => <MetricCard key={item.name} item={item} />)}</div>
-    </section>
-    {(() => {
+    </section>}
+    {view === 'hub' && (() => {
       // 乗継・ハブ欄は常時表示（UIデザイン更新 第3段階・§6-2）: 未解放・未有効化・未発生を状態として示し、0 人で消さない
       const hubLock = lockLabel(company, 'hub');
       const hubOn = featureOn(company, 'hub');
@@ -194,7 +220,7 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
         </section>
       );
     })()}
-    <section className="capacity-detail">
+    {view === 'facilities' && <section className="capacity-detail">
       <div className="capacity-heading"><h4>施設別の能力・状態</h4><label>種類 <select value={filter} onChange={(e) => setFilter(e.target.value)}>{categories.map((c) => <option key={c}>{c}</option>)}</select></label></div>
       <div className="capacity-table-scroll"><table className="board" data-testid="capacity-facilities">
         <thead><tr><th>施設</th><th>種別</th><th>状態</th><th>能力</th><th>需要</th><th>判定</th><th>算出根拠</th><th></th></tr></thead>
@@ -204,8 +230,8 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
           <td>{onSelectFacility && <button className="link" onClick={() => { actions.select(r.id); onSelectFacility(r.id); }}>建設で確認</button>}</td>
         </tr>)}</tbody>
       </table></div>
-    </section>
-    <section data-testid="capacity-common">
+    </section>}
+    {view === 'common' && <section data-testid="capacity-common">
       <div className="capacity-heading">
         <h4>共通能力ビュー（理論 / 有効能力と状態）</h4>
         <label>{PHASE7B_UI.hierarchy} <select value={hierarchy} onChange={(e) => setHierarchy(e.target.value as CommonHierarchy)} data-testid="capacity-hierarchy">
@@ -276,8 +302,8 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
           {uncomputedCount > 0 && <p className="muted small" data-testid="capacity-common-uncomputed">未算出の施設 {uncomputedCount} 件（0 能力とは区別しています）: 現在は効果なし {uncomputedBreakdown.none} 件・表示のみ {uncomputedBreakdown.displayOnly} 件・能力式なし {uncomputedBreakdown.noFormula} 件。理由は建設画面で施設を選ぶと表示されます。</p>}
         </>;
       })()}
-    </section>
-    {(() => {
+    </section>}
+    {view === 'common' && (() => {
       const latest = company.reports[company.reports.length - 1];
       const actuals = latest ? readingsFromProcessPeak(latest) : [];
       if (actuals.length === 0) return null;
@@ -304,11 +330,11 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
         )}
       </section>;
     })()}
-    <section>
+    {view === 'overview' && <section>
       <h4>時間帯別の需要</h4>
-      {peakHours.length ? <table className="board"><thead><tr><th>時間帯</th><th>離着陸回数</th><th>出発旅客</th><th>滑走路能力に対する需要</th></tr></thead><tbody>{peakHours.map((h) => <tr key={h.hour}><td>{String(h.hour).padStart(2, '0')}:00–{String(h.hour + 1).padStart(2, '0')}:00</td><td>{h.movements}</td><td>{h.pax} 人</td><td>{snapshot.analysis.capacity.movementsPerHour > 0 ? `${(h.movements / snapshot.analysis.capacity.movementsPerHour * 100).toFixed(1)}%` : '滑走路能力なし'}</td></tr>)}</tbody></table> : <p className="muted">当日の運航計画がありません。</p>}
-    </section>
-    <section className="capacity-preview" data-testid="capacity-preview">
+      {peakHours.length ? <div className="capacity-table-scroll"><table className="board"><thead><tr><th>時間帯</th><th>離着陸回数</th><th>出発旅客</th><th>滑走路能力に対する需要</th></tr></thead><tbody>{peakHours.map((h) => <tr key={h.hour}><td>{String(h.hour).padStart(2, '0')}:00–{String(h.hour + 1).padStart(2, '0')}:00</td><td>{h.movements}</td><td>{h.pax} 人</td><td>{snapshot.analysis.capacity.movementsPerHour > 0 ? `${(h.movements / snapshot.analysis.capacity.movementsPerHour * 100).toFixed(1)}%` : '滑走路能力なし'}</td></tr>)}</tbody></table></div> : <p className="muted">当日の運航計画がありません。</p>}
+    </section>}
+    {view === 'preview' && <section className="capacity-preview" data-testid="capacity-preview">
       <h4>契約・増便の仮想チェック</h4>
       <p className="muted">現在の空港・契約・セーブには反映しません。既存の計画生成と割当・能力警告で追加便を評価します。</p>
       <div className="capacity-form">
@@ -335,8 +361,10 @@ export function CapacityPanel({ onSelectFacility }: { onSelectFacility?: (id: st
             ) : null;
           })()}
       </div>}
-    </section>
-    <ServiceProfileSection layout={layout} liveGranularity={liveGranularity} liveUsage={liveUsage} />
-    <ServiceDetailSection layout={layout} />
+    </section>}
+    {view === 'service' && <>
+      <ServiceProfileSection layout={layout} liveGranularity={liveGranularity} liveUsage={liveUsage} />
+      <ServiceDetailSection layout={layout} />
+    </>}
   </div>;
 }

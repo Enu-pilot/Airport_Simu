@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { busTwoTerminalLayout } from '../audit/b_helpers';
 import { createSandboxCompany } from '../../src/core/economy/company';
 import { buildProject, serializeProject } from '../../src/core/io/project';
+import { openTab, row } from './ui';
 
 /** 1-11 / K-1 と Z-1: リモートスポットの所属ターミナルと、プロパティでのバス搭乗の変更 */
 const uncaught = new WeakMap<Page, string[]>();
@@ -24,7 +25,7 @@ test.afterEach(async ({ page }) => {
 async function loadTwoTerminals(page: Page): Promise<{ t1: string; t2: string }> {
   const tt = busTwoTerminalLayout();
   const json = serializeProject(buildProject({ name: '2ターミナル', savedAt: '2026-01-01T00:00:00.000Z', layout: tt.layout, company: createSandboxCompany('e2e-standterm'), pin: null, scenarios: [], sim: null }));
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-file').setInputFiles({ name: 'two.json', mimeType: 'application/json', buffer: Buffer.from(json) });
   await expect(page.getByTestId('project-report')).toContainText('読み込みました');
   return { t1: tt.t1, t2: tt.t2 };
@@ -32,7 +33,7 @@ async function loadTwoTerminals(page: Page): Promise<{ t1: string; t2: string }>
 
 test('Z-1: リモートスポットのバス搭乗・接続バスゲートをプロパティで変更でき、「値が不正です」にならない', async ({ page }) => {
   await loadTwoTerminals(page);
-  await page.getByTestId('row-std_8').click();
+  await (await row(page, 'std_8')).click();
   await expect(page.getByTestId('prop-remoteBoarding')).toBeVisible();
   await page.getByTestId('prop-remoteBoarding').selectOption('bus');
   await expect(page.getByTestId('prop-remoteBoarding')).toHaveValue('bus');
@@ -47,7 +48,7 @@ test('Z-1: リモートスポットのバス搭乗・接続バスゲートをプ
 
 test('所属ターミナルを選ぶと、使うバスゲートの候補と表示が所属側に切り替わり、「自動」に戻せる', async ({ page }) => {
   const { t2 } = await loadTwoTerminals(page);
-  await page.getByTestId('row-std_8').click();
+  await (await row(page, 'std_8')).click();
   const sel = page.getByTestId('prop-standTerminal');
   await expect(sel).toBeVisible();
   await expect(sel).toHaveValue('');

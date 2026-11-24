@@ -1220,6 +1220,18 @@ export const OPS_NAV: readonly (readonly [string, string])[] = [
   ['journal', '運航記録'],
 ];
 
+/**
+ * 運航ナビの分類（UX-5、2026-11-24）。OPS_NAV の各キーを 5 群に分けて見出し付きで並べる（ボタンと data-testid は従来どおり）。
+ * 群に含まれないキーは最後の群に入る（OpsNav 側で補完）。
+ */
+export const OPS_NAV_GROUPS: readonly (readonly [string, readonly string[]])[] = [
+  ['運航', ['flights', 'events', 'disruptions']],
+  ['旅客・施設', ['terminal', 'baggage', 'access', 'issues']],
+  ['地上', ['ground']],
+  ['経営', ['plan', 'finance', 'airlines', 'goals', 'journal', 'analytics']],
+  ['管理', ['expansion', 'catalog', 'scenarios', 'project']],
+];
+
 /** 運航モードの常設カード・運航表・アラートの文言 */
 export const OPS_UI = {
   dayUnit: '日目',

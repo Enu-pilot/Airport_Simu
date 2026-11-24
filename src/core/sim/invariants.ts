@@ -10,6 +10,7 @@ import { MIN_GROUND_SEPARATION_M, TICK_SEC } from './rules';
 import { APRON_BUS_CAPACITY } from './busRules';
 import type { Simulation } from './simulation';
 import { GROUND_MOVING_STATES, TERMINAL_STATES, type Aircraft, type AircraftState, type CrossingGrant, type SimState } from './types';
+import { complexKeyOfLayout } from '../terminal/serviceComplex';
 
 /** 横断中の機体の状態（経路上を地上走行している） */
 const TAXIING_STATES: readonly AircraftState[] = ['vacating', 'taxiIn', 'docking', 'taxiOut', 'holdShort', 'lineUp'];
@@ -352,6 +353,9 @@ export function checkPaxInvariants(sim: Simulation, full: boolean): string[] {
     for (const id of fac.queue) if (state.paxGroups[id]?.facility !== key) out.push(`P3 ${id} が ${key} の待ち行列にいるが所属が不一致`);
     for (const id of fac.inService) if (state.paxGroups[id]?.state !== 'inService') out.push(`P3 ${id} が ${key} で処理中だが状態が不一致`);
   }
+  const complexKey = complexKeyOfLayout(ctx.layout);
+  const sameComplex = (x: string | null | undefined, y: string | null | undefined): boolean =>
+    !!x && !!y && (x === y || (complexKey.get(x) ?? x) === (complexKey.get(y) ?? y));
   const ids = full ? Object.keys(state.paxGroups) : state.activePax;
   for (const id of ids) {
     const g = state.paxGroups[id]!;
@@ -365,26 +369,29 @@ export function checkPaxInvariants(sim: Simulation, full: boolean): string[] {
     }
     if (g.area && !ctx.terminal.areas[g.area]) out.push(`P5 ${g.id} の所在エリア ${g.area} が存在しない`);
     const a = g.area ? ctx.terminal.areas[g.area] : undefined;
-    if (g.terminalId && a && a.terminalId !== g.terminalId && g.targetTerminalId !== a.terminalId) {
+    // P6 は建物群（サービス複合体: 運用中リンク・隣接でつながった建物の集合）単位で判定する（2026-11-24 PO 決定、docs/10 R-07）。
+    // 連絡でつながった建物の間の移動は 1 つの建物の中の移動とみなし、所属・target 以外の第三の建物群に入ること・その経路だけを違反とする
+    const inAllowed = (terminalId: string | null | undefined): boolean =>
+      !!terminalId && (sameComplex(terminalId, g.terminalId) || sameComplex(terminalId, g.targetTerminalId));
+    if (g.terminalId && a && !inAllowed(a.terminalId)) {
       out.push(`P6 ${g.id} がターミナル ${g.terminalId} から別ターミナル ${a.terminalId} のエリア ${a.id} に入っている`);
     }
-    if (g.terminalId && g.route.some((areaId) => {
-      const terminalId = ctx.terminal.areas[areaId]?.terminalId;
-      return terminalId !== g.terminalId && terminalId !== g.targetTerminalId;
-    })) {
+    if (g.terminalId && g.route.some((areaId) => !inAllowed(ctx.terminal.areas[areaId]?.terminalId))) {
       out.push(`P6 ${g.id} の経路が割当て先ターミナル外へ出ている`);
     }
     if (g.facility?.startsWith('gate:')) {
       const gateId = g.facility.slice('gate:'.length);
       const gateTerminal = ctx.terminal.gates[gateId]?.terminalId;
-      if (g.terminalId && gateTerminal && gateTerminal !== g.terminalId) out.push(`P6 ${g.id} が割当てターミナル外の搭乗口 ${gateId} を利用している`);
-    } else if (g.facility && ctx.terminal.areas[g.facility]?.terminalId !== g.terminalId) {
+      if (g.terminalId && gateTerminal && !sameComplex(gateTerminal, g.terminalId)) out.push(`P6 ${g.id} が割当てターミナル外の搭乗口 ${gateId} を利用している`);
+    } else if (g.facility && !sameComplex(ctx.terminal.areas[g.facility]?.terminalId, g.terminalId)) {
       out.push(`P6 ${g.id} が割当てターミナル外の施設 ${g.facility} を利用している`);
     }
     const flight = state.flights[g.flightId];
     const gateId = flight?.direction === 'departure' ? flight.pax.gateId : null;
     const gateTerminal = gateId ? ctx.terminal.gates[gateId]?.terminalId : null;
-    if (g.terminalId && gateTerminal && gateTerminal !== g.terminalId && gateTerminal !== g.targetTerminalId) {
+    // 連絡設備の歩行中に遅らせたゲート変更（replanAfterTerminalLink）は、通過後に target を新しいゲートへ反映するまでの移行中として除く
+    // （経路・所在の検査は従来どおり。passengers.ts の reconcileDepartureGate と通過後の再計画）
+    if (g.terminalId && gateTerminal && !inAllowed(gateTerminal) && !g.replanAfterTerminalLink) {
       out.push(`P6 ${g.id} のターミナル ${g.terminalId} と便ゲート ${gateId} のターミナル ${gateTerminal} が不一致`);
     }
     if (g.direction === 'departure' && a && a.zone === 'departure' && a.kind !== 'security' && a.kind !== 'transferSecurity' && !g.securityCleared) {

@@ -96,6 +96,9 @@ export function attributeRevenue(sim: Simulation, aircraftId: string, amount: nu
 }
 
 /** 毎ティックの記録（シミュレーションの状態を読むだけで、変更しない） */
+const TERMINAL_SET: ReadonlySet<Aircraft['state']> = new Set(TERMINAL_STATES);
+const GROUND_MOVING_SET: ReadonlySet<Aircraft['state']> = new Set(GROUND_MOVING_STATES);
+
 export function stepAnalytics(sim: Simulation): void {
   const { state, ctx } = sim;
   const a = state.analytics;
@@ -104,15 +107,19 @@ export function stepAnalytics(sim: Simulation): void {
     if (rs.occupant) r.busySec++;
   }
   for (const sid of Object.keys(state.standAssignments)) (a.stands[sid] ??= { busySec: 0, turns: 0 }).busySec++;
-  for (const ac of Object.values(state.aircraft)) {
-    if (TERMINAL_STATES.includes(ac.state)) continue;
+  // 性能改善 第8弾: 毎 tick 全機体を 2 回走査するため、配列の確保をせず（for...in は Object.values と同じ列挙順）、
+  // 状態の判定は Set で行う。処理内容・順序は従来と同一
+  const aircraft = state.aircraft;
+  for (const acId in aircraft) {
+    const ac = aircraft[acId]!;
+    if (TERMINAL_SET.has(ac.state)) continue;
     if (ac.state === 'scheduled') continue;
     const live = liveOf(a, ac.id);
     if (ac.state === 'holding') {
       live.airborneHoldSec++;
       if (ac.runwayId) (a.runways[ac.runwayId] ??= { busySec: 0, ops: 0, waitSec: 0 }).waitSec++;
     }
-    if (GROUND_MOVING_STATES.includes(ac.state) && ac.state !== 'takeoff' && ac.state !== 'landing') {
+    if (GROUND_MOVING_SET.has(ac.state) && ac.state !== 'takeoff' && ac.state !== 'landing') {
       live.groundDistM += ac.speed;
       if (ac.speed === 0 && ac.route) {
         live.groundStopSec++;
@@ -126,8 +133,9 @@ export function stepAnalytics(sim: Simulation): void {
       }
     }
   }
-  for (const ac of Object.values(state.aircraft)) {
-    if (!TERMINAL_STATES.includes(ac.state) || a.recorded[ac.id]) continue;
+  for (const acId in aircraft) {
+    const ac = aircraft[acId]!;
+    if (!TERMINAL_SET.has(ac.state) || a.recorded[ac.id]) continue;
     a.recorded[ac.id] = true;
     a.records.push(buildRecord(sim, ac));
   }

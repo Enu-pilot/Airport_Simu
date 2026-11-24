@@ -16,6 +16,14 @@ export interface PaxRouteQuery {
   uncleared?: boolean;
   /** 階段を利用できない場合、階段エリアを経路から除外する。 */
   stepFree?: boolean;
+  /**
+   * 他の建物群を経由する経路を禁止する（2026-11-24 PO 決定、docs/10 R-07）。値はターミナル ID → 所属する建物群（サービス複合体:
+   * 運用中リンク・隣接でつながった建物の集合。terminal/serviceComplex.ts）の代表 ID。出発エリアの建物群を O として、
+   * 移動は O 内・O→X・X 内だけを許し、X→Y（第三の建物群の通り抜け）と X→O（戻り）は通さない。
+   * これにより経路の建物群は常に「出発」と「目的地」の 2 つ以内に収まり、不変条件 P6（建物群単位）と一致する。
+   * 連絡でつながった建物群の中の移動は従来どおり。
+   */
+  complexOf?: ReadonlyMap<string, string>;
 }
 
 export interface PaxRoute {
@@ -31,6 +39,11 @@ export function findPaxRoute(model: TerminalModel, q: PaxRouteQuery): PaxRoute |
   const done = new Set<string>();
   const open: string[] = [q.from];
   let best: { id: string; cost: number } | null = null;
+  const complexOfArea = (areaId: string): string => {
+    const t = model.areas[areaId]!.terminalId;
+    return q.complexOf?.get(t) ?? t;
+  };
+  const originComplex = q.complexOf ? complexOfArea(q.from) : undefined;
   while (open.length > 0) {
     // エリア数は少ない（数十）ので線形探索で十分
     open.sort((a, b) => dist.get(a)! - dist.get(b)! || (a < b ? -1 : 1));
@@ -46,6 +59,11 @@ export function findPaxRoute(model: TerminalModel, q: PaxRouteQuery): PaxRoute |
       const next = model.areas[link.to]!;
       if (q.closed?.has(next.id)) continue;
       if (q.stepFree && (node.kind === 'stairs' || next.kind === 'stairs')) continue;
+      // 出発の建物群を出た後は、入った建物群の中だけを進む（第三の建物群の通り抜け・出発の建物群への戻りを禁止）
+      if (q.complexOf) {
+        const cn = complexOfArea(node.id);
+        if (cn !== originComplex && complexOfArea(next.id) !== cn) continue;
+      }
       if (q.uncleared) {
         // フェーズ 4 §4.4: 保安検査を済ませていないグループは security・transferSecurity 以外から出発区域へ入れない
         if ((next.zone === 'departure' || next.zone === 'departureIntl') && !((next.kind === 'security' || next.kind === 'transferSecurity') && q.goals.has(next.id))) continue;

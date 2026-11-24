@@ -6,6 +6,7 @@ import { createSimulation } from '../../src/core/sim/simulation';
 import { stepTicks } from '../../src/core/sim/dayloop';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 import { must } from '../unit/helpers';
+import { openBuildPanel, openTab, overlayToggle, tool } from './ui';
 
 /** フェーズ 2（2-07・2-06 の画面）: 区間ごとに進む地上走行の設定・誘導路の上書き・区間の表示 */
 const uncaught = new WeakMap<Page, string[]>();
@@ -27,18 +28,19 @@ test.afterEach(async ({ page }) => {
 });
 
 async function deselect(page: Page) {
-  await page.getByTestId('tool-select').click();
+  await (await tool(page, 'select')).click();
   await page.keyboard.press('Escape');
 }
 
 async function selectFirstTaxiway(page: Page) {
-  await page.getByTestId('tool-select').click();
+  await (await tool(page, 'select')).click();
+  await openBuildPanel(page, 'facilities');
   await page.getByTestId('facility-list').getByRole('button', { name: /誘導路/ }).click();
   await page.getByTestId('facility-list').locator('[data-testid^="row-twy_"]').first().click();
 }
 
 async function loadProject(page: Page, json: string) {
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-file').setInputFiles({ name: 'p.json', mimeType: 'application/json', buffer: Buffer.from(json) });
 }
 
@@ -91,7 +93,7 @@ test('block のプロジェクトを読み込むと、論理ネットワーク�
   await selectFirstTaxiway(page);
   await expect(page.getByTestId('prop-blocks')).toContainText('区間');
   await expect(page.getByTestId('prop-blockMax-inactive')).toHaveCount(0);
-  await page.getByTestId('overlay-network').check(); // 区間の区切りと機数の表示（描画でエラーが出ないこと）
+  await (await overlayToggle(page, 'network')).check(); // 区間の区切りと機数の表示（描画でエラーが出ないこと）
   await page.waitForTimeout(300);
   await expect(page.getByTestId('map-canvas')).toBeVisible();
 });
@@ -102,7 +104,7 @@ test('運航中は区間の設定を変更できない（設定欄は出ず、�
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await expect(page.getByTestId('setting-taxiMode')).toHaveCount(0);
   await page.getByTestId('overlays-pop').locator('summary').click();
-  await page.getByTestId('overlay-network').check(); // 運航中の区間の占有の表示
+  await (await overlayToggle(page, 'network')).check(); // 運航中の区間の占有の表示
   await page.waitForTimeout(500);
   await page.getByTestId('stop-ops').click();
   await expect(page.getByTestId('map-canvas')).toBeVisible();
