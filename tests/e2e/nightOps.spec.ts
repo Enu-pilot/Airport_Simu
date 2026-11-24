@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
+import { openTab } from './ui';
 
 /** フェーズ 2（2-11・2-15 の画面）: 夜間の運用（最終出発時刻）の設定。新規ゲームで都市を選ぶと既定で有効、既存データには入れない */
 const uncaught = new WeakMap<Page, string[]>();
@@ -20,7 +21,7 @@ test.afterEach(async ({ page }) => {
 });
 
 async function openPlan(page: Page) {
-  await page.getByTestId('tab-plan').click();
+  await openTab(page, 'plan');
   await expect(page.getByTestId('plan-panel')).toBeVisible();
 }
 

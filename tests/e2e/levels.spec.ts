@@ -3,7 +3,7 @@ import { createSandboxCompany } from '../../src/core/economy/company';
 import { buildProject, serializeProject } from '../../src/core/io/project';
 import { addRoadPath, connectRoadLevels, createEmptyLayout } from '../../src/core/layout/operations';
 import { createSite } from '../../src/core/model/site';
-import { openBuildPanel, row, tool } from './ui';
+import { openBuildPanel, openTab, row, tool } from './ui';
 
 /**
  * 建物・階層の接続と UI（docs/39 §10。V-1・V-3〜V-6・W-6・W-8 の修正後の回帰、フェーズ 1 の 1-01・1-03〜1-05）。
@@ -201,7 +201,7 @@ test('1-05 階層接続設備は和名（階段）で表示される', async ({ 
   const connector = Object.values(l.roads).find((e) => e.connectorKind)!;
   const json = serializeProject(buildProject({ name: '階段', savedAt: '2026-01-01T00:00:00.000Z', layout: l, company: createSandboxCompany('e2e-conn'), pin: null, scenarios: [], sim: null }));
   await open(page);
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-file').setInputFiles({ name: 'conn.json', mimeType: 'application/json', buffer: Buffer.from(json) });
   await expect(page.getByTestId('project-report')).toContainText('読み込みました');
   await openBuildPanel(page, 'facilities');

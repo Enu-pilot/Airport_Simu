@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
-import { row } from './ui';
+import { openTab, row } from './ui';
 
 /** 12B-3a: リモートスポット・ランプバスによるバス搭乗・独立ゲート（docs/29） */
 
@@ -22,7 +22,7 @@ test.afterEach(async ({ page }) => {
 });
 
 async function loadBusProject(page: Page) {
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-file').setInputFiles(FIXTURE);
   await expect(page.getByTestId('project-report')).toContainText('読み込みました');
 }

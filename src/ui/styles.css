@@ -104,7 +104,7 @@ input[type='number'] { width: 80px; }
 .app {
   display: grid;
   grid-template-columns: 230px 1fr 300px;
-  grid-template-rows: 1fr 170px;
+  grid-template-rows: minmax(0, 1fr) auto; /* 下部は経営への近道 1 行（UX-7） */
   grid-template-areas: 'left center right' 'left bottom right';
   flex: 1;
   min-width: 0;
@@ -428,3 +428,39 @@ tr.selected td { background: rgba(63, 240, 255, 0.08); }
 .settings-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 60; }
 .settings-modal { background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; padding: 14px 18px; width: min(520px, 92vw); max-height: 90vh; overflow: auto; }
 .settings-modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+
+/* ---------------------------------------------------------------- 操作性改善（UX-1〜8、2026-11-24） */
+/* UX-7 建設画面の下部: 経営への近道 1 行 */
+.bottom-shortcuts { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; padding: 3px 6px; }
+.bottom-shortcuts .tab { border-radius: 4px; }
+/* UX-3 クイックバー */
+.quick-bar { display: flex; flex-wrap: wrap; gap: 3px; padding: 4px 0 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.quick-slot { font-size: 11px; padding: 2px 6px; display: inline-flex; align-items: center; gap: 3px; }
+.quick-slot.active { background: var(--accent); color: #062026; border-color: var(--accent); }
+.quick-slot.pinned { border-color: #d9a441; }
+.quick-slot-num { font-size: 10px; opacity: 0.7; }
+/* UX-4 ツール検索 */
+.tool-search { width: 100%; box-sizing: border-box; margin: 0 0 6px; padding: 3px 6px; font-size: 12px; }
+/* UX-1 ツールボタンのキー表示・ショートカット一覧 */
+.tool-key, .shortcut-help kbd { font-family: ui-monospace, monospace; font-size: 10px; padding: 0 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-2); margin-left: 4px; }
+.tool.active .tool-key { color: #062026; border-color: #062026; background: transparent; }
+.shortcut-help-backdrop { position: fixed; inset: 0; background: #000a; z-index: 60; display: flex; align-items: center; justify-content: center; }
+.shortcut-help { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; max-width: min(1100px, 94vw); max-height: 88vh; overflow: auto; }
+.shortcut-help-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+.shortcut-help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 18px; }
+.shortcut-help h4 { margin: 6px 0 4px; font-size: 12px; color: var(--muted); }
+.shortcut-help td { padding: 2px 6px 2px 0; font-size: 12px; vertical-align: top; }
+/* UX-8 トップバーの補助ボタン（狭い画面では「⋯」へ） */
+.top-more { position: relative; }
+.top-more > summary { list-style: none; cursor: pointer; padding: 3px 10px; border: 1px solid var(--border); border-radius: 4px; }
+.top-more-body { position: absolute; right: 0; top: 110%; z-index: 50; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 6px; min-width: 220px; box-shadow: 0 8px 24px #000a; }
+/* UX-5 運航ナビの分類 */
+.ops-nav-group { display: inline-flex; align-items: center; gap: 2px; padding: 0 6px 0 0; margin-right: 4px; border-right: 1px solid var(--border); }
+.ops-nav-group:last-child { border-right: none; }
+.ops-nav-group-label { font-size: 10px; color: var(--muted); margin: 0 3px 0 2px; white-space: nowrap; }
+/* UX-6 経営メニューの分類 */
+.management-section-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-right: 10px; margin-right: 6px; border-right: 1px solid var(--border); }
+.management-section-group:last-child { border-right: none; }
+.management-section-group-label { font-size: 11px; color: var(--muted); margin-right: 2px; white-space: nowrap; }
+.capacity-views { display: flex; flex-wrap: wrap; gap: 3px; margin: 6px 0; border-bottom: 1px solid var(--border); }
+.fold-title { display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 4px 0; }

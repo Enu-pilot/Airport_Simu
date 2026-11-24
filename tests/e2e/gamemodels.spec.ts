@@ -7,6 +7,7 @@ import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 import { createSimulation } from '../../src/core/sim/simulation';
 import { stepTicks } from '../../src/core/sim/dayloop';
 import { DAY_SEC } from '../../src/core/sim/rules';
+import { openTab } from './ui';
 
 /**
  * ゲームのモデル（12B-3a Part B）: 新しいゲームの設定（難易度）・天候 5 段階と予報・先行欠航・従来のサンドボックスは変わらない。
@@ -49,7 +50,7 @@ function gameProject(opts: { day: number; difficulty?: 'normal' | 'hard' | 'expe
 }
 
 async function load(page: Page, json: string) {
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-file').setInputFiles({ name: 'game.json', mimeType: 'application/json', buffer: Buffer.from(json) });
 }
 

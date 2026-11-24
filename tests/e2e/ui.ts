@@ -7,8 +7,38 @@ import type { Locator, Page } from '@playwright/test';
 
 type BuildPanel = 'tools' | 'facilities' | 'inbox';
 
+/** 経営ボードが開いていれば閉じる（建設パネル・地図・設定メニューはボードの下に隠れるため） */
+export async function closeBoardIfOpen(page: Page): Promise<void> {
+  const close = page.getByTestId('board-close');
+  if (await close.isVisible().catch(() => false)) await close.click();
+}
+
+/** 経営の各画面（tab-* と同じキー）。UX-7 で建設画面の下部タブは経営ボードへの近道になった */
+const BOARD_SECTION: Record<string, string> = {
+  plan: 'plan', contracts: 'contracts', airlines: 'airlines', capacity: 'capacity', finance: 'finance',
+  access: 'access', expansion: 'expansion', catalog: 'catalog', scenarios: 'scenarios', project: 'project',
+};
+
+/**
+ * 従来の `tab-<k>` を開く。運航中は運航ナビ（ボード）、建設中は下部の「経営への近道」から経営ボードの該当区分を開く。
+ * すでに経営ボードが開いていれば、ボードのメニュー（management-<k>）で切り替える（利用者と同じ操作）。
+ */
+export async function openTab(page: Page, k: string): Promise<void> {
+  if (await page.getByTestId('ops-nav').isVisible().catch(() => false)) {
+    await page.getByTestId(`tab-${k}`).click();
+    return;
+  }
+  const section = BOARD_SECTION[k];
+  if (section && (await page.getByTestId(`management-${section}`).isVisible().catch(() => false))) {
+    await page.getByTestId(`management-${section}`).click();
+    return;
+  }
+  await page.getByTestId(`tab-${k}`).click();
+}
+
 /** 建設パネルのタブ（ツール／施設一覧／要対応）を開く。運航中や別画面でタブが無いときは何もしない */
 export async function openBuildPanel(page: Page, panel: BuildPanel): Promise<void> {
+  await closeBoardIfOpen(page);
   const tab = page.getByTestId(`build-panel-${panel}`);
   if (!(await tab.isVisible().catch(() => false))) return;
   if ((await tab.getAttribute('aria-pressed')) !== 'true') await tab.click();
@@ -61,6 +91,7 @@ export async function inboxEl(page: Page, testId: string): Promise<Locator> {
 
 /** 空港の詳細設定（磁気偏角・判定ルール等）のダイアログを開く。すでに開いていれば何もしない */
 export async function openAirportSettings(page: Page): Promise<void> {
+  await closeBoardIfOpen(page);
   if (await page.getByTestId('airport-settings-modal').isVisible().catch(() => false)) return;
   await page.getByTestId('airport-settings-open').click();
 }

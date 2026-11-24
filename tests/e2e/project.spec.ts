@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
-import { openProjectPanel } from './ui';
+import { openProjectPanel, openTab } from './ui';
 
 const uncaught = new WeakMap<Page, string[]>();
 
@@ -45,7 +45,7 @@ test('運航中に保存すると運航状態を含み、開くと同じ時刻�
   await page.keyboard.press('Space');
   const clock = await page.getByTestId('sim-clock').textContent();
   const arrivals = await page.getByTestId('stat-arrivals').textContent();
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-name').fill('運航中');
   await page.getByTestId('project-save').click();
   await expect(page.getByTestId('project-slot-運航中')).toContainText('あり');
@@ -66,7 +66,7 @@ test('運航中に保存すると運航状態を含み、開くと同じ時刻�
 test('壊れたファイル・参照切れのファイルは読み込まず、開いているプロジェクトを変えない', async ({ page }) => {
   await settingsAction(page, 'new-empty');
   await expect(status(page)).toContainText('滑走路 0');
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-file').setInputFiles({ name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from('{ not json') });
   await expect(page.getByTestId('project-errors')).toContainText('JSON');
   await expect(status(page)).toContainText('滑走路 0');
@@ -80,7 +80,7 @@ test('壊れたファイル・参照切れのファイルは読み込まず、�
 });
 
 test('JSON に書き出したファイルを読み込むと同じ空港に戻る', async ({ page }) => {
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('project-export').click()]);
   const path = await download.path();
   expect(download.suggestedFilename()).toMatch(/\.skyport\.json$/);

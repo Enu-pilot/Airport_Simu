@@ -99,7 +99,13 @@
 docs/06（§4.1.1・画面構成）、docs/37（経営ナビ）、docs/42 §3.11（PO 承認後に行を追加）。
 
 ## 8. 進捗・計画との差分
-- 2026-11-23: 改善案を作成。U1 の「枠外へのはみ出し」だけは不具合として性能改善 第8弾の作業で修正済み（`.bottom`・`.tab-body` にスクロール枠）。他は未着手（PO 判断待ち）。
+- 2026-11-23: 改善案を作成。U1 の「枠外へのはみ出し」だけは不具合として性能改善 第8弾の作業で修正済み（`.bottom`・`.tab-body` にスクロール枠）。
+- 2026-11-24: PO 指示「全て導入」で UX-1〜8 を実装。計画との差分:
+  - UX-3 のクイックバーは「地図の上端」ではなくツールボックスの上端に置いた（地図の操作領域を狭めないため。ツール検索と並べて 1 か所にまとめた）。
+  - UX-7 は「下部タブを残して畳む」代替案ではなく廃止を採用。ただし従来の `tab-*` を 1 行の「経営への近道」として残し、押すと経営ボードの該当区分を全画面で開く（内容の正本は経営ボードだけ）。
+  - UX-8 の「運航左列の折りたたみ」は、既存のカード（本日の KPI 等）が既に折りたたみ式だったため、新たに折りたたむのは使用頻度の低い「ターミナル内部の表示」（既定で閉じる）だけにした。速度・運航状況・便の追加・表示モードは常に見える。
 
 ## 9. 完了記録
-（未着手）
+- 実装: `src/editor/shortcuts.ts`（キー追加・逆引き・クイックバー番号）、`src/ui/ShortcutHelp.tsx`（新規）、`src/ui/quickTools.ts`（新規）、`src/ui/Toolbox.tsx`（クイックバー・検索・キー表示）、`src/ui/App.tsx`（? / / / Shift+数字、下部の近道）、`src/ui/shell/TopBar.tsx`（? ボタン・⋯）、`src/ui/operate/OpsNav.tsx`・`src/i18n/ja.ts`（運航ナビ 5 群）、`src/ui/ManagementPage.tsx`・`ManagementPanels.tsx`（4 群・夜間整備・工事の区分）、`src/ui/CapacityPanel.tsx`（分野タブ・上位 5 件）、`src/ui/OpsPanels.tsx`（折りたたみ）、`src/ui/styles.css`。
+- テスト: 単体 `tests/unit/uxShortcuts2026.test.ts`（新規）・`keyboardShortcuts.test.ts`（キー追加の期待値を追加）、E2E `tests/e2e/uxImprovements.spec.ts`（新規 8 件）。既存 E2E は UX-6/7/8 の画面移動に合わせて操作手順を更新（`tests/e2e/ui.ts` の `openTab`・`closeBoardIfOpen`）。
+- 互換性: UI のみ。保存形式・SIM_MODEL_VERSION・シミュレーション結果は不変。クイックバー・折りたたみの状態はブラウザの localStorage（プロジェクトには入れない）。

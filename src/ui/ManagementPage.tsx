@@ -5,7 +5,7 @@ import { CapacityPanel } from './CapacityPanel';
 import { CatalogPanel } from './CatalogPanel';
 import { HubPanel } from './HubPanel';
 import { IssuesPanel } from './IssuesPanel';
-import { AirlinesPanel, ContractsPanel, FinancePanel, PlanPanel } from './ManagementPanels';
+import { AirlinesPanel, ContractsPanel, FinancePanel, PlanPanel, WorkOrdersPanel } from './ManagementPanels';
 import { ProjectPanel } from './ProjectPanel';
 import { AirlineScoreTable } from './operate/cards/AirlineScoreTable';
 import { GoalsPanel } from './operate/cards/GoalsCard';
@@ -23,13 +23,26 @@ const sections = [
   ['finance', '収支・財務'],
   ['analysis', '分析・履歴'],
   ['expansion', '拡張計画'],
+  ['workorders', '夜間整備・工事'],
   ['airport', '空港チェック'],
   ['catalog', '機種カタログ'],
   ['scenarios', 'シナリオ'],
   ['project', 'プロジェクト・保存'],
   ['goals', '目標'],
 ] as const;
+
+/**
+ * 経営メニューの分類（UX-6、2026-11-24）。区分を 4 群に分け、見出し付きで並べる（data-testid は従来どおり management-<id>）。
+ * 夜間整備・工事（Work Order）は「需要・運航計画」から「施設と能力」へ移した。
+ */
+const SECTION_GROUPS: readonly (readonly [string, readonly ManagementSection[]])[] = [
+  ['需要と計画', ['plan', 'contracts', 'airlines', 'hub']],
+  ['施設と能力', ['capacity', 'airport', 'expansion', 'workorders']],
+  ['お金', ['finance', 'access']],
+  ['記録と管理', ['analysis', 'goals', 'scenarios', 'catalog', 'project']],
+];
 export type ManagementSection = (typeof sections)[number][0];
+const labelOf = (id: ManagementSection): string => sections.find(([k]) => k === id)![1];
 
 /**
  * 経営ボード（UIデザイン更新 第3段階）: 経営の各セクションを、地図ワークスペースの上に
@@ -61,7 +74,12 @@ export function ManagementPage({ onOpenConstruction, section, onSectionChange, o
       </div>
     </header>
     <nav className="management-sections" aria-label="経営メニュー">
-      {sections.map(([id, label]) => <button key={id} className={section === id ? 'active' : ''} onClick={() => onSectionChange(id)} data-testid={`management-${id}`}>{label}</button>)}
+      {SECTION_GROUPS.map(([title, ids]) => (
+        <span key={title} className="management-section-group" data-testid={`management-group-${title}`}>
+          <span className="management-section-group-label">{title}</span>
+          {ids.map((id) => <button key={id} className={section === id ? 'active' : ''} onClick={() => onSectionChange(id)} data-testid={`management-${id}`}>{labelOf(id)}</button>)}
+        </span>
+      ))}
     </nav>
     <div
       className="management-content"
@@ -77,6 +95,7 @@ export function ManagementPage({ onOpenConstruction, section, onSectionChange, o
         section === 'finance' ? <FinancePanel /> :
         section === 'analysis' ? <div className="management-stack"><AnalyticsPanel /><JournalPanel /><button onClick={() => dayFlowActions.openHistory(true)}>日次振り返りの履歴を開く</button></div> :
         section === 'expansion' ? <ExpansionPanel /> :
+        section === 'workorders' ? <div className="management-stack"><WorkOrdersPanel /></div> :
         section === 'airport' ? <IssuesPanel /> :
         section === 'catalog' ? <CatalogPanel /> :
         section === 'scenarios' ? <ScenarioPanel /> :

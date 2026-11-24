@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
+import { openTab } from './ui';
 
 /** 12B-1: 運航モードの画面（常設カード・案内板風の運航表・アラート・大きなオーバーレイ・航空会社の評価） */
 
@@ -152,7 +153,7 @@ test('あまり使わないパネルは大きなオーバーレイで開き、�
   await expect(page.getByTestId('stop-ops')).toBeVisible();
   await page.getByTestId('overlay-close').click();
   await expect(page.getByTestId('detail-overlay')).toHaveCount(0);
-  await page.getByTestId('tab-finance').click();
+  await openTab(page, 'finance');
   await expect(page.getByTestId('finance-panel')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('detail-overlay')).toHaveCount(0);
@@ -176,9 +177,9 @@ test('航空会社の評価カードが点数と「足りないもの」を表�
   await expect(panel.getByTestId('airline-score-RJ-fees')).toContainText('良好');
   await expect(panel.getByTestId('airline-lacking-RJ')).toContainText('足りないもの');
   await page.getByTestId('overlay-close').click();
-  await page.getByTestId('tab-finance').click();
+  await openTab(page, 'finance');
   await page.getByTestId('overlay-close').click();
-  await page.getByTestId('tab-plan').click();
+  await openTab(page, 'plan');
   await page.getByTestId('fee-terminal').evaluate((el: HTMLInputElement) => {
     // React の制御コンポーネントのスライダーを 2.0 にする
     const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -186,7 +187,7 @@ test('航空会社の評価カードが点数と「足りないもの」を表�
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.getByTestId('overlay-close').click();
-  await page.getByTestId('tab-airlines').click();
+  await openTab(page, 'airlines');
   await expect(page.getByTestId('airline-score-RJ-fees')).toContainText(/注意|不足/);
   await expect(page.getByTestId('airline-lacking-RJ')).toContainText('料金');
 });

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { settingsAction } from './settings';
-import { tool } from './ui';
+import { openTab, tool } from './ui';
 
 // 初期カメラ（src/editor/store.ts）: 左上 (10, 20)、9px/タイル。矢印キー1回でカメラが4タイル動く
 const ZOOM = 9;
@@ -35,7 +35,7 @@ test.afterEach(async ({ page }) => {
 });
 
 test('アクセスの画面で手段の状況を確認し、タクシー乗り場を置くとタクシーが使えるようになる', async ({ page }) => {
-  await page.getByTestId('tab-access').click();
+  await openTab(page, 'access');
   const panel = page.getByTestId('access-panel');
   await expect(panel.getByTestId('mode-car')).toContainText('○');
   await expect(panel.getByTestId('mode-taxi')).toContainText('施設がない');
@@ -52,7 +52,7 @@ test('土地を購入すると敷地が広がり、拡張計画に購入面積�
   const cam = { x: -2, y: 20 };
   await (await tool(page, 'land')).click();
   await dragTiles(page, cam, [2, 60], [5, 64]);
-  await page.getByTestId('tab-expansion').click();
+  await openTab(page, 'expansion');
   await expect(page.getByTestId('expansion-panel')).toContainText('購入 20');
 });
 
@@ -63,7 +63,7 @@ test('キャリアで施設を一時閉鎖すると拡張計画に工事とし�
   await expect(page.getByTestId('prop-title')).toHaveText('スポット 1');
   await page.getByTestId('prop-close').click();
   await expect(page.getByTestId('project-info')).toContainText('一時閉鎖');
-  await page.getByTestId('tab-expansion').click();
+  await openTab(page, 'expansion');
   await expect(page.getByTestId('projects')).toContainText('スポット 1');
   await expect(page.getByTestId('impact')).toContainText('2か所');
   await page.keyboard.press('Escape');

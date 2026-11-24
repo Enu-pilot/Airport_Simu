@@ -45,9 +45,9 @@ test.afterEach(async ({ page }) => {
 
 const status = (page: Page) => page.getByTestId('status');
 
-test('Work Order: 経営画面から作成でき、一覧に載り、運航中は読み取り専用になる', async ({ page }) => {
+test('Work Order: 経営画面（施設と能力 → 夜間整備・工事、UX-6）から作成でき、一覧に載り、運航中は読み取り専用になる', async ({ page }) => {
   await page.getByTestId('page-management').click();
-  await page.getByTestId('management-plan').click();
+  await page.getByTestId('management-workorders').click();
   await expect(page.getByTestId('wo-asset-kind')).toBeVisible();
   await page.getByTestId('wo-engineers').fill('2');
   await page.getByTestId('wo-duration').fill('60');
@@ -57,7 +57,7 @@ test('Work Order: 経営画面から作成でき、一覧に載り、運航中�
   await page.getByTestId('board-close').click();
   await page.getByTestId('page-operations').click();
   await page.getByTestId('page-management').click();
-  await page.getByTestId('management-plan').click();
+  await page.getByTestId('management-workorders').click();
   await expect(page.getByTestId('wo-readonly')).toBeVisible();
   await expect(page.getByTestId('wo-list').locator('tbody tr')).toHaveCount(1);
 });

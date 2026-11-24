@@ -2,7 +2,9 @@ import { FACILITY_SIM_EFFECT, FACILITY_SPECS } from '../core/model/catalog';
 import type { BuildState, FacilityKind, RoadClass, SizeClass, TaxiwayWidthClass } from '../core/model/types';
 import { BUILD_STATES } from '../core/model/types';
 import { actions, useEditor, type ToolId } from '../editor/store';
-import { digitKeyForLevel } from '../editor/shortcuts';
+import { digitKeyForLevel, keyForTool } from '../editor/shortcuts';
+import { useState } from 'react';
+import { quickTools, useQuickSlots } from './quickTools';
 import { facilityKindOf } from '../editor/tools';
 import { useLayout } from '../editor/store';
 import { RunwayToolOptions } from './RunwayPanels';
@@ -112,6 +114,16 @@ const TERMINAL_FLOOR_PRESETS: Record<string, readonly [number, number]> = {
 const terminalFloorPreset = (min: number, max: number): string =>
   Object.entries(TERMINAL_FLOOR_PRESETS).find(([, [a, b]]) => a === min && b === max)?.[0] ?? 'custom';
 
+/** ツールの表示名（ショートカット一覧・クイックバー用）。未知のツールは ID のまま */
+export function toolLabel(tool: ToolId): string {
+  return ALL_TOOLS.find((t) => t.id === tool)?.label ?? tool;
+}
+
+/** 全ツールの定義（ツール検索用。表示順はツールボックスと同じ） */
+export function allToolDefs(): readonly { id: ToolId; label: string; hint: string; group: string }[] {
+  return GROUPS.flatMap((g) => g.tools.map((t) => ({ id: t.id, label: t.label, hint: t.hint, group: g.title })));
+}
+
 export function toolHint(tool: ToolId): string {
   return ALL_TOOLS.find((t) => t.id === tool)?.hint ?? '';
 }
@@ -126,23 +138,35 @@ export function Toolbox() {
   const mapLevel = useEditor((s) => s.mapLevel);
   const layout = useLayout();
   const rotatable = tool === 'stand' || (kind !== null && !FACILITY_SPECS[kind].dragPlace);
+  const [query, setQuery] = useState('');
+  const slots = useQuickSlots();
 
-  const renderToolButton = (t: ToolDef) => {
+  const lockOf = (id: ToolId): string | null => {
     // フェーズ 4 のエリアは、格で解放されるまで選べない（理由を表示）
-    const areaKind = t.id.startsWith('area:') ? (t.id.slice(5) as TerminalAreaKind) : null;
+    const areaKind = id.startsWith('area:') ? (id.slice(5) as TerminalAreaKind) : null;
     const feature = areaKind ? featureForAreaKind(areaKind) : null;
-    const lock = feature && company ? lockLabel(company, feature) : null;
+    return feature && company ? lockLabel(company, feature) : null;
+  };
+  const renderToolButton = (t: ToolDef) => {
+    const lock = lockOf(t.id);
+    const key = keyForTool(t.id);
     return (
       <button
         key={t.id}
         className={tool === t.id ? 'tool active' : 'tool'}
-        title={lock ?? t.hint}
+        title={lock ?? (key ? `${t.hint}（${key.toUpperCase()} キー）` : t.hint)}
         data-testid={`tool-${t.id}`}
         disabled={!!lock}
         onClick={() => actions.setTool(t.id)}
+        onContextMenu={(e) => {
+          // 右クリックでクイックバーへのピン留めを切り替える（UX-3）
+          e.preventDefault();
+          quickTools.togglePin(t.id);
+        }}
       >
         {t.label}
         {lock ? `（${lock}）` : ''}
+        {key && <kbd className="tool-key" data-testid={`tool-key-${t.id}`}>{key.toUpperCase()}</kbd>}
         {t.effectBadge && (
           <span className="badge sim-effect-badge" data-testid={`tool-effect-${t.id}`}>
             {t.effectBadge}
@@ -152,9 +176,71 @@ export function Toolbox() {
     );
   };
 
+  const q = query.trim();
+  const matches = q ? ALL_TOOLS.filter((t) => `${t.label} ${t.hint}`.includes(q) || t.id.includes(q)) : [];
+  const pickFirstMatch = () => {
+    const first = matches.find((t) => !lockOf(t.id));
+    if (!first) return;
+    actions.setTool(first.id);
+    setQuery('');
+    (document.activeElement as HTMLElement | null)?.blur();
+  };
+
   return (
     <div className="toolbox" data-testid="toolbox">
-      {GROUPS.map((g, gi) =>
+      {/* UX-3 クイックバー: ピン留め → 最近使ったツール。Shift+1〜6 でも呼び出せる。右クリックでピン留めの切替 */}
+      <div className="quick-bar" data-testid="quick-bar" aria-label="クイックバー（最近使ったツール・ピン留め）">
+        {slots.length === 0 ? (
+          <span className="muted small">最近使ったツールがここに並びます（右クリックでピン留め）</span>
+        ) : (
+          slots.map((id, i) => {
+            const lock = lockOf(id);
+            return (
+              <button
+                key={id}
+                className={`quick-slot${tool === id ? ' active' : ''}${quickTools.isPinned(id) ? ' pinned' : ''}`}
+                title={`${toolLabel(id)}（Shift+${i + 1}${quickTools.isPinned(id) ? '・ピン留め中' : ''}。右クリックでピン留めの切替）`}
+                disabled={!!lock}
+                onClick={() => actions.setTool(id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  quickTools.togglePin(id);
+                }}
+                data-testid={`quick-slot-${i + 1}`}
+              >
+                <span className="quick-slot-num">{i + 1}</span>
+                {quickTools.isPinned(id) ? '📌' : ''}
+                {toolLabel(id)}
+              </button>
+            );
+          })
+        )}
+      </div>
+      {/* UX-4 ツール検索（/ キーでフォーカス、Enter で先頭の候補を選ぶ） */}
+      <input
+        className="tool-search"
+        type="search"
+        placeholder="ツールを検索（/）"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') pickFirstMatch();
+          else if (e.key === 'Escape') {
+            setQuery('');
+            e.currentTarget.blur();
+          }
+        }}
+        data-testid="tool-search"
+      />
+      {q ? (
+        <div className="tool-group" data-testid="tool-search-results">
+          <div className="tool-group-title">
+            <span>検索結果</span>
+            <span className="tool-group-count">{matches.length}</span>
+          </div>
+          <div className="tool-buttons">{matches.length > 0 ? matches.map(renderToolButton) : <span className="muted small">該当するツールはありません</span>}</div>
+        </div>
+      ) : GROUPS.map((g, gi) =>
         gi === 0 ? (
           // 「編集」（選択・移動）だけはアコーディオンにせず常時表示する（PO 要望）
           <div key={g.title} className="tool-group">
@@ -168,7 +254,7 @@ export function Toolbox() {
           <details
             key={g.title}
             className="tool-group"
-            open={g.tools.some((t) => t.id === tool)}
+            open={g.tools.some((t) => t.id === tool || t.id === slots[0])}
           >
             <summary className="tool-group-title">
               <span>{g.title}</span>

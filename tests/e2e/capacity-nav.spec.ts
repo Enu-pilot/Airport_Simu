@@ -11,7 +11,11 @@ test('主要ページを切り替え、能力画面と設定メニューへ移�
   await expect(page.getByTestId('management-page')).toBeVisible();
   await page.getByTestId('management-capacity').click();
   await expect(page.getByTestId('capacity-panel')).toBeVisible();
+  // UX-8: 空港能力は分野タブで切り替える（概要が既定）
+  await expect(page.getByTestId('capacity-overall')).toBeVisible();
+  await page.getByTestId('capacity-view-facilities').click();
   await expect(page.getByTestId('capacity-facilities')).toBeVisible();
+  await page.getByTestId('capacity-view-preview').click();
   await expect(page.getByTestId('capacity-preview')).toBeVisible();
 
   const menu = page.getByTestId('settings-menu');

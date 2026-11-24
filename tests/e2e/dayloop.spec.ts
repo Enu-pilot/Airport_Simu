@@ -6,6 +6,7 @@ import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 import { createSimulation } from '../../src/core/sim/simulation';
 import { stepTicks } from '../../src/core/sim/dayloop';
 import { DAY_SEC } from '../../src/core/sim/rules';
+import { openTab } from './ui';
 
 /**
  * 1 日のループ（12B-2）: 0:00 の自動一時停止と振り返り、1 日スキップ、日ごとの履歴。
@@ -48,7 +49,7 @@ test.beforeAll(() => {
 });
 
 async function loadNearMidnight(page: Page) {
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-file').setInputFiles({ name: 'midnight.json', mimeType: 'application/json', buffer: Buffer.from(midnightProject ?? nearMidnight()) });
   await expect(page.getByTestId('ops-controls')).toBeVisible();
   await expect(page.getByTestId('sim-clock')).toContainText('1日目 23:59');
@@ -110,7 +111,7 @@ test('締めの直後に「建設モードに戻る」と、空の日報を作�
   await expect(page.getByTestId('page-operations')).toBeVisible();
   await expect(page.getByTestId('day-review')).toBeHidden();
   await expect(page.getByTestId('company-day')).toHaveText('2日目');
-  await page.getByTestId('tab-finance').click();
+  await openTab(page, 'finance');
   const reports = page.getByTestId('reports');
   await expect(reports).toContainText('1日目');
   await expect(reports).not.toContainText('（途中）');
@@ -145,7 +146,7 @@ test('途中で建設モードに戻る（stop-ops）は従来どおりその日
   await expect(page.getByTestId('stat-arrivals')).not.toHaveText('0', { timeout: 45_000 });
   await page.getByTestId('stop-ops').click();
   await expect(page.getByTestId('toast')).toContainText('1日目を締めました');
-  await page.getByTestId('tab-finance').click();
+  await openTab(page, 'finance');
   await expect(page.getByTestId('reports')).toContainText('1日目（途中）');
 });
 
@@ -206,7 +207,7 @@ test('日ごとの履歴: 締めるたびに「その日の朝」が残り、一
   await expect(page.getByTestId('company-day')).toHaveText('3日目');
 
   // 履歴（プロジェクトのパネルにも同じ一覧）から 2 日目の朝に戻す
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await expect(page.getByTestId('project-history').getByTestId('history-row-2')).toBeVisible();
   await page.getByTestId('open-history').click();
   await expect(page.getByTestId('history-overlay').getByTestId('history-row-1')).toContainText('2日目の朝');
@@ -239,6 +240,6 @@ test('日ごとの履歴: 締めるたびに「その日の朝」が残り、一
   await expect(page.getByTestId('company-day')).toHaveText('2日目');
   await expect(page.getByTestId('history-overlay')).toBeHidden();
   await expect(page.getByTestId('toast')).toContainText('2日目の朝に戻しました');
-  await page.getByTestId('tab-finance').click();
+  await openTab(page, 'finance');
   await expect(page.getByTestId('reports').locator('tbody tr')).toHaveCount(1);
 });

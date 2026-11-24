@@ -118,9 +118,14 @@ describe('S/M/L/F → サイズ段階', () => {
 });
 
 describe('切り替え系の対応表と非競合', () => {
-  it('ツール切替: T=誘導路・P=スポットのみ', () => {
+  it('ツール切替: T=誘導路・P=スポット、UX-2（2026-11-24 PO 指示）で W=滑走路・O=エプロン・Q=ゲート・H=ターミナル・U=道路を追加', () => {
     expect(toolForKey('t')).toBe('taxiway');
     expect(toolForKey('p')).toBe('stand');
+    expect(toolForKey('w')).toBe('runway');
+    expect(toolForKey('o')).toBe('facility:apron');
+    expect(toolForKey('q')).toBe('facility:gate');
+    expect(toolForKey('h')).toBe('facility:terminal');
+    expect(toolForKey('u')).toBe('road');
     expect(toolForKey('v')).toBeNull(); // V（選択）は既存の割当て
     expect(toolForKey('r')).toBeNull(); // R（回転）は既存の割当て
   });

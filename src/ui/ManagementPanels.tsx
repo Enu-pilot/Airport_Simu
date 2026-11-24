@@ -508,7 +508,7 @@ export function PlanPanel() {
         <CityEventPlanner company={c} />
         {c.city && <NightOpsSettings city={c.city} readOnly={mode === 'operate'} onChange={(next) => { const { nightOps: _n, ...rest } = c.city!; void _n; setCompanyCity(next ? { ...rest, nightOps: next } : rest); }} />}
         {c.city && <SoundproofPanel company={c} readOnly={mode === 'operate'} />}
-        <WorkOrdersPanel />
+        {/* 夜間整備・工事（Work Order）は経営メニュー「施設と能力 → 夜間整備・工事」へ移した（UX-6） */}
         <RouteTrafficSection c={c} accessFactor={accessFactor} ctx={ctx} routeCapabilities={routeCapabilities} />
 
 

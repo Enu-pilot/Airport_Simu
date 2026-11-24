@@ -89,11 +89,50 @@ export function sizeOptionForTool(tool: ToolId, sizeKey: SizeKey): SizeOptionTar
   }
 }
 
-/** ツール切替キー（建設モード）。頭文字が既存キーと衝突しない主要ツールだけに割り当てる */
+/**
+ * ツール切替キー（建設モード）。既存キー（S/M/L/F サイズ、G/I/N/E/B/C レイヤ、A 全レイヤ、R 回転、V 選択、数字 階）と衝突しない文字に割り当てる。
+ * 2026-11-24 UX-2 で W/O/Q/H/U を追加（docs/06 §4.1.1）。
+ */
 export const TOOL_FOR_KEY: Readonly<Record<string, ToolId>> = {
   t: 'taxiway', // Taxiway
   p: 'stand', // Parking stand
+  w: 'runway', // runWay（R は回転で使用中）
+  o: 'facility:apron', // aprOn
+  q: 'facility:gate', // Q（G はグリッド表示で使用中）
+  h: 'facility:terminal', // Hall / terminal building
+  u: 'road', // roUte / 道路・交通網
 };
+
+/** ツールに割り当てたキー（ボタンのキー表示用）。割り当てのないツールは null */
+export function keyForTool(tool: ToolId): string | null {
+  if (tool === 'select') return 'v';
+  return Object.entries(TOOL_FOR_KEY).find(([, t]) => t === tool)?.[0] ?? null;
+}
+
+/** クイックバー（最近使ったツール・ピン留め）の呼び出し: Shift + 1〜QUICK_BAR_SIZE（UX-3） */
+export const QUICK_BAR_SIZE = 6;
+/** KeyboardEvent.code（Digit1〜Digit9）からクイックバーの番号（0 始まり）。対象外は null */
+export function quickSlotForCode(code: string): number | null {
+  const m = /^Digit([1-9])$/.exec(code);
+  if (!m) return null;
+  const n = Number(m[1]) - 1;
+  return n < QUICK_BAR_SIZE ? n : null;
+}
+
+/** ショートカット一覧（UX-1。`?` で開く）の 1 行 */
+export interface ShortcutRow {
+  keys: string;
+  label: string;
+}
+
+/** 運航モードの数字キー（1〜5 = 時間倍率）。label は時間倍率の表示名 */
+export const OPERATE_SPEED_KEYS: readonly ShortcutRow[] = [
+  { keys: '1', label: '実時間' },
+  { keys: '2', label: '×15' },
+  { keys: '3', label: '×60' },
+  { keys: '4', label: '×240' },
+  { keys: '5', label: '×600' },
+];
 
 /** キーに対応するツール。割り当てのないキーは null */
 export function toolForKey(key: string): ToolId | null {

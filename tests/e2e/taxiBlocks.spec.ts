@@ -6,7 +6,7 @@ import { createSimulation } from '../../src/core/sim/simulation';
 import { stepTicks } from '../../src/core/sim/dayloop';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 import { must } from '../unit/helpers';
-import { openBuildPanel, overlayToggle, tool } from './ui';
+import { openBuildPanel, openTab, overlayToggle, tool } from './ui';
 
 /** フェーズ 2（2-07・2-06 の画面）: 区間ごとに進む地上走行の設定・誘導路の上書き・区間の表示 */
 const uncaught = new WeakMap<Page, string[]>();
@@ -40,7 +40,7 @@ async function selectFirstTaxiway(page: Page) {
 }
 
 async function loadProject(page: Page, json: string) {
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-file').setInputFiles({ name: 'p.json', mimeType: 'application/json', buffer: Buffer.from(json) });
 }
 

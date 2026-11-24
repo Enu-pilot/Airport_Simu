@@ -4,6 +4,7 @@ import { defaultCity } from '../../src/core/economy/city';
 import { buildProject, serializeProject } from '../../src/core/io/project';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 import { settingsAction } from './settings';
+import { openTab } from './ui';
 
 /** フェーズ 3（3-07 / 3-08 の画面）: 路線需要モデルの設定・契約の座席と見込み搭乗率・路線の需要と供給 */
 const uncaught = new WeakMap<Page, string[]>();
@@ -25,7 +26,7 @@ test.afterEach(async ({ page }) => {
 });
 
 async function openPlan(page: Page) {
-  await page.getByTestId('tab-plan').click();
+  await openTab(page, 'plan');
   await expect(page.getByTestId('plan-panel')).toBeVisible();
 }
 
@@ -39,7 +40,7 @@ test('新規ゲーム: 路線需要モデルを有効にすると、契約に座
   await expect(page.getByTestId('traffic-routes')).toBeVisible();
   await expect(page.getByTestId('traffic-route-KTA')).toBeVisible();
   // 契約の座席・見込み搭乗率は「契約」タブの契約中の便に出る
-  await page.getByTestId('tab-contracts').click();
+  await openTab(page, 'contracts');
   await expect(page.getByTestId('contracts-panel')).toBeVisible();
   const seats = page.locator('[data-testid^="contract-seats-"]').first();
   await expect(seats).toBeVisible();
@@ -56,15 +57,15 @@ test('market のプロジェクト（保存形式 5）: 新規の就航先（名
   });
   const project = buildProject({ name: 'p3', savedAt: '2026-11-18T00:00:00.000Z', layout: createSampleAirport(), company, pin: null, scenarios: [], sim: null });
   expect(project.formatVersion).toBe(5);
-  await page.getByTestId('tab-project').click();
+  await openTab(page, 'project');
   await page.getByTestId('project-file').setInputFiles({ name: 'p.json', mimeType: 'application/json', buffer: Buffer.from(serializeProject(project)) });
-  await page.getByTestId('tab-contracts').click();
+  await openTab(page, 'contracts');
   await expect(page.getByTestId('contracts-panel')).toBeVisible();
   await expect(page.getByTestId(`contract-${k.id}`)).toContainText('名古屋');
   await expect(page.getByTestId(`contract-seats-${k.id}`)).toHaveText('1160'); // 290 席 × 2 便 × 2（往復）。B787-9 の既定席数は PR #52 のカタログ更新で 266 → 290
   await expect(page.getByTestId(`contract-lf-${k.id}`)).toContainText('%');
   // 航空会社の一覧には market 専用の会社も出る
-  await page.getByTestId('tab-airlines').click();
+  await openTab(page, 'airlines');
   await expect(page.getByTestId('airlines-panel')).toContainText('ツバメエア');
 });
 
