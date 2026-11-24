@@ -30,7 +30,7 @@
 | 保存形式 | `PROJECT_FORMAT_VERSION = 1` 〜 `PROJECT_FORMAT_VERSION_9 = 9`（読込上限 `PROJECT_FORMAT_MAX_READABLE = 9`） | 新しい任意データを含むファイルだけ版を上げ、旧アプリが誤読しないようにする |
 | 機種カタログ | `CATALOG_VERSION`（現在 2026.11.1） | 収録機種・値を変えたとき |
 | 3D アセット | `ASSET_VERSION`（現在 2026.11.0） | 3D の形を変えたとき（表示だけに影響） |
-| シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.11` | 運航の計算を変えたとき |
+| シミュレーション | `SIM_MODEL_VERSION = skyport-sim-10.15` | 運航の計算を変えたとき |
 
 ### 版の方針（Phase 11 で明文化。詳細は [22](22_geometry_architecture.md) §7）
 

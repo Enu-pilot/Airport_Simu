@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.14",
+ "simModelVersion": "skyport-sim-10.15",
  "seconds": 86400,
  "now": 108000,
  "stateSha256": "39c549a0fab8f932467ac5748b497146ff68300abc3d0a642746272912abb326",
