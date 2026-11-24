@@ -1711,7 +1711,7 @@ function stepGroup(sim: Simulation, g: PaxGroup, occupancy: Map<string, number>)
             g.reason = 'unreachable';
             // 5-13 T5: 入口の列挙型クエリは分類時に再現できないため、ここで完成待ちを判定する
             const future = sim.ctx.terminalFuture;
-            if (future && allEntrances.some((id) => !!findPaxRoute(future, { complexOf: complexKeyOf(sim), from: id, goals, uncleared: uncleared(g), stepFree: g.stepFree }))) {
+            if (future && allEntrances.some((id) => !!findPaxRoute(future, { complexOf: complexKeyOfLayout(sim.ctx.layout, { includeUnderConstruction: true }), from: id, goals, uncleared: uncleared(g), stepFree: g.stepFree }))) {
               markRoutePending(state, g.id);
             }
           }
@@ -1843,7 +1843,9 @@ function serviceTerminalIds(sim: Simulation, terminalId: string | null): string[
 function markIfRoutePending(sim: Simulation, g: PaxGroup, from: string, goals: Map<string, number>, q: { uncleared?: boolean; stepFree?: boolean }): void {
   const future = sim.ctx.terminalFuture;
   if (!future || goals.size === 0) return;
-  if (findPaxRoute(future, { complexOf: complexKeyOf(sim), from, goals, uncleared: q.uncleared, stepFree: q.stepFree })) markRoutePending(sim.state, g.id);
+  // 将来モデル（建設中リンクの完成後）では、建物群も建設中リンクを含めて作る（完成すればつながる建物は同じ建物群になる。R-07）
+  const futureComplexOf = complexKeyOfLayout(sim.ctx.layout, { includeUnderConstruction: true });
+  if (findPaxRoute(future, { complexOf: futureComplexOf, from, goals, uncleared: q.uncleared, stepFree: q.stepFree })) markRoutePending(sim.state, g.id);
 }
 
 function planStep(sim: Simulation, g: PaxGroup): void {

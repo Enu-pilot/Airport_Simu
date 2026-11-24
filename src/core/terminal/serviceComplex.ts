@@ -104,12 +104,15 @@ export function serviceComplexOf(
  * 運用中リンク・隣接だけで作る（建設中は含めない）。レイアウト単位でキャッシュ（保存対象外の派生データ）
  */
 const complexKeyCache = new WeakMap<AirportLayout, Map<string, string>>();
-export function complexKeyOfLayout(layout: AirportLayout): ReadonlyMap<string, string> {
-  let m = complexKeyCache.get(layout);
+const complexKeyFutureCache = new WeakMap<AirportLayout, Map<string, string>>();
+export function complexKeyOfLayout(layout: AirportLayout, opts: ServiceComplexOptions = {}): ReadonlyMap<string, string> {
+  // 建設中リンクを含める版（将来モデルでの「完成待ち」判定用）は別にキャッシュする
+  const cache = opts.includeUnderConstruction ? complexKeyFutureCache : complexKeyCache;
+  let m = cache.get(layout);
   if (!m) {
     m = new Map();
-    for (const [t, members] of terminalServiceComplexes(layout)) m.set(t, members[0] ?? t);
-    complexKeyCache.set(layout, m);
+    for (const [t, members] of terminalServiceComplexes(layout, opts)) m.set(t, members[0] ?? t);
+    cache.set(layout, m);
   }
   return m;
 }
