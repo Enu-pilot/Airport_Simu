@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.13",
+ "simModelVersion": "skyport-sim-10.14",
  "runs": {
   "day0-normal": {
    "day": 0,
@@ -8,12 +8,12 @@
     "movements": 38,
     "paxDeparted": 2197,
     "paxArrived": 2204,
-    "otp": 1,
-    "avgDelayMin": 0.5,
-    "actualAvgDelayMin": 2.7,
+    "otp": 0.9473684210526315,
+    "avgDelayMin": 1.9,
+    "actualAvgDelayMin": 4.1,
     "runwayUtil": 0.07037037037037037,
-    "gateUtil": 0.1595610425240055,
-    "facilityUtil": 0.10173611111111111,
+    "gateUtil": 0.1649931412894376,
+    "facilityUtil": 0.10172916666666666,
     "avgWaitMin": 3.7,
     "avgWalkMin": 9.8,
     "avgGroundMin": 45,
@@ -22,24 +22,24 @@
     "leftBags": 0,
     "diverted": 0,
     "cancelled": 0,
-    "paxSatisfaction": 92.1,
+    "paxSatisfaction": 90.7,
     "paxSatisfactionDetail": {
      "waitPenalty": 7.4,
      "walkPenalty": 0,
-     "delayPenalty": 0.5,
+     "delayPenalty": 1.9,
      "missedPenalty": 0,
      "bagsPenalty": 0,
      "avgWaitMin": 3.7,
      "avgWalkMin": 9.8,
-     "avgDelayMin": 0.5,
+     "avgDelayMin": 1.9,
      "missedRate": 0,
      "leftRate": 0
     },
     "airlineSatisfaction": 61.1,
-    "rating": 60.4,
+    "rating": 59.9,
     "modePax": {
-     "car": 1806,
-     "dropoff": 2589,
+     "car": 1799,
+     "dropoff": 2596,
      "taxi": 0,
      "bus": 0,
      "rail": 0,
@@ -102,7 +102,7 @@
     "RJ": {
      "ema": {
       "otp": 72,
-      "turnaround": 64.2,
+      "turnaround": 63.9,
       "stand": 72,
       "fees": 72,
       "slots": 72,
@@ -228,7 +228,7 @@
     },
     "streaks": {
      "otp85x3": 1,
-     "otp95x7": 1,
+     "otp95x7": 0,
      "tier": 1
     },
     "tier": 0,
@@ -249,10 +249,14 @@
       "amount": 0
      }
     ],
-    "boostUntil": 31
+    "boostUntil": 31,
+    "bestStreaks": {
+     "otp85x3": 1,
+     "tier": 1
+    }
    },
-   "cash": 1001004563,
-   "rating": 60.4,
+   "cash": 1001004163,
+   "rating": 59.9,
    "weatherCancels": 0
   },
   "bad-winter-hard": {
@@ -503,7 +507,11 @@
       "amount": 0
      }
     ],
-    "boostUntil": 139
+    "boostUntil": 139,
+    "bestStreaks": {
+     "otp85x3": 1,
+     "tier": 1
+    }
    },
    "cash": 1000983744,
    "rating": 59.6,

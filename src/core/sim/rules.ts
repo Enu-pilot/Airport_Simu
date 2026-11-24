@@ -64,6 +64,26 @@ export const DEPARTURE_STARVATION_SEC = 10 * 60;
 /** 経路探索: 滑走路を横断する経路に加えるコスト（秒） */
 export const CROSSING_PENALTY_SEC = 120;
 
+// ---------------------------------------------------------------- 経路探索の分散化（2026-TAXI）
+
+/**
+ * Z1（決定的タイブレーク分散）: 最短コストからこの割合・絶対秒の小さい方（δ）を超える迂回は選ばない。
+ * δ の内側では、機体 ID ハッシュ由来の決定的ジッタで並行路などを機体ごとに分散させる（sim の RNG は消費しない）
+ */
+export const TAXI_JITTER_RATIO = 0.1;
+export const TAXI_JITTER_MAX_SEC = 60;
+/**
+ * Y（混雑コスト）: 確定経路にそのエッジを含む走行中機体 1 機あたりの加算（秒）と、1 エッジあたりの上限（秒）。
+ * 上限は横断ペナルティ（120 秒）未満に抑え、混雑回避のためだけに滑走路を横断する経路が生まれないようにする
+ */
+export const TAXI_CONGESTION_PER_AIRCRAFT_SEC = 15;
+export const TAXI_CONGESTION_CAP_SEC = 60;
+/**
+ * X2（入口コストの区分別重み）: 離陸入口の目標コスト = 滑走路端からの距離（m）÷ この値（秒）。
+ * 区分が大きいほど値が小さい（= 端寄り＝残りの長い入口を強く優先する）。F はコード F 機
+ */
+export const ENTRY_GOAL_DIST_DIVISOR: Record<SizeClass | 'F', number> = { S: 60, M: 30, L: 12, F: 8 };
+
 /** 地上で動いている2機の最小距離（m）。これ未満は競合として記録する */
 export const MIN_GROUND_SEPARATION_M = 20;
 
