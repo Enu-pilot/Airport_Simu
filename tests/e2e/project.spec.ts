@@ -86,6 +86,7 @@ test('JSON に書き出したファイルを読み込むと同じ空港に戻る
   expect(download.suggestedFilename()).toMatch(/\.skyport\.json$/);
   await settingsAction(page, 'new-empty');
   await expect(status(page)).toContainText('滑走路 0');
+  await openProjectPanel(page); // 設定メニューの操作で経営ボードを閉じたため開き直す（UX-7）
   await page.getByTestId('project-file').setInputFiles(path!);
   await expect(page.getByTestId('project-report')).toContainText('読み込みました');
   await expect(status(page)).toContainText('滑走路 1');

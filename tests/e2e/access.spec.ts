@@ -43,6 +43,8 @@ test('アクセスの画面で手段の状況を確認し、タクシー乗り�
   // サンプル空港の一般道路（y=57）沿い、ターミナルの近く
   await (await tool(page, 'facility:taxiStand')).click();
   await clickTile(page, { x: 10, y: 20 }, 40, 58);
+  await expect(page.getByTestId('status')).toContainText('エラー 0 · 警告 0');
+  await openTab(page, 'access'); // 配置後にアクセスの画面を開き直す（UX-7: 経営の画面はボードで開く）
   await expect(panel.getByTestId('mode-taxi')).toContainText('○');
   await expect(page.getByTestId('status')).toContainText('エラー 0 · 警告 0');
 });
@@ -68,5 +70,6 @@ test('キャリアで施設を一時閉鎖すると拡張計画に工事とし�
   await expect(page.getByTestId('impact')).toContainText('2か所');
   await page.keyboard.press('Escape');
   await page.getByTestId('undo').click();
+  await openTab(page, 'expansion'); // 元に戻した後に拡張計画を開き直す（UX-7）
   await expect(page.getByTestId('projects')).not.toContainText('スポット 1');
 });
