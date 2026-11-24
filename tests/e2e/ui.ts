@@ -72,7 +72,7 @@ export async function closeAirportSettings(page: Page): Promise<void> {
 
 /**
  * プロジェクト（保存・読み込み）の画面を開く。運航中は運航ナビのボード、建設中は経営画面の「プロジェクト・保存」。
- * 建設画面の下部タブは表示高が小さく、保存済み一覧の行が固定見出しの下に隠れて押せないため（docs/implementation/planned/ui_usability_improvement_plan.md U1）、
+ * 建設画面の下部タブは表示高が小さく、保存済み一覧の行が固定見出しの下に隠れて押せないため（docs/implementation/active/ui_usability_improvement_plan.md U1）、
  * 同じ ProjectPanel を全画面で表示する経営画面を使う。
  */
 export async function openProjectPanel(page: Page): Promise<void> {

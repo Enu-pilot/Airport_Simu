@@ -10,6 +10,7 @@
 4. 計画外の変更、受入条件の変更、保存/シミュレーション版の変更はPO判断を得る。
 
 ## 現在の作業
+- 2026-11-24 **進行中**（PO 指示）: (1) R-07 運航中セーブが P6 で読めない不具合を「他ターミナル経由の経路を禁止」で修正、(2) 操作性改善案 UX-1〜8 を全導入（planned/ui_usability_improvement_plan.md → active）、(3) PR 作成。対象: src/core/sim/passengers.ts・terminal/route 周辺、src/ui・src/editor/shortcuts.ts、tests/e2e、docs/06・37・10・42。
 - 2026-11-23 性能改善 第8弾＋E2E 追随＋lint（**完了**・push 済み、PR 未作成）: 実セーブ mainplay1 で tick 日中 −22%・深夜 −46%、最終状態ハッシュ不変（性能改善計画 §3.7）。lint 0、unit 新規失敗 0（38 は main 既存）、E2E は UI 再編へ追随（docs/39 §14）。新規不具合: 実規模の運航中セーブが P6 で読み込めない（docs/10 R-07）、1400px で詳細パネル 12px はみ出し。操作性の改善案は planned/ui_usability_improvement_plan.md（PO 判断待ち）。
 - 2026-11-23 総合テスト（**完了**、PO 依頼）: 結果は docs/39 §13。新規 E2E tests/e2e/featureReach.spec.ts 7/7 合格。main 既存の失敗: lint 15・unit 44（ENOENT 7 ファイル・タイムアウト・ゴールデン・paxConservation 等）・E2E 53/114（UI 再編への未追随が主）。600 倍速は 500 往復規模で維持不可（地図 ×420/3.3fps、無描画のみ ×618）。空港能力タブのレイアウト崩れを確認。修正は未着手（PO 判断待ち）。
 - 2026-11-22 就航都市の地域順表示（2026-REGION、docs/42 §3.11、実装完了・未push）: 表示専用の地域区分（国内11地方＋海外11地域）を src/core/data/destinationRegions.ts に新設し、就航先セレクト（CapacityPanel）・就航範囲表示（AirlineScoreTable）・路線の需要と供給表（ManagementPanels）の並びを地域順へ統一した。地域内は destinations.ts の登録順を維持。既存 regionId・保存形式・SIM_MODEL_VERSION は不変、ゴールデン 26/30（失敗4件は既存の幾何不一致）。新規テスト 7/7・関連 98/100（失敗2件は shellPhase7b の既存失敗）・typecheck・build・変更ファイル lint 合格。全スイート完走と E2E は未実施（VM 混雑／ブラウザ未導入）。計画は docs/implementation/active/destination_region_order_plan.md。push・PR は PO 指示待ち。

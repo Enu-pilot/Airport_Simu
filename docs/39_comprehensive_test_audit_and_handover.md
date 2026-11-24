@@ -614,7 +614,7 @@ Work Order の作成・一覧・運航中の読み取り専用 / 表示モード
 
 ## 14. 追加対応: 実セーブでの速度検証・軽量化・E2E 追随・lint（2026-11-23）
 
-§13 の指摘に対する PO 依頼（既存 E2E の更新、実セーブでの速度検証、lint、処理・表示の軽量化、操作性の改善案）の結果。軽量化の詳細と計測方法の正本は [性能改善計画 §3.7](implementation/active/performance_improvement_plan.md)、改善案は [UI 操作性改善計画](implementation/planned/ui_usability_improvement_plan.md)。
+§13 の指摘に対する PO 依頼（既存 E2E の更新、実セーブでの速度検証、lint、処理・表示の軽量化、操作性の改善案）の結果。軽量化の詳細と計測方法の正本は [性能改善計画 §3.7](implementation/active/performance_improvement_plan.md)、改善案は [UI 操作性改善計画](implementation/active/ui_usability_improvement_plan.md)。
 
 ### 14.1 実セーブでの速度（mainplay1-20261121-1141：契約 450 往復/日・約 12 万人/日・スポット 128）
 | 計測 | 変更前 | 変更後 |
