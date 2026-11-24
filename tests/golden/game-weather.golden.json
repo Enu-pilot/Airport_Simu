@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.13",
+ "simModelVersion": "skyport-sim-10.14",
  "runs": {
   "day0-normal": {
    "day": 0,
@@ -40,8 +40,8 @@
     "cancelled": 0,
     "goArounds": 0,
     "conflicts": 0,
-    "taxiInSecTotal": 3151,
-    "taxiOutSecTotal": 4463
+    "taxiInSecTotal": 3149,
+    "taxiOutSecTotal": 4020
    },
    "weatherCancels": 0,
    "weatherGoArounds": 0,
@@ -54,11 +54,11 @@
     "paxDeparted": 2197,
     "paxArrived": 2204,
     "otp": 1,
-    "avgDelayMin": 0.4,
+    "avgDelayMin": 0.5,
     "actualAvgDelayMin": 2.6,
     "runwayUtil": 0.07037037037037037,
-    "gateUtil": 0.15930212620027434,
-    "facilityUtil": 0.10185493827160494,
+    "gateUtil": 0.15934499314128944,
+    "facilityUtil": 0.10192515432098766,
     "avgWaitMin": 3.8,
     "avgWalkMin": 9.9,
     "avgGroundMin": 43.8,
@@ -71,20 +71,20 @@
     "paxSatisfactionDetail": {
      "waitPenalty": 7.7,
      "walkPenalty": 0,
-     "delayPenalty": 0.4,
+     "delayPenalty": 0.5,
      "missedPenalty": 0,
      "bagsPenalty": 0,
      "avgWaitMin": 3.8,
      "avgWalkMin": 9.9,
-     "avgDelayMin": 0.4,
+     "avgDelayMin": 0.5,
      "missedRate": 0,
      "leftRate": 0
     },
     "airlineSatisfaction": 62,
     "rating": 59.5,
     "modePax": {
-     "car": 1734,
-     "dropoff": 2661,
+     "car": 1738,
+     "dropoff": 2657,
      "taxi": 0,
      "bus": 0,
      "rail": 0,
@@ -102,8 +102,8 @@
     "HB": 62,
     "ML": 60
    },
-   "stateSha256": "8d852279903acdbf1e4cc71973c5595f60943c0c0b02786743a7b3658d4b3ca2",
-   "stateLength": 2350142
+   "stateSha256": "3ac0f902fa6967fc85a0e98ebc9d12e37cfca37fe357395047ce37df5c10c050",
+   "stateLength": 2351369
   },
   "bad-winter-normal": {
    "day": 108,
@@ -145,7 +145,7 @@
     "goArounds": 2,
     "conflicts": 0,
     "taxiInSecTotal": 3780,
-    "taxiOutSecTotal": 4995
+    "taxiOutSecTotal": 4682
    },
    "weatherCancels": 2,
    "weatherGoArounds": 2,
@@ -207,8 +207,8 @@
     "HB": 62,
     "ML": 60
    },
-   "stateSha256": "a5a67b53994978ddd65c5b66f8935b0c6921f08b44f9aacd172adfa9bc285c22",
-   "stateLength": 2164921
+   "stateSha256": "9579d91cbd6b6139604dc3ca6f6c18d69247b7b45fc2a3117f7b01baf3191970",
+   "stateLength": 2164922
   },
   "bad-humid-expert": {
    "day": 10,
@@ -250,7 +250,7 @@
     "goArounds": 0,
     "conflicts": 0,
     "taxiInSecTotal": 3155,
-    "taxiOutSecTotal": 3549
+    "taxiOutSecTotal": 3218
    },
    "weatherCancels": 0,
    "weatherGoArounds": 0,
@@ -313,7 +313,7 @@
     "HB": 52,
     "ML": 60
    },
-   "stateSha256": "8c2c455204bc10997cd27a07f4a349a370a61aa037f6629584b1c0299bb3e85c",
+   "stateSha256": "392229fdd53b779d19c56b05b993bf139bfea6ed2e67dd14aeca251f6a687d99",
    "stateLength": 2087525
   }
  }

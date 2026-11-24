@@ -1,5 +1,5 @@
 {
- "simModelVersion": "skyport-sim-10.13",
+ "simModelVersion": "skyport-sim-10.14",
  "flightsPerDay": 120,
  "runs": {
   "free-crossing|free-a": {
@@ -282,8 +282,8 @@
   "free-parallel|free-a": {
    "seconds": 10800,
    "now": 32400,
-   "stateSha256": "8c3be8fd94d02c49a73c3585a2a68c11bdd22585d3bd04cfcc86f8b31d39e3a2",
-   "stateLength": 828492,
+   "stateSha256": "500ef7c95dc12e129ad94eb3651cbffecf4f96f2bb6f4738b7faba0b3089b6e8",
+   "stateLength": 828429,
    "stats": {
     "arrivals": 11,
     "departures": 7,
@@ -292,7 +292,7 @@
     "goArounds": 0,
     "conflicts": 0,
     "taxiInSecTotal": 2418,
-    "taxiOutSecTotal": 1912
+    "taxiOutSecTotal": 1816
    },
    "crossingTicks": 0,
    "atomicCrossingTicks": 0,
@@ -308,14 +308,14 @@
     "runways": [
      {
       "id": "rwy_1",
-      "util": 0.10805555555555556,
-      "ops": 12,
-      "avgWaitMin": 0.2
+      "util": 0.08,
+      "ops": 8,
+      "avgWaitMin": 0.1
      },
      {
       "id": "rwy_2",
-      "util": 0.012777777777777779,
-      "ops": 2,
+      "util": 0.04083333333333333,
+      "ops": 6,
       "avgWaitMin": 0
      }
     ],
@@ -343,10 +343,6 @@
     ],
     "hotspots": [
      {
-      "node": "tn_3",
-      "waitMin": 4.1
-     },
-     {
       "node": "tn_7",
       "waitMin": 3.1
      },
@@ -357,6 +353,14 @@
      {
       "node": "tn_1",
       "waitMin": 2
+     },
+     {
+      "node": "tn_4",
+      "waitMin": 1.3
+     },
+     {
+      "node": "tn_3",
+      "waitMin": 1.2
      },
      {
       "node": "tn_8",
@@ -408,7 +412,7 @@
      "noStaff": 8
     },
     "avgTaxiInMin": 4.8,
-    "avgTaxiOutMin": 6.5,
+    "avgTaxiOutMin": 6.3,
     "avgGroundDistM": 3183,
     "avgAirborneHoldMin": 15.6
    }
@@ -416,8 +420,8 @@
   "free-parallel|free-b": {
    "seconds": 10800,
    "now": 32400,
-   "stateSha256": "37c7c41b16b4083d86357672f7f95b2d4aaa7ee0fd28ca5420268213db8d0fc4",
-   "stateLength": 975772,
+   "stateSha256": "2bd988ecd75f3af4d6e2aa1932e8f77bffde4cffb0f2aa4fdce587c86e232bca",
+   "stateLength": 975633,
    "stats": {
     "arrivals": 13,
     "departures": 10,
@@ -426,7 +430,7 @@
     "goArounds": 0,
     "conflicts": 0,
     "taxiInSecTotal": 2838,
-    "taxiOutSecTotal": 2340
+    "taxiOutSecTotal": 2267
    },
    "crossingTicks": 0,
    "atomicCrossingTicks": 0,
@@ -440,14 +444,14 @@
     "runways": [
      {
       "id": "rwy_1",
-      "util": 0.12990740740740742,
-      "ops": 17,
+      "util": 0.1112962962962963,
+      "ops": 14,
       "avgWaitMin": 0.5
      },
      {
       "id": "rwy_2",
-      "util": 0.01824074074074074,
-      "ops": 3,
+      "util": 0.03685185185185185,
+      "ops": 6,
       "avgWaitMin": 0
      }
     ],
@@ -475,10 +479,6 @@
     ],
     "hotspots": [
      {
-      "node": "tn_3",
-      "waitMin": 3.6
-     },
-     {
       "node": "tn_8",
       "waitMin": 3.1
      },
@@ -495,8 +495,12 @@
       "waitMin": 2.1
      },
      {
+      "node": "tn_3",
+      "waitMin": 1.6
+     },
+     {
       "node": "tn_4",
-      "waitMin": 0.5
+      "waitMin": 1.3
      },
      {
       "node": "tn_10",
@@ -543,7 +547,7 @@
      "waitingPax": 3
     },
     "avgTaxiInMin": 4.8,
-    "avgTaxiOutMin": 6.4,
+    "avgTaxiOutMin": 6.2,
     "avgGroundDistM": 3183.1,
     "avgAirborneHoldMin": 20.6
    }

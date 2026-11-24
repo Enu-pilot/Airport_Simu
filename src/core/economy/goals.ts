@@ -21,6 +21,12 @@ export interface GoalState {
   done: Record<string, number>;
   /** 連続日数を数える目標・格の昇格の連続 */
   streaks: Record<string, number>;
+  /**
+   * 最長の連続記録（2026-GOALS。キーは streaks と同じ: 目標 ID・`tier`・`chain`）。
+   * 日次の評価で連続が伸びたときだけ更新する（表示・記録専用で、判定には使わない）。
+   * 欠落 = 未記録（旧セーブは読み込み時に現在の streaks から種付けする。表示側も現在の連続で下限を取る）。
+   */
+  bestStreaks?: Record<string, number>;
   /** 空港の格（0 飛行場 〜 7 メガハブ空港。5-20 で 8 段階化） */
   tier: Tier;
   /**
@@ -175,6 +181,14 @@ export interface GoalResult {
   cash: number;
 }
 
+/** 連続日数を 1 日分進め（ok で +1、外れたら 0）、最長記録も保つ。新しい連続日数を返す */
+function bumpStreak(g: GoalState, key: string, ok: boolean): number {
+  const next = ok ? (g.streaks[key] ?? 0) + 1 : 0;
+  g.streaks[key] = next;
+  if (next > (g.bestStreaks?.[key] ?? 0)) (g.bestStreaks ??= {})[key] = next;
+  return next;
+}
+
 /**
  * 日次の評価。目標の判定 → 報酬（現金・評価・提案ブースト）→ 空港の格の昇格。c.goals を更新する。
  * 会社の現金への加算は `post` を使わず直接足す（日報の営業収支に入れない）。
@@ -189,8 +203,7 @@ export function evaluateGoals(c: CompanyState, x: Omit<GoalCtx, 'c'>): GoalResul
     if (g.done[def.id] !== undefined) continue;
     const ok = def.check(ctx);
     if (def.streak) {
-      g.streaks[def.id] = ok ? (g.streaks[def.id] ?? 0) + 1 : 0;
-      if ((g.streaks[def.id] ?? 0) < def.streak) continue;
+      if (bumpStreak(g, def.id, ok) < def.streak) continue;
     } else if (!ok) continue;
     g.done[def.id] = day;
     completed.push(def.id);
@@ -208,7 +221,11 @@ export function evaluateGoals(c: CompanyState, x: Omit<GoalCtx, 'c'>): GoalResul
     const ch = (g.chain ??= { index: 0, streak: 0 });
     const def = chainGoalAt(ch.index);
     const ok = def.check(ctx);
-    if (def.streak) ch.streak = ok ? ch.streak + 1 : 0;
+    if (def.streak) {
+      ch.streak = ok ? ch.streak + 1 : 0;
+      // 連鎖の連続は chain 側に持つため、最長記録だけ bestStreaks に写す（達成で 0 に戻る前に残す）
+      if (ch.streak > (g.bestStreaks?.chain ?? 0)) (g.bestStreaks ??= {}).chain = ch.streak;
+    }
     const complete = def.streak ? ch.streak >= def.streak : ok;
     if (complete) {
       completed.push(def.id);
@@ -228,7 +245,7 @@ export function evaluateGoals(c: CompanyState, x: Omit<GoalCtx, 'c'>): GoalResul
   let tierUp: Tier | null = null;
   if (g.tier < 7) {
     const next = (g.tier + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7;
-    g.streaks.tier = meetsTier(next, ctx) ? (g.streaks.tier ?? 0) + 1 : 0;
+    bumpStreak(g, 'tier', meetsTier(next, ctx));
     if ((g.streaks.tier ?? 0) >= TIER_REQ[next].streakDays) {
       g.tier = next;
       g.tierDay = day;
@@ -267,22 +284,12 @@ export interface NextTierProgress {
   reportDay: number | null;
 }
 
-/**
- * 次の格までの到達度（5-20 T6。表示専用で、判定・昇格には使わない）。
- * 現在値は meetsTier と同じ定義: 発着・旅客は直近の日報、評価は現在の会社評価、
- * 大型機は空港で L 区分が運航できるか、国際線・乗継は直近の締め日の記録に実績があるか。
- * 大型機と記録は会社の外の情報なので facts で渡す（渡されなければ met は null = 不明）。
- * goals を持たない会社（サンドボックス等）は対象外として null を返す。
- */
-export function nextTierProgress(
+/** ある格の要件ごとの到達度（表示専用。現在値の定義は meetsTier と同じ） */
+function tierProgressItems(
+  req: TierReq,
   c: CompanyState,
   facts?: { largeOperable?: boolean; records?: readonly FlightRecord[] },
-): NextTierProgress | null {
-  const g = c.goals;
-  if (!g) return null;
-  if (g.tier >= 7) return { tier: g.tier, next: null, req: null, items: [], streak: null, reportDay: c.reports[c.reports.length - 1]?.day ?? null };
-  const next = (g.tier + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7;
-  const req = TIER_REQ[next];
+): TierProgressItem[] {
   const report = c.reports[c.reports.length - 1];
   const numeric = (key: 'movements' | 'pax' | 'rating', required: number, current: number): TierProgressItem => ({
     key,
@@ -311,13 +318,101 @@ export function nextTierProgress(
       met: facts?.records ? facts.records.some((r) => (r.transferPax ?? 0) > 0) : null,
     });
   }
+  return items;
+}
+
+/**
+ * 次の格までの到達度（5-20 T6。表示専用で、判定・昇格には使わない）。
+ * 現在値は meetsTier と同じ定義: 発着・旅客は直近の日報、評価は現在の会社評価、
+ * 大型機は空港で L 区分が運航できるか、国際線・乗継は直近の締め日の記録に実績があるか。
+ * 大型機と記録は会社の外の情報なので facts で渡す（渡されなければ met は null = 不明）。
+ * goals を持たない会社（サンドボックス等）は対象外として null を返す。
+ */
+export function nextTierProgress(
+  c: CompanyState,
+  facts?: { largeOperable?: boolean; records?: readonly FlightRecord[] },
+): NextTierProgress | null {
+  const g = c.goals;
+  if (!g) return null;
+  if (g.tier >= 7) return { tier: g.tier, next: null, req: null, items: [], streak: null, reportDay: c.reports[c.reports.length - 1]?.day ?? null };
+  const next = (g.tier + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  const req = TIER_REQ[next];
   return {
     tier: g.tier,
     next,
     req,
-    items,
+    items: tierProgressItems(req, c, facts),
     streak: { current: g.streaks.tier ?? 0, required: req.streakDays },
-    reportDay: report?.day ?? null,
+    reportDay: c.reports[c.reports.length - 1]?.day ?? null,
+  };
+}
+
+// ---------------------------------------------------------------- 格のロードマップ（2026-GOALS）
+
+export type TierRoadmapStatus = 'achieved' | 'current' | 'next' | 'locked';
+
+export interface TierRoadmapEntry {
+  /** 対象の格（0〜7） */
+  tier: Tier;
+  /** 現在の格との関係（下 = 達成済み、同じ = 現在、+1 = 次、それより上 = 未到達） */
+  status: TierRoadmapStatus;
+  /** その格の要件（格 0 は要件なしで null） */
+  req: TierReq | null;
+  /** 要件ごとの現在の達成状況（定義は nextTierProgress と同じ。格 0 は空） */
+  items: TierProgressItem[];
+  /** その格へ昇格した日（現在の格のみ、tierDay 由来。過去の格の分は保持していないので null） */
+  reachedDay: number | null;
+}
+
+export interface TierRoadmap {
+  /** 現在の格 */
+  tier: Tier;
+  /** 格 0〜7 の全行（ロードマップ） */
+  entries: TierRoadmapEntry[];
+  /**
+   * 次の格への連続達成の要約（最高格では null）。
+   * best は最長記録（bestStreaks 由来。未記録の旧データでは現在の連続が下限）。
+   */
+  streak: { current: number; required: number; best: number } | null;
+  /** 現在値の根拠にした日報の日（日報がまだない場合は null） */
+  reportDay: number | null;
+}
+
+/**
+ * 全ての格のロードマップ（2026-GOALS。表示専用で、判定・昇格には使わない）。
+ * 各格の要件と、nextTierProgress と同じ定義の「現在の達成状況」を並べる。
+ * 達成済みの格でも現在値で判定し直すため、評価の低下などで未達表示になることがある
+ * （格そのものは降格しない。要件を満たし続けているかの目安として読む）。
+ * goals を持たない会社は対象外として null を返す。
+ */
+export function tierRoadmap(
+  c: CompanyState,
+  facts?: { largeOperable?: boolean; records?: readonly FlightRecord[] },
+): TierRoadmap | null {
+  const g = c.goals;
+  if (!g) return null;
+  const entries: TierRoadmapEntry[] = ([0, 1, 2, 3, 4, 5, 6, 7] as const).map((t) => {
+    const status: TierRoadmapStatus = t < g.tier ? 'achieved' : t === g.tier ? 'current' : t === g.tier + 1 ? 'next' : 'locked';
+    if (t === 0) return { tier: t, status, req: null, items: [], reachedDay: null };
+    const req = TIER_REQ[t];
+    return {
+      tier: t,
+      status,
+      req,
+      items: tierProgressItems(req, c, facts),
+      reachedDay: t === g.tier ? (g.tierDay ?? null) : null,
+    };
+  });
+  const current = g.streaks.tier ?? 0;
+  return {
+    tier: g.tier,
+    entries,
+    streak: g.tier >= 7 ? null : {
+      current,
+      required: TIER_REQ[(g.tier + 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7].streakDays,
+      best: Math.max(g.bestStreaks?.tier ?? 0, current),
+    },
+    reportDay: c.reports[c.reports.length - 1]?.day ?? null,
   };
 }
 
@@ -340,6 +435,7 @@ export function checkGoals(raw: unknown): string[] {
   const errors: string[] = [];
   if (!isObj(raw.done) || Object.entries(raw.done).some(([k, v]) => !GOAL_IDS.includes(k) || !Number.isInteger(v))) errors.push('目標: done が不正です（目標 ID・日）');
   if (!isObj(raw.streaks) || Object.values(raw.streaks).some((v) => !Number.isInteger(v) || (v as number) < 0)) errors.push('目標: streaks が不正です');
+  if (raw.bestStreaks !== undefined && (!isObj(raw.bestStreaks) || Object.values(raw.bestStreaks).some((v) => !Number.isInteger(v) || (v as number) < 0))) errors.push('目標: bestStreaks（最長記録）が不正です');
   if (!Number.isInteger(raw.tier) || (raw.tier as number) < 0 || (raw.tier as number) > 7) errors.push('目標: tier（空港の格）が 0〜7 ではありません');
   if (raw.tierScale !== undefined && raw.tierScale !== 2) errors.push('目標: tierScale（格の尺度）が不正です');
   if (!Array.isArray(raw.grants) || raw.grants.some((x) => !isObj(x) || !Number.isInteger(x.day) || !(GOAL_IDS.includes(x.id as string) || /^chain-\d+$/.test(x.id as string)) || typeof x.amount !== 'number' || !Number.isFinite(x.amount))) errors.push('目標: grants が不正です');

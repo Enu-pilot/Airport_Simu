@@ -32,6 +32,7 @@ import {
   DEPARTURE_STARVATION_SEC,
   DEPARTURE_WINDOW_SEC,
   ENGINE_START_SEC,
+  ENTRY_GOAL_DIST_DIVISOR,
   EXIT_SPEED,
   HOLD_DIVERT_SEC,
   INBOUND_LEAD_SEC,
@@ -571,18 +572,42 @@ function exitCandidates(sim: Simulation, rw: RunwayEndInfo, type: AircraftType):
   return out;
 }
 
-/** 離陸の進入候補（残り距離が離陸滑走距離以上のノード）。全長に近いほど優先 */
+/**
+ * 離陸の進入候補（残り距離が離陸滑走距離以上のノード）。候補集合は従来どおりで、
+ * 目標コストの傾きだけを区分別にする（2026-TAXI 案 X2: 大型機ほど全長に近い入口を強く優先）
+ */
 function entryCandidates(sim: Simulation, rw: RunwayEndInfo, type: AircraftType): Map<string, number> {
   const goals = new Map<string, number>();
   const total = rw.dist[rw.dist.length - 1]!;
   const need = takeoffDistanceM(type) + 100;
+  const divisor = ENTRY_GOAL_DIST_DIVISOR[type.codeF ? 'F' : type.size];
   for (let i = 0; i < rw.nodes.length - 1; i++) {
     const remaining = total - rw.dist[i]!;
     if (remaining < need) continue;
     if (!hasTaxiwayLink(sim, rw.nodes[i]!, type.size)) continue;
-    goals.set(rw.nodes[i]!, rw.dist[i]! / 30);
+    goals.set(rw.nodes[i]!, rw.dist[i]! / divisor);
   }
   return goals;
+}
+
+/** 混雑コスト（2026-TAXI 案 Y）の負荷シグナルとして数える状態（確定経路を持って地上走行する・まもなく走行する機体） */
+const TAXI_LOAD_STATES: ReadonlySet<AircraftState> = new Set(['approach', 'landing', 'vacating', 'taxiIn', 'pushback', 'taxiOut']);
+
+/**
+ * 走行中機体の確定経路に含まれるエッジごとの機体数（Y-a シグナル）。
+ * 通過済み（解放済み）部分は数えない。状態からの純粋な集計で、乱数は使わない
+ */
+function taxiEdgeLoad(sim: Simulation, selfId: string): Map<string, number> {
+  const load = new Map<string, number>();
+  for (const a of Object.values(sim.state.aircraft)) {
+    if (a.id === selfId || !a.route || !TAXI_LOAD_STATES.has(a.state)) continue;
+    const edges = a.route.edges;
+    for (let i = a.route.released; i < edges.length; i++) {
+      const e = edges[i]!;
+      load.set(e, (load.get(e) ?? 0) + 1);
+    }
+  }
+  return load;
 }
 
 /** 他機の予約を避けるための判定（閉鎖中の誘導路は常に通れない） */
@@ -622,6 +647,8 @@ function arrivalPath(sim: Simulation, ac: Aircraft, runwayId: string, standId: s
     codeF: type.codeF,
     speed: type.taxiSpeed,
     allowStands: [standId],
+    jitterKey: ac.id,
+    edgeLoad: taxiEdgeLoad(sim, ac.id),
     ...pathBlockers(sim, ac.id, avoidTraffic),
   });
   if (!path) return null;
@@ -674,6 +701,8 @@ export function departurePath(sim: Simulation, ac: Aircraft, avoidTraffic: boole
     codeF: type.codeF,
     speed: type.taxiSpeed,
     allowStands: [stand.id],
+    jitterKey: ac.id,
+    edgeLoad: taxiEdgeLoad(sim, ac.id),
     ...pathBlockers(sim, ac.id, avoidTraffic),
   });
   if (!path) return null;

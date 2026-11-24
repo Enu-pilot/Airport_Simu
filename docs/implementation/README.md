@@ -71,6 +71,8 @@ Phase 6 は親計画です。5-18 / 5-19 / 5-20 / 5-21 / 5-25 と A6（Phase 5 5
 | 2026-UI 日報・経営再編／2026-LV 階層同期／2026-FIDS 便名カラー | 完了（PR #61・#62・#66 マージ済み） | 計画書は作成せず、確定仕様は docs/36・37・34・06 へ直接反映 | — |
 | 2026-CF 誘導路幅の F 区分 | active（実装完了・作業コピー、PR 化は PO 指示待ち） | [code_f_taxiway_width_plan.md](active/code_f_taxiway_width_plan.md) | 旧 L＋コード F は読み込み時に F へ正規化。SIM 版・スキーマ版は据え置き |
 | 2026-REGION 就航都市の地域順表示 | active（実装完了・未push） | [destination_region_order_plan.md](active/destination_region_order_plan.md) | 表示専用の地域区分（国内 11 地方＋海外 11 地域）を destinationRegions.ts に集約し、就航先セレクト・就航範囲表示・路線の需要と供給表に適用。保存形式・SIM 版・ゴールデンは不変 |
+| 2026-GOALS 経営目標ページの格ロードマップ | active（実装中） | [goals_roadmap_plan.md](active/goals_roadmap_plan.md) | 全格の要件・現在の達成状況・連続達成日数・最長記録をロードマップ表示。最長記録は goals.bestStreaks（任意項目、旧セーブは現在 streak から種付け）。昇格判定・SIM 版・スキーマ版は不変 |
+| 2026-TAXI 誘導路経路探索の分散化 | active（実装完了・未push） | [taxi_route_dispersion_plan.md](active/taxi_route_dispersion_plan.md) | Z1（決定的ジッタ分散）+ X2（入口コストの区分別除数）+ Y（混雑コスト）を一括実装。SIM 版 10.14、運航ゴールデン再採取済み。X1 と ATC 側は 2026-TK 第 2 段に残置 |
 
 ## 基盤完成後に再検討する個別計画
 
