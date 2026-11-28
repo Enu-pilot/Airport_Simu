@@ -250,3 +250,8 @@
 .wx-hourly span.wx-l1 { background: #3b4a58; } .wx-hourly span.wx-l2 { background: #3f5f86; }
 .wx-hourly span.wx-l3 { background: #8a5a14; } .wx-hourly span.wx-l4 { background: #8a2420; }
 .wx-hourly span.now { outline: 1px solid #fff; }
+
+/* 詳細（選択中の機体・施設）は右列の高さに収め、中身は詳細の中でスクロールする（2026-11-28）。
+   右列が狭い 1400〜1599px では機体の履歴で縦に伸び、下端が画面外へはみ出していた */
+.app.mode-operate .ops-right .ops-detail.has-selection { display: flex; flex-direction: column; max-height: calc(100% - 6px); }
+.app.mode-operate .ops-right .ops-detail.has-selection .ops-detail-body { overflow-y: auto; min-height: 0; flex: 1 1 auto; }

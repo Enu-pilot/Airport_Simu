@@ -3,10 +3,11 @@ import { areaProcessingPerHour, areaServerCount, isProcessingArea } from '../../
 
 describe('エリアの処理能力（表示用ヘルパー）', () => {
   it('処理系の判定は docs/12 の既定処理時間がある種別だけ', () => {
-    for (const k of ['checkIn', 'security', 'emigration', 'immigration', 'customs', 'transferSecurity'] as const) {
+    // トイレは設備数（fixtures）と既定処理時間 90 秒を持つ処理系（docs/12「トイレ: 設備数」、PR #52）
+    for (const k of ['checkIn', 'security', 'emigration', 'immigration', 'customs', 'transferSecurity', 'restroom'] as const) {
       expect(isProcessingArea(k)).toBe(true);
     }
-    for (const k of ['waiting', 'hall', 'departureLobby', 'arrivalCorridor', 'baggageClaim', 'restroom', 'entrance'] as const) {
+    for (const k of ['waiting', 'hall', 'departureLobby', 'arrivalCorridor', 'baggageClaim', 'entrance'] as const) {
       expect(isProcessingArea(k)).toBe(false);
     }
   });

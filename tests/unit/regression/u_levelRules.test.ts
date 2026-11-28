@@ -45,7 +45,9 @@ describe('terminalAreaLevelProblem（V-6）', () => {
     const l = terminal(2);
     expect(terminalAreaLevelProblem(l, 'fac_1', 1)).toBeNull();
     expect(terminalAreaLevelProblem(l, 'fac_1', 2)).toBe('floorOutOfRange');
-    expect(terminalAreaLevelProblem(l, 'fac_1', -1)).toBe('floorOutOfRange');
+    // 機能G（地下ターミナル）で地下 3 階（-3）までは既定で配置可能になったため、範囲外の下限側は -4 で検査する
+    expect(terminalAreaLevelProblem(l, 'fac_1', -1)).toBeNull();
+    expect(terminalAreaLevelProblem(l, 'fac_1', -4)).toBe('floorOutOfRange');
     expect(placeTerminalArea(l, 'fac_1', 2, 'waiting', { x: 12, y: 12 })).toEqual({ ok: false, reason: 'INVALID_VALUE' });
   });
 });

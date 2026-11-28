@@ -64,7 +64,9 @@ describe('1-13 離陸時刻の予測', () => {
       // 観測した状態遷移（takeoff に入った tick）からの実時間は takeoffRollSec より 1 tick 短い（積分の最初の 1 tick が状態遷移と同じ tick に入るため）
       expect(takeoffRollSec(m) - (dep.actual! - takeoffStart!), m.id).toBe(TICK_SEC);
     }
-    expect(skipped.every((x) => x.startsWith('A380'))).toBe(true);
+    // このレイアウトで運航できないのはコード F（翼幅 65m 以上）の機種だけ。従来は A380 だけだったが、
+    // 機材カタログ改修（2026-FLEET、PR #95）で同じコード F の B747-8・B747-8F が加わった
+    expect(skipped.every((x) => AIRCRAFT_TYPES[x.split(':')[0]!]?.codeF === true), skipped.join(', ')).toBe(true);
     expect(rows.length).toBeGreaterThanOrEqual(Object.keys(AIRCRAFT_TYPES).length - 3);
   }, 600_000);
 

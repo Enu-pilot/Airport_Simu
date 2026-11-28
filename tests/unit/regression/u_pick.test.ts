@@ -31,7 +31,8 @@ describe('pickAt / pickCandidatesAt（階層・内部表示）', () => {
   });
 
   it('表示していない階の独立施設は候補にならない（V-4）', () => {
-    const l = must(placeFacility(emptyLayout(), 'tower', { x: 5, y: 5 }, { mapLevel: -1 })).layout;
+    // 地下に置ける単独施設は機能G で駐車場・鉄道駅・ターミナル等に限られる（管制塔は不可）ため、地下の独立施設は鉄道駅で検査する
+    const l = must(placeFacility(emptyLayout(), 'railStation', { x: 5, y: 5 }, { mapLevel: -1 })).layout;
     const p = at(5, 5);
     expect(pickAt(l, p, view(0))).toBeNull();
     expect(pickAt(l, p, view(-1))).toBe('fac_1');

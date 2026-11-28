@@ -87,8 +87,9 @@ describe('第7段階b-1: hubOd / portalUsage の表示行', () => {
 
 describe('第7段階b-2: 就航範囲の表示', () => {
   it('制限つき会社は許可目的地の件数と名前を列挙する', () => {
-    const text = airlineNetworkScopeText('IJ'); // スプリング・ジャパン: 5 目的地に制限
-    expect(text).toContain('5 目的地のみ');
+    // スプリング・ジャパン: 7 目的地に制限（貨物航空会社の拡充 2d78679 で北九州・那覇が加わり 5 → 7）
+    const text = airlineNetworkScopeText('IJ');
+    expect(text).toContain('7 目的地のみ');
     expect(text).toContain('東京');
     expect(text).toContain('高松');
   });
@@ -148,10 +149,12 @@ describe('第7段階b-4: B7 ターミナル複合体の表示', () => {
     expect(html).toContain('data-testid="complex-physical"');
     expect(html).toContain('構成 2 建物');
     expect(html).toContain('第2ターミナル（テスト）');
-    // リンクを外すとサービス複合体は単独に戻る（物理複合体は隣接のまま）
+    // リンクを外しても、エリア同士が辺を共有して隣接する建物はサービス複合体のまま（2026-A・PR #63「隣接ターミナルの自動接続」、
+    // docs/35 §7-6: サービス複合体の判定にも隣接を含める）。物理複合体も隣接のまま
     const unlinked: AirportLayout = { ...layout, terminalLinks: {} };
     const html2 = renderToString(createElement(TerminalComplexInfo, { layout: unlinked, terminalId: t1.id }));
-    expect(html2).toContain('単独');
+    expect(html2).toContain('data-testid="complex-service"');
+    expect(html2.split('構成 2 建物').length - 1).toBe(2); // 物理・サービスの両方が 2 建物
   });
 });
 

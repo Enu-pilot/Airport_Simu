@@ -7,7 +7,8 @@ import { emptyLayout, must } from '../helpers';
 describe('施設ラベル・内部設備の表示条件（1-05: W-1・W-2）', () => {
   it('施設名ラベルは表示中の階の施設だけ（W-1）', () => {
     let l = must(placeFacility(emptyLayout(), 'tower', { x: 5, y: 5 }, { name: '地上塔', mapLevel: 0 })).layout;
-    l = must(placeFacility(l, 'tower', { x: 15, y: 5 }, { name: '地下塔', mapLevel: -1 })).layout;
+    // 地下に置ける単独施設は機能G（地下ターミナル）で駐車場・鉄道駅・ターミナル等に限られ、管制塔は置けないため、地下側は鉄道駅で検査する
+    l = must(placeFacility(l, 'railStation', { x: 15, y: 5 }, { name: '地下塔', mapLevel: -1 })).layout;
     expect(visibleFacilityLabelIds(l, 0, false)).toEqual(['fac_1']);
     expect(visibleFacilityLabelIds(l, -1, false)).toEqual(['fac_2']);
     expect(visibleFacilityLabelIds(l, 'all', false)).toEqual(['fac_1', 'fac_2']);
