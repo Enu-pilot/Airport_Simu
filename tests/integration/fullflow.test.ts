@@ -5,7 +5,18 @@
 import { describe, expect, it } from 'vitest';
 import { createSampleAirport } from '../../src/core/sample/sampleAirport';
 import { analyzeLayout } from '../../src/core/validation/validate';
-import { createSandboxCompany, changeContractAircraft, importCompany, type CompanyState } from '../../src/core/economy/company';
+import { addContract, createSandboxCompany, changeContractAircraft, importCompany, type CompanyState } from '../../src/core/economy/company';
+
+/**
+ * 777-300ER の契約を持つサンドボックス会社。従来はサンドボックスの SK 契約が 777-300ER だったが、PR #67 の航空会社整理で
+ * サンドボックスの契約から 777-300ER がなくなり（SK はスカンジナビア航空・国際線のみ）、国内線で 777-300ER を運航できる NH（ANA）の契約を明示する
+ */
+function companyWith777er(): CompanyState {
+  const c = createSandboxCompany();
+  c.airlines.NH ??= { satisfaction: 60, lowDays: 0 }; // 航空会社が利用可能になったときに作られる関係（company.ts と同じ初期値）
+  addContract(c, { airlineId: 'NH', destinationId: 'TYO', typeId: 'B777-300ER', perDay: 1, window: 'daytime', feeDiscount: 0.1, startDay: 0, endDay: 9999, status: 'active', offerExpiresDay: 0 });
+  return c;
+}
 import { CATALOG } from '../../src/core/aircraft/catalog';
 import { checkAirport } from '../../src/core/aircraft/compat';
 import { buildAirsideNetwork } from '../../src/core/airside/network';
@@ -33,8 +44,8 @@ function step(sim: Simulation, sec: number): void {
 describe('総合テスト: 新規作成 → 建設 → 機種割り当て → 運航 → 分析 → シナリオ → 保存・復元 → カタログ更新 → 旧形式 → 不正データ', { timeout: 300_000 }, () => {
   // 1〜2. 空の敷地から編集操作（滑走路・誘導路・スポット・ターミナル・ターミナル内部）を順に適用して空港を作る
   const layout = createSampleAirport('fullflow');
-  // 3〜4. 航空会社と便（契約）を設定し、具体的な機種を割り当てる: SK = 777-300ER、NP の長距離便 = 777-300
-  const company: CompanyState = createSandboxCompany();
+  // 3〜4. 航空会社と便（契約）を設定し、具体的な機種を割り当てる: NH = 777-300ER、NP の長距離便 = 777-300
+  const company: CompanyState = companyWith777er();
   const npLong = Object.values(company.contracts).find((k) => k.airlineId === 'NP' && k.typeId === 'A350-900')!;
   let sim: Simulation;
   let day1: ReturnType<typeof airportKpis>;
@@ -85,9 +96,9 @@ describe('総合テスト: 新規作成 → 建設 → 機種割り当て → �
     const k3er = by.find((g) => g.key === 'B777-300ER');
     expect(k3).toBeDefined();
     expect(k3er).toBeDefined();
-    // 機種の座席数が実績に反映される（NP の 777-300 は 400 席、SK の 777-300ER は 316 席）
+    // 機種の座席数が実績に反映される（NP の 777-300 は 400 席、NH の 777-300ER は会社の機材設定がないため機種の既定 370 席）
     expect(k3!.seats / k3!.n).toBe(400);
-    expect(k3er!.seats / k3er!.n).toBe(316);
+    expect(k3er!.seats / k3er!.n).toBe(370);
     // 便数が少ないのでデータ不足として扱う
     expect(k3!.lowSample).toBe(true);
     expect(day1.departures).toBe(sim.state.analytics.records.filter((r) => r.takeoffAt !== null).length);
@@ -134,8 +145,8 @@ describe('総合テスト: 新規作成 → 建設 → 機種割り当て → �
   });
 
   it('12. 機種カタログが更新されても、保存済みプロジェクト・シナリオ結果は変わらず、最新での再実行は区別される', () => {
-    const sc = createScenario({ id: 'sc_c', name: 'カタログ固定', createdAt: NOW, layout, company: createSandboxCompany(), seed: 'cat', durationHours: 18 });
-    delete sc.company.fleets.SK; // 機種の既定座席を使う
+    const sc = createScenario({ id: 'sc_c', name: 'カタログ固定', createdAt: NOW, layout, company: companyWith777er(), seed: 'cat', durationHours: 18 });
+    delete sc.company.fleets.NH; // 機種の既定座席を使う
     const before = runScenario(sc, NOW);
     const saved = serializeProject(buildProject({ name: 'p', savedAt: NOW, layout, company: sc.company, pin: null, scenarios: [sc], sim: null }));
     const original = structuredClone(CATALOG['B777-300ER']!);

@@ -52,7 +52,8 @@ test('market のプロジェクト（保存形式 5）: 新規の就航先（名
   company.city = defaultCity('core');
   company.market = { version: 1, routes: {} };
   const k = addContract(company, {
-    airlineId: 'SK', destinationId: 'NGO', typeId: 'B787-9', perDay: 2, window: 'any',
+    // 国内線を運航できる NH（ANA）。SK は PR #67 でスカンジナビア航空（国際線のみ）になり、名古屋は範囲外で見込み搭乗率が出ない
+    airlineId: 'NH', destinationId: 'NGO', typeId: 'B787-9', perDay: 2, window: 'any',
     feeDiscount: 0, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0,
   });
   const project = buildProject({ name: 'p3', savedAt: '2026-11-18T00:00:00.000Z', layout: createSampleAirport(), company, pin: null, scenarios: [], sim: null });

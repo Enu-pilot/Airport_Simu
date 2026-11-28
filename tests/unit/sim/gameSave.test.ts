@@ -70,7 +70,8 @@ describe('ゲームのモデルの保存', () => {
     bad((d) => delete d.sim.state.wx, /wx）がありません/);
     bad((d) => (d.sim.company.game.weather = 'legacy'), /wx）があるのに/);
     bad((d) => (d.company.game.difficulty = 'easy'), /難易度/);
-    bad((d) => (d.company.goals.tier = 7), /tier/);
+    // 範囲外の格。5-20 で格は 0〜7 の 8 段階になり 7 は有効値になったため、範囲外の 8 で検査する（src/core/economy/goals.ts の検証）
+    bad((d) => (d.company.goals.tier = 8), /tier/);
     bad((d) => (d.company.goals.done = { nope: 1 }), /done/);
     bad((d) => (d.company.airlineEval = { SK: { ema: { otp: 500 } } }), /ema|形が不正/);
     bad((d) => (d.company.airlineEval = { XX: {} }), /航空会社が不明/);

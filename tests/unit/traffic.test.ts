@@ -36,18 +36,20 @@ describe('traffic: 旅客実績の集計と見込み（フェーズ 3 §5）', (
     expect(byRoute.get('KTA')!.pax).toBe(70);
   });
 
+  // 航空会社は国内線を運航できる NH（ANA）を使う。SK は PR #67 の航空会社整理でスカンジナビア航空（国際線のみ）になり、
+  // 国内の就航先は範囲外（airline-unsupported）として見込みを出さないのが正しい挙動のため
   it('見込み搭乗率: market のない会社は null、ある会社は路線需要から出す', () => {
     const plain = createCompany('career', 'traffic-plain');
-    expect(previewLoadFactor(plain, { airlineId: 'SK', destinationId: 'TYO', typeId: 'B787-9', perDay: 1 }, 0)).toBeNull();
+    expect(previewLoadFactor(plain, { airlineId: 'NH', destinationId: 'TYO', typeId: 'B787-9', perDay: 1 }, 0)).toBeNull();
     const c: CompanyState = createCompany('career', 'traffic-market');
     c.city = defaultCity('regional');
     c.market = { version: 1, routes: {} };
     c.rating = 50;
-    const p = previewLoadFactor(c, { airlineId: 'SK', destinationId: 'TYO', typeId: 'B787-9', perDay: 1 }, 0);
+    const p = previewLoadFactor(c, { airlineId: 'NH', destinationId: 'TYO', typeId: 'B787-9', perDay: 1 }, 0);
     expect(p).not.toBeNull();
     expect(p!.lf).toBeGreaterThan(0);
     expect(p!.lf).toBeLessThanOrEqual(0.98);
-    expect(p!.seats).toBe(532);
+    expect(p!.seats).toBe(580); // NH の B787-9（既定 290 席）× 1 便 × 往復
   });
 
   it('既存の契約がある路線では、便を足すと見込みが下がる', () => {
@@ -55,9 +57,9 @@ describe('traffic: 旅客実績の集計と見込み（フェーズ 3 §5）', (
     c.city = defaultCity('regional');
     c.market = { version: 1, routes: {} };
     c.rating = 50;
-    const one = previewLoadFactor(c, { airlineId: 'SK', destinationId: 'TYO', typeId: 'B787-9', perDay: 4 }, 0)!;
+    const one = previewLoadFactor(c, { airlineId: 'NH', destinationId: 'TYO', typeId: 'B787-9', perDay: 4 }, 0)!;
     addContract(c, { airlineId: 'NP', destinationId: 'TYO', typeId: 'A350-900', perDay: 4, window: 'any', feeDiscount: 0, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0 });
-    const after = previewLoadFactor(c, { airlineId: 'SK', destinationId: 'TYO', typeId: 'B787-9', perDay: 4 }, 0)!;
+    const after = previewLoadFactor(c, { airlineId: 'NH', destinationId: 'TYO', typeId: 'B787-9', perDay: 4 }, 0)!;
     expect(after.lf).toBeLessThan(one.lf);
   });
 });

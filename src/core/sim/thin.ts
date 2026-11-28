@@ -12,7 +12,11 @@ const GONE_AIRCRAFT = new Set(['departed', 'diverted', 'cannotOperate']);
 const FINAL_BAG = new Set(['loaded', 'leftBehind', 'offloaded', 'collected']);
 
 export function thinSnapshotState(state: SimState): { flights: number; groups: number; bags: number; aircraft: number } {
-  const todayStart = Math.floor(state.now / DAY_SEC) * DAY_SEC;
+  // 間引きの境界は「当日 0:00」と「未締めの期間の始まり（economy.periodStart）」の早い方。
+  // 0:00 ちょうど（日次締めの tick の前）に保存すると、前日はまだ締めていない。前日の便を間引くと、
+  // 復元後の締めがその日の便を数えられず、翌日の計画（需要・搭乗見込み）まで変わってしまう（2026-11-28 修正）。
+  // 日中の保存では periodStart = 当日 0:00 なので従来と同じ。
+  const todayStart = Math.min(Math.floor(state.now / DAY_SEC) * DAY_SEC, state.economy?.periodStart ?? Infinity);
   const liveAircraft = Object.values(state.aircraft).filter((a) => !GONE_AIRCRAFT.has(a.state));
   const keepFlights = new Set<string>();
   for (const a of liveAircraft) {

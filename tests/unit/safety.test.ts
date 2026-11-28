@@ -39,7 +39,8 @@ describe('消防区分・管制塔（5-05）', () => {
 
   it('777-300 の計画があると消防区分の警告が出る（運航は止めない助言的な制限）', () => {
     const company = createCompany('career', 'safety-fire');
-    addContract(company, { airlineId: 'SK', destinationId: 'TYO', typeId: 'B777-300', perDay: 1, feeDiscount: 0, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0, window: 'any' });
+    // NH（ANA）の B777-300。SK は PR #67 でスカンジナビア航空（国際線のみ）になり、国内の就航先の契約は計画に入らない
+    addContract(company, { airlineId: 'NH', destinationId: 'TYO', typeId: 'B777-300', perDay: 1, feeDiscount: 0, startDay: 0, endDay: 999, status: 'active', offerExpiresDay: 0, window: 'any' });
     const result = analyzeAirportCapacity(company, createContext(createSampleAirport()));
     const issue = result.analysis.issues.find((i) => i.code === 'FIRE_CATEGORY_LOW');
     expect(issue).toBeDefined();
